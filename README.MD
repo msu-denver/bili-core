@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="bili/images/logo.png" alt="BiliCore Logo" width="150"/>
+</p>
+
 # BiliCore: A Framework for Benchmarking and Building Dynamic RAG Implementations
 
 ## Overview
