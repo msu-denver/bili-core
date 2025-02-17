@@ -1,0 +1,31 @@
+# Set the default behavior to automatically normalize line endings to LF
+* text=auto eol=lf
+
+# Force LF for specific types of files
+*.sh text eol=lf
+*.bat text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.sql text eol=lf
+scripts/** text eol=lf
+
+# Treat all binary files as binary and do not change their line endings
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.gz binary
+*.exe binary
+*.dll binary

@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Fail on any error
+set -e
+
+# Get the directory where the script is located
+SCRIPT_DIR=$(pwd)
+
+# Load environment variables from a secrets file
+if [ -f "${SCRIPT_DIR}/secrets" ]; then
+    source "${SCRIPT_DIR}/secrets"
+fi
+
+# Create the data directories if they don't exist
+mkdir -p "${SCRIPT_DIR}/../../data/"
+
+# Navigate to the lib directory
+cd "${SCRIPT_DIR}/../../venv/lib" || exit
+
+# Find the directory starting with 'python' (assumes there's only one such directory)
+PYTHON_DIR=$(find . -maxdepth 1 -type d -name 'python*' | head -1 | sed 's|./||')
+
+# if tensorrt_libs directory exists, add it to LD_LIBRARY_PATH
+if [ -d "${SCRIPT_DIR}/../../venv/lib/${PYTHON_DIR}/site-packages/tensorrt_libs" ]; then
+    echo "Found tensorrt_libs directory, enabling TensorRT support in Streamlit"
+    # Construct the path to the tensorrt_libs directory
+    TENSORRT_LIBS_PATH="${SCRIPT_DIR}/../../venv/lib/${PYTHON_DIR}/site-packages/tensorrt_libs"
+
+    # Export LD_LIBRARY_PATH with the TensorRT libraries path
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$TENSORRT_LIBS_PATH
+
+    # Set the CUDA allocation config to avoid OOM errors
+    export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+fi
+
+# Navigate to the parent directory and run the streamlit application
+cd "${SCRIPT_DIR}/../.." || exit
+
+# Activate the virtual environment
+source venv/bin/activate
+
+# Run the Streamlit application
+export STREAMLIT_SERVER_ADDRESS=0.0.0.0
+LOG_LEVEL=${LOG_LEVEL:-INFO} ENV=development PYTHONPATH=./ streamlit run bili/streamlit_app.py

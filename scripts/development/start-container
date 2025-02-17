@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Exit on error
+set -e
+
+# Change to the directory of the script
+cd "$(dirname "$0")"
+
+# Check for NVIDIA GPU
+if command -v nvidia-smi &> /dev/null; then
+    echo "NVIDIA GPU detected. Using GPU profile."
+    profile="gpu"
+else
+    echo "No NVIDIA GPU detected. Using CPU profile."
+    profile="cpu"
+fi
+
+docker build ../../ -t bili-core
+docker compose build
+docker network create bili-core || true
+
+docker compose --profile $profile up
+
+docker stop bili-core
+docker stop bili-core-postgis
+docker stop bili-core-mongodb
+docker stop bili-core-localstack
+docker stop bili-core-opensearch
+
+docker compose down

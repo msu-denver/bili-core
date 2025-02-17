@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# exit if any command fails
+set -e
+
+# Change to the directory of the script
+cd "$(dirname "$0")"
+
+# If clear param set, delete all files in bucket before uploading
+if [ "$1" == "clear" ]; then
+  echo "Clearing all files in bucket"
+  awslocal --endpoint-url=http://bili-core-localstack:4566 s3 rm s3://bilicore-dev/ --recursive
+fi
+
+# Iterate over all files in /app/bili-core/data and subdirectories and upload them to localstack s3
+# Use find and -exec to iterate over all files in /app/bili-core/data and subdirectories
+# Ignore hidden files and folders
+find /app/bili-core/data -type f -not -name '.*' -not -path '*/.*' -exec \
+  sh -c 'awslocal --endpoint-url=http://bili-core-localstack:4566 \
+  s3 cp "$1" "s3://bilicore-dev/$(basename "$1")"' _ {} \;
+
+# List all files in the bucket to verify the upload
+awslocal --endpoint-url=http://bili-core-localstack:4566 s3 ls s3://bilicore-dev/

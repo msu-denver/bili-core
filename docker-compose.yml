@@ -1,0 +1,118 @@
+volumes:
+    bili-core-virtualenv:
+    bili-core-postgis-data:
+    bili-core-mongodb-data:
+services:
+    bili-core:
+        build: .
+        image: "bili-core"
+        container_name: "bili-core"
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - count: all
+                          capabilities: [gpu]
+        environment:
+            - PYTHON_ENV=development
+            - LOCALSTACK_HOSTNAME=bili-core-localstack
+        volumes:
+            - ".:/app/bili-core/:rw"
+            - "./env/bili_root/:/root/:rw"
+            - "bili-core-virtualenv:/app/bili-core/venv/"
+        ports:
+            - 8501:8501
+        networks:
+            bili-core:
+                aliases:
+                    - bili-core
+        depends_on:
+            - bili-core-postgis
+            - bili-core-localstack
+        profiles: ["gpu"]
+
+    bili-core-cpu:
+        build: .
+        image: "bili-core"
+        container_name: "bili-core"
+        environment:
+            - PYTHON_ENV=development
+            - LOCALSTACK_HOSTNAME=bili-core-localstack
+        volumes:
+            - ".:/app/bili-core/:rw"
+            - './env/bili_root/:/root/:rw'
+            - "bili-core-virtualenv:/app/bili-core/venv/"
+        ports:
+            - 8501:8501
+        networks:
+            bili-core:
+                aliases:
+                    - bili-core
+        depends_on:
+            - bili-core-postgis
+            - bili-core-localstack
+        profiles: ["cpu"]
+
+    bili-core-postgis:
+        image: postgis/postgis:17-3.4
+        platform: linux/amd64
+        container_name: "bili-core-postgis"
+        environment:
+            - PGDATA=/data/db
+            - POSTGRES_USER=bilicore
+            - POSTGRES_PASSWORD=bilicore
+        volumes:
+            - "bili-core-postgis-data:/data/db/"
+        ports:
+            - 5432:5432
+        networks:
+            bili-core:
+                aliases:
+                    - bili-core-postgis
+
+    bili-core-mongodb:
+        image: mongo:5
+        container_name: "bili-core-mongodb"
+        hostname: "bili-core-mongodb"
+        environment:
+            MONGO_INITDB_ROOT_USERNAME: bilicore
+            MONGO_INITDB_ROOT_PASSWORD: bilicore
+        volumes:
+            - "bili-core-mongodb-data:/data/db/"
+        ports:
+            - 27017:27017
+        networks:
+            bili-core:
+                aliases:
+                    - bili-core-mongodb
+
+    bili-core-localstack:
+        image: localstack/localstack
+        container_name: "bili-core-localstack"
+        hostname: "bili-core-localstack"
+        ports:
+            - "4566:4566"
+            - "4571:4571"
+        environment:
+            - DEBUG=1
+            - DOCKER_SOCK=/var/run/docker.sock
+            - HOSTNAME_EXTERNAL=bili-core-localstack
+            - PERSISTENCE=1
+            - SERVICES=s3,lambda,dynamodb,ssm,ses,opensearch
+        volumes:
+            - "/var/run/docker.sock:/var/run/docker.sock"
+            - "./env/localstack:/var/lib/localstack"
+            - "./scripts/localstack/seed_localstack.sh:/etc/localstack/init/ready.d/seed_localstack.sh"
+        networks:
+            bili-core:
+                aliases:
+                    - bili-core-localstack
+        healthcheck:
+            test: [ "CMD-SHELL", "curl -s http://localhost:4566/health | grep '\"s3\": \"running\"'" ]
+            interval: 10s
+            retries: 5
+
+networks:
+    bili-core:
+        name: bili-core
+        external: true

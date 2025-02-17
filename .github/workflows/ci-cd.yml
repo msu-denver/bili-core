@@ -1,0 +1,49 @@
+name: Bili Core CI/CD Pipeline
+
+on:
+    push:
+        branches:
+            - '*'  # Trigger on any branch
+
+jobs:
+    # Build the application on any branch commit
+    build-application:
+        runs-on: ubuntu-latest
+        steps:
+            # Checkout code
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            # Set up Python
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.11'
+
+            # Install required dependencies
+            - name: Install dependencies
+              run: |
+                if command -v sudo > /dev/null 2>&1; then 
+                  sudo apt-get update && sudo apt-get install -y jq zip zstd;
+                else 
+                  apt-get update && apt-get install -y jq zip zstd;
+                fi
+                pip install pylint
+              shell: bash
+
+            # Run pylint on Lambda code
+            - name: Run pylint on code
+              run: |
+                pylint bili/ --disable=import-error --fail-under=9
+
+            # Build and Test
+            - name: Build and Test
+              run: ./scripts/build/build-and-test.sh
+
+            # Cache dist and package directories
+            - name: Cache dist and package directories
+              uses: actions/cache/save@v4
+              with:
+                  enableCrossOsArchive: true
+                  key: ${{ runner.os }}-build-${{ github.sha }}-${{ github.workflow }}
+                  path: dist/

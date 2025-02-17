@@ -1,0 +1,32 @@
+#!/bin/bash
+# https://docs.localstack.cloud/user-guide/aws/opensearch/#opensearch-dashboards
+
+# Exit on error
+set -e
+
+# Change to the directory of the script
+cd "$(dirname "$0")"
+
+# Wait for bili-core-localstack container to have started
+echo "Waiting for LocalStack container to have started..."
+until [ "$(docker inspect -f '{{.State.Running}}' bili-core-localstack)" == "true" ]; do
+    sleep 5
+    echo "Waiting for LocalStack container to have started..."
+done
+
+# Get LocalStack container's IP address
+localstack_ip=$(docker inspect bili-core-localstack | \
+                jq -r '.[0].NetworkSettings.Networks | to_entries | .[].value.IPAddress')
+echo "LocalStack IP address: $localstack_ip"
+
+# Start OpenSearch Dashboards container
+# The version of the Dashboard has to exactly match the version
+# of OpenSearch that LocalStack is running
+echo "Starting OpenSearch Dashboards container..."
+docker run --rm --name bili-core-opensearch-dashboard \
+  --network bili-core \
+  --dns "$localstack_ip" \
+  -p 5601:5601 \
+  -e "OPENSEARCH_HOSTS=http://bilicore-dev.us-east-1.opensearch.localhost.localstack.cloud:4566" \
+  -e "DISABLE_SECURITY_DASHBOARDS_PLUGIN=true" \
+  opensearchproject/opensearch-dashboards:2.11.1

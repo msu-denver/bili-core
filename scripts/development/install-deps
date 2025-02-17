@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# exit if any command fails
+set -e
+
+# Change to the directory of the script
+cd "$(dirname "$0")"
+
+# Check if the virtual environment directory exists
+# and that there is a /bin/activate command
+if [ ! -d "../../venv" ] || [ ! -f "../../venv/bin/activate" ]; then
+  echo "Virtual environment not found. Creating one..."
+  python3 -m venv ../../venv
+fi
+
+# Upgrade pip to the latest version
+python3 -m pip install --upgrade pip
+
+# Activate the virtual environment
+source ../../venv/bin/activate
+
+# If CLEAN parameter is set to true, remove the existing packages
+if [ "$CLEAN" = "true" ]; then
+  pip freeze | grep -v "@" | xargs pip uninstall -y
+fi
+
+# Install the required packages
+pip install -r ../../requirements.txt
+
+echo "Virtual environment setup complete."

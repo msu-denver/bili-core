@@ -1,0 +1,24 @@
+[theme]
+# Base theme for the app is dark mode
+base="dark"
+
+# Primary color for elements like buttons and highlights
+primaryColor = "#55bfef"
+
+# Background color (a middle ground lighter dark gray)
+backgroundColor = "#2a2a2a"
+
+# Secondary background color for headers, sidebars, or dropdowns
+secondaryBackgroundColor = "#3b3b3b"  # Slightly lighter than background to help elements stand out
+
+# Text color to contrast the dark background
+textColor = "#FFFFFF"
+
+# Font family for all text in the app
+font = "sans serif"
+
+[server]
+
+# Enable CORS and Xsrf protection
+enableCORS = true
+enableXsrfProtection = true

@@ -1,0 +1,40 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+        name: Black Formatter
+        language_version: python3
+        types: [ python ]
+        args: [ "--fast" ]  # Runs faster by not rechecking already formatted files
+
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        name: Autoflake
+        entry: autoflake
+        language: python
+        types: [ python ]
+        args: [ "--in-place", "--remove-unused-variables", "--remove-all-unused-imports" ]
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: Isort Import Sorter
+        language_version: python3
+        types: [ python ]
+        args: ["--profile", "black"]
+
+  - repo: local
+    hooks:
+      - id: pylint
+        name: Pylint for bili # and other directories as needed
+        entry: pylint
+        language: python
+        types: [ python ]
+        # Specify the directories you want to include
+        # files: ^(bili/|project2/).*\.py$
+        files: ^(bili/).*\.py$
+        args: ["--fail-under=9"]  # Set the threshold to fail if the score is below 9
