@@ -83,10 +83,18 @@ Efficiently manages conversation states in LangGraph by persisting chat history 
    cd bili-core
    ```
 2. **Install Dependencies**
-    ```bash
-    pip install -r requirements.txt
-    pip install .
-    ```
+   - To install BiliCore locally, run:
+       ```bash
+       pip install .
+       ```
+   - If you want to use BiliCore as a dependency in another project, add the following line to your requirements.txt file:
+        ```bash
+        git+https://github.com/msu-denver/bili-core.git@main
+        ```
+        Then install it with:
+        ```bash
+        pip install -r requirements.txt
+        ```
 3. **Set Up Environment Variables**
     ```bash
     cp scripts/development/secrets.template scripts/development/secrets

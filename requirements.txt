@@ -25,7 +25,9 @@ openpyxl==3.1.5
 opensearch-py==2.8.0
 optimum==1.23.1
 pandas==2.2.3
+pre-commit==4.0.1
 psycopg2==2.9.10
+pylint==3.3.1
 pymongo==4.9.2
 pympler==1.1
 pypdf==5.0.1
