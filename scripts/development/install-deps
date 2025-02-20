@@ -3,21 +3,21 @@
 # exit if any command fails
 set -e
 
-# Change to the directory of the script
-cd "$(dirname "$0")"
+# Change to the root of the project
+cd "$(dirname "$0")"/../..
 
 # Check if the virtual environment directory exists
 # and that there is a /bin/activate command
-if [ ! -d "../../venv" ] || [ ! -f "../../venv/bin/activate" ]; then
+if [ ! -d "./venv" ] || [ ! -f "./venv/bin/activate" ]; then
   echo "Virtual environment not found. Creating one..."
-  python3 -m venv ../../venv
+  python3 -m venv ./venv
 fi
 
 # Upgrade pip to the latest version
 python3 -m pip install --upgrade pip
 
 # Activate the virtual environment
-source ../../venv/bin/activate
+source ./venv/bin/activate
 
 # If CLEAN parameter is set to true, remove the existing packages
 if [ "$CLEAN" = "true" ]; then
@@ -25,6 +25,6 @@ if [ "$CLEAN" = "true" ]; then
 fi
 
 # Install the required packages
-pip install -r ../../requirements.txt
+pip install .
 
 echo "Virtual environment setup complete."
