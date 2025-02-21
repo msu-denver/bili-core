@@ -168,7 +168,7 @@ class UIAuthManager(AuthManager):
                         st.rerun()
                     else:
                         self.profile_provider.create_user_profile(
-                            uid, email, first_name, last_name
+                            uid, email, first_name, last_name, token
                         )
                         st.session_state.role = "user"
                         st.warning(
@@ -224,13 +224,16 @@ class UIAuthManager(AuthManager):
         try:
             if not existing_user:
                 auth_response = self.auth_provider.create_user(email, password)
-                uid = auth_response["uid"]
                 self.auth_provider.send_email_verification(auth_response)
             else:
                 auth_response = self.auth_provider.sign_in(email, password)
-                uid = auth_response["uid"]
 
-            self.profile_provider.create_user_profile(uid, email, first_name, last_name)
+            uid = auth_response["uid"]
+            token = auth_response["token"]
+
+            self.profile_provider.create_user_profile(
+                uid, email, first_name, last_name, token
+            )
 
             if not isinstance(self.auth_provider, InMemoryAuthProvider):
                 st.session_state.auth_success = (

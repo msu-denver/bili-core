@@ -13,7 +13,7 @@ Classes:
 Methods:
     - __init__():
       Initializes the in-memory profile storage.
-    - create_user_profile(uid, email, first_name, last_name):
+    - create_user_profile(uid, email, first_name, last_name, token):
       Creates a new user profile and stores it in memory.
     - get_user_profile(uid, token):
       Fetches the profile of a user based on the provided user ID.
@@ -32,10 +32,11 @@ Example:
 
     # Create a new user profile
     profile_provider.create_user_profile(
-        id_token="unique_id_token",
         uid="user123",
+        email="test@example.com",
         first_name="John",
         last_name="Doe"
+        token="auth_token"
     )
 
     # Get user profile
@@ -61,21 +62,30 @@ class InMemoryProfileProvider(ProfileProvider):
         self.profiles = {}  # Store profiles in memory
 
     def create_user_profile(
-        self, uid: str, email: str, first_name: str, last_name: str
+        self, uid: str, email: str, first_name: str, last_name: str, token: str
     ):
         """
-        Creates a new user profile and stores it in the profiles dictionary. This method
-        associates a unique user ID with their ID token and personal name information,
-        including the first and last names.
+        Creates a user profile in an internal data store. This method associates
+        a unique identifier (UID) with user-specific details such as first name
+        and last name, storing them as a profile for later access. The function
+        ensures that the required user information is correctly structured and
+        maintained within the profiles data structure.
 
-        :param uid: A unique string token associated with the user's identity.
-        :param email: A unique string identifier for the user, used as the key in the
-            profiles dictionary.
-        :param first_name: The first name of the user, as a string.
-        :param last_name: The last name of the user, as a string.
+        :param uid: A unique identifier for the user.
+        :type uid: str
+        :param email: The user's email address.
+        :type email: str
+        :param first_name: The first name of the user.
+        :type first_name: str
+        :param last_name: The last name of the user.
+        :type last_name: str
+        :param token: Authentication or identification token for the user.
+        :type token: str
+
         :return: None
+        :rtype: None
         """
-        self.profiles[email] = {
+        self.profiles[uid] = {
             "uid": uid,
             "email": email,
             "first_name": first_name,

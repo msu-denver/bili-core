@@ -10,7 +10,7 @@ Classes:
     - ProfileProvider: Interface for user profile management.
 
 Methods:
-    - create_user_profile(uid, email, first_name, last_name):
+    - create_user_profile(uid, email, first_name, last_name, token):
       Creates a user profile with the provided details.
     - get_user_profile(uid, token):
       Retrieves user profile information based on the provided ID token.
@@ -22,7 +22,7 @@ Usage:
 
 Example:
     class MyProfileProvider(ProfileProvider):
-        def create_user_profile(self, uid, email, first_name, last_name):
+        def create_user_profile(uid, email, first_name, last_name, token):
             # Implement profile creation logic here
             pass
 
@@ -41,28 +41,32 @@ class ProfileProvider:
     the actual functionality.
 
     Methods:
-        - create_user_profile(uid, email, first_name, last_name):
+        - create_user_profile(uid, email, first_name, last_name, token):
           Creates a user profile with the provided details.
         - get_user_profile(uid, token):
           Retrieves user profile information based on the provided ID token.
     """
 
-    def create_user_profile(self, uid, email, first_name, last_name):
+    def create_user_profile(
+        self, uid: str, email: str, first_name: str, last_name: str, token: str
+    ):
         """
-        Creates a user profile in the system by taking user identification details
-        and personal information. This method is a placeholder and must be implemented
-        in subclasses or elsewhere to provide the desired functionality.
+        Creates a user profile with the provided user details and token. This function is
+        intended to handle the necessary steps to initialize and store a user profile based
+        on the given data. The implementation is currently not provided and must be
+        handled by the derived or overriding class.
 
-        :param uid: A unique authentication token identifying the user.
+        :param uid: Unique identifier of the user.
         :type uid: str
-        :param email: A unique identifier for the user.
+        :param email: Email address of the user.
         :type email: str
-        :param first_name: The first name of the user.
+        :param first_name: First name of the user.
         :type first_name: str
-        :param last_name: The last name of the user.
+        :param last_name: Last name of the user.
         :type last_name: str
-        :return: None
-        :rtype: NoneType
+        :param token: Authentication or session token for the user.
+        :type token: str
+
         :raises NotImplementedError: If the method is not implemented.
         """
         raise NotImplementedError
