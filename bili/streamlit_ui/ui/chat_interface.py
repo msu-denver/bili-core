@@ -36,7 +36,7 @@ Dependencies:
       retrieving state configuration.
     - bili.streamlit.query.streamlit_query_handler: Imports process_query for
       processing user queries.
-    - bili.tools.config: Imports TOOLS for tool configuration.
+    - bili.config.tool_config: Imports TOOLS for tool configuration.
     - bili.utils.langgraph_utils: Imports format_message_with_citations and
       clear_state for message formatting and state clearing.
     - bili.streamlit.ui.configuration_panels: Imports display_configuration_panels
@@ -63,14 +63,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from bili.checkpointers.checkpointer_functions import get_state_config
+from bili.config.tool_config import TOOLS
 from bili.loaders.langchain_loader import load_langgraph_agent
 from bili.loaders.llm_loader import load_model
-from bili.streamlit.query.streamlit_query_handler import process_query
-from bili.streamlit.ui.auth_ui import display_login_signup, is_authenticated
-from bili.streamlit.ui.configuration_panels import display_configuration_panels
-from bili.streamlit.utils.state_management import disable_form, enable_form
-from bili.tools.config import TOOLS
+from bili.streamlit_ui.query.streamlit_query_handler import process_query
+from bili.streamlit_ui.ui.auth_ui import display_login_signup, is_authenticated
+from bili.streamlit_ui.ui.configuration_panels import display_configuration_panels
+from bili.streamlit_ui.utils.state_management import (
+    disable_form,
+    enable_form,
+    get_state_config,
+)
 from bili.utils.langgraph_utils import clear_state, format_message_with_citations
 
 

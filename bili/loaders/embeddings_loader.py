@@ -45,7 +45,7 @@ from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings
 
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)

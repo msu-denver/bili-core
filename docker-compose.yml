@@ -15,6 +15,7 @@ services:
                           capabilities: [gpu]
         environment:
             - PYTHON_ENV=development
+            - FLASK_DEBUG=1
             - LOCALSTACK_HOSTNAME=bili-core-localstack
         volumes:
             - ".:/app/bili-core/:rw"
@@ -22,6 +23,7 @@ services:
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501
+            - 8080:8080
         networks:
             bili-core:
                 aliases:
@@ -37,6 +39,7 @@ services:
         container_name: "bili-core"
         environment:
             - PYTHON_ENV=development
+            - FLASK_DEBUG=1
             - LOCALSTACK_HOSTNAME=bili-core-localstack
         volumes:
             - ".:/app/bili-core/:rw"
@@ -44,6 +47,7 @@ services:
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501
+            - 8080:8080
         networks:
             bili-core:
                 aliases:

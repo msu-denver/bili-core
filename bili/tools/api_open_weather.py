@@ -50,7 +50,7 @@ import urllib.parse
 import requests
 from langchain.tools import Tool
 
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module

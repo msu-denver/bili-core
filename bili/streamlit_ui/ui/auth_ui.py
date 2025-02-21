@@ -41,7 +41,7 @@ Example:
 
 import streamlit as st
 
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 
 
 def display_login_signup():
@@ -169,9 +169,9 @@ def initialize_auth_manager(
              providers.
     :rtype: AuthManager
     """
-    from bili.auth.auth_manager import AuthManager
+    from bili.streamlit_ui.ui.ui_auth_manager import UIAuthManager
 
-    auth_manager = AuthManager(
+    auth_manager = UIAuthManager(
         auth_provider_name=auth_provider_name,
         profile_provider_name=profile_provider_name,
         role_provider_name=role_provider_name,

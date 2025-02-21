@@ -59,18 +59,13 @@ Example:
     auth_manager.attempt_reauthentication()
 """
 
-import time
-
-import requests
-import streamlit as st
-
 from bili.auth.providers.auth.firebase_auth_provider import FirebaseAuthProvider
 from bili.auth.providers.auth.in_memory_auth_provider import InMemoryAuthProvider
 from bili.auth.providers.profile.in_memory_profile_provider import (
     InMemoryProfileProvider,
 )
 from bili.auth.providers.role.in_memory_role_provider import InMemoryRoleProvider
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 # Providers for authentication, profile management, and role checking
@@ -148,237 +143,80 @@ class AuthManager:
             f"and role={role_provider_name} providers"
         )
 
-    def sign_in(
-        self, email: str, password: str, first_name=None, last_name=None
-    ) -> None:
+    def create_jwt_token(self, payload: dict) -> str:
         """
-        Handles the process of signing in a user, verifying the user's email, and determining
-        their role within the system. Performs additional profile creation steps if the user
-        is not found in the API.
+        Creates a JSON Web Token (JWT) based on the provided payload.
 
-        :param email: The email address of the user attempting to sign in.
-        :type email: str
-        :param password: The password of the user attempting to sign in.
-        :type password: str
-        :param first_name: The first name of the user, required for profile creation if needed.
-            Defaults to None.
-        :type first_name: Optional[str]
-        :param last_name: The last name of the user, required for profile creation if needed.
-            Defaults to None.
-        :type last_name: Optional[str]
-        :return: None
-        :rtype: None
-        :raises Exception: If any unexpected error occurs during the sign-in process.
+        The method uses the `auth_provider` attribute to generate a JWT token.
+        This token can be used for authentication or securing communication
+        between systems or users.
+
+        :param payload: A dictionary containing the claims and data to
+            encode within the JWT token.
+        :return: A string representation of the generated JWT token.
+        :rtype: str
         """
-        try:
-            auth_response = self.auth_provider.sign_in(email, password)
-            id_token = auth_response["idToken"]
-            user_id = auth_response["localId"]
+        return self.auth_provider.create_jwt_token(payload)
 
-            st.session_state["id_token"] = id_token
-            user_info = self.auth_provider.get_account_info(id_token)
-
-            if not user_info["emailVerified"]:
-                self.auth_provider.send_email_verification(id_token)
-                st.session_state.auth_warning = (
-                    "Please verify your email before signing in."
-                )
-                st.rerun()
-
-            st.session_state.user_info = user_info
-
-            try:
-                user_role = self.role_provider.get_user_role(id_token)
-                st.session_state.role = user_role
-
-                if user_role in ["researcher", "admin"]:
-                    st.session_state.auth_success = "Signed in successfully"
-                    st.rerun()
-                elif user_role == "user":
-                    st.warning(
-                        "Your account is under review. Please contact an administrator."
-                    )
-                else:
-                    st.error("You are not authorized to access this page.")
-                    st.stop()
-
-            except requests.exceptions.HTTPError as error:
-                if error.response.status_code == 404:
-                    st.warning("User not found in API. Creating profile now...")
-                    if first_name is None or last_name is None:
-                        st.session_state.needs_profile_creation = True
-                        st.session_state.auth_warning = (
-                            "Please provide your name to complete your profile."
-                        )
-                        st.rerun()
-                    else:
-                        self.profile_provider.create_user_profile(
-                            id_token, user_id, first_name, last_name
-                        )
-                        st.session_state.role = "user"
-                        st.warning(
-                            "Your account is under review. Please contact an administrator."
-                        )
-                        time.sleep(3)
-                        st.session_state.needs_profile_creation = False
-                        st.rerun()
-                else:
-                    st.warning(f"Error fetching user role: {error}")
-                    raise
-
-        except Exception as error:
-            st.session_state.clear()
-            st.session_state.auth_warning = f"Unexpected error: {error}"
-            st.rerun()
-
-    def create_account(
-        self,
-        email: str,
-        password: str,
-        first_name: str,
-        last_name: str,
-        existing_user: bool,
-    ) -> None:
+    def verify_jwt_token(self, token: str) -> dict:
         """
-        Creates a user account or signs in an existing user, then sets up the user's
-        profile and updates the application state accordingly.
+        Verifies a JWT (JSON Web Token) using the configured authentication provider.
 
-        This function uses an authentication provider to create or sign in a user
-        based on the provided parameters. If a new account is created, the function
-        triggers an email verification process. After successful authentication, it
-        creates a user profile using a profile provider. Depending on whether the
-        user is logging in for the first time or is an existing user, the function
-        updates the session state variables to reflect the account's status.
+        This function is responsible for validating the given JWT token. It uses the
+        authentication provider associated with the object to perform the verification
+        process. Upon successful verification, it extracts and returns the decoded
+        payload of the token, which contains information embedded within the JWT.
 
-        If errors occur during the process, the function gracefully handles them by
-        updating the session state with a warning message and restarting the app flow.
-
-        :param email: The email address for the user account.
-        :type email: str
-        :param password: The password associated with the user account.
-        :type password: str
-        :param first_name: The first name of the user, used for profile creation.
-        :type first_name: str
-        :param last_name: The last name of the user, used for profile creation.
-        :type last_name: str
-        :param existing_user: A Boolean flag indicating if an account already exists
-            for the email.
-        :type existing_user: bool
-        :return: None
+        :param token: The JWT string to be verified.
+        :type token: str
+        :return: A dictionary containing the decoded payload from the verified JWT.
+        :rtype: dict
         """
-        try:
-            if not existing_user:
-                auth_response = self.auth_provider.create_user(email, password)
-                id_token = auth_response["idToken"]
-                user_id = auth_response["localId"]
-                self.auth_provider.send_email_verification(id_token)
-            else:
-                auth_response = self.auth_provider.sign_in(email, password)
-                id_token = auth_response["idToken"]
-                user_id = auth_response["localId"]
+        return self.auth_provider.verify_jwt_token(token)
 
-            self.profile_provider.create_user_profile(
-                id_token, user_id, first_name, last_name
-            )
-
-            if not isinstance(self.auth_provider, InMemoryAuthProvider):
-                st.session_state.auth_success = (
-                    "Check your inbox to verify your email"
-                    if not existing_user
-                    else "Account created successfully and is now under review"
-                )
-            else:
-                st.session_state.auth_success = "Account created successfully"
-
-            st.session_state.needs_profile_creation = False
-            st.rerun()
-
-        except Exception as error:
-            st.session_state.auth_warning = f"Unexpected error: {error}"
-            st.rerun()
-
-    def reset_password(self, email: str) -> None:
+    def extract_token_from_headers(self, headers) -> str:
         """
-        Reset a user's password by sending a reset link to the provided email address.
+        Extracts an authentication token from the provided HTTP headers. The method attempts to
+        retrieve the token using two approaches: first, by checking the "Authorization" header
+        if it starts with "Bearer", and second, by retrieving the token from the "X-Auth-Token"
+        header. If neither approach provides a valid token, a ValueError is raised.
 
-        This method interacts with an external authentication provider to send a
-        password reset email to the specified address. If the operation is successful,
-        a success message will be set in the session state. In case of any errors during
-        the process, a warning message with error details will be set instead. The
-        method ensures immediate feedback to the user by rerunning the application state.
-
-        :param email: The email address to send the password reset link to.
-        :type email: str
-        :return: None
+        :param headers: The HTTP headers from which the token will be extracted.
+        :type headers: dict
+        :return: The extracted authentication token.
+        :rtype: str
+        :raises ValueError: If neither the "Authorization" header nor the "X-Auth-Token"
+            header contain a valid token.
         """
-        try:
-            self.auth_provider.send_password_reset(email)
-            st.session_state.auth_success = "Password reset link sent to your email"
-            st.rerun()
-        except Exception as error:
-            st.session_state.auth_warning = f"Error: {error}"
-            st.rerun()
+        auth_header = headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            return auth_header.split(" ")[1]  # Extract token from "Bearer <token>"
 
-    def sign_out(self) -> None:
+        # Fallback: Try "X-Auth-Token" header
+        token = headers.get("X-Auth-Token")
+        if token:
+            return token
+
+        raise ValueError("No valid authentication token found in headers.")
+
+    def verify_request_token(self, headers):
         """
-        Clears the session state and updates the authentication status to indicate the
-        user has successfully signed out.
+        Verifies the authenticity of a request token extracted from the provided
+        headers. The method uses an authentication provider to validate the token
+        and ensure its integrity and compliance with authentication requirements.
 
-        :return: None
+        This method is commonly used in contexts where the incoming request headers
+        contain a JWT token that needs verification to authenticate and authorize user
+        access.
+
+        :param headers: The HTTP headers where the token will be extracted from.
+        :type headers: dict
+        :return: The result of the verification process as determined by the
+            authentication provider.
+        :rtype: Any
         """
-        st.session_state.clear()
-        st.session_state.auth_success = "You have successfully signed out"
-
-    def delete_account(self, password: str) -> None:
-        """
-        Deletes the authenticated user's account from the system. This method requires
-        the user to confirm their password. Upon successful deletion, it clears the
-        user session state and sets a success message for the session. If an error
-        occurs during the process, it updates the session state with the error message
-        and triggers a rerun of the application.
-
-        :param password: The password of the user's account to confirm deletion.
-        :type password: str
-        :return: None
-        """
-        try:
-            id_token = self.auth_provider.sign_in(
-                st.session_state.user_info["email"], password
-            )["idToken"]
-            self.auth_provider.delete_account(id_token)
-            st.session_state.clear()
-            st.session_state.auth_success = "You have successfully deleted your account"
-        except Exception as error:
-            st.session_state.auth_warning = f"Error: {error}"
-            st.rerun()
-
-    def attempt_reauthentication(self):
-        """
-        Attempts to reauthenticate a user with their existing ID token. If the "id_token"
-        exists in the Streamlit session state but "user_info" does not, the function will
-        fetch the user's account information and role from respective providers. Upon
-        successful reauthentication, user details, role, and an authentication success
-        message are stored back in the session state. If an exception occurs during
-        reatuhentication, the session state will be cleared.
-
-        :raises Exception: When reauthentication fails due to the unavailability of valid
-                           account or role data during the authentication process.
-
-        :rtype: None
-        :return: This function does not return any value; it modifies the session state
-                 with either updated user information or clears it upon failure.
-        """
-        if "id_token" in st.session_state and "user_info" not in st.session_state:
-            try:
-                user_info = self.auth_provider.get_account_info(
-                    st.session_state["id_token"]
-                )
-                st.session_state.user_info = user_info
-                role = self.role_provider.get_user_role(st.session_state["id_token"])
-                st.session_state.role = role
-                st.session_state.auth_success = "Reauthenticated successfully"
-            except Exception:
-                st.session_state.clear()
+        token = self.extract_token_from_headers(headers)
+        return self.auth_provider.verify_jwt_token(token)
 
 
 @conditional_cache_resource()

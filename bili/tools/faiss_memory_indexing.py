@@ -49,7 +49,7 @@ import os
 from langchain_community.vectorstores import FAISS
 
 from bili.loaders.embeddings_loader import load_embedding_function
-from bili.streamlit.utils.streamlit_utils import conditional_cache_data
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_data
 from bili.utils.file_utils import preprocess_directory
 from bili.utils.logging_utils import get_logger
 

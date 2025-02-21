@@ -6,7 +6,9 @@
 
 ## Overview
 
-**BiliCore** is an open-source, reusable framework designed to benchmark Large Language Models (LLMs) across cloud providers and local environments. It enables rapid, reproducible testing without requiring researchers to run models locally. Developed as part of the [**Colorado Sustainability Hub**](https://sustainabilityhub.co/). initiative, BiliCore contributes to the AI/ML community by providing a **flexible and extensible core library** built with **LangChain** and **LangGraph**. The framework emphasizes modular authentication, customizable tool selection, support for multiple LLMs across different providers, and a robust web interface in Streamlit that enables on-the-fly RAG customization during a user's session. This allows users to start a conversation with one LLM and switch to another mid-session without losing conversation history. Users can also test different personas using unique prompts, configure tools, adjust LLM parameters such as top-p, top-k, and seed values, and manage state with complete flexibility, including using truncation or summarization to preserve context when a customizable context window limit is reached.
+**BiliCore** is an open-source, reusable framework designed to benchmark Large Language Models (LLMs) across cloud providers and local environments. It enables rapid, reproducible testing without requiring researchers to run models locally. Developed as part of the [**Colorado Sustainability Hub**](https://sustainabilityhub.co/). initiative, BiliCore contributes to the AI/ML community by providing a **flexible and extensible core library** built with **LangChain** and **LangGraph**. The framework emphasizes modular authentication, customizable tool selection, support for multiple LLMs across different providers, a robust web interface in Streamlit that enables on-the-fly RAG customization during a user's session, and a Flask REST API for programmatic access and backend integration. This allows users to start a conversation with one LLM and switch to another mid-session without losing conversation history. 
+
+Via the Streamlit UI, users can also test different personas using unique prompts, configure tools, adjust LLM parameters such as top-p, top-k, and seed values, and manage state with complete flexibility, including using truncation or summarization to preserve context when a customizable context window limit is reached.
 
 This project is funded by the **[National Science Foundation (NSF)](https://www.nsf.gov/)** and the **[NAIRR Pilot](https://nairrpilot.org/)**, aligning with their mission to advance AI accessibility and sustainability.
 
@@ -62,6 +64,17 @@ Efficiently manages conversation states in LangGraph by persisting chat history 
 - **Trim Strategy**: Retains only the last `k` messages for simple memory management
 - **Summarization Strategy**: Aggregates older messages into a coherent summary to optimize token usage
 
+### 6. Flask REST API for Programmatic Access
+
+BiliCore includes an optional Flask API for applications that require stateless, token-based authentication and API-based access to the benchmarking framework.
+With the Flask integration, you can:
+
+* Authenticate users via JWT-based authentication
+* Secure API routes using role-based access control
+* Access LLMs via RESTful API endpoints
+* Use the same authentication providers (Firebase, In-Memory) as the Streamlit UI
+
+
 ---
 
 ## Installation
@@ -110,9 +123,13 @@ Efficiently manages conversation states in LangGraph by persisting chat history 
     cd scripts/development
     ./attach-container[.bat]
     ```
-6. **Run BiliCore**
+6. **Run BiliCore as a Streamlit Application**
     ```bash
     streamlit
+    ```
+7. **Run BiliCore as a Flask Application**
+    ```bash
+    flask
     ```
 ## Acknowledgments
 This research is supported by the [National Science Foundation (NSF) (Grant No. 2318730)](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2318730) and the [National Artificial Intelligence Research Resource (NAIRR) Pilot](https://nairrpilot.org/projects/awarded?_requestNumber=NAIRR240197). Their support has been instrumental in advancing AI accessibility and fostering innovation in sustainability-focused applications.

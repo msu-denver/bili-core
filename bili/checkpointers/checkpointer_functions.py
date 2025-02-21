@@ -10,8 +10,6 @@ Functions:
     - get_checkpointer():
       Determines and returns the appropriate checkpointer (PostgresSaver,
       MongoDBSaver, or MemorySaver).
-    - get_state_config():
-      Creates and returns a conversation state configuration dictionary.
 
 Dependencies:
     - streamlit: Provides the Streamlit library for building web applications.
@@ -40,11 +38,8 @@ Example:
     # Get the appropriate checkpointer
     checkpointer = get_checkpointer()
 
-    # Get the state configuration
-    state_config = get_state_config()
 """
 
-import streamlit as st
 from langgraph.checkpoint.memory import MemorySaver
 
 from bili.checkpointers.mongo_checkpointer import get_mongo_checkpointer
@@ -86,30 +81,3 @@ def get_checkpointer():
     # If no database persistence is available, use MemorySaver as a fallback
     LOGGER.debug("Using MemorySaver for conversation state checkpointing.")
     return MemorySaver()
-
-
-def get_state_config():
-    """
-    Creates a configuration dictionary to store conversation state information.
-    This function checks the Streamlit `session_state` to retrieve the user ID
-    and then assigns it to the thread ID within the configuration. If a session
-    UUID is not stored in `session_state`, it will not uniquely identify threads,
-    but relies solely on the user's local ID.
-
-    :return: A dictionary containing configuration data for managing conversation
-        state, specifically with a `thread_id` key derived from user information
-        stored in Streamlit `session_state`.
-    :rtype: dict
-    """
-    # Create a config with an optional thread_id if you want to store conversation state
-    # if not "session_uuid" in st.session_state:
-    #     st.session_state.session_uuid = str(uuid.uuid4())
-    # thread_id = st.session_state.get("session_uuid")
-    user_id = st.session_state.get("user_info", {}).get("localId")
-    config = {
-        "configurable": {
-            # "thread_id": f"{user_id}_{thread_id}",
-            "thread_id": f"{user_id}",
-        },
-    }
-    return config

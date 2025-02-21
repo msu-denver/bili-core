@@ -21,8 +21,8 @@ Dependencies:
     - os: Provides a way of using operating system dependent functionality.
     - pathlib.Path: Provides an object-oriented filesystem path representation.
     - streamlit: Provides the Streamlit library for building web applications.
-    - bili.streamlit.config: Imports LLM_MODELS for language model configurations.
-    - bili.tools.config: Imports TOOLS for tool configurations.
+    - bili.config.llm_config: Imports LLM_MODELS for language model configurations.
+    - bili.config.tool_config: Imports TOOLS for tool configurations.
     - bili.utils.file_utils: Imports load_from_json for loading JSON files.
 
 Usage:
@@ -43,8 +43,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from bili.streamlit.config import LLM_MODELS
-from bili.tools.config import TOOLS
+from bili.config.llm_config import LLM_MODELS
+from bili.config.tool_config import TOOLS
 from bili.utils.file_utils import load_from_json
 
 # Load default prompts from JSON that will be used in the chatbot system

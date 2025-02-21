@@ -26,7 +26,7 @@ Dependencies:
       API tools.
     - bili.tools.api_weather_gov: Imports `init_weather_gov_api_tool` for
       initializing Weather.gov API tools.
-    - bili.tools.config: Imports `TOOLS` for tool configurations.
+    - bili.config.tool_config: Imports `TOOLS` for tool configurations.
     - bili.tools.faiss_memory_indexing: Imports `init_faiss` for initializing
       FAISS retrievers.
     - bili.tools.mock_tool: Imports `init_mock_tool` for initializing mock
@@ -61,12 +61,12 @@ Example:
 
 from langchain.agents.agent_toolkits import create_retriever_tool
 
+from bili.config.tool_config import TOOLS
 from bili.loaders.embeddings_loader import load_embedding_function
 from bili.tools.amazon_opensearch import init_amazon_opensearch
 from bili.tools.api_open_weather import init_weather_api_tool
 from bili.tools.api_serp import init_serp_api_tool
 from bili.tools.api_weather_gov import init_weather_gov_api_tool
-from bili.tools.config import TOOLS
 from bili.tools.faiss_memory_indexing import init_faiss
 from bili.tools.mock_tool import init_mock_tool
 from bili.utils.logging_utils import get_logger
@@ -106,7 +106,7 @@ TOOL_REGISTRY = {
 }
 
 
-def initialize_tools(active_tools, tool_prompts, tool_params):
+def initialize_tools(active_tools, tool_prompts, tool_params=None):
     """
     Initializes and configures a list of tools based on the provided parameters.
 
@@ -126,10 +126,11 @@ def initialize_tools(active_tools, tool_prompts, tool_params):
     :return: A list of initialized tool objects.
     :rtype: list
     """
+    if tool_params is None:
+        tool_params = {}
     LOGGER.debug("Initializing tools: %s", active_tools)
 
     tools = []
-
     for tool in active_tools:
         if tool in TOOL_REGISTRY:
             tools.append(

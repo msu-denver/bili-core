@@ -27,11 +27,11 @@ Example:
     role_provider = InMemoryRoleProvider()
 
     # Get user role
-    user_role = role_provider.get_user_role(id_token="user_id_token")
+    user_role = role_provider.get_user_role(uid="user_id_token")
 
     # Check if user is authorized
     is_auth = role_provider.is_authorized(
-        id_token="user_id_token", required_roles=["admin"]
+        uid="user_id_token", required_roles=["admin"]
     )
 """
 

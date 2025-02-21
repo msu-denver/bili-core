@@ -49,7 +49,7 @@ import os
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module
