@@ -15,7 +15,7 @@ Methods:
       Initializes the in-memory profile storage.
     - create_user_profile(uid, email, first_name, last_name):
       Creates a new user profile and stores it in memory.
-    - get_user_profile(uid):
+    - get_user_profile(uid, token):
       Fetches the profile of a user based on the provided user ID.
 
 Usage:
@@ -39,7 +39,7 @@ Example:
     )
 
     # Get user profile
-    user_profile = profile_provider.get_user_profile(uid="user123")
+    user_profile = profile_provider.get_user_profile(uid="user123", token="auth_token")
 """
 
 from bili.auth.providers.profile.profile_provider import ProfileProvider
@@ -82,18 +82,19 @@ class InMemoryProfileProvider(ProfileProvider):
             "last_name": last_name,
         }
 
-    def get_user_profile(self, uid: str):
+    def get_user_profile(self, uid: str, token: str):
         """
-        Fetches the profile of a user based on the provided user ID.
-
-        This method retrieves the profile of a user from the 'profiles' attribute
-        using the given user ID. If the user ID does not exist in the 'profiles',
+        Fetches the user profile based on the given unique identifier and authentication token.
+        This method retrieves the user's information stored in the `profiles` dictionary.
+        If the profile corresponding to the provided identifier is not found,
         it returns an empty dictionary.
 
         :param uid: The unique identifier of the user whose profile is to be retrieved.
         :type uid: str
-        :return: The profile corresponding to the given user ID, or an empty dictionary if no
-                 matching profile is found.
+        :param token: The authentication token required to access the user profile.
+        :type token: str
+        :return: A dictionary containing the user's profile information if the user exists;
+        otherwise, an empty dictionary.
         :rtype: dict
         """
         return self.profiles.get(uid, {})

@@ -100,7 +100,9 @@ def display_login_signup():
     else:
         if st.button("Log In"):
             st.session_state.password = password
-            st.session_state.auth_manager.sign_in(email, password)
+            st.session_state["auth_info"] = st.session_state.auth_manager.sign_in(
+                email, password
+            )
 
 
 def is_authenticated():

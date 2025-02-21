@@ -10,9 +10,9 @@ Classes:
     - RoleProvider: Interface for user role management and authorization.
 
 Methods:
-    - get_user_role(id_token):
+    - get_user_role(uid, token):
       Retrieves the role of a user based on the provided ID token.
-    - is_authorized(id_token, required_roles):
+    - is_authorized(uid, token, required_roles):
       Checks if a user is authorized based on their role.
 
 Usage:
@@ -22,11 +22,11 @@ Usage:
 
 Example:
     class MyRoleProvider(RoleProvider):
-        def get_user_role(self, id_token):
+        def get_user_role(self, uid, token):
             # Implement role retrieval logic here
             pass
 
-        def is_authorized(self, id_token, required_roles):
+        def is_authorized(self, uid, token, required_roles):
             # Implement authorization logic here
             pass
 """
@@ -46,40 +46,43 @@ class RoleProvider:
     various identity providers or role management systems.
     """
 
-    def get_user_role(self, id_token):
+    def get_user_role(self, uid: str, token: str):
         """
-        Retrieves the role of a user based on the provided ID token.
+        Fetches the role of a user based on their unique identifier and session token.
 
-        This method takes an ID token as input and determines the user's role
-        associated with that token. The implementation of this functionality
-        is not currently provided and will raise a NotImplementedError upon
-        being called.
+        This method is used to retrieve the role associated with a user account.
+        The role determines the level of access or permissions the user has
+        within the system. It is expected to be implemented in a derived class.
 
-        :param id_token: The ID token used to identify and retrieve the user's role.
-        :type id_token: str
-
-        :return: The role of the user as identified by the ID token.
+        :param uid: The unique identifier of the user.
+        :type uid: str
+        :param token: The session token for the user, used for authentication
+            and authorization.
+        :type token: str
+        :return: The string representation of the user's role (e.g., "admin",
+            "user", "moderator").
         :rtype: str
-
-        :raises NotImplementedError: Indicates that the method has not been
-            implemented.
+        :raises NotImplementedError: Indicates that this method must be
+            implemented in a subclass.
         """
         raise NotImplementedError
 
-    def is_authorized(self, id_token, required_roles):
+    def is_authorized(self, uid: str, token: str, required_roles: list):
         """
-        Verifies if the user is authorized based on the provided id_token and required roles.
+        Checks if a user is authorized based on their role.
 
-        This method determines whether a user possesses the necessary roles to access
-        a resource or perform an action. The user's role is identified through the
-        provided id_token, and it's checked against the required roles for the
-        operation.
+        This function determines whether a user, identified by their unique ID and token,
+        has sufficient privileges defined in the list of required roles. The user's role
+        is retrieved and compared against the list of required roles.
 
-        :param id_token: The token used to identify and authenticate the user's
-            credentials.
-        :param required_roles: The set of roles required for authorization.
-        :return: A boolean indicating whether the user is authorized or not.
+        :param uid: The unique identifier of the user.
+        :type uid: str
+        :param token: The authentication token associated with the user.
+        :type token: str
+        :param required_roles: A list of roles that are required for access.
+        :type required_roles: list of str
+        :return: True if the user's role matches one of the required roles, False otherwise.
         :rtype: bool
         """
-        user_role = self.get_user_role(id_token)
+        user_role = self.get_user_role(uid, token)
         return user_role in required_roles

@@ -249,7 +249,7 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
                 # Role-based authorization check
                 if required_roles and not auth_manager.role_provider.is_authorized(
-                    user_data.get("role"), required_roles
+                    user_data.get("role"), token, required_roles
                 ):
                     return (
                         jsonify({"error": "Forbidden: Insufficient permissions"}),

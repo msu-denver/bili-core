@@ -293,14 +293,16 @@ def display_configuration_panels():
                 st.button(
                     "Random Seed",
                     on_click=lambda: st.session_state.update(
-                        {"seed_value": int.from_bytes(os.urandom(4), "big")}
+                        {"seed_value_setting": int.from_bytes(os.urandom(4), "big")}
                     ),
                     use_container_width=True,
                 )
             with col2:
                 st.button(
                     "Clear Seed",
-                    on_click=lambda: st.session_state.update({"seed_value": None}),
+                    on_click=lambda: st.session_state.update(
+                        {"seed_value_setting": None}
+                    ),
                     use_container_width=True,
                 )
             # Create tooltip explaining what seed is

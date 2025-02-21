@@ -12,7 +12,7 @@ Classes:
 Methods:
     - create_user_profile(uid, email, first_name, last_name):
       Creates a user profile with the provided details.
-    - get_user_profile(uid):
+    - get_user_profile(uid, token):
       Retrieves user profile information based on the provided ID token.
 
 Usage:
@@ -26,7 +26,7 @@ Example:
             # Implement profile creation logic here
             pass
 
-        def get_user_profile(self, id_token):
+        def get_user_profile(self, uid, token):
             # Implement profile retrieval logic here
             pass
 """
@@ -43,7 +43,7 @@ class ProfileProvider:
     Methods:
         - create_user_profile(uid, email, first_name, last_name):
           Creates a user profile with the provided details.
-        - get_user_profile(uid):
+        - get_user_profile(uid, token):
           Retrieves user profile information based on the provided ID token.
     """
 
@@ -67,22 +67,20 @@ class ProfileProvider:
         """
         raise NotImplementedError
 
-    def get_user_profile(self, uid):
+    def get_user_profile(self, uid, token):
         """
-        Retrieves the user profile based on the provided ID token.
+        Retrieve the profile of a user given their unique identifier and authentication token.
 
-        This function receives an ID token as input, validates it,
-        and fetches the corresponding user profile. The function
-        is not implemented and serves as a placeholder for future
-        development.
+        This method is designed to fetch user details based on the provided user identifier and
+        an authentication token. It raises a NotImplementedError as it is intended to be
+        overridden or implemented elsewhere.
 
-        :param uid: A unique token representing a user's identity.
+        :param uid: A unique identifier of the user whose profile is being retrieved.
         :type uid: str
-
-        :return: The user profile associated with the provided ID token.
+        :param token: A valid authentication token for user verification.
+        :type token: str
+        :return: The profile details of the user.
         :rtype: dict
-
-        :raises NotImplementedError: If the functionality has not
-            been implemented yet.
+        :raises NotImplementedError: if the method is not overridden.
         """
         raise NotImplementedError

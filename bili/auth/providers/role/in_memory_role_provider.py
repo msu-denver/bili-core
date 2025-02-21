@@ -10,9 +10,9 @@ Classes:
     - InMemoryRoleProvider: Simulates an in-memory role provider.
 
 Methods:
-    - get_user_role(id_token):
+    - get_user_role(uid, token):
       Retrieves the role of a user based on the provided ID token.
-    - is_authorized(id_token, required_roles):
+    - is_authorized(uid, token, required_roles):
       Checks if a user is authorized based on their role.
 
 Usage:
@@ -27,11 +27,11 @@ Example:
     role_provider = InMemoryRoleProvider()
 
     # Get user role
-    user_role = role_provider.get_user_role(uid="user_id_token")
+    user_role = role_provider.get_user_role(uid="user_id", token="auth_token")
 
     # Check if user is authorized
     is_auth = role_provider.is_authorized(
-        uid="user_id_token", required_roles=["admin"]
+        uid="user_id", token="auth_token", required_roles=["admin"]
     )
 """
 
@@ -50,11 +50,12 @@ class InMemoryRoleProvider(RoleProvider):
     "researcher"
     """
 
-    def get_user_role(self, id_token: str):
+    def get_user_role(self, uid: str, token: str):
         """
         A simple role implementation where all users share the same role, "researcher"
 
-        :param id_token: A unique identity token that represents the user. The token is
+        :param uid: The unique identifier of the user.
+        :param token: A unique identity token that represents the user. The token is
             typically issued by an authentication system and includes encoded user
             information and potentially claims about user roles or permissions.
         :return: A string representing the user's role
@@ -62,23 +63,23 @@ class InMemoryRoleProvider(RoleProvider):
         """
         return "researcher"
 
-    def is_authorized(self, id_token, required_roles):
+    def is_authorized(self, uid: str, token: str, required_roles: list):
         """
-        Check if a user is authorized based on the provided token and required roles.
+        Check if a user is authorized based on their unique identifier, authentication
+        token, and required roles. The method evaluates whether the provided user
+        credentials and roles meet the necessary authorization criteria.
 
         This function, being a simple implementation, will always return True. Real implementations
         would check the user's role against the list of required roles to determine if the user
         was authorized to access the application.
 
-        :param id_token: A unique identity token that represents the user. The token is
-            typically issued by an authentication system and includes encoded user
-            information and potentially claims about user roles or permissions.
-        :type id_token: str
-        :param required_roles: A list of roles that a user must possess to be considered
-            authorized. Each role in the list represents an access requirement.
-        :type required_roles: list[str]
-        :return: A boolean value indicating whether the user is authorized (True) or
-            unauthorized (False) based on the provided token and required roles.
+        :param uid: Unique identifier for the user.
+        :type uid: str
+        :param token: Authentication token for the user.
+        :type token: str
+        :param required_roles: List of roles required for access.
+        :type required_roles: list
+        :return: A boolean value indicating whether the user is authorized.
         :rtype: bool
         """
         return True

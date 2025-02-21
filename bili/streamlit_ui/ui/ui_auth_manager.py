@@ -128,6 +128,7 @@ class UIAuthManager(AuthManager):
         try:
             auth_response = self.auth_provider.sign_in(email, password)
             uid = auth_response["uid"]
+            token = auth_response["token"]
 
             st.session_state["uid"] = uid
             user_info = self.auth_provider.get_account_info(uid)
@@ -142,7 +143,7 @@ class UIAuthManager(AuthManager):
             st.session_state.user_info = user_info
 
             try:
-                user_role = self.role_provider.get_user_role(uid)
+                user_role = self.role_provider.get_user_role(uid, token)
                 st.session_state.role = user_role
 
                 if user_role in ["researcher", "admin"]:
@@ -304,7 +305,7 @@ class UIAuthManager(AuthManager):
 
     def attempt_reauthentication(self):
         """
-        Attempts to reauthenticate a user with their existing ID token. If the "uid"
+        Attempts to reauthenticate a user with their existing ID token. If "auth_info"
         exists in the Streamlit session state but "user_info" does not, the function will
         fetch the user's account information and role from respective providers. Upon
         successful reauthentication, user details, role, and an authentication success
@@ -318,11 +319,16 @@ class UIAuthManager(AuthManager):
         :return: This function does not return any value; it modifies the session state
                  with either updated user information or clears it upon failure.
         """
-        if "uid" in st.session_state and "user_info" not in st.session_state:
+        if "auth_info" in st.session_state and "user_info" not in st.session_state:
             try:
-                user_info = self.auth_provider.get_account_info(st.session_state["uid"])
+                auth_info = st.session_state.auth_info
+                uid = auth_info["uid"]
+                token = auth_info["token"]
+
+                user_info = self.auth_provider.get_account_info(uid)
                 st.session_state.user_info = user_info
-                role = self.role_provider.get_user_role(st.session_state["uid"])
+
+                role = self.role_provider.get_user_role(uid, token)
                 st.session_state.role = role
                 st.session_state.auth_success = "Reauthenticated successfully"
             except Exception:
