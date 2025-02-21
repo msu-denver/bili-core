@@ -23,7 +23,7 @@ services:
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501
-            - 8080:8080
+            - 5000:5000
         networks:
             bili-core:
                 aliases:
@@ -47,7 +47,7 @@ services:
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501
-            - 8080:8080
+            - 5000:5000
         networks:
             bili-core:
                 aliases:
