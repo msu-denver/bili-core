@@ -47,13 +47,13 @@ import os
 from pathlib import Path
 
 from flask import Flask, g, jsonify, make_response, request
-from langchain_core.messages import HumanMessage
 
 from bili.checkpointers.checkpointer_functions import get_checkpointer
 from bili.config.tool_config import TOOLS
 from bili.flask_api.flask_utils import (
     add_unauthorized_handler,
     auth_required,
+    handle_agent_prompt,
     set_token_cookies,
 )
 from bili.loaders.langchain_loader import load_langgraph_agent
@@ -218,29 +218,8 @@ def nova_pro_route():
     # Get the prompt from the request body JSON data via param "prompt"
     prompt = request.get_json().get("prompt", "")
 
-    # Associate the correct thread id based on the authenticated user
-    email = g.user["email"]
-    config = {
-        "configurable": {
-            # "thread_id": f"{email}_{thread_id}",
-            "thread_id": f"{email}",
-        },
-    }
-
-    # Convert prompt into a HumanMessage
-    input_message = HumanMessage(content=prompt)
-
-    # Process the user prompt using the conversation agent
-    result = conversation_agent.invoke(
-        {"messages": [input_message], "verbose": False}, config
-    )
-
-    # result is typically a dict containing "messages": [...], where the last is the AIMessage
-    if isinstance(result, dict) and "messages" in result:
-        final_msg = result["messages"][-1]
-        return jsonify({"response": final_msg.content})
-    else:
-        return jsonify({"response": "No response"}), 500
+    # Invoke agent with the provided prompt
+    return handle_agent_prompt(g.user, conversation_agent, prompt)
 
 
 if __name__ == "__main__":
