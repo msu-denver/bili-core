@@ -50,8 +50,8 @@ import streamlit as st
 from PIL import Image
 
 from bili.checkpointers.checkpointer_functions import get_checkpointer
-from bili.streamlit.ui.auth_ui import check_auth, initialize_auth_manager
-from bili.streamlit.ui.chat_interface import run_app_page
+from bili.streamlit_ui.ui.auth_ui import check_auth, initialize_auth_manager
+from bili.streamlit_ui.ui.chat_interface import run_app_page
 
 # Disable tokenizers parallelism to avoid issues with Streamlit
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

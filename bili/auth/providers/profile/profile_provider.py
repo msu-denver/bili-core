@@ -10,9 +10,9 @@ Classes:
     - ProfileProvider: Interface for user profile management.
 
 Methods:
-    - create_user_profile(id_token, user_id, first_name, last_name):
+    - create_user_profile(uid, email, first_name, last_name):
       Creates a user profile with the provided details.
-    - get_user_profile(id_token):
+    - get_user_profile(uid):
       Retrieves user profile information based on the provided ID token.
 
 Usage:
@@ -22,7 +22,7 @@ Usage:
 
 Example:
     class MyProfileProvider(ProfileProvider):
-        def create_user_profile(self, id_token, user_id, first_name, last_name):
+        def create_user_profile(self, uid, email, first_name, last_name):
             # Implement profile creation logic here
             pass
 
@@ -41,22 +41,22 @@ class ProfileProvider:
     the actual functionality.
 
     Methods:
-        - create_user_profile(id_token, user_id, first_name, last_name):
+        - create_user_profile(uid, email, first_name, last_name):
           Creates a user profile with the provided details.
-        - get_user_profile(id_token):
+        - get_user_profile(uid):
           Retrieves user profile information based on the provided ID token.
     """
 
-    def create_user_profile(self, id_token, user_id, first_name, last_name):
+    def create_user_profile(self, uid, email, first_name, last_name):
         """
         Creates a user profile in the system by taking user identification details
         and personal information. This method is a placeholder and must be implemented
         in subclasses or elsewhere to provide the desired functionality.
 
-        :param id_token: A unique authentication token identifying the user.
-        :type id_token: str
-        :param user_id: A unique identifier for the user.
-        :type user_id: str
+        :param uid: A unique authentication token identifying the user.
+        :type uid: str
+        :param email: A unique identifier for the user.
+        :type email: str
         :param first_name: The first name of the user.
         :type first_name: str
         :param last_name: The last name of the user.
@@ -67,7 +67,7 @@ class ProfileProvider:
         """
         raise NotImplementedError
 
-    def get_user_profile(self, id_token):
+    def get_user_profile(self, uid):
         """
         Retrieves the user profile based on the provided ID token.
 
@@ -76,8 +76,8 @@ class ProfileProvider:
         is not implemented and serves as a placeholder for future
         development.
 
-        :param id_token: A unique token representing a user's identity.
-        :type id_token: str
+        :param uid: A unique token representing a user's identity.
+        :type uid: str
 
         :return: The user profile associated with the provided ID token.
         :rtype: dict

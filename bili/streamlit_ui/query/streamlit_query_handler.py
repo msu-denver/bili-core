@@ -30,7 +30,7 @@ Example:
 
 from langchain_core.messages import HumanMessage
 
-from bili.checkpointers.checkpointer_functions import get_state_config
+from bili.streamlit_ui.utils.state_management import get_state_config
 
 
 def process_query(conversation_chain, user_query):

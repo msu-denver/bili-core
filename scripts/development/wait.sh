@@ -10,6 +10,7 @@ if ! grep -qxF "alias awslocal='awslocal --endpoint=\${LOCALSTACK_ENDPOINT}'" ~/
   echo "alias deps='cd /app/bili-core/scripts/development && ./install-deps'" >> ~/.bashrc
   echo "alias seeds3='cd /app/bili-core/scripts/development && ./upload-to-localstack-s3'" >> ~/.bashrc
   echo "alias streamlit='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-streamlit-server'" >> ~/.bashrc
+  echo "alias flask='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-flask-server'" >> ~/.bashrc
   echo "export LOCALSTACK_ENDPOINT='http://bili-core-localstack:4566'" >> ~/.bashrc
   echo '[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"' >> ~/.bashrc
   echo '[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud config set project "$GOOGLE_PROJECT_ID"' >> ~/.bashrc

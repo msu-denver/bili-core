@@ -49,7 +49,7 @@ import os
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from pymongo import MongoClient
 
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)

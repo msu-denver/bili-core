@@ -38,7 +38,7 @@ Example:
 
 from langchain.tools import Tool
 
-from bili.streamlit.utils.streamlit_utils import conditional_cache_resource
+from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 from bili.utils.opensearch_utils import load_opensearch_vector_search
 

@@ -64,8 +64,8 @@ def conditional_cache_resource():
             import streamlit as st
 
             return st.cache_resource(func)
-        else:
-            return func
+
+        return func
 
     return decorator
 
@@ -119,7 +119,7 @@ def conditional_cache():
             import streamlit as st
 
             return st.cache(func)
-        else:
-            return func
+
+        return func
 
     return decorator

@@ -17,15 +17,15 @@ Methods:
       Initializes the Firebase configuration from environment variables.
     - sign_in(email, password):
       Authenticates a user with the provided email and password.
-    - get_account_info(id_token):
+    - get_account_info(uid):
       Retrieves account information for the provided ID token.
-    - send_email_verification(id_token):
+    - send_email_verification(auth_details):
       Sends an email verification for a given user.
     - send_password_reset_email(email):
       Sends a password reset email to a user.
     - create_user(email, password):
       Creates a user with the specified email and password.
-    - delete_user(id_token):
+    - delete_user(uid):
       Deletes a user from the system.
 
 Usage:
@@ -43,10 +43,10 @@ Example:
     user_info = auth_provider.sign_in(email="user@example.com", password="password")
 
     # Get account information
-    account_info = auth_provider.get_account_info(id_token="user_id_token")
+    account_info = auth_provider.get_account_info(uid="user_uid")
 
     # Send email verification
-    auth_provider.send_email_verification(id_token="user_id_token")
+    auth_provider.send_email_verification(auth_details)
 
     # Send password reset email
     auth_provider.send_password_reset_email(email="user@example.com")
@@ -55,14 +55,16 @@ Example:
     new_user = auth_provider.create_user(email="newuser@example.com", password="password")
 
     # Delete a user
-    auth_provider.delete_user(id_token="user_id_token")
+    auth_provider.delete_user(uid="user_uid")
 """
 
 import base64
 import json
 import os
 
+import firebase_admin
 import requests
+from firebase_admin import auth
 
 from bili.auth.providers.auth.auth_provider import AuthProvider
 
@@ -111,17 +113,13 @@ class FirebaseAuthProvider(AuthProvider):
         is raised. This setup is essential for ensuring Firebase services can be accessed securely
         and properly.
 
-        :param firebase_config_json: The Firebase configuration JSON string loaded from the
-            `GOOGLE_CREDENTIALS` environment variable. Can be a base64-encoded or plain JSON string.
-        :type firebase_config_json: str
-
         :raises ValueError: If the environment variable `GOOGLE_CREDENTIALS` is not set or empty.
         """
         # Load Firebase configuration from environment variables
         firebase_config_json = os.getenv("GOOGLE_CREDENTIALS")
 
         if firebase_config_json:
-            # Check if the string is base64 encoded
+            # Check if the config is base64-encoded and decode it if necessary
             try:
                 decoded_bytes = base64.b64decode(firebase_config_json)
                 firebase_config = json.loads(decoded_bytes)
@@ -134,6 +132,9 @@ class FirebaseAuthProvider(AuthProvider):
 
         # Get the Firebase Web API Key from the config JSON
         self.firebase_web_api_key = firebase_config.get("apiKey")
+
+        # Initialize Firebase Admin SDK
+        firebase_admin.initialize_app()
 
     def sign_in(self, email, password):
         """
@@ -170,54 +171,67 @@ class FirebaseAuthProvider(AuthProvider):
             request_ref, headers=headers, data=data, timeout=10
         )
         _raise_detailed_error(request_object)
-        return request_object.json()
+        response_data = request_object.json()
+        response_object = {
+            "token": response_data.get("idToken"),
+            "refreshToken": response_data.get("refreshToken"),
+            "uid": response_data.get("localId"),
+        }
+        return response_object
 
-    def get_account_info(self, id_token):
+    def get_account_info(self, uid):
         """
-        Retrieves user account information associated with the given ID token from Firebase.
+        Retrieves account information for a given user ID (UID).
 
-        This method fetches account details by making a POST request to the Firebase
-        Identity Toolkit API. It sends the ID token provided in the request payload
-        to retrieve the associated account's information. The method assumes that the
-        provided `id_token` is valid and associated with an existing user in Firebase.
+        This method fetches user data from Firebase Authentication using the provided
+        UID. It constructs a dictionary containing user details such as email, display
+        name, phone number, and other relevant attributes, if available. If the user
+        does not exist or an error occurs during the retrieval process, an exception
+        will be raised.
 
-        :param id_token: A string representing the Firebase identity token required
-            to fetch user account information.
-        :return: A dictionary representing the account information of the user, with
-            the data extracted from the API response.
-        :raises ValueError: If the response from the Firebase API indicates an error
-            or does not contain the expected data.
+        :param uid: The unique identifier of the user for whom account details
+                    are to be retrieved.
+        :type uid: str
+        :return: A dictionary containing the retrieved account details, including
+                 fields such as localId, email, email_verified, display_name,
+                 photo_url, phone_number, disabled, custom_claims, and uid (alias for
+                 localId), if available.
+        :rtype: dict
+        :raises ValueError: If no user matching the given UID is found or if an error
+                            occurs while retrieving user information.
         """
-        request_ref = (
-            f"https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?"
-            f"key={self.firebase_web_api_key}"
-        )
-        headers = {"content-type": "application/json; charset=UTF-8"}
-        data = json.dumps({"idToken": id_token})
-        request_object = requests.post(
-            request_ref, headers=headers, data=data, timeout=10
-        )
-        _raise_detailed_error(request_object)
-        return request_object.json()["users"][0]
+        try:
+            user = auth.get_user(uid)
+            user_dict = {
+                "localId": user.uid,
+                "email": user.email,
+                "emailVerified": user.email_verified,
+                "displayName": user.display_name,
+                "photoURL": user.photo_url,
+                "phoneNumber": user.phone_number,
+                "disabled": user.disabled,
+                "customClaims": user.custom_claims,
+                "uid": user.uid,
+            }
+            return user_dict
+        except firebase_admin.auth.UserNotFoundError:
+            raise ValueError(f"User with UID {uid} not found")
+        except Exception as e:
+            raise ValueError(f"Error retrieving user info: {e}")
 
-    def send_email_verification(self, id_token):
+    def send_email_verification(self, auth_details):
         """
-        Sends an email verification request to the specified user based on the provided
-        ID token. This function utilizes Firebase's Identity Toolkit API to initiate the
-        process of sending a verification email to the user's registered email address.
+        Sends an email verification request to the Firebase Identity Toolkit API. The method
+        constructs a POST request with the provided authentication details, including the
+        user's ID token, to trigger a verification email for the corresponding account.
 
-        The function constructs the appropriate API endpoint with the Firebase web API
-        key, sets the necessary headers for the request, and sends a POST request with
-        the required payload that specifies the verification request. If the request
-        fails, a detailed error is raised. Upon success, the response data in JSON
-        format is returned.
+        The response from the API is returned in JSON format. Any errors raised during
+        communication with the API are handled by an internal error-handling method.
 
-        :param id_token: The ID token of the user for whom the email verification is
-                         requested.
-        :type id_token: str
-
-        :return: A dictionary containing the JSON response from the Firebase API,
-                 which includes information about the email verification request.
+        :param auth_details: A dictionary containing authentication details, specifically
+            the key "token" representing the user's ID token required for the API request.
+        :type auth_details: dict
+        :return: A dictionary containing the JSON response from the Firebase API.
         :rtype: dict
         """
         request_ref = (
@@ -225,7 +239,9 @@ class FirebaseAuthProvider(AuthProvider):
             f"getOobConfirmationCode?key={self.firebase_web_api_key}"
         )
         headers = {"content-type": "application/json; charset=UTF-8"}
-        data = json.dumps({"requestType": "VERIFY_EMAIL", "idToken": id_token})
+        data = json.dumps(
+            {"requestType": "VERIFY_EMAIL", "idToken": auth_details["token"]}
+        )
         request_object = requests.post(
             request_ref, headers=headers, data=data, timeout=10
         )
@@ -260,59 +276,127 @@ class FirebaseAuthProvider(AuthProvider):
 
     def create_user(self, email, password):
         """
-        Creates a new user account using the provided email and password. It communicates
-        with Firebase Authentication REST API to register the user and obtain the
-        authentication credentials.
+        Creates a new user with the specified email and password using the
+        authentication service. This function interacts with the authentication
+        service to register a new user. If successful, it returns a dictionary
+        containing the unique user ID and the email of the newly created user.
+        If an error occurs during the creation process, it raises a ValueError
+        containing the error message.
 
-        :param email: The email address for the new user account.
-        :type email: str
-        :param password: The password for the new user account.
-        :type password: str
-        :return: A dictionary containing the response data with user details and
-            authentication tokens.
+        :param email: The email address of the user to be created.
+        :param password: The password for the new user.
+        :return: A dictionary with keys 'uid' and 'email', representing the unique
+            identifier and the email of the newly created user.
+        :raises ValueError: If an error occurs during user creation, this exception
+            contains the error details.
+        """
+        try:
+            auth.create_user(email=email, password=password)
+            return self.sign_in(email, password)
+        except Exception as e:
+            raise ValueError(f"Error creating user: {e}")
+
+    def delete_user(self, uid):
+        """
+        Deletes a user account from Firebase using their UID.
+
+        This method uses Firebase Admin SDK to delete a specific user account.
+        The operation does not require an ID token since it is a privileged
+        server-side operation.
+
+        :param uid: The Firebase UID of the user to be deleted.
+        :type uid: str
+        :return: A dictionary confirming the deletion.
         :rtype: dict
-        :raises requests.exceptions.RequestException: If there is an issue with the HTTP request.
-        :raises Exception: If the API responds with an error or the response cannot be processed.
+        :raises ValueError: If the user is not found or an error occurs.
         """
-        request_ref = (
-            f"https://www.googleapis.com/identitytoolkit/v3/relyingparty/signupNewUser?"
-            f"key={self.firebase_web_api_key}"
-        )
-        headers = {"content-type": "application/json; charset=UTF-8"}
-        data = json.dumps(
-            {"email": email, "password": password, "returnSecureToken": True}
-        )
-        request_object = requests.post(
-            request_ref, headers=headers, data=data, timeout=10
-        )
-        _raise_detailed_error(request_object)
-        return request_object.json()
+        try:
+            auth.delete_user(uid)
+            return {"message": "User deleted successfully"}
+        except firebase_admin.auth.UserNotFoundError:
+            raise ValueError(f"User with UID {uid} not found")
+        except Exception as e:
+            raise ValueError(f"Error deleting user: {e}")
 
-    def delete_user(self, id_token):
+    def create_jwt_token(self, payload: dict) -> dict:
         """
-        Delete a user account from Firebase using their ID token.
+        Create a Firebase JWT token using the provided payload.
 
-        This method interacts with Firebase's REST API to delete a specific user account.
-        It requires the ID token of the user to perform the operation. The method sends
-        a POST request to the Firebase Identity Toolkit API endpoint with the user's ID
-        token in the request body. If the request fails, the method raises a detailed
-        error based on the response. On success, it returns the JSON response from the API.
+        This function extracts the `uid` from the input payload and attempts to create a
+        custom Firebase JWT token associated with that `uid`. If the `uid` is missing
+        from the payload or if an error occurs during token creation, it raises a
+        ValueError.
 
-        :param id_token: The ID token of the user whose account is to be deleted.
-        :type id_token: str
-        :return: The JSON response from the Firebase API after deleting the user.
+        :param payload: A dictionary containing the user data for whom the JWT token
+            needs to be created. The dictionary must contain a `uid` field.
+        :type payload: dict
+        :return: A Firebase JWT token as a string.
+        :rtype: str
+        :raises ValueError: If the payload does not contain a `uid` field.
+        :raises ValueError: If there is an error during the JWT token generation process.
+        """
+        id_token = payload.get("idToken")
+        if not id_token:
+            raise ValueError("Payload must contain a 'id_token' field")
+
+        refresh_token = payload.get("refreshToken", None)
+
+        return {"token": id_token, "refreshToken": refresh_token}
+
+    def verify_jwt_token(self, token: str) -> dict:
+        """
+        Verifies the given Firebase JSON Web Token (JWT) to ensure its authenticity and validity.
+        This function uses Firebase Admin SDK to decode and validate the token. If the token
+        is valid, it processes the information embedded in it. Otherwise, it raises suitable
+        exceptions to indicate invalid or failed token verification.
+
+        :param token: The Firebase ID token JWT that needs to be verified.
+        :type token: str
+
+        :return: A dictionary containing the decoded information from the valid Firebase ID
+            Token, including user information such as UID, email, etc.
         :rtype: dict
-        :raises Exception: Raises a detailed exception if the request fails or the API
-            returns an error.
+
+        :raises ValueError: Raised if the provided token is invalid or an error occurs
+            during the token verification process. It includes specific details about
+            the error encountered.
         """
-        request_ref = (
-            f"https://www.googleapis.com/identitytoolkit/v3/relyingparty/deleteAccount?"
-            f"key={self.firebase_web_api_key}"
-        )
-        headers = {"content-type": "application/json; charset=UTF-8"}
-        data = json.dumps({"idToken": id_token})
-        request_object = requests.post(
-            request_ref, headers=headers, data=data, timeout=10
-        )
-        _raise_detailed_error(request_object)
-        return request_object.json()
+        try:
+            decoded_token = auth.verify_id_token(token)
+            return decoded_token  # Contains user info (e.g., uid, email, etc.)
+        except firebase_admin.auth.InvalidIdTokenError as e:
+            print(e)
+            raise ValueError("Invalid Firebase ID Token")
+        except Exception as e:
+            raise ValueError(f"Error verifying Firebase ID Token: {e}")
+
+    def refresh_jwt_token(self, refresh_token: str) -> dict:
+        """
+        Refreshes a JWT token using a given refresh token.
+
+        This function communicates with the Firebase secure token endpoint to obtain a
+        new JWT token. It sends an HTTP POST request with the `refresh_token` and
+        Firebase API key as payload. If the request fails, it raises a ValueError.
+        On successful execution, it returns the refreshed token data as a dictionary.
+
+        :param refresh_token: The refresh token provided for obtaining a new JWT token.
+        :type refresh_token: str
+        :returns: A dictionary containing the refreshed JWT token and related data.
+        :rtype: dict
+        :raises ValueError: If the HTTP request to refresh the token fails.
+        """
+        url = f"https://securetoken.googleapis.com/v1/token?key={self.firebase_web_api_key}"
+        payload = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+        response = requests.post(url, data=payload)
+
+        if response.status_code != 200:
+            raise ValueError("Failed to refresh token")
+
+        response_data = response.json()
+        resp = {
+            "token": response_data.get("id_token"),
+        }
+        if "refresh_token" in response_data:
+            resp["refreshToken"] = response_data["refresh_token"]
+        else:
+            resp["refreshToken"] = refresh_token

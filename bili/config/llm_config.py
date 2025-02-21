@@ -14,7 +14,7 @@ Functions:
       specific parameters.
 
 Dependencies:
-    - bili.config: Imports LLM_MODELS for accessing the model configurations.
+    - bili.config.llm_config: Imports LLM_MODELS for accessing the model configurations.
 
 Usage:
     This module is intended to be used within the application to initialize
@@ -22,7 +22,7 @@ Usage:
     supports models from different providers for various use cases.
 
 Example:
-    from bili.streamlit.config import initialize_models
+    from bili.config.llm_config import initialize_models
 
     # Initialize models with active models and parameters
     models = initialize_models(active_models, model_params)
