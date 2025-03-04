@@ -692,6 +692,11 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 100,
+                # LlamaCPP does not support automatic tool calling, so it will be disabled
+                # If you wanted to manually use tools, you can create the LLM and bind
+                # tool calls differently than create_react_agent does in the default
+                # implementation in bili.loaders.langchain_loader.load_langgraph_agent
+                "supports_tools": False,
             },
         ],
     },
@@ -712,6 +717,11 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 100,
+                # ChatHuggingFace does not support automatic tool calling, so it will be disabled
+                # If you wanted to manually use tools, you can create the LLM and bind
+                # tool calls differently than create_react_agent does in the default
+                # implementation in bili.loaders.langchain_loader.load_langgraph_agent
+                "supports_tools": False,
             },
         ],
     },

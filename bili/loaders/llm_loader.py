@@ -217,10 +217,9 @@ def load_huggingface_model(
         torch_dtype=torch.float16,
         # The pipeline type is 'text-generation' because we are generating text.
         task="text-generation",
-        # The return_full_text parameter is set to True to return the full text instead of
-        # just the generated tokens.
-        # This is useful for our use case because we want to display the full text to the user.
-        return_full_text=True,
+        # The return_full_text parameter is set to False so that we only
+        # get the generated text, not the full output that includes the prompt also.
+        return_full_text=False,
         # The Llama model is used for text generation.
         model=model,
         # The tokenizer is used to convert text to tokens that the model can understand.
@@ -235,6 +234,9 @@ def load_huggingface_model(
     hf_pipeline = HuggingFacePipeline(pipeline=text_pipeline)
 
     # Wraps the pipeline in a ChatHuggingFace object to enable tool support.
+    # While ChatHuggingFace does say it supports tools, it does not seem to currently support
+    # automatic tool calling. The param 'tool_choice' must be explicitly set to call a tool.
+    # https://github.com/langchain-ai/langchain/issues/22379
     chat_hf = ChatHuggingFace(llm=hf_pipeline)
 
     # Print the pipeline for debugging purposes
@@ -269,7 +271,7 @@ def load_llamacpp_model(
     :return: Loaded LlamaCpp model object configured with specified parameters.
     :rtype: LlamaCpp
     """
-    LOGGER.info(f"Loading LlamaCpp model from %s...", model_name)
+    LOGGER.info("Loading LlamaCpp model from %s...", model_name)
 
     # Load the Llama model using the LlamaCpp library
     # More info: https://python.langchain.com/api_reference/community/chat_models/langchain_community.chat_models.llamacpp.ChatLlamaCpp.html
@@ -418,7 +420,7 @@ def load_remote_bedrock_model(
     :return: An instance of the language model configured with provided parameters.
     :rtype: ChatBedrockConverse
     """
-    LOGGER.info(f"Initializing AWS Bedrock model: %s...", model_name)
+    LOGGER.info("Initializing AWS Bedrock model: %s...", model_name)
 
     llm_config = {
         "model_id": model_name,
