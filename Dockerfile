@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -yq apt-transport-https ca-certificates wg
 
 RUN apt-get update && apt-get install -yq \
     build-essential \
+    clang \
     cmake \
     curl \
     default-jdk \
@@ -36,6 +37,9 @@ RUN apt-get update && apt-get install -yq \
     xclip \
     xsel \
     xvfb
+
+# Specify that clang should be used as the default compiler
+ENV CC=clang CXX=clang++
 
 # Install Python 3.11 using deadsnakes PPA
 RUN add-apt-repository ppa:deadsnakes/ppa

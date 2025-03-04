@@ -21,7 +21,7 @@ langchain==0.3.19
 langgraph-checkpoint-mongodb==0.1.1
 langgraph-checkpoint-postgres==2.0.15
 langgraph==0.2.76
-llama-cpp-python==0.3.1
+llama-cpp-python==0.3.7
 ml-dtypes==0.4.1
 nltk==3.9.1
 openpyxl==3.1.5

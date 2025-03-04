@@ -308,9 +308,11 @@ def load_llamacpp_model(
         # The number of most likely next words in a pool to choose from for generation
         params["top_k"] = top_k
 
-    # ChatLlamaCpp does not currently support automatic tool calling
+    # ChatLlamaCpp states that it does not currently support automatic tool calling
     # https://python.langchain.com/v0.2/docs/integrations/chat/llamacpp/#tool-calling
     # It can invoke tools, but only if you explicitly set the 'tool choice' parameter
+    # However, LlamaCpp recently added tool call support, so maybe this is changing:
+    # https://github.com/ggml-org/llama.cpp/pull/9639
     llm = ChatLlamaCpp(**params)  # pylint: disable=E1102
 
     # Print the model for debugging purposes
