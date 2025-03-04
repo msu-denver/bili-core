@@ -683,7 +683,7 @@ LLM_MODELS = {
         "models": [
             {
                 "model_name": "LlamaCpp Local (In Memory) Model",
-                "model_id": "llamacpp",
+                "model_id": "/app/bili-core/models/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q5_K_M.gguf",
                 "custom_model_path": True,
                 "supports_temperature": True,
                 "supports_seed": True,
@@ -697,12 +697,13 @@ LLM_MODELS = {
     },
     "local_huggingface": {
         "name": "Local HuggingFace Compatible Model",
-        "description": "Local HuggingFace compatible model loaded into memory.",
+        "description": "Local HuggingFace compatible model loaded into memory. "
+        "Can specify either a file path or a HuggingFace model ID.",
         "model_help": "https://huggingface.co/models?other=gptq",
         "models": [
             {
                 "model_name": "HuggingFace Local (In Memory) Model",
-                "model_id": "huggingface",
+                "model_id": "/app/bili-core/models/Llama-3.2-1B-Instruct",
                 "custom_model_path": True,
                 "supports_temperature": True,
                 "supports_seed": True,

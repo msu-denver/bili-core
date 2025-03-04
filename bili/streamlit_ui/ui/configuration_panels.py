@@ -195,8 +195,18 @@ def display_configuration_panels():
             (m for m in model_name_options if m["model_name"] == selected_model_name),
             None,
         )
-        st.session_state["model_id"] = selected_model.get("model_id")
         st.session_state["model_kwargs"] = selected_model.get("kwargs", {})
+
+        # If model supports custom_model_path, add a text input for the path
+        if selected_model.get("custom_model_path", False):
+            st.session_state["model_id"] = selected_model.get("model_id")
+            st.session_state["model_id"] = st.text_input(
+                "Custom Model Path",
+                value=st.session_state.get("model_id", ""),
+                help="Path to the custom model file.",
+            )
+        else:
+            st.session_state["model_id"] = selected_model.get("model_id")
 
         # insert horizontal rule
         st.markdown("---")

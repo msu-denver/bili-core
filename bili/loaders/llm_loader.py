@@ -9,8 +9,6 @@ The functions are conditionally cached to optimize resource usage in Streamlit a
 Functions:
     - load_model(model_type, **kwargs):
       Loads a machine learning model based on the provided model type.
-    - load_huggingface_tokenizer(model_name):
-      Loads a tokenizer for the specified local HuggingFace model.
     - load_huggingface_model(model_name, max_tokens, temperature, top_p=0.1, top_k=None, seed=None):
       Loads a locally available HuggingFace model and initializes a text generation pipeline.
     - load_llamacpp_model(model_name, max_tokens, temperature, top_p=1.0, top_k=50, seed=None):
@@ -58,14 +56,16 @@ import gc
 
 import torch
 from langchain_aws import ChatBedrockConverse
-from langchain_community.llms import (  # pylint: disable=E0611
-    HuggingFacePipeline,
-    LlamaCpp,
-)
+from langchain_community.chat_models import ChatLlamaCpp
 from langchain_google_vertexai import ChatVertexAI
+from langchain_huggingface.chat_models.huggingface import (
+    ChatHuggingFace,
+    HuggingFacePipeline,
+)
 from langchain_openai import AzureChatOpenAI
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import AutoModelForCausalLM, pipeline
 
+from bili.loaders.tokenizer_loader import load_huggingface_tokenizer
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
@@ -128,43 +128,6 @@ def load_model(
     return llm_model
 
 
-# This function initializes and loads the Llama tokenizer for CUDA-compatible machines.
-@conditional_cache_resource()
-def load_huggingface_tokenizer(model_name):
-    """
-    Loads a tokenizer for the specified HuggingFace model. The tokenizer is
-    configured for high performance with the `use_fast=True` setting and
-    is specifically adjusted to handle long input sequences by extending
-    the maximum model length.
-
-    :param model_name: The name of the model for which the tokenizer should be loaded.
-    :type model_name: str
-    :return: Tokenizer object configured for the specified model.
-    :rtype: transformers.PreTrainedTokenizer
-    """
-    # Initialize the tokenizer for the Llama model
-    # The tokenizer is used to convert text to tokens that the model can understand.
-    # The tokenizer is also used to convert the model's output tokens back to text.
-    # The tokenizer is loaded with the 'use_fast=True' parameter to optimize performance.
-    # More info:
-    # https://huggingface.co/docs/tokenizers/python/latest/api/reference.html#tokenizers.AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_name,
-        use_fast=True,
-    )
-
-    # Because our prompts can get pretty long when created by langchain,
-    # we need to increase the max length of the tokenizer's input.
-    # Need to refine tokenizer max length
-    tokenizer.model_max_length = 5120
-    tokenizer.truncation = True
-
-    # Print the tokenizer config for debugging purposes
-    LOGGER.debug(tokenizer)
-
-    return tokenizer
-
-
 # This method initializes and loads the Llama model for CUDA-compatible machines.
 @conditional_cache_resource()
 def load_huggingface_model(
@@ -186,7 +149,7 @@ def load_huggingface_model(
     :return: An instance of `HuggingFacePipeline`, configured for generating text
              using the HuggingFace Llama model.
     """
-    LOGGER.info(f"Loading HuggingFace model from {model_name}...")
+    LOGGER.info("Loading HuggingFace model from %s...", model_name)
     tokenizer = load_huggingface_tokenizer(model_name)
 
     # Ask Python to garbage collect
@@ -214,6 +177,7 @@ def load_huggingface_model(
         torch_dtype=torch.float16,
         trust_remote_code=True,
         device_map="auto",
+        offload_folder="/tmp/model_offload",
     )
 
     # Set the padding token to the end-of-string token.
@@ -268,14 +232,15 @@ def load_huggingface_model(
     )
 
     # Wraps the text pipeline in a LangChain HuggingFacePipeline for easy integration.
-    hf_pipeline = HuggingFacePipeline(
-        pipeline=text_pipeline, model_name=model_name, model_kwargs={"temperature": 0}
-    )
+    hf_pipeline = HuggingFacePipeline(pipeline=text_pipeline)
+
+    # Wraps the pipeline in a ChatHuggingFace object to enable tool support.
+    chat_hf = ChatHuggingFace(llm=hf_pipeline)
 
     # Print the pipeline for debugging purposes
-    LOGGER.debug(hf_pipeline)
+    LOGGER.debug(chat_hf)
 
-    return hf_pipeline
+    return chat_hf
 
 
 @conditional_cache_resource()
@@ -304,57 +269,49 @@ def load_llamacpp_model(
     :return: Loaded LlamaCpp model object configured with specified parameters.
     :rtype: LlamaCpp
     """
-    LOGGER.info(f"Loading LlamaCpp model from {model_name}...")
+    LOGGER.info(f"Loading LlamaCpp model from %s...", model_name)
 
     # Load the Llama model using the LlamaCpp library
-    # More info: https://python.langchain.com/docs/integrations/llms/llamacpp
+    # More info: https://python.langchain.com/api_reference/community/chat_models/langchain_community.chat_models.llamacpp.ChatLlamaCpp.html
     # When using LlamaCPP the tokenizer is included in the model, so we don't
     # need to load it separately.
     # We also do not create a separate pipeline for the model, as the LlamaCpp
     # library handles this for us.
     # https://www.reddit.com/r/LocalLLaMA/comments/1343bgz/what_model_parameters_is_everyone_using/
-    llm = LlamaCpp(  # pylint: disable=E1102
-        model_path=model_name,  # The model to load
+    params = {
+        "model_path": model_name,  # The model to load
         # https://github.com/abetlen/llama-cpp-python?tab=readme-ov-file#adjusting-the-context-window
-        n_ctx=4096,
-        # The maximum number of tokens the model can account for when generating responses
-        # n_ctx=1500,  # The maximum number of tokens the model can account for
-        # when generating responses
-        n_gpu_layers=512,  # The number of layers to put on the GPU, we probably need to tweak this
-        n_batch=30,  # The batch size, which is how many tokens to process at once by the model
-        n_parts=1,  # The number of parts to split the model into, almost always 1
-        verbose=1,  # Whether to print verbose output
+        "n_ctx": 4096,
+        "n_gpu_layers": 512,  # The number of layers to put on the GPU, we probably need to tweak this
+        "n_batch": 30,  # The batch size, which is how many tokens to process at once by the model
+        "n_parts": 1,  # The number of parts to split the model into, almost always 1
         # The maximum number of tokens to generate, which controls the length of generated responses
-        max_tokens=max_tokens,
+        "max_tokens": max_tokens,
         # The temperature to use for generation, which controls the randomness of
         # generated responses
-        temperature=temperature,
-        seed=seed,  # Random seed for reproducibility
-        # The temperature to use for generation, which controls the randomness of
-        # generated responses
-        min_p=0.1,
-        # The minimum p value to use for generation, which controls the
-        # diversity of generated responses
-        # top_p=0.1,  # The top p value to use for generation, which controls the
-        # diversity of generated responses
-        top_p=top_p,
-        # The top p value to use for generation, which controls the diversity of generated responses
-        top_k=top_k,  # The number of most likely next words in a pool to choose from for generation
-        # top_k=40,  # The number of most likely next words in a pool to choose from for generation
-        repeat_penalty=1.176,
+        "temperature": temperature,
         # The repetition penalty to use for generation, which controls the diversity of
         # generated responses
-        # Extended context window support in newer versions of llama.cpp
-        # https://github.com/ggerganov/llama.cpp/discussions/4785
-        # https://github.com/ggerganov/llama.cpp/pull/4815
-        # https://github.com/ggerganov/llama.cpp/pull/4889
-        # these numbers might need to change depending on model that is used
-        # I'm not sure if these are the right params for LlamaCPP Python, can't find documentation yet
-        grp_attn_n=8,
-        grp_attn_w=1024,
+        "repeat_penalty": 1.176,
         # MUST set to True, otherwise you will run into problem after a couple of calls
-        f16_kv=True,  # Whether to use 16-bit floating point for the key/value vectors
-    )
+        "f16_kv": True,  # Whether to use 16-bit floating point for the key/value vectors
+    }
+    if seed:
+        params["seed"] = (
+            seed  # The random seed to use for generation, which helps with reproducibility
+        )
+    if top_p:
+        # The top p value to use for generation, which controls the
+        # diversity of generated responses
+        params["top_p"] = top_p
+    if top_k:
+        # The number of most likely next words in a pool to choose from for generation
+        params["top_k"] = top_k
+
+    # ChatLlamaCpp does not currently support automatic tool calling
+    # https://python.langchain.com/v0.2/docs/integrations/chat/llamacpp/#tool-calling
+    # It can invoke tools, but only if you explicitly set the 'tool choice' parameter
+    llm = ChatLlamaCpp(**params)  # pylint: disable=E1102
 
     # Print the model for debugging purposes
     LOGGER.debug(llm)
@@ -459,7 +416,7 @@ def load_remote_bedrock_model(
     :return: An instance of the language model configured with provided parameters.
     :rtype: ChatBedrockConverse
     """
-    LOGGER.info(f"Initializing AWS Bedrock model: {model_name}...")
+    LOGGER.info(f"Initializing AWS Bedrock model: %s...", model_name)
 
     llm_config = {
         "model_id": model_name,
@@ -507,7 +464,7 @@ def load_remote_azure_openai(
     :return: An initialized Azure OpenAI language model instance.
     """
     LOGGER.info(
-        f"Initializing Azure OpenAI model: {model_name} with API version: {api_version}..."
+        "Initializing Azure OpenAI model: %s, API version: %s", model_name, api_version
     )
 
     # Define Azure-specific parameters
