@@ -62,7 +62,7 @@ from langchain_huggingface.chat_models.huggingface import (
     ChatHuggingFace,
     HuggingFacePipeline,
 )
-from langchain_openai import AzureChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from transformers import AutoModelForCausalLM, pipeline
 
 from bili.loaders.tokenizer_loader import load_huggingface_tokenizer
@@ -122,6 +122,8 @@ def load_model(
         llm_model = load_remote_bedrock_model(**kwargs)
     elif model_type == "remote_azure_openai":
         llm_model = load_remote_azure_openai(**kwargs)
+    elif model_type == "remote_openai":
+        llm_model = load_remote_openai(**kwargs)
     else:
         raise ValueError(f"Invalid model type: {model_type}")
 
@@ -509,5 +511,59 @@ def load_remote_azure_openai(
         azure_config["seed"] = seed
 
     llm = AzureChatOpenAI(**azure_config)
+    LOGGER.debug(llm)
+    return llm
+
+
+@conditional_cache_resource()
+def load_remote_openai(
+    model_name,
+    max_tokens=None,
+    temperature=None,
+    top_p=None,
+    top_k=None,
+    seed=None,
+):
+    """
+    Loads and initializes a remote OpenAI model with the specified
+    parameters and configurations. This function interacts with the OpenAI
+    service, creating a model instance based on the provided
+    execution and configuration details. The function leverages OpenAI-specific
+    settings such as deployment name, API version, and other behavioral
+    parameters to personalize its runtime behavior.
+
+    This function employs caching to minimize repetitive resource initialization
+    through conditional cache decorators, enhancing performance for frequently
+    used configurations. Upon successful initialization, the OpenAI
+    language model instance is returned for further use.
+
+    :param model_name: Name of the OpenAI model deployment.
+    :param max_tokens: Optional. Maximum number of tokens to generate.
+    :param temperature: Optional. Sampling temperature that controls randomness.
+    :param top_p: Optional. Nucleus sampling probability. Picks tokens from
+        the top p cumulative probability mass, if provided.
+    :param top_k: Optional. Top-k sampling that limits the next token
+        selection to k most likely options, if specified.
+    :param seed: Optional. Random seed for deterministic outputs in sampling.
+    :return: An initialized OpenAI language model instance.
+    """
+    LOGGER.info("Initializing OpenAI model: %s", model_name)
+
+    # Define OpenAI-specific parameters
+    openai_config = {
+        "model": model_name,
+    }
+    if temperature:
+        openai_config["temperature"] = temperature
+    if max_tokens:
+        openai_config["max_completion_tokens"] = max_tokens
+    if top_p:
+        openai_config["top_p"] = top_p
+    if top_k:
+        openai_config["top_k"] = top_k
+    if seed:
+        openai_config["seed"] = seed
+
+    llm = ChatOpenAI(**openai_config)
     LOGGER.debug(llm)
     return llm
