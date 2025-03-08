@@ -131,7 +131,7 @@ def load_model(
 # This method initializes and loads the Llama model for CUDA-compatible machines.
 @conditional_cache_resource()
 def load_huggingface_model(
-    model_name, max_tokens, temperature, top_p=0.1, top_k=None, seed=None
+    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None
 ):
     """
     Loads a locally available HuggingFace model and initializes a text generation pipeline
@@ -140,9 +140,9 @@ def load_huggingface_model(
     text generation tasks.
 
     :param model_name: The name or path of the pretrained HuggingFace model to load.
-    :param max_tokens: Maximum number of tokens to generate for text outputs.
-    :param temperature: Sampling temperature to control the randomness of the response.
-    :param top_p: Cumulative probability threshold for nucleus sampling.
+    :param max_tokens: (Optional) Maximum number of tokens to generate for text outputs.
+    :param temperature: (Optional) Sampling temperature to control the randomness of the response.
+    :param top_p: (Optional) Cumulative probability threshold for nucleus sampling.
     :param top_k: (Optional) The number of highest probability tokens to consider during sampling.
     :param seed: (Optional) Random seed for reproducibility of outputs.
 
@@ -194,18 +194,26 @@ def load_huggingface_model(
     # These parameters control how the model generates responses.
     # Need to refine generation config
     generation_config = {
-        "max_new_tokens": max_tokens,  # Limits the maximum tokens generated
-        "temperature": temperature,  # Controls randomness in response generation
-        "seed": seed,  # Random seed for reproducibility
-        "top_p": top_p,
-        # The top p value to use for generation, which controls the
-        # diversity of generated responses
         "do_sample": True,
         # Enables sampling, which lets the model generate different responses for the same input
         "repetition_penalty": 1.176,  # Penalizes repetition to avoid loops
     }
+    if top_p is not None:
+        # The top p value to use for generation, which controls the
+        # diversity of generated responses
+        generation_config["top_p"] = top_p
     if top_k is not None:
+        # The number of most likely next words in a pool to choose from for generation
         generation_config["top_k"] = top_k
+    if seed is not None:
+        # The random seed to use for generation, which helps with reproducibility
+        generation_config["seed"] = seed
+    if max_tokens is not None:
+        # Limits the maximum tokens generated
+        generation_config["max_new_tokens"] = max_tokens
+    if temperature is not None:
+        # Controls randomness in response generation
+        generation_config["temperature"] = temperature
 
     # Create a text generation pipeline.
     # This pipeline will manage input/output processing for text generation tasks.
@@ -245,7 +253,7 @@ def load_huggingface_model(
 
 @conditional_cache_resource()
 def load_llamacpp_model(
-    model_name, max_tokens, temperature, top_p=1.0, top_k=50, seed=None
+    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None
 ):
     """
     Load a LlamaCpp model with specified configurations.
@@ -259,13 +267,13 @@ def load_llamacpp_model(
     or ensuring reproducibility through a random seed.
 
     :param model_name: The file path of the model to load.
-    :param max_tokens: The maximum number of tokens to generate during a response.
-    :param temperature: Controls generation randomness; a higher value creates more random responses.
-    :param top_p: Controls diversity of the response using nucleus sampling; only tokens with the top cumulative
+    :param max_tokens: (Optional) The maximum number of tokens to generate during a response.
+    :param temperature: (Optional) Controls generation randomness; a higher value creates more random responses.
+    :param top_p: (Optional) Controls diversity of the response using nucleus sampling; only tokens with the top cumulative
         probability of `top_p` are considered. Defaults to 1.0.
-    :param top_k: Limits responses to the top `top_k` most probable tokens, determining response diversity.
+    :param top_k: (Optional) Limits responses to the top `top_k` most probable tokens, determining response diversity.
         Defaults to 50.
-    :param seed: Optional random seed for reproducibility.
+    :param seed: (Optional) Optional random seed for reproducibility.
     :return: Loaded LlamaCpp model object configured with specified parameters.
     :rtype: LlamaCpp
     """
@@ -285,11 +293,6 @@ def load_llamacpp_model(
         "n_gpu_layers": 512,  # The number of layers to put on the GPU, we probably need to tweak this
         "n_batch": 30,  # The batch size, which is how many tokens to process at once by the model
         "n_parts": 1,  # The number of parts to split the model into, almost always 1
-        # The maximum number of tokens to generate, which controls the length of generated responses
-        "max_tokens": max_tokens,
-        # The temperature to use for generation, which controls the randomness of
-        # generated responses
-        "temperature": temperature,
         # The repetition penalty to use for generation, which controls the diversity of
         # generated responses
         "repeat_penalty": 1.176,
@@ -307,6 +310,14 @@ def load_llamacpp_model(
     if top_k:
         # The number of most likely next words in a pool to choose from for generation
         params["top_k"] = top_k
+    if temperature:
+        # The temperature to use for generation, which controls the randomness of
+        # generated responses
+        params["temperature"] = temperature
+    if max_tokens:
+        # The maximum number of tokens to generate, which controls the length of
+        # generated responses
+        params["max_tokens"] = max_tokens
 
     # ChatLlamaCpp states that it does not currently support automatic tool calling
     # https://python.langchain.com/v0.2/docs/integrations/chat/llamacpp/#tool-calling
@@ -343,7 +354,7 @@ def load_llamacpp_model(
 #    without Customer's prior permission or instruction."
 @conditional_cache_resource()
 def load_remote_gcp_vertex_model(
-    model_name, max_tokens, temperature, top_p=None, top_k=None, seed=None
+    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None
 ):
     """
     Loads a remote GCP Vertex AI model with the specified configuration parameters.
@@ -356,9 +367,9 @@ def load_remote_gcp_vertex_model(
     :param model_name: The name of the model to be loaded.
     :type model_name: str
     :param max_tokens: Maximum number of tokens for the model's output.
-    :type max_tokens: int
-    :param temperature: Sampling temperature for generating responses.
-    :type temperature: float
+    :type max_tokens: int, optional
+    :param temperature: Optional. Sampling temperature for generating responses.
+    :type temperature: float, optional
     :param top_p: Optional. The nucleus sampling probability for response
                   generation.
     :type top_p: float, optional
@@ -373,9 +384,11 @@ def load_remote_gcp_vertex_model(
 
     llm_config = {
         "model_name": model_name,
-        "max_output_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if max_tokens:
+        llm_config["max_output_tokens"] = max_tokens
+    if temperature:
+        llm_config["temperature"] = temperature
     if top_p:
         llm_config["top_p"] = top_p
     if top_k:
@@ -393,7 +406,7 @@ def load_remote_gcp_vertex_model(
 
 @conditional_cache_resource()
 def load_remote_bedrock_model(
-    model_name, max_tokens, temperature, top_p=None, top_k=None, seed=None
+    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None
 ):
     """
     Initializes and loads a remote bedrock model from AWS Bedrock service.
@@ -405,9 +418,9 @@ def load_remote_bedrock_model(
 
     :param model_name: The name or ID of the model to initialize.
     :type model_name: str
-    :param max_tokens: Maximum number of tokens the model should generate.
+    :param max_tokens: (Optional) Maximum number of tokens the model should generate.
     :type max_tokens: int
-    :param temperature: The temperature setting for generation, controlling output randomness.
+    :param temperature: (Optional) The temperature setting for generation, controlling output randomness.
     :type temperature: float
     :param top_p: (Optional) Cumulative probability threshold for nucleus sampling.
     :type top_p: float, optional
@@ -422,9 +435,11 @@ def load_remote_bedrock_model(
 
     llm_config = {
         "model_id": model_name,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
     }
+    if max_tokens:
+        llm_config["max_tokens"] = max_tokens
+    if temperature:
+        llm_config["temperature"] = temperature
     if top_p:
         llm_config["top_p"] = top_p
     if top_k:
@@ -439,7 +454,13 @@ def load_remote_bedrock_model(
 
 @conditional_cache_resource()
 def load_remote_azure_openai(
-    model_name, api_version, max_tokens, temperature, top_p=None, top_k=None, seed=None
+    model_name,
+    api_version,
+    max_tokens=None,
+    temperature=None,
+    top_p=None,
+    top_k=None,
+    seed=None,
 ):
     """
     Loads and initializes a remote Azure OpenAI model with the specified
@@ -456,8 +477,8 @@ def load_remote_azure_openai(
 
     :param model_name: Name of the Azure OpenAI model deployment.
     :param api_version: API version to be used for the OpenAI service.
-    :param max_tokens: Maximum number of tokens to generate.
-    :param temperature: Sampling temperature that controls randomness.
+    :param max_tokens: Optional. Maximum number of tokens to generate.
+    :param temperature: Optional. Sampling temperature that controls randomness.
     :param top_p: Optional. Nucleus sampling probability. Picks tokens from
         the top p cumulative probability mass, if provided.
     :param top_k: Optional. Top-k sampling that limits the next token
@@ -473,9 +494,11 @@ def load_remote_azure_openai(
     azure_config = {
         "azure_deployment": model_name,
         "api_version": api_version,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
     }
+    if temperature:
+        azure_config["temperature"] = temperature
+    if max_tokens:
+        azure_config["max_completion_tokens"] = max_tokens
     if top_p:
         azure_config["top_p"] = top_p
     if top_k:

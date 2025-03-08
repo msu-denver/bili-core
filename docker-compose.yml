@@ -43,7 +43,7 @@ services:
             - LOCALSTACK_HOSTNAME=bili-core-localstack
         volumes:
             - ".:/app/bili-core/:rw"
-            - './env/bili_root/:/root/:rw'
+            - "./env/bili_root/:/root/:rw"
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501

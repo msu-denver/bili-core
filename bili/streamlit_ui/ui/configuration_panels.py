@@ -237,6 +237,8 @@ def display_configuration_panels():
 
             # insert horizontal rule
             st.markdown("---")
+        else:
+            st.session_state["top_p"] = None
 
         # Check if the model supports top_k
         if selected_model.get("supports_top_k", False):
@@ -262,6 +264,8 @@ def display_configuration_panels():
                 """content-generation-parameters#top-k'>What is top-k?</a>""",
                 unsafe_allow_html=True,
             )
+        else:
+            st.session_state["top_k"] = None
 
         # Check if the model supports temperature
         if selected_model.get("supports_temperature", False):
@@ -287,6 +291,8 @@ def display_configuration_panels():
 
             # insert horizontal rule
             st.markdown("---")
+        else:
+            st.session_state["temperature"] = None
 
         # If the model supports seed
         if selected_model.get("supports_seed"):
@@ -324,6 +330,8 @@ def display_configuration_panels():
 
             # insert horizontal rule
             st.markdown("---")
+        else:
+            st.session_state["seed_value"] = None
 
         if selected_model["supports_max_output_tokens"]:
             st.session_state["max_output_tokens_max"] = selected_model.get(
@@ -353,6 +361,8 @@ def display_configuration_panels():
                 """content-generation-parameters#max-output-tokens'>What does max tokens do?</a>""",
                 unsafe_allow_html=True,
             )
+        else:
+            st.session_state["max_output_tokens"] = None
 
     # ---- Prompt Customization ----
     with st.expander("Prompt Customization"):
