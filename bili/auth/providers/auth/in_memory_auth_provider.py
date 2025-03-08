@@ -157,6 +157,9 @@ class InMemoryAuthProvider(AuthProvider):
         :type email: str
         :returns: None
         """
+        raise NotImplementedError(
+            "Password reset email not implemented for in-memory provider."
+        )
 
     def create_user(self, email: str, password: str):
         """

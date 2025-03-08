@@ -266,7 +266,7 @@ class UIAuthManager(AuthManager):
         :return: None
         """
         try:
-            self.auth_provider.send_password_reset(email)
+            self.auth_provider.send_password_reset_email(email)
             st.session_state.auth_success = "Password reset link sent to your email"
             st.rerun()
         except Exception as error:

@@ -93,16 +93,21 @@ def display_login_signup():
     if option == "Signup":
         first_name = st.text_input("First Name", key="first_name")
         last_name = st.text_input("Last Name", key="last_name")
-        if st.button("Create Account"):
+        if st.button("Create Account", use_container_width=True):
             st.session_state.auth_manager.create_account(
                 email, password, first_name, last_name, existing_user
             )
     else:
-        if st.button("Log In"):
-            st.session_state.password = password
-            st.session_state["auth_info"] = st.session_state.auth_manager.sign_in(
-                email, password
-            )
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Log In", use_container_width=True):
+                st.session_state.password = password
+                st.session_state["auth_info"] = st.session_state.auth_manager.sign_in(
+                    email, password
+                )
+        with col2:
+            if st.button("Forgot Password", use_container_width=True):
+                st.session_state.auth_manager.reset_password(email)
 
 
 def is_authenticated():
