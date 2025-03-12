@@ -11,13 +11,18 @@ cd "$(dirname "$0")"/../..
 if [ ! -d "./venv" ] || [ ! -f "./venv/bin/activate" ]; then
   echo "Virtual environment not found. Creating one..."
   python3 -m venv ./venv
-fi
 
-# Upgrade pip to the latest version
-python3 -m pip install --upgrade pip
+  # Ensure pip is installed inside the venv
+  echo "Ensuring pip is available in the virtual environment..."
+  ./venv/bin/python3 -m ensurepip --default-pip
+  ./venv/bin/python3 -m pip install --upgrade pip setuptools wheel
+fi
 
 # Activate the virtual environment
 source ./venv/bin/activate
+
+# Upgrade pip to the latest version
+python3 -m pip install --upgrade pip
 
 # If CLEAN parameter is set to true, remove the existing packages
 if [ "$CLEAN" = "true" ]; then
