@@ -23,8 +23,8 @@ class PostInstallCommand(install):
             print("Installing pre-commit hooks...")
             try:
                 subprocess.check_call(["pre-commit", "install"])
-            except FileNotFoundError:
-                print("Warning: pre-commit is not installed. Skipping hook setup.")
+            except:
+                print("Warning: pre-commit install failed. Skipping hook setup.")
         else:
             print("Skipping pre-commit hook installation (not a Git repository).")
 
@@ -72,7 +72,7 @@ def read_http_git_requirements():
 
 setup(
     name="bili-core",
-    version="1.4.3",
+    version="1.4.4",
     packages=find_packages(),  # Automatically detect all packages
     install_requires=read_requirements(),  # Load only standard dependencies
     cmdclass={
