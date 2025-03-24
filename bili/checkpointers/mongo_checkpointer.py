@@ -37,7 +37,7 @@ Example:
         get_mongo_client, get_mongo_checkpointer
 
     # Get the MongoDB client
-    mongo_client = get_mongo_client()
+    mongo_db = get_mongo_client()
 
     # Get the MongoDB checkpointer
     mongo_checkpointer = get_mongo_checkpointer()
@@ -72,9 +72,7 @@ def get_mongo_client():
     if mongo_connection_string:
         LOGGER.info("Initializing shared MongoDB client.")
         client = MongoClient(mongo_connection_string)
-        # Select the 'langgraph' database
         db = client["langgraph"]
-        # Ensure the client is closed on app shutdown
         atexit.register(close_mongo_client, client)
         return db
 
@@ -89,15 +87,10 @@ def close_mongo_client(client):
     """
     Closes the provided MongoDB client if it is active.
 
-    This function ensures that the provided MongoDB client is properly closed
-    to avoid resource leaks or improper handling of the client. A message
-    indicating the closure process is logged before and after the client is
-    closed.
-
     :param client: The MongoDB client instance to close.
     :type client: pymongo.MongoClient or None
     """
-    if client:
+    if client is not None:
         LOGGER.info("Closing shared MongoDB client.")
         client.close()
         LOGGER.info("Shared MongoDB client closed.")
@@ -105,22 +98,14 @@ def close_mongo_client(client):
 
 def get_mongo_checkpointer():
     """
-    Creates and returns a MongoDB checkpointer instance if a MongoDB client
-    can be successfully initialized. This is used for saving checkpoint data
-    into the MongoDB database.
+    Creates and returns a MongoDB checkpointer instance if a MongoDB database
+    can be successfully initialized.
 
-    The function attempts to get a MongoDB client. If the client is available,
-    it creates and returns an instance of `MongoDBSaver`, which will save
-    data into the MongoDB database. If the client cannot be obtained, the
-    function will return `None`, indicating that the checkpointer is not
-    available.
-
-    :return: Returns an instance of `MongoDBSaver` if the MongoDB client
+    :return: Returns an instance of `MongoDBSaver` if the MongoDB database
              is successfully initialized, otherwise returns `None`.
     :rtype: MongoDBSaver | None
     """
-    mongo_client = get_mongo_client()
-    if mongo_client:
-        checkpointer = MongoDBSaver(mongo_client)
-        return checkpointer
+    mongo_db = get_mongo_client()
+    if mongo_db is not None:
+        return MongoDBSaver(mongo_db)
     return None
