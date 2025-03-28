@@ -10,6 +10,6 @@ __all__ = [
     "embeddings_loader",
     "langchain_loader",
     "llm_loader",
-    "tools_loader",
     "tokenizer_loader",
+    "tools_loader",
 ]
