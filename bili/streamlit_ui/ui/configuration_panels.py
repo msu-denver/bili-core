@@ -121,9 +121,7 @@ def display_configuration_panels():
                 "selected_prompt_template": st.session_state[
                     "selected_prompt_template"
                 ],
-                "langgraph_system_prefix": st.session_state.get(
-                    "langgraph_system_prefix", ""
-                ),
+                "persona": st.session_state.get("persona", ""),
                 "supports_tools": st.session_state.get("supports_tools", True),
                 "selected_tools": st.session_state.get("selected_tools", []),
                 "tool_prompts": {
@@ -380,9 +378,9 @@ def display_configuration_panels():
             key="selected_prompt_template",
             on_change=lambda: st.session_state.update(
                 {
-                    "langgraph_system_prefix": DEFAULT_PROMPTS[
+                    "persona": DEFAULT_PROMPTS[
                         st.session_state["selected_prompt_template"]
-                    ]["langgraph_system_prefix"],
+                    ]["persona"],
                     "prompt_description": DEFAULT_PROMPTS[
                         st.session_state["selected_prompt_template"]
                     ].get("description", "No description provided."),
@@ -390,10 +388,8 @@ def display_configuration_panels():
             ),
         )
 
-        if "langgraph_system_prefix" not in st.session_state:
-            st.session_state["langgraph_system_prefix"] = DEFAULT_PROMPTS[
-                selected_template
-            ]["langgraph_system_prefix"]
+        if "persona" not in st.session_state:
+            st.session_state["persona"] = DEFAULT_PROMPTS[selected_template]["persona"]
             st.session_state["prompt_description"] = DEFAULT_PROMPTS[
                 selected_template
             ].get("description", "")
@@ -406,8 +402,8 @@ def display_configuration_panels():
         st.markdown("**System Prefix (LangGraph)**:")
         st.text_area(
             "System Prefix",
-            value=st.session_state["langgraph_system_prefix"],
-            key="langgraph_system_prefix",
+            value=st.session_state["persona"],
+            key="persona",
         )
 
     # ---- Tool Selection ----

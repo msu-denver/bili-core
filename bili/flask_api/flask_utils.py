@@ -18,8 +18,13 @@ Functions:
 
 - auth_required(auth_manager, required_roles=None):
     A decorator function to enforce authentication and optionally
-    validate role-based access control (RBAC)
-    for the decorated Flask route function.
+    validate role-based access control (RBAC) for the decorated Flask route function.
+
+- per_user_agent(checkpoint_saver, graph_definition, node_kwargs, state=State, custom_node_registry=None):
+    Builds a decorator to create a per-user agent graph for a Flask application.
+
+- handle_agent_prompt(user, conversation_agent, prompt):
+    Processes a user prompt using a conversation agent and retrieves the generated response.
 
 Dependencies:
 -------------
@@ -28,6 +33,12 @@ Dependencies:
 - flask.make_response: Used to create response objects with updated cookies.
 - flask.jsonify: Used to create JSON responses for error handling.
 - flask.g: Used to store user information in Flask's global context.
+- bili.utils.langgraph_utils.State: Represents the initial state of the graph.
+- langchain_core.messages.HumanMessage: Represents a human message in the conversation.
+- langgraph.checkpoint.base.BaseCheckpointSaver: Base class for checkpoint savers.
+- bili.auth.auth_manager.AuthManager: Manages authentication and authorization.
+- bili.loaders.langchain_loader.build_agent_graph: Builds and compiles a state graph for a LangGraph-based agent.
+- bili.loaders.langchain_loader.GRAPH_NODE_REGISTRY: Default registry for graph nodes.
 
 Usage:
 ------
@@ -37,7 +48,7 @@ application as shown in the examples below:
 Example:
 --------
 from flask import Flask
-from bili.flask_api.flask_utils import add_unauthorized_handler, auth_required
+from bili.flask_api.flask_utils import add_unauthorized_handler, auth_required, per_user_agent
 
 app = Flask(__name__)
 auth_manager = get_auth_manager()
@@ -58,8 +69,15 @@ from functools import wraps
 
 from flask import g, jsonify, make_response, request
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from bili.auth.auth_manager import AuthManager
+from bili.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
+from bili.utils.langgraph_utils import State
+from bili.utils.logging_utils import get_logger
+
+# Get the logger for the module
+LOGGER = get_logger(__name__)
 
 
 def add_unauthorized_handler(auth_manager, app):
@@ -119,7 +137,7 @@ def add_unauthorized_handler(auth_manager, app):
                     return resp
 
             except Exception as e:
-                print(f"Token refresh failed: {str(e)}")  # Log failure
+                LOGGER.error(f"Token refresh failed: {str(e)}")  # Log failure
 
         return response  # If refresh fails, just return the original 401 response
 
@@ -249,17 +267,101 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
                 # Role-based authorization check
                 if required_roles and not auth_manager.role_provider.is_authorized(
-                    user_data.get("role"), token, required_roles
+                    user_data.get("uid"), token, required_roles
                 ):
                     return (
                         jsonify({"error": "Forbidden: Insufficient permissions"}),
                         403,
                     )
 
+                user_profile = auth_manager.profile_provider.get_user_profile(
+                    g.user["uid"], token
+                )
+                g.user_profile = (
+                    user_profile  # Store user profile in Flask's global context
+                )
+
                 return func(*args, **kwargs)  # Proceed with the original route function
 
             except ValueError as e:
                 return jsonify({"error": str(e)}), 401
+
+        return wrapper
+
+    return decorator
+
+
+def per_user_agent(
+    checkpoint_saver: BaseCheckpointSaver,
+    graph_definition: list[str],
+    node_kwargs: dict,
+    state: type = State,
+    custom_node_registry: dict = None,
+):
+    """
+    Builds a decorator to create a per-user agent graph for a Flask application. This
+    decorator facilitates constructing a graph with nodes defined by a graph
+    definition, initializing edges between them, and compiling it into a reusable
+    graph structure. Additionally, it adds the current user from Flask's global
+    context to the node_kwargs, enabling the graph to be tailored to a specific user.
+
+    :param checkpoint_saver: An instance of BaseCheckpointSaver utilized to
+        handle checkpoint saving mechanisms for the graph.
+    :param graph_definition: A list of node identifiers as strings that define
+        the structure and sequence of nodes in the user-agent graph.
+    :param node_kwargs: A dictionary containing key-value pairs that provide
+        configuration properties or arguments required by the nodes in the graph.
+    :param state: A class or type representing the shared state passed through
+        the graph. Defaults to `State` if not explicitly specified.
+    :param custom_node_registry: An optional dictionary that maps custom node
+        names to their implementations. If not provided, the default
+        `GRAPH_NODE_REGISTRY` is used.
+    :return: A decorator function that, when applied to another function, supplies
+        it with a per-user agent graph tailored to the active user and defined by
+        the provided parameters.
+    """
+    if custom_node_registry is None:
+        custom_node_registry = GRAPH_NODE_REGISTRY
+
+    def decorator(func):
+        """
+        Decorator function to build a per-user agent graph using the provided
+        parameters. This function initializes the graph with nodes defined by the
+        provided graph definition, sets up edges between them, and compiles it
+        using the provided checkpoint saver. The annotation will add to the
+        node_kwargs dictionary the current user object from Flask's global context.
+        This will allow the graph to be built with the current user information if it
+        supports it.
+
+        :param func: The function to be decorated.
+        :return: A wrapped function that builds a per-user agent graph.
+        """
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Add current user to node_kwargs. Check for user_profile first, and
+            # use user if it is not available
+            if hasattr(g, "user_profile"):
+                node_kwargs["current_user"] = g.user_profile
+            else:
+                # Use g.user if user_profile is not available
+                node_kwargs["current_user"] = g.user
+
+            # Check that the graph definition contains the per_user_state node at position 1
+            # If not, add it
+            if "per_user_state" not in graph_definition:
+                graph_definition.insert(1, "per_user_state")
+
+            # Build the agent graph using the provided parameters
+            agent_graph = build_agent_graph(
+                checkpoint_saver=checkpoint_saver,
+                custom_node_registry=custom_node_registry,
+                graph_definition=graph_definition,
+                node_kwargs=node_kwargs,
+                state=state,
+            )
+            g.agent = agent_graph  # Store the agent graph in Flask's global context
+            return func(*args, **kwargs)
 
         return wrapper
 

@@ -144,8 +144,37 @@ class UIAuthManager(AuthManager):
 
             try:
                 user_role = self.role_provider.get_user_role(uid, token)
-                st.session_state.role = user_role
+                user_profile = self.profile_provider.get_user_profile(uid, token)
+                st.session_state.user_profile = user_profile
+            except requests.exceptions.HTTPError as error:
+                if error.response.status_code == 404:
+                    st.warning("User not found in API. Creating profile now...")
+                    user_role = None
+                    user_profile = None
+                else:
+                    st.warning(f"Error fetching user role: {error}")
+                    raise
 
+            if user_role is None or user_profile is None:
+                if first_name is None or last_name is None:
+                    st.session_state.needs_profile_creation = True
+                    st.session_state.auth_warning = (
+                        "Please provide your name to complete your profile."
+                    )
+                    st.rerun()
+                else:
+                    self.profile_provider.create_user_profile(
+                        uid, email, first_name, last_name, token
+                    )
+                    st.session_state.role = "user"
+                    st.warning(
+                        "Your account is under review. Please contact an administrator."
+                    )
+                    time.sleep(3)
+                    st.session_state.needs_profile_creation = False
+                    st.rerun()
+            else:
+                st.session_state.role = user_role
                 if user_role in ["researcher", "admin"]:
                     st.session_state.auth_success = "Signed in successfully"
                     st.rerun()
@@ -156,30 +185,6 @@ class UIAuthManager(AuthManager):
                 else:
                     st.error("You are not authorized to access this page.")
                     st.stop()
-
-            except requests.exceptions.HTTPError as error:
-                if error.response.status_code == 404:
-                    st.warning("User not found in API. Creating profile now...")
-                    if first_name is None or last_name is None:
-                        st.session_state.needs_profile_creation = True
-                        st.session_state.auth_warning = (
-                            "Please provide your name to complete your profile."
-                        )
-                        st.rerun()
-                    else:
-                        self.profile_provider.create_user_profile(
-                            uid, email, first_name, last_name, token
-                        )
-                        st.session_state.role = "user"
-                        st.warning(
-                            "Your account is under review. Please contact an administrator."
-                        )
-                        time.sleep(3)
-                        st.session_state.needs_profile_creation = False
-                        st.rerun()
-                else:
-                    st.warning(f"Error fetching user role: {error}")
-                    raise
 
         except Exception as error:
             st.session_state.clear()

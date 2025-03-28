@@ -78,8 +78,8 @@ def main():
     # Initialize the appropriate AuthManager
     st.session_state.auth_manager = initialize_auth_manager(
         auth_provider_name="firebase",
-        profile_provider_name="default",
-        role_provider_name="default",
+        profile_provider_name="sqlite",
+        role_provider_name="sqlite",
     )
 
     # Setup Streamlit authentication and check if the user is authenticated

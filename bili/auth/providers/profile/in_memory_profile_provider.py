@@ -97,14 +97,14 @@ class InMemoryProfileProvider(ProfileProvider):
         Fetches the user profile based on the given unique identifier and authentication token.
         This method retrieves the user's information stored in the `profiles` dictionary.
         If the profile corresponding to the provided identifier is not found,
-        it returns an empty dictionary.
+        it returns None.
 
         :param uid: The unique identifier of the user whose profile is to be retrieved.
         :type uid: str
         :param token: The authentication token required to access the user profile.
         :type token: str
         :return: A dictionary containing the user's profile information if the user exists;
-        otherwise, an empty dictionary.
+        otherwise, None.
         :rtype: dict
         """
-        return self.profiles.get(uid, {})
+        return self.profiles.get(uid, None)

@@ -48,26 +48,30 @@ from pathlib import Path
 
 from flask import Flask, g, jsonify, make_response, request
 
+from bili.auth.auth_manager import get_auth_manager
 from bili.checkpointers.checkpointer_functions import get_checkpointer
 from bili.config.tool_config import TOOLS
 from bili.flask_api.flask_utils import (
     add_unauthorized_handler,
     auth_required,
     handle_agent_prompt,
+    per_user_agent,
     set_token_cookies,
 )
-from bili.loaders.langchain_loader import load_langgraph_agent
+from bili.loaders.langchain_loader import build_agent_graph
 from bili.loaders.llm_loader import load_model
-from bili.streamlit_ui.ui.auth_ui import initialize_auth_manager
+from bili.loaders.tools_loader import initialize_tools
 from bili.utils.file_utils import load_from_json
+from bili.utils.langgraph_utils import State
+from build.lib.bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
 
 app = Flask(__name__)
 
 # Initialize the appropriate AuthManager
-AUTH_MANAGER = initialize_auth_manager(
+AUTH_MANAGER = get_auth_manager(
     auth_provider_name="firebase",
-    profile_provider_name="default",
-    role_provider_name="default",
+    profile_provider_name="sqlite",
+    role_provider_name="sqlite",
 )
 
 # Initialize JWT token refresh on 401 Unauthorized
@@ -166,6 +170,10 @@ tool_prompts = {
     "weather_api_tool": TOOLS["weather_api_tool"]["default_prompt"],
     "serp_api_tool": TOOLS["serp_api_tool"]["default_prompt"],
 }
+# Tool specific parameters can be passed here
+tool_params = {}
+# Initialize the tools using the active tools and their parameters
+tools = initialize_tools(active_tools, tool_prompts, tool_params)
 
 # Create langgraph agent using the created LLM model and active tools
 # Load default prompts from JSON that will be used in the api
@@ -177,31 +185,43 @@ default_prompts = load_from_json(
     "templates",
 )
 
-# Create the langgraph agent
-conversation_agent = load_langgraph_agent(
-    # Use the nova pro llm model
-    llm_model=nova_pro_llm,
-    # Use the default prompts as defined in the default_prompts.json file
-    langgraph_system_prefix=default_prompts["default"]["langgraph_system_prefix"],
-    # Use the active tools and prompts
-    active_tools=active_tools,
-    tool_prompts=tool_prompts,
+node_kwargs = {
+    # Use the nova pro llm model for the agent
+    "llm_model": nova_pro_llm,
+    # Use the default prompts as defined in default_prompts.json
+    # as the persona for the agent
+    "persona": default_prompts["default"]["persona"],
+    # Use the built tools for the agent
+    "tools": tools,
+    # Use the nova pro llm model for conversation summarization
+    "summarize_llm_model": nova_pro_llm,
     # Use a summarization strategy with a memory limit of 15 messages
-    memory_strategy="summarize",
-    memory_limit_type="message_count",
-    k=15,
+    "memory_strategy": "summarize",
+    "memory_limit_type": "message_count",
+    "k": 15,
+}
+
+# Create the langgraph agent
+conversation_agent = build_agent_graph(
     # Use the checkpointer for state persistence to allow for conversation history
     # to be saved and restored
     checkpoint_saver=checkpointer,
+    # Use the default graph definition
+    graph_definition=DEFAULT_GRAPH_DEFINITION,
+    # Pass in the node kwargs for the agent which are used to initialize
+    # each node in the defined graph
+    node_kwargs=node_kwargs,
+    # Use the default State definition for the agent
+    state=State,
 )
 
 
-@app.route("/nova", methods=["GET"])
+@app.route("/nova_global", methods=["GET"])
 @auth_required(AUTH_MANAGER, required_roles=["admin", "researcher"])
-def nova_pro_route():
+def nova_pro_global_route():
     """
-    Handles requests sent to the `/nova` endpoint. Authenticates user roles and processes
-    a prompt provided in the request body. Generates a response using a conversational
+    Handles requests sent to the `/nova_global` endpoint. Authenticates user roles and processes
+    a prompt provided in the request body. Generates a response using a globally defined conversational
     agent and returns the AI's reply to the user.
 
     :param prompt: The input text extracted from the client's JSON request body, provided
@@ -220,6 +240,38 @@ def nova_pro_route():
 
     # Invoke agent with the provided prompt
     return handle_agent_prompt(g.user, conversation_agent, prompt)
+
+
+@app.route("/nova_per_user", methods=["GET"])
+@auth_required(AUTH_MANAGER, required_roles=["admin", "researcher"])
+@per_user_agent(
+    checkpoint_saver=checkpointer,
+    graph_definition=DEFAULT_GRAPH_DEFINITION,
+    node_kwargs=node_kwargs,
+    state=State,
+)
+def nova_pro_per_user_route():
+    """
+    Handles requests sent to the `/nova_per_user` endpoint. Authenticates user roles and processes
+    a prompt provided in the request body. Generates a response using a per user defined conversational
+    agent that is aware of the user's profile and returns the AI's reply to the user.
+
+    :param prompt: The input text extracted from the client's JSON request body, provided
+        under the key "prompt".
+
+    :raises KeyError: If the provided JSON object does not include a "prompt" key.
+    :raises TypeError: If the prompt is not a string.
+
+    :return: A JSON response containing the AI-generated reply as a string under the
+        "response" key. Returns a 500 status with a generic error message if the
+        conversational agent execution fails or yields no output.
+    :rtype: flask.Response
+    """
+    # Get the prompt from the request body JSON data via param "prompt"
+    prompt = request.get_json().get("prompt", "")
+
+    # Invoke agent with the provided prompt using the per-user agent stored in g
+    return handle_agent_prompt(g.user, g.agent, prompt)
 
 
 if __name__ == "__main__":

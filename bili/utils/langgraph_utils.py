@@ -7,52 +7,62 @@ formatting messages with citations, trimming and summarizing conversation
 history, and adding personas and summaries to conversation states.
 
 Classes:
-    - State: Represents a user's state in the system, extending the AgentState
-      class.
+--------
+- State:
+    Represents a user's state in the system, extending the AgentState class.
 
 Functions:
-    - format_message_with_citations(message):
-      Formats a message with included citations if available.
-    - build_trim_and_summarize_node(memory_limit_type, memory_strategy, k,
-      llm_model):
-      Builds a node function for trimming and summarizing conversation state.
-    - build_add_persona_and_summary_node(langgraph_system_prefix):
-      Builds a node function to add a persona and conversation summary to the
-      current state.
-    - clear_state(state: State) -> dict:
-      Clears the messages present in the given state and prepares a response
-      containing the list of removed messages and an empty summary.
-    - build_normalize_tool_state_node():
-      Builds a node function to normalize tool function calls in the
-      conversation state.
+----------
+- format_message_with_citations(message):
+    Formats a message with included citations if available.
+
+- build_trim_and_summarize_node(llm_model, summarize_llm_model=None, memory_limit_type="message_count",
+memory_strategy="trim", k=5, **kwargs):
+    Builds a node function for trimming and summarizing conversation state.
+
+- build_add_persona_and_summary_node(persona, **kwargs):
+    Builds a node function to add a persona and conversation summary to the current state.
+
+- clear_state(state: State) -> dict:
+    Clears the messages present in the given state and prepares a response containing the list of
+    removed messages and an empty summary.
+
+- build_normalize_tool_state_node(**kwargs):
+    Builds a node function to normalize tool function calls in the conversation state.
+
+- build_react_agent_node(tools=None, state=State, llm_model=None, **kwargs):
+    Constructs a REACT agent node using the specified tools and state or a fallback node for
+    models that do not support tools.
 
 Dependencies:
-    - langchain_core.messages: Imports AIMessage, HumanMessage, RemoveMessage,
-      SystemMessage, trim_messages.
-    - langgraph.prebuilt.chat_agent_executor: Imports AgentState.
-    - bili.utils.logging_utils: Imports get_logger.
+-------------
+- langchain_core.messages: Imports AIMessage, HumanMessage, RemoveMessage, SystemMessage, trim_messages.
+- langgraph.prebuilt.chat_agent_executor: Imports AgentState, create_react_agent, StateSchema.
+- bili.utils.logging_utils: Imports get_logger.
 
 Usage:
-    This module is intended to be used within the LangGraph framework to manage
-    conversation states, including trimming, summarizing, and formatting
-    messages with citations. It also allows for the addition of custom personas
-    and conversation summaries to the conversation state.
+------
+This module is intended to be used within the LangGraph framework to manage
+conversation states, including trimming, summarizing, and formatting
+messages with citations. It also allows for the addition of custom personas
+and conversation summaries to the conversation state.
 
 Example:
-    from bili.utils.langgraph_utils import format_message_with_citations,
-    build_trim_and_summarize_node, build_add_persona_and_summary_node
+--------
+from bili.utils.langgraph_utils import format_message_with_citations, build_trim_and_summarize_node,
+build_add_persona_and_summary_node
 
-    # Format a message with citations
-    formatted_message = format_message_with_citations(message)
+# Format a message with citations
+formatted_message = format_message_with_citations(message)
 
-    # Build a trim and summarize node
-    trim_and_summarize = build_trim_and_summarize_node("message_count",
-        "summarize", 100, llm_model)
+# Build a trim and summarize node
+trim_and_summarize = build_trim_and_summarize_node("message_count", "summarize", 100, llm_model)
 
-    # Build an add persona and summary node
-    add_persona_and_summary = build_add_persona_and_summary_node(
-        "Custom Persona Prefix")
+# Build an add persona and summary node
+add_persona_and_summary = build_add_persona_and_summary_node("Custom Persona Prefix")
 """
+
+import json
 
 from langchain_core.messages import (
     AIMessage,
@@ -61,7 +71,12 @@ from langchain_core.messages import (
     SystemMessage,
     trim_messages,
 )
-from langgraph.prebuilt.chat_agent_executor import AgentState
+from langchain_core.tools import Tool
+from langgraph.prebuilt.chat_agent_executor import (
+    AgentState,
+    StateSchema,
+    create_react_agent,
+)
 
 from bili.utils.logging_utils import get_logger
 
@@ -147,26 +162,40 @@ def clear_state(state: State) -> dict:
     return {"messages": messages_to_remove, "summary": ""}
 
 
-def build_trim_and_summarize_node(memory_limit_type, memory_strategy, k, llm_model):
+def build_trim_and_summarize_node(
+    llm_model,
+    summarize_llm_model=None,
+    memory_limit_type="message_count",
+    memory_strategy="trim",
+    k=5,
+    **kwargs,
+):
     """
-    Builds a node function for trimming and summarizing conversation state.
+    Constructs a configuration node that enables trimming and summarization of a
+    conversation's state. The function facilitates memory management by applying
+    constraints on the conversation history to adhere to specified limits, such
+    as message count or token count. Additionally, summarization can be performed
+    based on the user's defined strategy to retain the essential context.
 
-    This function creates a node that trims messages based on a specified strategy
-    and summarizes the conversation to retain important context while minimizing
-    the size of the conversation data.
-
-    Args:
-        memory_limit_type (str): The type of limit to enforce on memory
-            ("message_count" or "token_count").
-        memory_strategy (str): The strategy for handling memory
-            ("trim" or "summarize").
-        k (int): The threshold or limit used for trimming/summarizing.
-        llm_model: The language model instance used for summarization.
-
-    Returns:
-        function: A function that takes a `State` object and returns a dictionary
-        with updated conversation metadata, including trimmed messages and a summary.
+    :param llm_model: The language model to be used for trimming and/or summarization.
+    :param summarize_llm_model: The summarization-specific language model. If not provided,
+        defaults to the primary `llm_model`.
+    :param memory_limit_type: Defines the type of memory constraint to apply. Defaults to
+        "message_count". Other values may include token-based options.
+    :param memory_strategy: Defines the approach to memory management. Options include
+        "trim" for reducing the conversation size via trimming and "summarize" for
+        creating a condensed summary. Defaults to "trim".
+    :param k: The maximum number of tokens or messages to include in the trimmed state.
+        Exact parameter behavior may vary based on the `memory_limit_type`. Defaults to 5.
+    :param kwargs: Additional configuration parameters that can influence behavior.
+    :return: A callable function (`trim_and_summarize_state`) that manages memory
+        optimization for conversation states while ensuring critical context remains intact
+        for future interaction.
+    :rtype: callable
     """
+
+    if summarize_llm_model is None:
+        summarize_llm_model = llm_model
 
     def trim_and_summarize_state(state: State) -> dict:
         """
@@ -230,7 +259,7 @@ def build_trim_and_summarize_node(memory_limit_type, memory_strategy, k, llm_mod
             arguments["token_counter"] = len
         else:
             LOGGER.trace("Trimming messages based on token count.")
-            arguments["token_counter"] = llm_model
+            arguments["token_counter"] = summarize_llm_model
 
         # pylint: disable=missing-kwoa
         remaining_messages = trim_messages(all_messages, **arguments)
@@ -284,7 +313,7 @@ def build_trim_and_summarize_node(memory_limit_type, memory_strategy, k, llm_mod
 
                 if conversation_text:
                     try:
-                        new_summary = llm_model.invoke(
+                        new_summary = summarize_llm_model.invoke(
                             f"Summarize this older summary of the user's conversation (if any):\n\n"
                             f"{existing_summary_content}\n\n"
                             f"With the following text that was removed during the conversation:\n\n"
@@ -305,7 +334,7 @@ def build_trim_and_summarize_node(memory_limit_type, memory_strategy, k, llm_mod
     return trim_and_summarize_state
 
 
-def build_add_persona_and_summary_node(langgraph_system_prefix):
+def build_add_persona_and_summary_node(persona, **kwargs):
     """
     Builds a node function to add a persona and conversation summary to the current state.
 
@@ -314,7 +343,7 @@ def build_add_persona_and_summary_node(langgraph_system_prefix):
     conversation exists, it appends the summary to the `SystemMessage` content.
 
     Args:
-        langgraph_system_prefix (str): The prefix used as a system message to set up
+        persona (str): The prefix used as a system message to set up
         the initial context or persona.
 
     Returns:
@@ -347,12 +376,12 @@ def build_add_persona_and_summary_node(langgraph_system_prefix):
         )
 
         # Check if there's already a SystemMessage with the same content at position 0
-        # If not, insert a new SystemMessage with the langgraph_system_prefix at the beginning.
+        # If not, insert a new SystemMessage with the persona at the beginning.
         # This is how a custom persona is set for the agent.
         if not all_messages:
             all_messages = []
 
-        message_content = langgraph_system_prefix
+        message_content = persona
         if "summary" in state and state["summary"]:
             message_content += (
                 f"\n\nSummary of the conversation so far:\n{state['summary']}"
@@ -372,7 +401,7 @@ def build_add_persona_and_summary_node(langgraph_system_prefix):
     return add_persona_and_summary
 
 
-def build_normalize_tool_state_node():
+def build_normalize_tool_state_node(**kwargs):
     """
     This function modifies the input state by normalizing tool function calls present
     in the messages. Specifically, it removes the "function_call" entry from the
@@ -418,3 +447,177 @@ def build_normalize_tool_state_node():
         return {"messages": all_messages}
 
     return normalize_tool_state
+
+
+def build_react_agent_node(
+    tools: list[Tool] = None, state: StateSchema = State, llm_model=None, **kwargs
+):
+    """
+    Constructs a REACT agent node using the specified tools and state or a fallback
+    node for models that do not support tools. The REACT agent integrates tools
+    and language models to process the input state and perform tasks.
+
+    If tools are provided, creates a REACT agent using the specified tools
+    with the associated state schema. If tools are not supported, creates a
+    fallback node that directly interacts with the language model (LLM) while
+    adapting the state's message format to prevent compatibility issues.
+
+    :param tools: List of tools to be integrated with the REACT agent. If None,
+        a fallback mechanism is used. Tools enable additional functionality for
+        task handling.
+    :type tools: list[Tool]
+
+    :param state: Represents the schema of the state that interacts with the
+        agent or LLM. This includes maintaining messages and other context
+        required for conversation and workflows.
+    :type state: StateSchema
+
+    :param llm_model: The language model to be used by the agent or fallback
+        node. This model processes the input messages and produces responses.
+        The exact behavior may vary depending on the model's capabilities.
+
+    :param kwargs: Additional arguments and settings for constructing the REACT
+        agent or fallback node. This may include configuration options that are
+        passed to internal functions.
+
+    :return: A REACT agent node if tools are provided, otherwise a fallback node
+        that directly interacts with the language model. Both options are
+        structured to handle the input state appropriately and return the
+        processed state.
+    :rtype: Callable or any
+    """
+    LOGGER.debug(
+        "Using model: %s | Tools enabled: %s",
+        getattr(llm_model, "__class__", None),
+        tools is not None,
+    )
+    if tools is not None:
+        # If tools are supported, create a REACT agent with the provided tools
+        LOGGER.debug("Creating REACT agent with tools: %s", tools)
+        agent = create_react_agent(
+            model=llm_model,
+            state_schema=state,
+            tools=tools,
+        )
+    else:
+        LOGGER.debug(
+            "TOOLS not supported for this LLM. Creating a simple graph node to invoke the LLM"
+            "directly, and to convert the state to a format that the LLM can understand."
+        )
+
+        # If tools are not supported, create a simple graph node that calls the LLM directly
+        def call_model(state: State):
+            # Filter out any tool messages to prevent errors in the LLM during the call
+            # This is to allow for the scenario where the state was established with a model
+            # that used tools, and then later a model that does not support tools was selected.
+            # This allows the conversation to continue without the history of tool messages being
+            # passed to the model.
+            messages = [
+                message
+                for message in state["messages"]
+                if isinstance(message, (AIMessage, HumanMessage, SystemMessage))
+            ]
+            # Repackage every message as a HumanMessage with only the text content
+            # There are some bugs out there right now with limitations of the kinds
+            # of messages that can be sent to certain models, and this is a way to work around
+            # that for now.
+            messages_to_send = [
+                HumanMessage(content=str(message.content)) for message in messages
+            ]
+            response = llm_model.invoke(messages_to_send)
+            return {"messages": [response]}
+
+        agent = call_model
+    return agent
+
+
+def buld_per_user_state_node(current_user: dict = None, **kwargs):
+    """
+    Builds a per-user state node by adding relevant user information to the messages.
+
+    This function serves as a factory for creating a closure that encapsulates logic to
+    add user-specific information to the conversation state. The closure function, when invoked,
+    modifies the state by inserting user-centric contextual data in the
+    form of a personalized message.
+
+    :param current_user: A dictionary containing user details for addition to the state
+    :param kwargs: Additional keyword arguments to augment the functionality
+    :return: A closure function that processes and updates the state with user information
+    :rtype: Callable[[State], dict]
+    """
+
+    def add_user_info(state: State) -> dict:
+        """
+        Adds user information to the current state of messages.
+
+        This function modifies the conversation state by inserting a user profile message.
+        The user profile is added as a `HumanMessage` to personalize the conversation and
+        provide contextual understanding for the language model. If there is no
+        current user, the state is returned without modifications.
+
+        Parameters:
+        -----------
+        - state (State): The current state of the conversation represented as a dictionary.
+          It must include a "messages" key containing a list of message objects.
+
+        Returns:
+        --------
+        - dict: An updated state dictionary with modified messages reflecting the addition
+          of the user profile message.
+
+        Example:
+        --------
+        state = {
+            "messages": [
+                SystemMessage(content="System message content"),
+                HumanMessage(content="User message content")
+            ]
+        }
+        current_user = {
+            "uid": "user123",
+            "name": "John Doe"
+        }
+        updated_state = add_user_info(state)
+        """
+        # Retrieve the current list of messages from state for processing
+        all_messages = state["messages"]
+        if not all_messages:
+            all_messages = []
+
+        # If there is no current user, return the state as is
+        if current_user is None:
+            LOGGER.debug(
+                "No current user provided. Returning state without modifications."
+            )
+            return {"messages": all_messages}
+
+        LOGGER.trace(f"Original messages before adding user info: {all_messages}")
+
+        # Add user information to the message list after the first SystemMessage
+        # Convert user dictionary to JSON string for LLM processing
+        user_json = json.dumps(current_user, indent=0)
+        profile_prefix = "USER PROFILE: "
+        profile_msg = (
+            f"{profile_prefix}The following information is the profile of the user having the conversation. "
+            "This information is used to personalize the conversation, and should be "
+            f"referenced when generating responses. Profile details: {user_json}"
+        )
+
+        profile_info = HumanMessage(content=profile_msg)
+
+        # Check if there is already a HumanMessage at position 1 that has the same prefix. If so, remove it.
+        if len(all_messages) > 1 and isinstance(all_messages[1], HumanMessage):
+            if all_messages[1].content.startswith(profile_prefix):
+                all_messages.append(RemoveMessage(id=all_messages[1].id))
+
+        # Insert the new profile message after the first SystemMessage
+        if len(all_messages) > 0 and isinstance(all_messages[0], SystemMessage):
+            all_messages.insert(1, profile_info)
+        else:
+            all_messages.insert(0, profile_info)
+
+        LOGGER.trace(f"Messages after adding user info: {all_messages}")
+
+        return {"messages": all_messages}
+
+    return add_user_info

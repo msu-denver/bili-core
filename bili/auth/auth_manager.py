@@ -61,19 +61,35 @@ Example:
 
 from bili.auth.providers.auth.firebase_auth_provider import FirebaseAuthProvider
 from bili.auth.providers.auth.in_memory_auth_provider import InMemoryAuthProvider
+from bili.auth.providers.auth.sqlite_auth_provider import SQLiteAuthProvider
 from bili.auth.providers.profile.in_memory_profile_provider import (
     InMemoryProfileProvider,
 )
+from bili.auth.providers.profile.sqlite_profile_provider import SQLiteProfileProvider
 from bili.auth.providers.role.in_memory_role_provider import InMemoryRoleProvider
+from bili.auth.providers.role.sqlite_role_provider import SQLiteRoleProvider
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 # Providers for authentication, profile management, and role checking
 # This allows for easy swapping of providers based on the environment, and for users
 # to define their own providers if needed.
-AUTH_PROVIDERS = {"default": InMemoryAuthProvider, "firebase": FirebaseAuthProvider}
-PROFILE_PROVIDERS = {"default": InMemoryProfileProvider}
-ROLE_PROVIDERS = {"default": InMemoryRoleProvider}
+AUTH_PROVIDERS = {
+    "default": SQLiteAuthProvider,
+    "in_memory": InMemoryAuthProvider,
+    "sqlite": SQLiteAuthProvider,
+    "firebase": FirebaseAuthProvider,
+}
+PROFILE_PROVIDERS = {
+    "default": SQLiteProfileProvider,
+    "in_memory": InMemoryProfileProvider,
+    "sqlite": SQLiteProfileProvider,
+}
+ROLE_PROVIDERS = {
+    "default": SQLiteRoleProvider,
+    "in_memory": InMemoryRoleProvider,
+    "sqlite": SQLiteRoleProvider,
+}
 
 # Initialize the logger for the module
 LOGGER = get_logger(__name__)

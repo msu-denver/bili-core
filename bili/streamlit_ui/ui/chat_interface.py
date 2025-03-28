@@ -64,8 +64,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from bili.config.tool_config import TOOLS
-from bili.loaders.langchain_loader import load_langgraph_agent
+from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION, build_agent_graph
 from bili.loaders.llm_loader import load_model
+from bili.loaders.tools_loader import initialize_tools
 from bili.streamlit_ui.query.streamlit_query_handler import process_query
 from bili.streamlit_ui.ui.auth_ui import display_login_signup, is_authenticated
 from bili.streamlit_ui.ui.configuration_panels import display_configuration_panels
@@ -74,7 +75,7 @@ from bili.streamlit_ui.utils.state_management import (
     enable_form,
     get_state_config,
 )
-from bili.utils.langgraph_utils import clear_state, format_message_with_citations
+from bili.utils.langgraph_utils import State, clear_state, format_message_with_citations
 
 
 def run_app_page(checkpointer=None):
@@ -487,6 +488,11 @@ def load_system_components(checkpointer):
         active_tools = None
         tool_prompts = None
         tool_params = None
+    tools = initialize_tools(
+        active_tools=active_tools,
+        tool_prompts=tool_prompts,
+        tool_params=tool_params,
+    )
 
     # Grab the memory strategy toggles
     memory_strategy = st.session_state.get("memory_strategy")
@@ -498,20 +504,42 @@ def load_system_components(checkpointer):
         checkpointer = MemorySaver()
 
     # Load the conversation chain
-    conversation_chain = load_langgraph_agent(
-        llm_model=model,
-        langgraph_system_prefix=st.session_state.get("langgraph_system_prefix"),
-        active_tools=active_tools,
-        tool_prompts=tool_prompts,
-        tool_params=tool_params,
-        k=memory_limit_value,
-        memory_strategy=memory_strategy,
-        memory_limit_type=memory_limit_type,
+    node_kwargs = {
+        # Use the selected model for the agent
+        "llm_model": model,
+        # Use the currently selected system prompt as the persona for the agent
+        "persona": st.session_state.get("persona"),
+        # Use the currently selected tools for the agent
+        "tools": tools,
+        # Use the selected model for conversation summarization
+        "summarize_llm_model": model,
+        # Use the currently configured memory strategy for summarization within the agent
+        "memory_strategy": memory_strategy,
+        "memory_limit_type": memory_limit_type,
+        "k": memory_limit_value,
+        "current_user": st.session_state.get("user_profile"),
+    }
+
+    # Add per-user state node to the graph nodes since UI is per-user
+    graph_definition = DEFAULT_GRAPH_DEFINITION.copy()
+    graph_definition.insert(1, "per_user_state")
+
+    # Create the langgraph agent
+    conversation_agent = build_agent_graph(
+        # Use the checkpointer for state persistence to allow for conversation history
+        # to be saved and restored
         checkpoint_saver=checkpointer,
+        # Use the default graph definition
+        graph_definition=graph_definition,
+        # Pass in the node kwargs for the agent which are used to initialize
+        # each node in the defined graph
+        node_kwargs=node_kwargs,
+        # Use the default State definition for the agent
+        state=State,
     )
 
     # Store the conversation chain in session state
-    st.session_state["conversation_chain"] = conversation_chain
+    st.session_state["conversation_chain"] = conversation_agent
 
     # Enable the form to allow user queries
     enable_form()
