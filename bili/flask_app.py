@@ -58,12 +58,11 @@ from bili.flask_api.flask_utils import (
     per_user_agent,
     set_token_cookies,
 )
-from bili.loaders.langchain_loader import build_agent_graph
+from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION, build_agent_graph
 from bili.loaders.llm_loader import load_model
 from bili.loaders.tools_loader import initialize_tools
 from bili.utils.file_utils import load_from_json
 from bili.utils.langgraph_utils import State
-from build.lib.bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
 
 app = Flask(__name__)
 
