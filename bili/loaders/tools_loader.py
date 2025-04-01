@@ -133,10 +133,29 @@ def initialize_tools(active_tools, tool_prompts, tool_params=None):
     tools = []
     for tool in active_tools:
         if tool in TOOL_REGISTRY:
+            # If there is a default prompt, retrieve it, otherwise set to None
+            if tool in TOOLS and "default_prompt" in TOOLS[tool]:
+                default_prompt = TOOLS[tool]["default_prompt"]
+            else:
+                default_prompt = None
+
+            # Check if a custom prompt is set, otherwise use the default prompt if available
+            # If there is no custom prompt and no default prompt, raise an error
+            if f"{tool}_prompt" in tool_prompts:
+                prompt = tool_prompts[f"{tool}_prompt"]
+            elif tool in tool_prompts:
+                prompt = tool_prompts[tool]
+            elif default_prompt:
+                prompt = default_prompt
+            else:
+                raise ValueError(
+                    f"Tool '{tool}' does not have a default prompt and no prompt was provided."
+                )
+
             tools.append(
                 TOOL_REGISTRY[tool](
                     tool,
-                    tool_prompts.get(f"{tool}_prompt", TOOLS[tool]["default_prompt"]),
+                    prompt,
                     tool_params.get(tool, {}),
                 )
             )
