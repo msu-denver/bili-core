@@ -111,7 +111,7 @@ TOOLS = {
         "default_prompt": "This tool retrieves weather data using the OpenWeatherMap API. "
         "The input query should provide the location in a comma-separated "
         "format (e.g., 'Denver,CO') to accurately convert to geographic "
-        "coordinates for weather retrieval.",
+        "coordinates for weather retrieval. Alternatively, you can input a US 5-digit ZIP code (e.g., '80202')",
     },
     "weather_gov_api_tool": {
         "description": "US weather data from weather.gov.",
