@@ -216,12 +216,13 @@ def execute_query(query: str) -> str:
         else:
             city, state = query, "CO"  # Default to "CO" if no state is provided
 
-    # Sanitize and encode the city and state
-    city = sanitize_input(city)
-    state = sanitize_input(state)
+        # Sanitize and encode the city and state
+        city = sanitize_input(city)
+        state = sanitize_input(state)
 
-    # Get the latitude and longitude for the city and state
-    lat, lon = get_geocode(city, state)
+        # Get the latitude and longitude for the city and state
+        lat, lon = get_geocode(city, state)
+
     if lat is None or lon is None:
         return "Could not find the location."
 
