@@ -95,6 +95,9 @@ class SQLiteProfileProvider:
         :raises sqlite3.Error: If there is an error while connecting to or modifying
             the database.
         """
+        # Create the database directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(

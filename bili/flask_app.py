@@ -49,7 +49,7 @@ from pathlib import Path
 from flask import Flask, g, jsonify, make_response, request
 
 from bili.auth.auth_manager import get_auth_manager
-from bili.checkpointers.checkpointer_functions import get_checkpointer
+from bili.checkpointers.pg_checkpointer import get_pg_checkpointer
 from bili.config.tool_config import TOOLS
 from bili.flask_api.flask_utils import (
     add_unauthorized_handler,
@@ -147,7 +147,10 @@ def me():
 # ----- LLM example routes -----
 
 # Get the appropriate checkpointer (PostgresSaver or MemorySaver) for state persistence
-checkpointer = get_checkpointer()
+# checkpointer = get_checkpointer()
+checkpointer = get_pg_checkpointer()
+# checkpointer = get_mongo_checkpointer()
+# checkpointer = MemorySaver()
 
 # Create the nova pro llm model instance using the remote AWS Bedrock provider
 nova_pro_llm = load_model(

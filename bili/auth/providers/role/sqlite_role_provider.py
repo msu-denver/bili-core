@@ -82,6 +82,9 @@ class SQLiteRoleProvider(RoleProvider):
         """
         self.db_path = db_path or os.getenv("PROFILE_DB_PATH", "/tmp/user_profiles.db")
 
+        # Create the database directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
     def get_user_role(self, uid: str, token: str) -> str:
         """
         Retrieve the role of a user based on their unique identifier.

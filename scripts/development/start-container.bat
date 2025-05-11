@@ -29,7 +29,6 @@ docker stop bili-core
 docker stop bili-core-postgis
 docker stop bili-core-mongodb
 docker stop bili-core-localstack
-docker stop bili-core-opensearch
 
 :: Bring down the Docker Compose setup
 docker-compose down

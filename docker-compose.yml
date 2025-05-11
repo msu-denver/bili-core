@@ -75,7 +75,7 @@ services:
                     - bili-core-postgis
 
     bili-core-mongodb:
-        image: mongo:5
+        image: mongo:8
         container_name: "bili-core-mongodb"
         hostname: "bili-core-mongodb"
         environment:

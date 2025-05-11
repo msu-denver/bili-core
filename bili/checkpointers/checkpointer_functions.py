@@ -40,6 +40,8 @@ Example:
 
 """
 
+import os
+
 from langgraph.checkpoint.memory import MemorySaver
 
 from bili.checkpointers.mongo_checkpointer import get_mongo_checkpointer
@@ -68,15 +70,15 @@ def get_checkpointer():
 
     :rtype: Checkpointer
     """
-    checkpointer = get_pg_checkpointer()
-    if checkpointer:
+    # if POSTGRES_CONNECTION_STRING exists, use PostgresSaver
+    if os.getenv("POSTGRES_CONNECTION_STRING"):
         LOGGER.debug("Using PostgresSaver for conversation state checkpointing.")
-        return checkpointer
+        return get_pg_checkpointer()
 
-    checkpointer = get_mongo_checkpointer()
-    if checkpointer:
+    # if MONGO_CONNECTION_STRING exists, use MongoDBSaver
+    if os.getenv("MONGO_CONNECTION_STRING"):
         LOGGER.debug("Using MongoDBSaver for conversation state checkpointing.")
-        return checkpointer
+        return get_mongo_checkpointer()
 
     # If no database persistence is available, use MemorySaver as a fallback
     LOGGER.debug("Using MemorySaver for conversation state checkpointing.")
