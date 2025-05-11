@@ -126,6 +126,38 @@ def get_geocode(city_name, state_code="CO", country_code="US"):
         raise e
     return None, None
 
+def get_geocode_from_zip(zip_code, country_code="US"):
+    """
+    Retrieves the geocode (latitude and longitude) for a given zip code.
+
+    Uses OpenWeather's ZIP code geocoding API to fetch the latitude and longitude
+    based on the zip code and country.
+
+    :param zip_code: ZIP code to look up.
+    :type zip_code: str
+    :param country_code: Country code (defaults to 'US').
+    :type country_code: str, optional
+    :return: Tuple containing (latitude, longitude), or (None, None) if an error occurs.
+    :rtype: tuple[float, float] | tuple[None, None]
+    """
+    api_key = os.environ["OPENWEATHERMAP_API_KEY"]
+
+    # Sanitize zip code input
+    sanitized_zip = sanitize_input(zip_code)
+    sanitized_country = sanitize_input(country_code)
+
+    url = f"http://api.openweathermap.org/geo/1.0/zip?zip={sanitized_zip},{sanitized_country}&appid={api_key}"
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        return data.get("lat"), data.get("lon")
+    except requests.exceptions.RequestException as e:
+        LOGGER.error(f"Error occurred while fetching geocode by ZIP code: {e}")
+        return None, None
+
 
 def get_weather(lat, lon):
     """
@@ -172,20 +204,25 @@ def execute_query(query: str) -> str:
              if the data could not be obtained.
     :rtype: str
     """
-    # Split the query into city and state if a comma or space is present
-    if "," in query:
-        city, state = map(str.strip, query.split(",", 1))
-    elif " " in query:
-        city, state = map(str.strip, query.split(" ", 1))
+    # Detect if the query is a ZIP code (5-digit numeric)
+    if query.isdigit() and len(query) == 5:
+        lat, lon = get_geocode_from_zip(query)
     else:
-        city, state = query, "CO"  # Default state to "CO" if not provided
+        # Assume it's a city/state input, split the query into city and state if a comma or space is present
+        if "," in query:
+            city, state = map(str.strip, query.split(",", 1))
+        elif " " in query:
+            city, state = map(str.strip, query.split(" ", 1))
+        else:
+            city, state = query, "CO"  # Default to "CO" if no state is provided
 
-    # Sanitize and encode the city and state
-    city = sanitize_input(city)
-    state = sanitize_input(state)
+        # Sanitize and encode the city and state
+        city = sanitize_input(city)
+        state = sanitize_input(state)
 
-    # Get the latitude and longitude for the city and state
-    lat, lon = get_geocode(city, state)
+        # Get the latitude and longitude for the city and state
+        lat, lon = get_geocode(city, state)
+
     if lat is None or lon is None:
         return "Could not find the location."
 
