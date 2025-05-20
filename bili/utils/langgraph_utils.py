@@ -269,7 +269,7 @@ def build_trim_and_summarize_node(
         if trim_k is not None:
             if len(remaining_messages) != len(all_messages):
                 # Threshold has been met, trim to custom trim_k
-                arguments["k"] = trim_k
+                arguments["max_tokens"] = trim_k
                 remaining_messages = trim_messages(all_messages, **arguments)
 
         # pylint: enable=missing-kwoa
