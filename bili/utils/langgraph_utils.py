@@ -168,30 +168,33 @@ def build_trim_and_summarize_node(
     memory_limit_type="message_count",
     memory_strategy="trim",
     k=5,
+    trim_k=None,
     **kwargs,
 ):
     """
-    Constructs a configuration node that enables trimming and summarization of a
-    conversation's state. The function facilitates memory management by applying
-    constraints on the conversation history to adhere to specified limits, such
-    as message count or token count. Additionally, summarization can be performed
-    based on the user's defined strategy to retain the essential context.
+    Builds a function that trims and/or summarizes a conversation's state based on specified
+    memory constraints and strategies. This function is intended to optimize conversational
+    context data by reducing the size of the conversation history while preserving
+    essential details.
 
-    :param llm_model: The language model to be used for trimming and/or summarization.
-    :param summarize_llm_model: The summarization-specific language model. If not provided,
-        defaults to the primary `llm_model`.
-    :param memory_limit_type: Defines the type of memory constraint to apply. Defaults to
-        "message_count". Other values may include token-based options.
-    :param memory_strategy: Defines the approach to memory management. Options include
-        "trim" for reducing the conversation size via trimming and "summarize" for
-        creating a condensed summary. Defaults to "trim".
-    :param k: The maximum number of tokens or messages to include in the trimmed state.
-        Exact parameter behavior may vary based on the `memory_limit_type`. Defaults to 5.
-    :param kwargs: Additional configuration parameters that can influence behavior.
-    :return: A callable function (`trim_and_summarize_state`) that manages memory
-        optimization for conversation states while ensuring critical context remains intact
-        for future interaction.
-    :rtype: callable
+    :param llm_model: The large language model (LLM) used for processing conversation history
+        and adjustments, such as message-summarization.
+    :param summarize_llm_model: (Optional) A specialized large language model used explicitly
+        for summarization. If not provided, defaults to the primary `llm_model`.
+    :param memory_limit_type: The type of memory constraint applied to the conversation.
+        Defaults to "message_count". Accepted values include "message_count"
+        (message-based trimming) and token-based strategies.
+    :param memory_strategy: Defines the approach utilized to manage memory constraints.
+        Defaults to "trim" for trimming conversation history. Alternatively, "summarize"
+        enables the use of summarization for efficient memory management.
+    :param k: The initial memory limit (e.g., number of messages or token count), serving
+        as the primary metric for conversations requiring trimming.
+    :param trim_k: (Optional) A secondary threshold indicating the memory limit for further
+        trimming once the initial limit is exceeded. If not provided, defaults to `k`.
+    :param kwargs: Additional options or configuration parameters to customize the behavior
+        of memory trimming and summarization processing.
+    :return: A function that accepts a `State` dictionary and returns a processed dictionary
+        with optimized conversation data based on trimming and/or summarization.
     """
 
     if summarize_llm_model is None:
@@ -263,6 +266,12 @@ def build_trim_and_summarize_node(
 
         # pylint: disable=missing-kwoa
         remaining_messages = trim_messages(all_messages, **arguments)
+        if trim_k is not None:
+            if len(remaining_messages) != len(all_messages):
+                # Threshold has been met, trim to custom trim_k
+                arguments["k"] = trim_k
+                remaining_messages = trim_messages(all_messages, **arguments)
+
         # pylint: enable=missing-kwoa
         LOGGER.trace(f"Remaining messages after trimming: {remaining_messages}")
 
