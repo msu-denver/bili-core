@@ -130,6 +130,9 @@ def display_configuration_panels():
                 "memory_strategy": st.session_state.get("memory_strategy"),
                 "memory_limit_type": st.session_state.get("memory_limit_type"),
                 "memory_limit_value": st.session_state.get("memory_limit_value"),
+                "memory_limit_trim_value": st.session_state.get(
+                    "memory_limit_trim_value"
+                ),
             }
             st.download_button(
                 label="Download Configuration as JSON",

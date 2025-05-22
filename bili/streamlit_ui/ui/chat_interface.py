@@ -208,13 +208,17 @@ def display_state_management_management():
         if st.session_state["memory_limit_type"] == "message_count":
             if st.session_state["memory_strategy"] == "trim":
                 label = "Number of messages to keep before truncating (k)"
+                trim_label = "Number of messages to trim to (trim_k)"
             else:
                 label = "Number of messages to keep before summarizing (k)"
+                trim_label = "Number of messages to summarize to (trim_k)"
         else:
             if st.session_state["memory_strategy"] == "trim":
                 label = "Total token limit to keep before truncating (k)"
+                trim_label = "Total token limit to keep after trimming (trim_k)"
             else:
                 label = "Total token limit to keep before summarizing (k)"
+                trim_label = "Total token limit to keep after summarizing (trim_k)"
 
         if "memory_limit_value" not in st.session_state:
             if st.session_state["memory_limit_type"] == "message_count":
@@ -229,6 +233,22 @@ def display_state_management_management():
             key="memory_limit_value_setting",
             help="If using Number of Messages to trim, this is how many messages to keep before trimming."
             " If using Total Tokens, this is how many tokens total are allowed before trimming.",
+        )
+
+        if "memory_limit_trim_value" not in st.session_state:
+            if st.session_state["memory_limit_type"] == "message_count":
+                st.session_state["memory_limit_trim_value"] = 15
+            else:
+                st.session_state["memory_limit_trim_value"] = 10000
+        st.session_state["memory_limit_trim_value"] = st.number_input(
+            trim_label,
+            min_value=4,
+            max_value=2097152,
+            value=st.session_state["memory_limit_trim_value"],
+            key="memory_limit_trim_value_setting",
+            help="If using Number of Messages to trim, this is how many messages to trim to, after the"
+            "trim limit is met. If using Total Tokens, this is how many tokens total are allowed "
+            "to be retained after trimming.",
         )
 
         # If no conversation chain loaded, warn the user
@@ -422,6 +442,10 @@ def display_model_configuration():
                 st.markdown(
                     f"**Chat History 'k' Value:** {st.session_state.get('memory_limit_value')}"
                 )
+            if "memory_limit_trim_value" in st.session_state:
+                st.markdown(
+                    f"**Chat History 'trim_k' Value:** {st.session_state.get('memory_limit_trim_value')}"
+                )
 
         if st.session_state.get("supports_tools", True):
             with st.expander("Tool Configuration"):
@@ -498,6 +522,7 @@ def load_system_components(checkpointer):
     memory_strategy = st.session_state.get("memory_strategy")
     memory_limit_type = st.session_state.get("memory_limit_type")
     memory_limit_value = st.session_state.get("memory_limit_value")
+    memory_limit_trim_value = st.session_state.get("memory_limit_trim_value")
 
     # If no checkpointer is provided, use MemorySaver for checkpoints
     if checkpointer is None:
@@ -517,6 +542,7 @@ def load_system_components(checkpointer):
         "memory_strategy": memory_strategy,
         "memory_limit_type": memory_limit_type,
         "k": memory_limit_value,
+        "trim_k": memory_limit_trim_value,
         "current_user": st.session_state.get("user_profile"),
     }
 
