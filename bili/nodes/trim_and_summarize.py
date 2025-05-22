@@ -65,7 +65,6 @@ def build_trim_and_summarize_node(
     k=5,
     trim_k=None,
     prompt_template=None,
-    abc=None,
     **kwargs,
 ):
     """
