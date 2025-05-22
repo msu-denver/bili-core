@@ -64,6 +64,7 @@ from langchain.agents.agent_toolkits import create_retriever_tool
 from bili.config.tool_config import TOOLS
 from bili.loaders.embeddings_loader import load_embedding_function
 from bili.tools.amazon_opensearch import init_amazon_opensearch
+from bili.tools.api_free_weather_api import init_weather_tool
 from bili.tools.api_open_weather import init_weather_api_tool
 from bili.tools.api_serp import init_serp_api_tool
 from bili.tools.api_weather_gov import init_weather_gov_api_tool
@@ -91,6 +92,9 @@ TOOL_REGISTRY = {
         name, prompt, **params
     ),
     "weather_gov_api_tool": lambda name, prompt, params: init_weather_gov_api_tool(
+        name, prompt, **params
+    ),
+    "free_weather_api_tool": lambda name, prompt, params: init_weather_tool(
         name, prompt, **params
     ),
     "mock_tool": lambda name, prompt, params: init_mock_tool(name, prompt, **params),

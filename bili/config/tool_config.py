@@ -107,7 +107,7 @@ TOOLS = {
     },
     "weather_api_tool": {
         "description": "Fetches weather data via OpenWeatherMap API.",
-        "enabled": True,
+        "enabled": False,
         "default_prompt": "This tool retrieves weather data using the OpenWeatherMap API. "
         "The input query should provide the location in a comma-separated "
         "format (e.g., 'Denver,CO') to accurately convert to geographic "
@@ -119,6 +119,14 @@ TOOLS = {
         "default_prompt": "This tool provides detailed weather forecasts for US locations via "
         "the weather.gov API. Queries must be formatted as "
         "'latitude,longitude' (e.g., '39.7392,-104.9903').",
+    },
+    "free_weather_api_tool": {
+        "description": "Free weather data from weatherapi.com.",
+        "enabled": True,
+        "default_prompt": """Fetches the latest weather information. If a user asks for weather, call this tool.
+        Only Pass in the city name of the user request, if no city is provided, check the user location,
+        if no location is provided, use denver as the default city. 
+        Always respond in both farenheit and celsius.""",
     },
     "serp_api_tool": {
         "description": "Search engine results using SERP API.",
