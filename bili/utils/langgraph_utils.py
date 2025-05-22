@@ -44,6 +44,8 @@ formatted = format_message_with_citations(message)
 cleared = clear_state(state)
 """
 
+from datetime import datetime
+
 from langchain_core.messages import AIMessage, RemoveMessage
 from langgraph.prebuilt.chat_agent_executor import AgentState
 
@@ -91,21 +93,31 @@ def format_message_with_citations(message):
 
 class State(AgentState):
     """
-    Encapsulates user-specific preferences or state.
+    Represents the state of an agent with user-specific preferences or state data.
 
-    This class is designed for maintaining any user-specific preferences or
-    state information. It serves as an extension of the AgentState base class
-    to incorporate additional properties tied to a specific user or agent.
+    This class extends `AgentState` and includes additional attributes to track user-specific
+    preferences or state like summary, user ownership information, and message timestamps
+    as well as the time difference between current and previous messages.
 
-    :ivar summary: Provides a summary or brief description of the state.
+    :ivar summary: A text summary associated with the agent state.
     :type summary: str
-    :ivar owner: Identifies the owner of the state, typically a user or agent.
+    :ivar owner: The identifier for the owner linked to this state.
     :type owner: str
+    :ivar previous_message_time: The timestamp of the last recorded message.
+    :type previous_message_time: datetime
+    :ivar current_message_time: The timestamp of the latest message.
+    :type current_message_time: datetime
+    :ivar delta_time: The calculated time difference, in seconds,
+    between the current and previous messages.
+    :type delta_time: float
     """
 
     # If we wanted to keep any user-specific preferences or state, we could add them here
     summary: str
     owner: str
+    previous_message_time: datetime
+    current_message_time: datetime
+    delta_time: float
 
 
 def clear_state(state: State) -> dict:

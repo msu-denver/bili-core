@@ -66,6 +66,7 @@ from bili.nodes.normalize_tool_state import build_normalize_tool_state_node
 from bili.nodes.per_user_state import buld_per_user_state_node
 from bili.nodes.react_agent_node import build_react_agent_node
 from bili.nodes.trim_and_summarize import build_trim_and_summarize_node
+from bili.nodes.update_timestamp import build_update_timestamp_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -84,10 +85,11 @@ if current_log_level <= logging.DEBUG:
 # custom nodes.
 GRAPH_NODE_REGISTRY = {
     "add_persona_and_summary": build_add_persona_and_summary_node,
+    "normalize_state": build_normalize_tool_state_node,
     "per_user_state": buld_per_user_state_node,
     "react_agent": build_react_agent_node,
     "trim_summarize": build_trim_and_summarize_node,
-    "normalize_state": build_normalize_tool_state_node,
+    "update_timestamp": build_update_timestamp_node,
 }
 
 # Define the default graph definition, which is the default set of nodes that will
@@ -96,6 +98,7 @@ GRAPH_NODE_REGISTRY = {
 DEFAULT_GRAPH_DEFINITION = [
     "add_persona_and_summary",
     "react_agent",
+    "update_timestamp",
     "trim_summarize",
     "normalize_state",
 ]

@@ -35,6 +35,8 @@ normalize_node = build_normalize_tool_state_node()
 new_state = normalize_node(state)
 """
 
+from langchain_core.messages import AIMessage, RemoveMessage
+
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module
@@ -43,47 +45,64 @@ LOGGER = get_logger(__name__)
 
 def build_normalize_tool_state_node(**kwargs):
     """
-    This function modifies the input state by normalizing tool function calls present
-    in the messages. Specifically, it removes the "function_call" entry from the
-    `additional_kwargs` of each message if it exists. The goal is to ensure that
-    redundant tool calls are eliminated while retaining the tool information
-    in the existing "tool_calls" field. This is to ensure compatibility with
-    multiple LLM providers, some of which don't allow the mixture of tool calls
-    with function calls.
+    Creates a LangGraph node that normalizes tool function calls in the conversation state.
 
-    :return: A new dictionary containing the "messages" key with the potentially
-             updated list of messages after normalization.
-    :rtype: dict
+    This includes:
+    - Removing the `function_call` entry from `additional_kwargs` in each message, if present
+    - Identifying and removing AI messages with `invalid_tool_calls`, using `RemoveMessage` objects
+
+    Returns:
+        function: A LangGraph-compatible node function that accepts a state dictionary and
+                  returns a modified state dictionary with `RemoveMessage` instructions.
     """
 
-    def normalize_tool_state(state):
+    def normalize_tool_state(state: dict) -> dict:
         """
-        Normalizes tool function calls in the conversation state.
+        Normalizes the state of tool messages by inspecting and modifying their content
+        and flagging invalid messages for removal. This function processes tool-related
+        messages within a dictionary, removing unnecessary information and marking
+        invalid messages for deletion.
 
-        This function iterates through the messages in the provided state and removes
-        the "function_call" entry from the `additional_kwargs` of each message if it exists.
-        This ensures that redundant tool calls are eliminated while retaining the tool
-        information in the existing "tool_calls" field.
-
-        :param state: The current state of the conversation containing a list of messages.
+        :param state: A dictionary containing the state of tool messages. The "messages"
+            entry in the dictionary should be a list of message objects that may include
+            AI-generated messages with potential invalid tool calls or redundant information
+            in their additional arguments.
         :type state: dict
-        :return: A dictionary containing the "messages" key with the potentially updated
-                 list of messages after normalization.
+
+        :return: A dictionary containing an updated state where invalid or redundant
+            tool-related messages have been appropriately marked or modified. The
+            "messages" key of the returned dictionary contains the list of messages
+            flagged for removal.
         :rtype: dict
         """
         all_messages = state["messages"]
         LOGGER.trace(
-            f"Original messages before adding normalizing tool calls: {all_messages}"
+            "Original messages before normalizing tool calls: %s", all_messages
         )
+
+        messages_to_remove = []
+
         for message in all_messages:
-            # Check if the message contains a function call
-            if message.additional_kwargs and message.additional_kwargs.get(
-                "function_call"
+            # Normalize: Remove function_call from additional_kwargs
+            if (
+                message.additional_kwargs
+                and "function_call" in message.additional_kwargs
             ):
-                LOGGER.debug(f"Normalizing tool call for message: %s", message)
-                # Remove the function call from the message, since the tool call is already
-                # present in the tool_calls field
+                LOGGER.debug(
+                    "Removing redundant function_call from message: %s", message
+                )
                 del message.additional_kwargs["function_call"]
-        return {"messages": all_messages}
+
+            # Detect and flag invalid tool call messages for removal
+            if isinstance(message, AIMessage) and getattr(
+                message, "invalid_tool_calls", False
+            ):
+                LOGGER.debug(
+                    "Marking AI message for removal due to invalid tool calls: %s",
+                    message,
+                )
+                messages_to_remove.append(RemoveMessage(id=message.id))
+
+        return {"messages": messages_to_remove}
 
     return normalize_tool_state
