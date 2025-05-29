@@ -187,7 +187,9 @@ class InMemoryAuthProvider(AuthProvider):
         }
         self.users[uid] = user
         self.users[email] = user
-        return self.users[uid]
+        token = self.create_jwt_token(user)
+        user["token"] = token["token"]
+        return user
 
     def delete_user(self, uid: str):
         """

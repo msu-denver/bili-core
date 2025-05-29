@@ -107,7 +107,7 @@ class SQLiteAuthProvider(AuthProvider):
     :type db_path: str
     """
 
-    def __init__(self, db_path: str = "/tmp/auth_provider.db"):
+    def __init__(self, db_path=None):
         """
         Initializes the authentication provider class and sets up the database path. Ensures
         the database is initialized upon creating an instance of this class. This class handles
@@ -116,7 +116,7 @@ class SQLiteAuthProvider(AuthProvider):
         :ivar db_path: Represents the path to the database file. It can be specified during
             initialization or uses a default value if not provided.
         """
-        self.db_path = db_path
+        self.db_path = db_path or os.getenv("PROFILE_DB_PATH", "/tmp/user_profiles.db")
         self._initialize_db()
 
     def _get_connection(self):
@@ -188,12 +188,15 @@ class SQLiteAuthProvider(AuthProvider):
             user = cursor.fetchone()
             if not user or user[2] != password:
                 raise ValueError("Invalid credentials")
-            return {
+            profile = {
                 "uid": user[0],
                 "email": user[1],
                 "password": user[2],
                 "emailVerified": bool(user[3]),
             }
+            token = self.create_jwt_token(profile)
+            profile["token"] = token["token"]
+            return profile
 
     def get_account_info(self, uid: str):
         """
@@ -292,12 +295,15 @@ class SQLiteAuthProvider(AuthProvider):
                 conn.commit()
             except sqlite3.IntegrityError:
                 raise ValueError("Email already exists")
-        return {
+        profile = {
             "uid": uid,
             "email": email,
             "password": password,
             "emailVerified": False,
         }
+        token = self.create_jwt_token(profile)
+        profile["token"] = token["token"]
+        return profile
 
     def delete_user(self, uid: str):
         """

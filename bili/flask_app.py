@@ -68,7 +68,7 @@ app = Flask(__name__)
 
 # Initialize the appropriate AuthManager
 AUTH_MANAGER = get_auth_manager(
-    auth_provider_name="firebase",
+    auth_provider_name="sqlite",
     profile_provider_name="sqlite",
     role_provider_name="sqlite",
 )
