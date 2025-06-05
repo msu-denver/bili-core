@@ -135,6 +135,9 @@ class SQLiteProfileProvider:
         :type token: str
         :return: None
         """
+        # Create the database directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -164,6 +167,9 @@ class SQLiteProfileProvider:
             Returns None if the user is not found in the database.
         :rtype: dict or None
         """
+        # Create the database directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(

@@ -130,6 +130,9 @@ class SQLiteAuthProvider(AuthProvider):
         :return: A new SQLite database connection object.
         :rtype: sqlite3.Connection
         """
+        # Create the database directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
         return sqlite3.connect(self.db_path)
 
     def _initialize_db(self):
@@ -249,7 +252,7 @@ class SQLiteAuthProvider(AuthProvider):
             cursor.execute("UPDATE users SET email_verified = 1 WHERE uid=?", (uid,))
             conn.commit()
 
-    def send_password_reset_email(self, uid):
+    def send_password_reset_email(self, email):
         """
         Sends a password reset email to a user identified by their unique ID.
 
@@ -259,8 +262,8 @@ class SQLiteAuthProvider(AuthProvider):
         not support email sending. Use an email-capable backend to utilize this
         functionality.
 
-        :param uid: Unique identifier of the user to send the password reset email to
-        :type uid: str
+        :param email: Unique identifier of the user to send the password reset email to
+        :type email: str
         :raises NotImplementedError: Raised when the function is not implemented for
                                      the current backend
         """

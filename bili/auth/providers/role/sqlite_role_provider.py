@@ -98,6 +98,9 @@ class SQLiteRoleProvider(RoleProvider):
         :param token: Authorization token for validating the user.
         :return: The role of the user as a string, or None if the user does not exist.
         """
+        # Create the database directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT role FROM user_profiles WHERE uid = ?", (uid,))
