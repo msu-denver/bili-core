@@ -67,6 +67,7 @@ from bili.nodes.per_user_state import buld_per_user_state_node
 from bili.nodes.react_agent_node import build_react_agent_node
 from bili.nodes.trim_and_summarize import build_trim_and_summarize_node
 from bili.nodes.update_timestamp import build_update_timestamp_node
+from bili.nodes.inject_current_datetime import build_inject_current_date_time
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -90,6 +91,7 @@ GRAPH_NODE_REGISTRY = {
     "react_agent": build_react_agent_node,
     "trim_summarize": build_trim_and_summarize_node,
     "update_timestamp": build_update_timestamp_node,
+    "inject_current_datetime": build_inject_current_date_time
 }
 
 # Define the default graph definition, which is the default set of nodes that will
@@ -97,6 +99,7 @@ GRAPH_NODE_REGISTRY = {
 # definition with custom nodes.
 DEFAULT_GRAPH_DEFINITION = [
     "add_persona_and_summary",
+    "inject_current_datetime",
     "react_agent",
     "update_timestamp",
     "trim_summarize",
