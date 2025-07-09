@@ -96,6 +96,11 @@ def build_trim_and_summarize_node(
         trims conversation messages or summarizes removed content depending on the provided
         parameters.
     :rtype: Callable
+    
+    ## Notes:
+    - An optional flag in the state ```disable_summarization``` can be set to true to skip the
+    summarization and trimming steps. If this flag is set to ```True``` this node will be skipped.
+    If the flag doesn't exist or is false this node will execute.
     """
 
     if summarize_llm_model is None:
@@ -125,6 +130,11 @@ def build_trim_and_summarize_node(
               summarized content following trimming operations.
         :rtype: dict
         """
+
+        # Check for optional flag to disable summarization
+        disable_summarization = state.get("disable_summarization", False)
+        if disable_summarization is True:
+            return state
 
         # Retrieve the current list of messages from state for processing
         all_messages = state["messages"]
