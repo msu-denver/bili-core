@@ -118,6 +118,7 @@ class State(AgentState):
     previous_message_time: datetime
     current_message_time: datetime
     delta_time: float
+    disable_summarization: bool
 
 
 def clear_state(state: State) -> dict:
