@@ -118,6 +118,7 @@ def display_configuration_panels():
                 "top_p": st.session_state.get("top_p"),
                 "top_k": st.session_state.get("top_k"),
                 "seed_value": st.session_state.get("seed_value"),
+                "max_retries": st.session_state.get("max_retries"),
                 "selected_prompt_template": st.session_state[
                     "selected_prompt_template"
                 ],
@@ -364,6 +365,43 @@ def display_configuration_panels():
             )
         else:
             st.session_state["max_output_tokens"] = None
+
+        if selected_model.get("supports_max_retries", False):
+            max_retries_max = selected_model.get("max_retries_max", 10)
+            max_retries_default = selected_model.get("max_retries_default", 3)
+
+            st.session_state["max_retries"] = st.number_input(
+                f"Max Retries (API Retry Attempts), Maximum Value: {max_retries_max}",
+                min_value=0,
+                max_value=max_retries_max,
+                value=st.session_state.get("max_retries", max_retries_default) or 3,
+                step=1,
+                key="max_retries_setting",
+                help="Maximum number of retry attempts for failed API calls."
+                     "Set to 0 to disable retries.",
+            )
+
+            # Add clear button
+            st.button(
+                "Reset to Default",
+                on_click=lambda: st.session_state.update(
+                    {"max_retries_setting": max_retries_default}
+                    ),
+                help=f"Reset max retries to default value ({max_retries_default})",
+                use_container_width=True,
+            )
+
+            # Add help link
+            st.markdown(
+                """<a href='https://platform.openai.com/docs/guides/error-codes'>"""
+                """Learn about OpenAI error handling and retries</a>""",
+                unsafe_allow_html=True,
+            )
+
+            # insert horizontal rule
+            st.markdown("---")
+        else:
+            st.session_state["max_retries"] = None
 
     # ---- Prompt Customization ----
     with st.expander("Prompt Customization"):

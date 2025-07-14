@@ -523,6 +523,7 @@ def load_remote_openai(
     top_p=None,
     top_k=None,
     seed=None,
+    max_retries=None,
 ):
     """
     Loads and initializes a remote OpenAI model with the specified
@@ -563,6 +564,8 @@ def load_remote_openai(
         openai_config["top_k"] = top_k
     if seed:
         openai_config["seed"] = seed
+    if max_retries:
+        openai_config["max_retries"] = max_retries
 
     llm = ChatOpenAI(**openai_config)
     LOGGER.debug(llm)
