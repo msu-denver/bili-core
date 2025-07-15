@@ -55,7 +55,7 @@ from bili.utils.logging_utils import get_logger
 LOGGER = get_logger(__name__)
 
 
-def build_add_persona_and_summary_node(persona: str, template_dict: dict=None, **kwargs):
+def build_add_persona_and_summary_node(persona: str, **kwargs):
     """
     Builds a node function to add a persona and conversation summary to the current state.
 
@@ -126,6 +126,8 @@ def build_add_persona_and_summary_node(persona: str, template_dict: dict=None, *
 
         # Load the persona string
         message_content = persona
+
+        template_dict = state.get("template_dict", None)
 
         # Check if template data should be seeded and seed it
         if template_dict is not None:
