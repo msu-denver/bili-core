@@ -157,7 +157,7 @@ def build_trim_and_summarize_node(
             if isinstance(message, HumanMessage) and message.content.startswith('USER PROFILE:'):
                 user_profile_message = message
                 user_profile_message_id = user_profile_message.id
-
+                break
         # 1) Start by trimming messages, if needed, using either message or token count to trim by
         arguments = {
             "max_tokens": k,
