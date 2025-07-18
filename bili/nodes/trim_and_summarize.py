@@ -151,6 +151,14 @@ def build_trim_and_summarize_node(
         )
         last_ai_message_id = last_ai_message.id if last_ai_message else None
 
+        user_profile_message = None 
+        user_profile_message_id = None
+        for message in all_messages:
+            if isinstance(message, HumanMessage):
+                if message.content.startswith('USER PROFILE:'):
+                    user_profile_message = message
+                    user_profile_message_id = user_profile_message.id
+                break
         # 1) Start by trimming messages, if needed, using either message or token count to trim by
         arguments = {
             "max_tokens": k,
@@ -198,6 +206,7 @@ def build_trim_and_summarize_node(
         # they should never be removed. Also, exclude the last human and AI messages so
         # that even if we exceed the message or token limit, we don't remove the last interaction
         # with the user. This allows the conversation to continue from the last asked question.
+        # Also, Exclude the user profile message being loaded in by per_user_state.py
         removed_messages = [
             m
             for m in all_messages
@@ -205,6 +214,7 @@ def build_trim_and_summarize_node(
             and not isinstance(m, SystemMessage)
             and not m.id == last_human_message_id
             and not m.id == last_ai_message_id
+            and not m.id == user_profile_message_id
         ]
         LOGGER.trace(f"Removed messages after trimming: {removed_messages}")
 
