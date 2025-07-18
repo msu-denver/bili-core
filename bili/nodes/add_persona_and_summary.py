@@ -112,6 +112,17 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
             of the persona and conversation summary.
         :rtype: dict
         """
+        # Define custom dict class to override missing
+        # This will allow {} to exist in system prompts and only update keys
+        # found in the template_dict
+        class FormatDict(dict):
+            """
+            Support class for allowing a template string as a system prompt.
+            """
+            def __missing__(self, key):
+                LOGGER.warning("Key not found. Substituting with {%s}", key)
+                return "{" + key + "}" 
+
         # Retrieve the current list of messages from state for processing
         all_messages = state["messages"]
         LOGGER.trace(
@@ -132,7 +143,7 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
         # Check if template data should be seeded and seed it
         if template_dict is not None:
             # Use ** to unpack the dictionary for .format()
-            message_content = message_content.format(**template_dict)
+            message_content = message_content.format(**FormatDict(template_dict))
 
         if "summary" in state and state["summary"]:
             message_content += (
