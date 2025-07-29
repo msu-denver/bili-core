@@ -14,8 +14,8 @@ keras==3.8.0
 langchain-aws==0.2.10
 langchain-community==0.3.18
 langchain-core==0.3.40
-langchain-huggingface==0.1.2
 langchain-google-vertexai==2.0.14
+langchain-huggingface==0.1.2
 langchain-openai==0.3.7
 langchain==0.3.19
 langgraph-checkpoint-mongodb==0.1.1
