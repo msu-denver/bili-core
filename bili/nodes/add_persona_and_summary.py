@@ -46,6 +46,7 @@ add_persona_node = build_add_persona_and_summary_node(
 new_state = add_persona_node(state)
 """
 
+import re
 from langchain_core.messages import RemoveMessage, SystemMessage
 
 from bili.utils.langgraph_utils import State
@@ -112,16 +113,19 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
             of the persona and conversation summary.
         :rtype: dict
         """
-        # Define custom dict class to override missing
+        # Define custom format function class to override missing
         # This will allow {} to exist in system prompts and only update keys
         # found in the template_dict
-        class FormatDict(dict):
+        def safe_format(template, **kwargs):
             """
-            Support class for allowing a template string as a system prompt.
+            Replace {key} with value from kwargs if key exists, otherwise leave unchanged.
             """
-            def __missing__(self, key):
-                LOGGER.warning("Key not found. Substituting with {%s}", key)
-                return "{" + key + "}" 
+            def replacer(match):
+                key = match.group(1)
+                return kwargs.get(key, match.group(0))
+
+            return re.sub(r'\{(\w+)\}', replacer, template)
+
 
         # Retrieve the current list of messages from state for processing
         all_messages = state["messages"]
@@ -143,7 +147,7 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
         # Check if template data should be seeded and seed it
         if template_dict is not None:
             # Use ** to unpack the dictionary for .format()
-            message_content = message_content.format(**FormatDict(template_dict))
+            message_content = safe_format(message_content, **template_dict)
 
         if "summary" in state and state["summary"]:
             message_content += (
