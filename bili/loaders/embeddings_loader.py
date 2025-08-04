@@ -43,7 +43,7 @@ Example:
 from langchain_aws import BedrockEmbeddings
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_google_vertexai import VertexAIEmbeddings
-from langchain_openai import AzureOpenAIEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings, OpenAIEmbeddings
 
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
@@ -80,6 +80,8 @@ def load_embedding_function(provider, model_name=None):
         embedding_function = create_azure_openai_embedding_function(
             model_name=model_name
         )
+    elif provider == "openai":
+        embedding_function = create_openai_embedding_function(model_name=model_name)
     elif provider == "sentence_transformer":
         embedding_function = create_sentence_transformer_embedding_function(
             model_name=model_name
@@ -142,6 +144,25 @@ def create_azure_openai_embedding_function(model_name="azure_text-embedding-3-la
     """
     # https://python.langchain.com/docs/integrations/text_embedding/azureopenai/
     return AzureOpenAIEmbeddings(model=model_name)
+
+
+@conditional_cache_resource()
+def create_openai_embedding_function(model_name="text-embedding-3-large"):
+    """
+    Creates an OpenAI Embedding Function with a specified model.
+
+    This function utilizes the OpenAI service through LangChain for
+    generating embeddings. The model to be used for embeddings can be customized
+    using the parameter.
+
+    :param model_name: The name of the model to be used for generating embeddings. Defaults to
+        'text-embedding-3-large'.
+    :type model_name: str
+    :return: An instance of OpenAIEmbeddings configured with the specified model.
+    :rtype: OpenAIEmbeddings
+    """
+    # https://python.langchain.com/docs/integrations/text_embedding/openai/
+    return OpenAIEmbeddings(model=model_name)
 
 
 @conditional_cache_resource()
