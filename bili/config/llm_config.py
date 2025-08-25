@@ -518,6 +518,7 @@ LLM_MODELS = {
                 "top_k_max": 40,
                 "response_mime_type": "string",
                 "response_schema": {"type": "string"},
+                "supports_structured_output": True,
             },
             {
                 "model_name": "Gemini 2.5 Flash",
@@ -533,6 +534,7 @@ LLM_MODELS = {
                 "top_k_max": 40,
                 "response_mime_type": "string",
                 "response_schema": {"type": "string"},
+                "supports_structured_output": True,
             },
             {
                 "model_name": "Gemini 2.5 Flash Lite",
@@ -548,6 +550,7 @@ LLM_MODELS = {
                 "top_k_max": 40,
                 "response_mime_type": "string",
                 "response_schema": {"type": "string"},
+                "supports_structured_output": True,
             },
             {
                 "model_name": "Gemini 2.0 Flash",

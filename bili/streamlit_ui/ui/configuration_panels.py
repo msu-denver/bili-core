@@ -406,7 +406,7 @@ def display_configuration_panels():
             st.session_state["max_retries"] = None
 
         # Vertex AI specific configuration for response schema and MIME type
-        if selected_model.get("response_mime_type", False):
+        if selected_model.get("supports_structured_output", False) is True:
             # insert horizontal rule
             st.markdown("---")
             st.markdown("**AI Response Configuration**")
