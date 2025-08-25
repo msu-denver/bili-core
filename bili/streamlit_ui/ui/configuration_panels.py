@@ -119,6 +119,8 @@ def display_configuration_panels():
                 "top_k": st.session_state.get("top_k"),
                 "seed_value": st.session_state.get("seed_value"),
                 "max_retries": st.session_state.get("max_retries"),
+                "response_mime_type": st.session_state.get("response_mime_type"),
+                "custom_response_schema": st.session_state.get("custom_response_schema"),
                 "selected_prompt_template": st.session_state[
                     "selected_prompt_template"
                 ],
@@ -402,6 +404,151 @@ def display_configuration_panels():
             st.markdown("---")
         else:
             st.session_state["max_retries"] = None
+
+        # Vertex AI specific configuration for response schema and MIME type
+        if selected_model.get("response_mime_type", False):
+            # insert horizontal rule
+            st.markdown("---")
+            st.markdown("**AI Response Configuration**")
+
+            # Response MIME Type selector
+            mime_type_options = {
+                "text/plain": "Plain Text (Default)",
+                "application/json": "JSON Structured Output",
+            }
+
+            # Initialize response_mime_type if not in session state
+            if "response_mime_type" not in st.session_state:
+                st.session_state["response_mime_type"] = "text/plain"
+
+            # Initialize custom_response_schema if not in session state
+            if "custom_response_schema" not in st.session_state:
+                st.session_state["custom_response_schema"] = '{"type": "object", "properties": {"response": {"type": "string"}}, "required": ["response"]}'
+
+            # Initialize schema_preset if not in session state
+            if "schema_preset" not in st.session_state:
+                st.session_state["schema_preset"] = "Custom"
+
+            st.selectbox(
+                "Response MIME Type",
+                options=list(mime_type_options.keys()),
+                format_func=lambda x: f"{x}: {mime_type_options[x]}",
+                index=list(mime_type_options.keys()).index(st.session_state["response_mime_type"]),
+                key="response_mime_type",
+                help="Choose the output format for the model's responses."
+            )
+
+            # Custom JSON Schema input (only show if JSON is selected)
+            if st.session_state["response_mime_type"] == "application/json":
+                st.markdown("**Custom JSON Response Schema**")
+
+                # Preset schema options
+                preset_schemas = {
+                    "String Response": '{"type": "string"}',
+                    "Object Response": '{"type": "object", "properties": {"response": {"type": "string"}}, "required": ["response"]}',
+                    "Array Response": '{"type": "array", "items": {"type": "string"}}',
+                    "Custom": None  # None indicates custom input
+                }
+
+                def update_schema_from_preset():
+                    """Update schema when preset changes"""
+                    preset = st.session_state["schema_preset"]
+                    if preset != "Custom" and preset_schemas[preset] is not None:
+                        st.session_state["custom_response_schema"] = preset_schemas[preset]
+
+                # Preset selector
+                schema_preset = st.selectbox(
+                    "Schema Preset",
+                    options=list(preset_schemas.keys()),
+                    index=list(preset_schemas.keys()).index(
+                        st.session_state.get("schema_preset", "Custom")
+                        ),
+                    key="schema_preset",
+                    on_change=update_schema_from_preset,
+                    help="Select a preset schema or choose 'Custom' to define your own."
+                )
+
+                def update_schema_state():
+                    """Update the schema in session state when text area changes"""
+                    st.session_state["custom_response_schema"] = st.session_state["custom_response_schema_input"]
+                    # If user is editing, switch to Custom preset
+                    if st.session_state["schema_preset"] != "Custom":
+                        st.session_state["schema_preset"] = "Custom"
+
+                # Schema text area - always editable, using the session state pattern
+                schema_value = st.session_state.get("custom_response_schema", '{"type": "string"}')
+
+                st.text_area(
+                    "JSON Schema" + (" (Preset Selected)" if schema_preset != "Custom" else ""),
+                    value=schema_value,
+                    height=150,
+                    key="custom_response_schema_input",
+                    on_change=update_schema_state,
+                    help="Define the JSON schema for structured responses. Must be valid JSON.",
+                    disabled=False  # Always editable
+                )
+
+                # Validate JSON schema
+                try:
+                    json.loads(st.session_state.get("custom_response_schema", "{}"))
+                    st.success("✅ Valid JSON schema")
+                except json.JSONDecodeError as e:
+                    st.error(f"❌ Invalid JSON: {str(e)}")
+
+                # Example schemas - using info box instead of expander
+                st.info("""
+                **📖 Example Schemas:**
+                
+                **Analysis Response:**
+                ```json
+                {
+                "type": "object",
+                "properties": {
+                    "analysis": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "categories": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["analysis", "confidence"]
+                }
+                ```
+                
+                **Q&A Response:**
+                ```json
+                {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string"},
+                    "sources": {"type": "array", "items": {"type": "string"}},
+                    "confidence_score": {"type": "number"}
+                },
+                "required": ["answer"]
+                }
+                ```
+                """)
+
+                st.markdown(
+                "[📚 Learn about Vertex AI JSON schemas](https://ai.google.dev/gemini-api/docs/structured-output)"
+                )
+
+                # Clear/Reset buttons
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Reset to Default Schema", use_container_width=True):
+                        st.session_state["custom_response_schema"] = '{"type": "object", "properties": {"response": {"type": "string"}}, "required": ["response"]}'
+                        st.session_state["schema_preset"] = "Object Response"
+                        st.rerun()
+                with col2:
+                    if st.button("Clear Schema", use_container_width=True):
+                        st.session_state["custom_response_schema"] = '{}'
+                        st.session_state["schema_preset"] = "Custom"
+                        st.rerun()
+
+            else:
+                # Clear custom schema and related settings for non-JSON MIME types
+                if "custom_response_schema" in st.session_state:
+                    del st.session_state["custom_response_schema"]
+                if "schema_preset" in st.session_state:
+                    del st.session_state["schema_preset"]
 
     # ---- Prompt Customization ----
     with st.expander("Prompt Customization"):

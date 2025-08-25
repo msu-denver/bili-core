@@ -57,7 +57,7 @@ Example:
     # Run the application page
     run_app_page()
 """
-
+import json
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -444,7 +444,7 @@ def display_model_configuration():
                 )
             if "memory_limit_trim_value" in st.session_state:
                 st.markdown(
-                    f"**Chat History 'trim_k' Value:** {st.session_state.get('memory_limit_trim_value')}"
+                    f"""**Chat History 'trim_k' Value:** {st.session_state.get('memory_limit_trim_value')}"""
                 )
 
         if st.session_state.get("supports_tools", True):
@@ -476,6 +476,30 @@ def load_system_components(checkpointer):
     :return: None
     """
     # Load the model that will be used for the conversation chain
+    model_kwargs = st.session_state.get("model_kwargs", {})
+
+    # Add Vertex AI specific parameters if using Google Vertex
+    if st.session_state["model_type"] == "remote_google_vertex":
+        # Handle custom response schema
+        if st.session_state.get("response_mime_type") == "application/json":
+            custom_schema = st.session_state.get("custom_response_schema")
+            if custom_schema:
+                try:
+                    parsed_schema = json.loads(custom_schema)
+                    model_kwargs["response_schema"] = parsed_schema
+                except json.JSONDecodeError:
+                    # Use default string schema if custom schema is invalid
+                    model_kwargs["response_schema"] = {"type": "string"}
+            else:
+                model_kwargs["response_schema"] = {"type": "string"}
+
+        # Handle MIME type
+        response_mime_type = st.session_state.get("response_mime_type", "text/plain")
+        if response_mime_type == "text/plain":
+            model_kwargs["response_mime_type"] = "text/plain"
+        elif response_mime_type == "application/json":
+            model_kwargs["response_mime_type"] = "application/json"
+
     model = load_model(
         model_type=st.session_state["model_type"],
         model_name=st.session_state["model_id"],
@@ -484,7 +508,7 @@ def load_system_components(checkpointer):
         top_p=st.session_state.get("top_p", None),
         top_k=st.session_state.get("top_k", None),
         seed=st.session_state.get("seed_value", None),
-        **st.session_state.get("model_kwargs", {}),
+        **model_kwargs,
     )
     st.session_state["model_config"] = model
 
