@@ -478,19 +478,22 @@ def load_system_components(checkpointer):
     # Load the model that will be used for the conversation chain
     model_kwargs = st.session_state.get("model_kwargs", {})
 
-    # Add Vertex AI specific parameters if using Google Vertex
-    if st.session_state["model_type"] == "remote_google_vertex":
-        # Handle custom response schema
+    # Check if the llm config supports structured output
+    if st.session_state.get("supports_structured_output", False):
+        # If it does check if the mime type is json
         if st.session_state.get("response_mime_type") == "application/json":
             custom_schema = st.session_state.get("custom_response_schema")
+            # If the custom schema is json and exists
             if custom_schema:
                 try:
+                    # Load the json schema
                     parsed_schema = json.loads(custom_schema)
                     model_kwargs["response_schema"] = parsed_schema
                 except json.JSONDecodeError:
                     # Use default string schema if custom schema is invalid
                     model_kwargs["response_schema"] = {"type": "string"}
             else:
+                # Default to string response
                 model_kwargs["response_schema"] = {"type": "string"}
 
         # Handle MIME type

@@ -200,6 +200,7 @@ def display_configuration_panels():
             None,
         )
         st.session_state["model_kwargs"] = selected_model.get("kwargs", {})
+        st.session_state["supports_structured_output"] = selected_model.get("supports_structured_output", False)
 
         # If model supports custom_model_path, add a text input for the path
         if selected_model.get("custom_model_path", False):
@@ -406,7 +407,7 @@ def display_configuration_panels():
             st.session_state["max_retries"] = None
 
         # Vertex AI specific configuration for response schema and MIME type
-        if selected_model.get("supports_structured_output", False) is True:
+        if selected_model.get("supports_structured_output", False):
             # insert horizontal rule
             st.markdown("---")
             st.markdown("**AI Response Configuration**")
