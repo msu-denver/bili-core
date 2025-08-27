@@ -358,7 +358,7 @@ def load_llamacpp_model(
 #    without Customer's prior permission or instruction."
 @conditional_cache_resource()
 def load_remote_gcp_vertex_model(
-    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None
+    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None, response_schema=None, response_mime_type=None
 ):
     """
     Loads a remote GCP Vertex AI model with the specified configuration parameters.
@@ -399,6 +399,10 @@ def load_remote_gcp_vertex_model(
         llm_config["top_k"] = top_k
     if seed:
         llm_config["seed"] = seed
+    if response_mime_type:
+        llm_config["response_mime_type"] = response_mime_type
+    if response_schema:
+        llm_config["response_schema"] = response_schema
 
     llm = ChatVertexAI(**llm_config)
 
