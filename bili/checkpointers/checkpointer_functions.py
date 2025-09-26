@@ -44,7 +44,7 @@ import os
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from bili.checkpointers.mongo_checkpointer import get_mongo_checkpointer
+from bili.checkpointers.mongo_checkpointer import get_mongo_checkpointer, get_async_mongo_checkpointer
 from bili.checkpointers.pg_checkpointer import get_pg_checkpointer
 from bili.utils.logging_utils import get_logger
 
@@ -82,4 +82,25 @@ def get_checkpointer():
 
     # If no database persistence is available, use MemorySaver as a fallback
     LOGGER.debug("Using MemorySaver for conversation state checkpointing.")
+    return MemorySaver()
+
+
+async def get_async_checkpointer():
+    """
+    Determine and return the appropriate async checkpointer instance for streaming
+    operations. Currently supports async MongoDB checkpointer.
+
+    :returns: An async checkpointer instance based on availability.
+        - Async MongoDB checkpointer if MONGO_CONNECTION_STRING is available.
+        - Memory checkpointer as fallback (converted to async-compatible).
+
+    :rtype: AsyncCheckpointer | MemorySaver
+    """
+    # Currently only MongoDB has async support for streaming
+    if os.getenv("MONGO_CONNECTION_STRING"):
+        LOGGER.debug("Using AsyncMongoDBSaver for streaming operations.")
+        return await get_async_mongo_checkpointer()
+
+    # Fallback to memory checkpointer (works in async contexts)
+    LOGGER.debug("Using MemorySaver for streaming operations (async fallback).")
     return MemorySaver()
