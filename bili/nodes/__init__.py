@@ -1,6 +1,6 @@
 from . import (
     add_persona_and_summary,
-    normalize_tool_state,
+    normalize_state,
     per_user_state,
     react_agent_node,
     trim_and_summarize,
@@ -9,7 +9,7 @@ from . import (
 
 __all__ = [
     "add_persona_and_summary",
-    "normalize_tool_state",
+    "normalize_state",
     "per_user_state",
     "react_agent_node",
     "trim_and_summarize",
