@@ -1,5 +1,5 @@
 """
-normalize_tool_state.py
+normalize_state.py
 -----------------------
 
 This module provides a utility for normalizing tool function
@@ -10,14 +10,18 @@ support mixing tool calls with function calls.
 
 Functions:
 ----------
-- build_normalize_tool_state_node(**kwargs):
-    Returns a node function that processes the conversation state
+- build_normalize_state_node(**kwargs):
+    - Returns a node function that processes the conversation state
     by removing the "function_call"
     entry from the `additional_kwargs` of each message, if present.
-    This ensures that redundant
+    - This ensures that redundant
     tool calls are eliminated while retaining tool information
     in the "tool_calls" field.
-
+    - Also removes any empty AI messages to prevent and invalid message
+    from existing. In vertex if an AI message is empty it will cause a
+    ```InvalidArgument: 400 Unable to submit request because it must include 
+    at least one parts field, which describes the prompt input.``` 
+    
 Dependencies:
 -------------
 - bili.utils.logging_utils.get_logger: Initializes a logger for tracing and debugging.
@@ -43,7 +47,7 @@ from bili.utils.logging_utils import get_logger
 LOGGER = get_logger(__name__)
 
 
-def build_normalize_tool_state_node(**kwargs):
+def build_normalize_state_node(**kwargs):
     """
     Creates a LangGraph node that normalizes tool function calls in the conversation state.
 
@@ -56,7 +60,7 @@ def build_normalize_tool_state_node(**kwargs):
                   returns a modified state dictionary with `RemoveMessage` instructions.
     """
 
-    def normalize_tool_state(state: dict) -> dict:
+    def normalize_state(state: dict) -> dict:
         """
         Normalizes the state of tool messages by inspecting and modifying their content
         and flagging invalid messages for removal. This function processes tool-related
@@ -103,6 +107,14 @@ def build_normalize_tool_state_node(**kwargs):
                 )
                 messages_to_remove.append(RemoveMessage(id=message.id))
 
+            # If an AI message exists and the content is empty mark for deletion
+            if isinstance(message, AIMessage) and message.content == "":
+                LOGGER.debug(
+                    "Marking AI message for removal due to empty content field: %s",
+                    message,
+                )
+                messages_to_remove.append(RemoveMessage(id=message.id))
+
         return {"messages": messages_to_remove}
 
-    return normalize_tool_state
+    return normalize_state
