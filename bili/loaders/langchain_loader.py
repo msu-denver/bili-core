@@ -62,7 +62,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from bili.nodes.add_persona_and_summary import build_add_persona_and_summary_node
-from bili.nodes.normalize_tool_state import build_normalize_tool_state_node
+from bili.nodes.normalize_state import build_normalize_state_node
 from bili.nodes.per_user_state import buld_per_user_state_node
 from bili.nodes.react_agent_node import build_react_agent_node
 from bili.nodes.trim_and_summarize import build_trim_and_summarize_node
@@ -86,7 +86,7 @@ if current_log_level <= logging.DEBUG:
 # custom nodes.
 GRAPH_NODE_REGISTRY = {
     "add_persona_and_summary": build_add_persona_and_summary_node,
-    "normalize_state": build_normalize_tool_state_node,
+    "normalize_state": build_normalize_state_node,
     "per_user_state": buld_per_user_state_node,
     "react_agent": build_react_agent_node,
     "trim_summarize": build_trim_and_summarize_node,
