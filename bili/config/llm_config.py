@@ -28,6 +28,7 @@ Example:
     models = initialize_models(active_models, model_params)
 """
 
+# pylint: disable=too-many-lines
 # Available LLM Models and Types
 LLM_MODELS = {
     # https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html
@@ -43,10 +44,8 @@ LLM_MODELS = {
         "model_help": "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions",
         "models": [
             # AWS Models
+            # Amazon Nova Models (4)
             # https://docs.aws.amazon.com/nova/latest/userguide/what-is-nova.html
-            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-jamba.html
-            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-text.html
-            # https://docs.aws.amazon.com/bedrock/latest/userguide/titan-text-models.html
             {
                 "model_name": "Amazon Nova Pro",
                 "model_id": "amazon.nova-pro-v1:0",
@@ -99,8 +98,11 @@ LLM_MODELS = {
                 "supports_top_k": True,
                 "top_k_max": 50,
             },
+            # Amazon Titan Models (3)
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-text.html
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/titan-text-models.html
             {
-                "model_name": "Amazon Titan Text G1 - Premier (Deprecated)",
+                "model_name": "Amazon Titan Text G1 - Premier",
                 "model_id": "amazon.titan-text-premier-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 32000,
@@ -114,7 +116,7 @@ LLM_MODELS = {
                 "supports_tools": False,
             },
             {
-                "model_name": "Amazon Titan Text G1 - Express (Deprecated)",
+                "model_name": "Amazon Titan Text G1 - Express ",
                 "model_id": "amazon.titan-text-express-v1",
                 "custom_model_path": False,
                 "max_input_tokens": 8192,
@@ -128,7 +130,7 @@ LLM_MODELS = {
                 "supports_tools": False,
             },
             {
-                "model_name": "Amazon Titan Text G1 - Lite (Deprecated)",
+                "model_name": "Amazon Titan Text G1 - Lite",
                 "model_id": "amazon.titan-text-lite-v1",
                 "custom_model_path": False,
                 "max_input_tokens": 4096,
@@ -141,7 +143,7 @@ LLM_MODELS = {
                 "top_k_max": 50,
                 "supports_tools": False,
             },
-            # AI21 Labs Models
+            # AI21 Labs Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-jamba.html
             {
                 "model_name": "AI21 Jamba 1.5 Large",
@@ -171,50 +173,9 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": False,
             },
-            {
-                "model_name": "AI21 Jamba-Instruct (Deprecated)",
-                "model_id": "ai21.jamba-instruct-v1:0",
-                "custom_model_path": False,
-                "max_input_tokens": 256000,
-                "max_output_tokens": 4096,
-                "supports_temperature": True,
-                # Although documentation says 2.0 is the max, anything greater than 1.0 errors out
-                "temperature_max": 1.0,
-                "supports_seed": True,
-                "supports_max_output_tokens": True,
-                "supports_top_p": True,
-                "supports_top_k": False,
-                "supports_tools": False,
-            },
-            # Anthropic Models
+            # Anthropic Models (10)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-claude.html
             # https://docs.anthropic.com/en/docs/about-claude/models
-            {
-                "model_name": "Anthropic Claude 2.1",
-                "model_id": "anthropic.claude-v2:1",
-                "custom_model_path": False,
-                "max_input_tokens": 200000,
-                "max_output_tokens": 8192,
-                "supports_temperature": True,
-                "supports_seed": True,
-                "supports_max_output_tokens": True,
-                "supports_top_p": True,
-                "supports_top_k": True,
-                "top_k_max": 50,
-            },
-            {
-                "model_name": "Anthropic Claude 2",
-                "model_id": "anthropic.claude-v2",
-                "custom_model_path": False,
-                "max_input_tokens": 200000,
-                "max_output_tokens": 8192,
-                "supports_temperature": True,
-                "supports_seed": True,
-                "supports_max_output_tokens": True,
-                "supports_top_p": True,
-                "supports_top_k": True,
-                "top_k_max": 50,
-            },
             {
                 "model_name": "Anthropic Claude 3 Haiku",
                 "model_id": "anthropic.claude-3-haiku-20240307-v1:0",
@@ -229,11 +190,50 @@ LLM_MODELS = {
                 "top_k_max": 50,
             },
             {
+                "model_name": "Anthropic Claude 3.5 Haiku",
+                "model_id": "anthropic.claude-3-5-haiku-20241022-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+            },
+            {
                 "model_name": "Anthropic Claude 3 Opus",
                 "model_id": "anthropic.claude-3-opus-20240229-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+            },
+            {
+                "model_name": "Anthropic Claude Opus 4",
+                "model_id": "anthropic.claude-opus-4-20250514-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 32000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+            },
+            {
+                "model_name": "Anthropic Claude Opus 4.1",
+                "model_id": "anthropic.claude-opus-4-1-20250805-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 32000,
                 "supports_temperature": True,
                 "supports_seed": True,
                 "supports_max_output_tokens": True,
@@ -281,11 +281,11 @@ LLM_MODELS = {
                 "top_k_max": 50,
             },
             {
-                "model_name": "Anthropic Claude 3.5 Haiku",
-                "model_id": "anthropic.claude-3-5-haiku-20241022-v1:0",
+                "model_name": "Anthropic Claude 3.7 Sonnet",
+                "model_id": "anthropic.claude-3-7-sonnet-20250219-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
-                "max_output_tokens": 8192,
+                "max_output_tokens": 64000,
                 "supports_temperature": True,
                 "supports_seed": True,
                 "supports_max_output_tokens": True,
@@ -293,13 +293,26 @@ LLM_MODELS = {
                 "supports_top_k": True,
                 "top_k_max": 50,
             },
-            # Cohere Models
+            {
+                "model_name": "Anthropic Claude Sonnet 4",
+                "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 64000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+            },
+            # Cohere Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-cohere-command.html
             # https://aws.amazon.com/bedrock/cohere/#:~:text=With%20a%20context%20window%20of,advanced%20retrieval%2C%20and%20tool%20use.
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-cohere-command-r-plus.html
             {
-                "model_name": "Cohere Command Light",
-                "model_id": "cohere.command-light-text-v14",
+                "model_name": "Cohere Command R",
+                "model_id": "cohere.command-r-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4096,
@@ -323,35 +336,49 @@ LLM_MODELS = {
                 "supports_top_k": True,
                 "top_k_max": 500,
             },
+            # DeepSeek Models (1)
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-deepseek.html
             {
-                "model_name": "Cohere Command R",
-                "model_id": "cohere.command-r-v1:0",
+                "model_name": "DeepSeek-R1",
+                "model_id": "deepseek.r1-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
-                "max_output_tokens": 4096,
+                "max_output_tokens": 32000,
                 "supports_temperature": True,
-                "supports_seed": True,
+                "supports_seed": False,
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
-                "supports_top_k": True,
-                "top_k_max": 500,
+                "supports_top_k": False,
             },
-            {
-                "model_name": "Cohere Command",
-                "model_id": "cohere.command-text-v14",
-                "custom_model_path": False,
-                "max_input_tokens": 128000,
-                "max_output_tokens": 4096,
-                "supports_temperature": True,
-                "supports_seed": True,
-                "supports_max_output_tokens": True,
-                "supports_top_p": True,
-                "supports_top_k": True,
-                "top_k_max": 500,
-            },
-            # Meta LLama Models
+            # Meta LLama Models (11)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-meta.html
             # https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
+            {
+                "model_name": "Meta Llama 3 8B Instruct",
+                "model_id": "meta.llama3-8b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 8192,
+                "max_output_tokens": 2048,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_tools": False,
+            },
+            {
+                "model_name": "Meta Llama 3 70B Instruct",
+                "model_id": "meta.llama3-70b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 8192,
+                "max_output_tokens": 2048,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_tools": False,
+            },
             {
                 "model_name": "Meta Llama 3.1 8B Instruct",
                 "model_id": "us.meta.llama3-1-8b-instruct-v1:0",
@@ -423,6 +450,20 @@ LLM_MODELS = {
                 "supports_tools": False,
             },
             {
+                "model_name": "Meta Llama 3.2 90B Vision Instruct",
+                "model_id": "us.meta.llama3-2-90b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 2048,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "supports_tools": False,
+            },
+            {
                 "model_name": "Meta Llama 3.3 70B Instruct",
                 "model_id": "us.meta.llama3-3-70b-instruct-v1:0",
                 "custom_model_path": False,
@@ -436,7 +477,35 @@ LLM_MODELS = {
                 "top_k_max": 50,
                 "supports_tools": False,
             },
-            # Minstral AI Models
+            {
+                "model_name": "Meta Llama 4 Scout 17B Instruct",
+                "model_id": "us.meta.llama4-scout-17b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 3500000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "supports_tools": False,
+            },
+            {
+                "model_name": "Meta Llama 4 Maverick 17B Instruct",
+                "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 1000000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "supports_tools": False,
+            },
+            # Minstral AI Models (5)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-large-2407.html
             # https://docs.mistral.ai/getting-started/models/models_overview/
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-text-completion.html
@@ -492,6 +561,33 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 200,
+            },
+            {
+                "model_name": "Mistral Pixtral Large",
+                "model_id": "us.mistral.pixtral-large-2502-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_tools": True,
+            },
+            # TwelveLabs Models (1)
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-pegasus.html
+            {
+                "model_name": "TwelveLabs Pegasus 1.2",
+                "model_id": "us.twelvelabs.pegasus-1-2-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
             },
         ],
     },
@@ -653,8 +749,10 @@ LLM_MODELS = {
         "Model descriptions can be found at "
         """https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/models?tabs="""
         """global-standard%2Cstandard-chat-completions""",
-        "model_help": """https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/models?tabs="""
-        """global-standard%2Cstandard-chat-completions""",
+        "model_help": (
+            "https://learn.microsoft.com/en-us/azure/ai-services/"
+            "openai/concepts/models?tabs=global-standard%2Cstandard-chat-completions"
+        ),
         "models": [
             {
                 "model_name": "Azure OpenAI GPT-4.1",
@@ -994,7 +1092,10 @@ LLM_MODELS = {
         "models": [
             {
                 "model_name": "LlamaCpp Local (In Memory) Model",
-                "model_id": "/app/bili-core/models/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q5_K_M.gguf",
+                "model_id": (
+                    "/app/bili-core/models/Llama-3.2-1B-Instruct-GGUF/"
+                    "Llama-3.2-1B-Instruct-Q5_K_M.gguf"
+                ),
                 "custom_model_path": True,
                 "supports_temperature": True,
                 "supports_seed": True,
