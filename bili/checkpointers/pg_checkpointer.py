@@ -138,6 +138,7 @@ def get_pg_checkpointer(keep_last_n: int = 5) -> Optional[PostgresSaver]:
     if pg_connection_pool:
         checkpointer = PruningPostgresSaver(pg_connection_pool, keep_last_n=keep_last_n)
         checkpointer.setup()  # Perform setup if this is the first time
+        checkpointer.ensure_indexes()  # Create indexes after tables exist
         return checkpointer
     return None
 
@@ -167,7 +168,6 @@ class PruningPostgresSaver(PostgresSaver):
         """
         super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
-        self.ensure_indexes()
 
     def ensure_indexes(self) -> None:
         """

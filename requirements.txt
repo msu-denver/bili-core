@@ -24,6 +24,7 @@ langgraph==0.2.76
 llama-cpp-python==0.3.7
 ml-dtypes==0.4.1
 nltk==3.9.1
+numpy==1.26.4
 openpyxl==3.1.5
 opensearch-py==2.8.0
 optimum==1.23.1
@@ -49,6 +50,6 @@ textract==1.5.0
 torch==2.4.1
 torchaudio==2.4.1
 torchvision==0.19.1
-transformers==4.45.2
+transformers==4.41.2
 unstructured[all-docs]==0.15.14
 watchdog==5.0.3
