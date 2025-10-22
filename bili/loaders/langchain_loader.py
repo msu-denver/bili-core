@@ -52,6 +52,7 @@ agent_graph = build_agent_graph(
 
 import difflib
 import logging
+import time
 from typing import Callable
 
 import langchain
@@ -105,6 +106,27 @@ DEFAULT_GRAPH_DEFINITION = [
     "trim_summarize",
     "normalize_state",
 ]
+
+
+def wrap_node(node_func: Callable, node_name: str) -> Callable:
+    """
+    Wraps a node function to log its execution time.
+
+    :param node_func: The node function to wrap.
+    :param node_name: The name of the node for logging purposes.
+    :return: A wrapped function that logs execution time.
+    """
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        # CompiledStateGraph objects need to use .invoke() method
+        if isinstance(node_func, CompiledStateGraph):
+            result = node_func.invoke(*args, **kwargs)
+        else:
+            result = node_func(*args, **kwargs)
+        execution_time = (time.time() - start_time) * 1000
+        LOGGER.info(f"Node '{node_name}' executed in {execution_time:.2f} ms")
+        return result
+    return wrapper
 
 
 def build_agent_graph(
@@ -170,6 +192,7 @@ def build_agent_graph(
             )
         builder = node_registry[node_name]
         nodes[node_name] = builder(**node_kwargs)
+        nodes[node_name] = wrap_node(nodes[node_name], node_name)
         graph.add_node(node_name, nodes[node_name])
 
     # Add edges between nodes in the graph
