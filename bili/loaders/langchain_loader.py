@@ -114,14 +114,17 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
 
     :param node_func: The node function to wrap.
     :param node_name: The name of the node for logging purposes.
-    :return: A wrapped function that logs execution time.
+    :return: A wrapped function that logs execution time, or the node itself if it's a CompiledStateGraph.
     """
+    # Skip wrapping for CompiledStateGraph - let LangGraph handle it directly
+    if isinstance(node_func, CompiledStateGraph):
+        return node_func
+
     def wrapper(*args, **kwargs):
         start_time = time.time()
         result = node_func(*args, **kwargs)
-        end_time = time.time()
-        execution_time = end_time - start_time
-        LOGGER.info(f"Node '{node_name}' executed in {execution_time:.4f} seconds")
+        execution_time = (time.time() - start_time) * 1000
+        LOGGER.info(f"Node '{node_name}' executed in {execution_time:.2f} ms")
         return result
     return wrapper
 

@@ -96,11 +96,16 @@ def build_react_agent_node(
     if tools is not None:
         # If tools are supported, create a REACT agent with the provided tools
         LOGGER.debug("Creating REACT agent with tools: %s", tools)
-        agent = create_react_agent(
+        compiled_agent = create_react_agent(
             model=llm_model,
             state_schema=state,
             tools=tools,
         )
+
+        # Wrap the compiled agent in a callable function so it can be used as a node
+        # (CompiledStateGraph can't be added directly as a node)
+        def agent(state: State):
+            return compiled_agent.invoke(state)
     else:
         LOGGER.debug(
             "TOOLS not supported for this LLM. Creating a simple graph node to invoke the LLM"
