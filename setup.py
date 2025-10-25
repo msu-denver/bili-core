@@ -18,21 +18,33 @@ class PostInstallCommand(install):
         # Run the standard install process
         install.run(self)
 
-        # Only install pre-commit hooks if this is a Git repository
-        if os.path.isdir(".git"):
+        # Check if we're in build mode by looking for bdist_wheel in the command
+        import sys
+
+        is_wheel_build = "bdist_wheel" in sys.argv
+
+        # Only install pre-commit hooks if this is a Git repository and NOT building a wheel
+        if not is_wheel_build and os.path.isdir(".git"):
             print("Installing pre-commit hooks...")
             try:
                 subprocess.check_call(["pre-commit", "install"])
             except:
                 print("Warning: pre-commit install failed. Skipping hook setup.")
-        else:
+        elif not is_wheel_build:
             print("Skipping pre-commit hook installation (not a Git repository).")
 
         # Install excluded HTTP/Git-based dependencies separately
         http_git_deps = read_http_git_requirements()
         if http_git_deps:
             print("Installing HTTP/Git-based dependencies separately...")
-            subprocess.check_call(["pip", "install"] + http_git_deps)
+            try:
+                subprocess.check_call(["pip", "install"] + http_git_deps)
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: Failed to install Git/HTTP dependencies: {e}")
+                print(
+                    "Please install them manually with: pip install "
+                    + " ".join(http_git_deps)
+                )
 
 
 def read_requirements():
@@ -72,7 +84,7 @@ def read_http_git_requirements():
 
 setup(
     name="bili-core",
-    version="2.9.0",
+    version="2.9.1",
     packages=find_packages(),  # Automatically detect all packages
     install_requires=read_requirements(),  # Load only standard dependencies
     cmdclass={
