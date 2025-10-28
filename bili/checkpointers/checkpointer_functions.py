@@ -42,10 +42,9 @@ Example:
 
 import os
 
-from langgraph.checkpoint.memory import MemorySaver
-
+from bili.checkpointers.memory_checkpointer import QueryableMemorySaver
 from bili.checkpointers.mongo_checkpointer import get_mongo_checkpointer, get_async_mongo_checkpointer
-from bili.checkpointers.pg_checkpointer import get_pg_checkpointer
+from bili.checkpointers.pg_checkpointer import get_pg_checkpointer, get_async_pg_checkpointer
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module
@@ -80,27 +79,38 @@ def get_checkpointer():
         LOGGER.debug("Using MongoDBSaver for conversation state checkpointing.")
         return get_mongo_checkpointer()
 
-    # If no database persistence is available, use MemorySaver as a fallback
-    LOGGER.debug("Using MemorySaver for conversation state checkpointing.")
-    return MemorySaver()
+    # If no database persistence is available, use QueryableMemorySaver as a fallback
+    LOGGER.debug("Using QueryableMemorySaver for conversation state checkpointing.")
+    return QueryableMemorySaver()
 
 
 async def get_async_checkpointer():
     """
     Determine and return the appropriate async checkpointer instance for streaming
-    operations. Currently supports async MongoDB checkpointer.
+    operations. Supports async PostgreSQL, MongoDB, and Memory checkpointers.
+
+    The priority order matches get_checkpointer():
+    1. PostgreSQL if POSTGRES_CONNECTION_STRING is set
+    2. MongoDB if MONGO_CONNECTION_STRING is set
+    3. MemorySaver as fallback (inherently async-compatible)
 
     :returns: An async checkpointer instance based on availability.
+        - Async PostgreSQL checkpointer if POSTGRES_CONNECTION_STRING is available.
         - Async MongoDB checkpointer if MONGO_CONNECTION_STRING is available.
-        - Memory checkpointer as fallback (converted to async-compatible).
+        - MemorySaver as fallback (works in async contexts).
 
-    :rtype: AsyncCheckpointer | MemorySaver
+    :rtype: AsyncPostgresSaver | AsyncMongoDBSaver | MemorySaver
     """
-    # Currently only MongoDB has async support for streaming
+    # Priority 1: PostgreSQL async checkpointer
+    if os.getenv("POSTGRES_CONNECTION_STRING"):
+        LOGGER.debug("Using AsyncPostgresSaver for streaming operations.")
+        return await get_async_pg_checkpointer()
+
+    # Priority 2: MongoDB async checkpointer
     if os.getenv("MONGO_CONNECTION_STRING"):
         LOGGER.debug("Using AsyncMongoDBSaver for streaming operations.")
         return await get_async_mongo_checkpointer()
 
-    # Fallback to memory checkpointer (works in async contexts)
-    LOGGER.debug("Using MemorySaver for streaming operations (async fallback).")
-    return MemorySaver()
+    # Priority 3: Memory checkpointer (inherently async-compatible, no await needed)
+    LOGGER.debug("Using QueryableMemorySaver for streaming operations (async-compatible fallback).")
+    return QueryableMemorySaver()

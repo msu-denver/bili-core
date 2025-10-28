@@ -1,0 +1,173 @@
+"""
+Module: base_checkpointer
+
+This module provides an abstract base class for checkpointers that extends
+LangGraph's base checkpointer functionality with query capabilities for
+conversation management.
+
+Classes:
+    - QueryableCheckpointerMixin:
+      Mixin class that provides query methods for conversation data retrieval.
+      Designed to be mixed into checkpointer implementations (MongoDB, PostgreSQL, Memory).
+
+Dependencies:
+    - abc: Provides abstract base class functionality
+    - typing: Provides type hints
+    - datetime: Provides datetime handling
+
+Usage:
+    Checkpointer implementations should inherit from this mixin along with
+    their respective LangGraph checkpointer base class to gain query capabilities.
+
+Example:
+    class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
+        def get_user_threads(self, user_identifier: str) -> List[Dict[str, Any]]:
+            # Implementation specific to MongoDB
+            pass
+"""
+
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+
+class QueryableCheckpointerMixin(ABC):
+    """
+    Abstract mixin class that defines query interface for checkpointers.
+
+    This mixin provides methods for querying conversation data from checkpointers
+    regardless of the underlying storage mechanism (MongoDB, PostgreSQL, Memory).
+    All checkpointer implementations should implement these methods to provide
+    a consistent interface for conversation management.
+    """
+
+    @abstractmethod
+    def get_user_threads(
+        self,
+        user_identifier: str,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all conversation threads for a specific user.
+
+        Args:
+            user_identifier: User's email or ID used in thread_id format
+            limit: Maximum number of threads to return (None for all)
+            offset: Number of threads to skip for pagination
+
+        Returns:
+            List of thread objects with metadata:
+            [
+                {
+                    "thread_id": str,
+                    "conversation_id": str,  # Extracted from thread_id
+                    "last_updated": datetime,
+                    "checkpoint_count": int,
+                    "message_count": int,
+                    "first_message": Optional[str],  # For title generation
+                },
+                ...
+            ]
+        """
+        pass
+
+    @abstractmethod
+    def get_thread_messages(
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all messages from a conversation thread.
+
+        Args:
+            thread_id: Thread ID to retrieve messages from
+            limit: Maximum number of messages to return (None for all)
+            offset: Number of messages to skip for pagination
+
+        Returns:
+            List of message objects:
+            [
+                {
+                    "role": str,  # "user" or "assistant"
+                    "content": str,
+                    "timestamp": Optional[datetime],
+                },
+                ...
+            ]
+        """
+        pass
+
+    @abstractmethod
+    def delete_thread(self, thread_id: str) -> bool:
+        """
+        Delete all checkpoints for a conversation thread.
+
+        Args:
+            thread_id: Thread ID to delete
+
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        pass
+
+    @abstractmethod
+    def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:
+        """
+        Get usage statistics for a user.
+
+        Args:
+            user_identifier: User's email or ID used in thread_id format
+
+        Returns:
+            Dictionary with statistics:
+            {
+                "total_threads": int,
+                "total_messages": int,
+                "total_checkpoints": int,
+                "oldest_thread": Optional[datetime],
+                "newest_thread": Optional[datetime],
+            }
+        """
+        pass
+
+    @abstractmethod
+    def thread_exists(self, thread_id: str) -> bool:
+        """
+        Check if a thread exists in the checkpointer.
+
+        Args:
+            thread_id: Thread ID to check
+
+        Returns:
+            True if thread exists, False otherwise
+        """
+        pass
+
+    def verify_thread_ownership(
+        self,
+        thread_id: str,
+        user_identifier: str
+    ) -> bool:
+        """
+        Verify that a thread belongs to a specific user.
+
+        Default implementation checks thread_id format:
+        - email (default thread)
+        - email_conversationId (named conversation)
+
+        Subclasses can override for custom ownership logic.
+
+        Args:
+            thread_id: Thread ID to verify
+            user_identifier: User's email or ID
+
+        Returns:
+            True if thread belongs to user, False otherwise
+        """
+        return (
+            thread_id == user_identifier or
+            thread_id.startswith(f"{user_identifier}_")
+        )

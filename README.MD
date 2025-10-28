@@ -59,10 +59,20 @@ Users can extend the prebuilt LangGraph workflows by adding **custom nodes** in 
 
 ### 5. **Chat History and Memory Management**
 Efficiently manages conversation states in LangGraph by persisting chat history with:
-- **[MongoDB Checkpointer](https://langchain-ai.github.io/langgraph/how-tos/persistence_mongodb/)**: Supports flexible document-based state storage
-- **[PostgreSQL Checkpointer](https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres/)**: Provides relational database storage for robust checkpointing
+- **[MongoDB Checkpointer](https://langchain-ai.github.io/langgraph/how-tos/persistence_mongodb/)**: Supports flexible document-based state storage with async support
+- **[PostgreSQL Checkpointer](https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres/)**: Provides relational database storage for robust checkpointing with async support
+- **Memory Checkpointer**: In-memory storage for testing and development
 - **Trim Strategy**: Retains only the last `k` messages for simple memory management
 - **Summarization Strategy**: Aggregates older messages into a coherent summary to optimize token usage
+
+All checkpointers implement a unified queryable interface for conversation management:
+- **Query conversations by user**: List all conversations for a specific user
+- **Retrieve conversation history**: Get all messages from a thread
+- **Delete conversations**: Remove conversation data
+- **Get usage statistics**: Track conversation counts and message volumes
+- **Check thread existence**: Validate thread IDs before operations
+
+Both synchronous and asynchronous checkpointer APIs are supported for flexibility across different application architectures.
 
 ### 6. Flask REST API for Programmatic Access
 

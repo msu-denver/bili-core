@@ -45,7 +45,8 @@ Example:
 
 import atexit
 import os
-from typing import Any
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
@@ -54,6 +55,7 @@ from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
@@ -116,7 +118,7 @@ def get_mongo_checkpointer(keep_last_n: int = 5):
     return None
 
 
-class PruningMongoDBSaver(MongoDBSaver):
+class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
     """
     Manages saving and pruning of checkpoints in MongoDB for efficient storage.
 
@@ -125,6 +127,9 @@ class PruningMongoDBSaver(MongoDBSaver):
     only the most recent checkpoints, specified by the `keep_last_n` parameter, are retained
     in the database. The class also ensures necessary MongoDB indexes exist for optimal
     performance.
+
+    Also implements QueryableCheckpointerMixin to provide query methods for conversation
+    data retrieval without exposing MongoDB-specific implementation details.
 
     :ivar keep_last_n: Determines the maximum number of recent checkpoints to retain
         in the database. If set to -1 or None, pruning is disabled.
@@ -256,6 +261,157 @@ class PruningMongoDBSaver(MongoDBSaver):
                 self.writes_collection.delete_many(del_query)
 
         return result_config
+
+    # QueryableCheckpointerMixin implementation for MongoDB
+
+    def get_user_threads(
+        self,
+        user_identifier: str,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get all conversation threads for a user from MongoDB."""
+        pipeline = [
+            {
+                "$match": {
+                    "thread_id": {
+                        "$regex": f"^{user_identifier}(_|$)"  # Matches user_identifier or user_identifier_*
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$thread_id",
+                    "last_updated": {"$max": "$checkpoint.ts"},
+                    "checkpoint_count": {"$sum": 1}
+                }
+            },
+            {
+                "$sort": {"last_updated": DESCENDING}
+            }
+        ]
+
+        # Add pagination if specified
+        if offset > 0:
+            pipeline.append({"$skip": offset})
+        if limit is not None:
+            pipeline.append({"$limit": limit})
+
+        results = list(self.checkpoint_collection.aggregate(pipeline))
+
+        threads = []
+        for result in results:
+            thread_id = result["_id"]
+
+            # Extract conversation_id from thread_id
+            if "_" in thread_id:
+                conversation_id = thread_id.split("_", 1)[1]
+            else:
+                conversation_id = "default"
+
+            # Get the latest checkpoint to extract first message
+            latest_checkpoint = self.checkpoint_collection.find_one(
+                {"thread_id": thread_id},
+                sort=[("checkpoint.ts", DESCENDING)]
+            )
+
+            first_message = None
+            message_count = 0
+
+            if latest_checkpoint and "checkpoint" in latest_checkpoint:
+                channel_values = latest_checkpoint["checkpoint"].get("channel_values", {})
+                messages = channel_values.get("messages", [])
+
+                if messages:
+                    message_count = len(messages)
+                    # Get the first user message
+                    for msg in messages:
+                        if hasattr(msg, 'content') and msg.content and msg.__class__.__name__ == "HumanMessage":
+                            first_message = msg.content
+                            break
+
+            threads.append({
+                "thread_id": thread_id,
+                "conversation_id": conversation_id,
+                "last_updated": result["last_updated"],
+                "checkpoint_count": result["checkpoint_count"],
+                "message_count": message_count,
+                "first_message": first_message,
+            })
+
+        return threads
+
+    def get_thread_messages(
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get all messages from a conversation thread."""
+        # Get the latest checkpoint for this thread
+        latest_checkpoint = self.checkpoint_collection.find_one(
+            {"thread_id": thread_id},
+            sort=[("checkpoint.ts", DESCENDING)]
+        )
+
+        if not latest_checkpoint or "checkpoint" not in latest_checkpoint:
+            return []
+
+        # Extract messages from checkpoint
+        channel_values = latest_checkpoint["checkpoint"].get("channel_values", {})
+        raw_messages = channel_values.get("messages", [])
+
+        messages = []
+        for msg in raw_messages:
+            messages.append({
+                "role": "user" if msg.__class__.__name__ == "HumanMessage" else "assistant",
+                "content": msg.content if hasattr(msg, 'content') else str(msg),
+                "timestamp": None,  # Messages don't have individual timestamps in LangGraph
+            })
+
+        # Apply pagination
+        if offset > 0 or limit is not None:
+            end_index = offset + limit if limit is not None else None
+            messages = messages[offset:end_index]
+
+        return messages
+
+    def delete_thread(self, thread_id: str) -> bool:
+        """Delete all checkpoints for a conversation thread."""
+        result = self.checkpoint_collection.delete_many({"thread_id": thread_id})
+        # Also delete writes for this thread
+        self.writes_collection.delete_many({"thread_id": thread_id})
+        return result.deleted_count > 0
+
+    def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:
+        """Get usage statistics for a user."""
+        threads = self.get_user_threads(user_identifier)
+
+        if not threads:
+            return {
+                "total_threads": 0,
+                "total_messages": 0,
+                "total_checkpoints": 0,
+                "oldest_thread": None,
+                "newest_thread": None,
+            }
+
+        total_messages = sum(thread["message_count"] for thread in threads)
+        total_checkpoints = sum(thread["checkpoint_count"] for thread in threads)
+        oldest_thread = min((t["last_updated"] for t in threads if t["last_updated"]), default=None)
+        newest_thread = max((t["last_updated"] for t in threads if t["last_updated"]), default=None)
+
+        return {
+            "total_threads": len(threads),
+            "total_messages": total_messages,
+            "total_checkpoints": total_checkpoints,
+            "oldest_thread": oldest_thread,
+            "newest_thread": newest_thread,
+        }
+
+    def thread_exists(self, thread_id: str) -> bool:
+        """Check if a thread exists in MongoDB."""
+        return self.checkpoint_collection.count_documents({"thread_id": thread_id}, limit=1) > 0
 
 
 # Async MongoDB Checkpointer Support for Streaming
