@@ -81,11 +81,17 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
             # Extract first message and message count from latest checkpoint
             first_message = None
             message_count = 0
+            title = None
+            tags = []
             last_checkpoint = data["last_checkpoint"]
 
             if last_checkpoint:
                 channel_values = last_checkpoint.get("channel_values", {})
                 messages = channel_values.get("messages", [])
+
+                # Extract title and tags from state
+                title = channel_values.get("title")
+                tags = channel_values.get("tags", [])
 
                 if messages:
                     message_count = len(messages)
@@ -102,6 +108,8 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
                 "checkpoint_count": len(data["checkpoints"]),
                 "message_count": message_count,
                 "first_message": first_message,
+                "title": title,
+                "tags": tags,
             })
 
         # Apply pagination

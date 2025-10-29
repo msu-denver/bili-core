@@ -335,11 +335,17 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
 
                 first_message = None
                 message_count = 0
+                title = None
+                tags = []
 
                 if latest and latest["checkpoint"]:
                     checkpoint_data = latest["checkpoint"]
                     channel_values = checkpoint_data.get("channel_values", {})
                     messages = channel_values.get("messages", [])
+
+                    # Extract title and tags from state
+                    title = channel_values.get("title")
+                    tags = channel_values.get("tags", [])
 
                     if messages:
                         message_count = len(messages)
@@ -356,6 +362,8 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                     "checkpoint_count": row["checkpoint_count"],
                     "message_count": message_count,
                     "first_message": first_message,
+                    "title": title,
+                    "tags": tags,
                 })
 
             return threads

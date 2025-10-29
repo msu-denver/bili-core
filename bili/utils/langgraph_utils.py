@@ -45,6 +45,7 @@ cleared = clear_state(state)
 """
 
 from datetime import datetime
+from typing import List
 
 from langchain_core.messages import AIMessage, RemoveMessage
 from langgraph.prebuilt.chat_agent_executor import AgentState
@@ -96,8 +97,9 @@ class State(AgentState):
     Represents the state of an agent with user-specific preferences or state data.
 
     This class extends `AgentState` and includes additional attributes to track user-specific
-    preferences or state like summary, user ownership information, and message timestamps
-    as well as the time difference between current and previous messages.
+    preferences or state like summary, user ownership information, message timestamps,
+    conversation metadata (title and tags), as well as the time difference between current
+    and previous messages.
 
     :ivar summary: A text summary associated with the agent state.
     :type summary: str
@@ -110,6 +112,14 @@ class State(AgentState):
     :ivar delta_time: The calculated time difference, in seconds,
     between the current and previous messages.
     :type delta_time: float
+    :ivar disable_summarization: Flag to disable automatic conversation summarization.
+    :type disable_summarization: bool
+    :ivar template_dict: Dictionary of prompt templates for the conversation.
+    :type template_dict: dict
+    :ivar title: The title of the conversation thread.
+    :type title: str
+    :ivar tags: List of tags/categories associated with the conversation.
+    :type tags: List[str]
     """
 
     # If we wanted to keep any user-specific preferences or state, we could add them here
@@ -120,6 +130,8 @@ class State(AgentState):
     delta_time: float
     disable_summarization: bool
     template_dict: dict
+    title: str
+    tags: List[str]
 
 
 def clear_state(state: State) -> dict:

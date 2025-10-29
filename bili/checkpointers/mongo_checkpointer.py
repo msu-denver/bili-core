@@ -317,10 +317,16 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
 
             first_message = None
             message_count = 0
+            title = None
+            tags = []
 
             if latest_checkpoint and "checkpoint" in latest_checkpoint:
                 channel_values = latest_checkpoint["checkpoint"].get("channel_values", {})
                 messages = channel_values.get("messages", [])
+
+                # Extract title and tags from state
+                title = channel_values.get("title")
+                tags = channel_values.get("tags", [])
 
                 if messages:
                     message_count = len(messages)
@@ -337,6 +343,8 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
                 "checkpoint_count": result["checkpoint_count"],
                 "message_count": message_count,
                 "first_message": first_message,
+                "title": title,
+                "tags": tags,
             })
 
         return threads
