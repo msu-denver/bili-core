@@ -64,6 +64,8 @@ pip install -e .
 
 5. **LangGraph Workflows** (`bili/loaders/`, `bili/nodes/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
 
+6. **Middleware System** (`bili/loaders/middleware_loader.py`, `bili/config/middleware_config.py`): Extensible middleware framework for intercepting and modifying agent execution. Supports built-in middleware (summarization, model call limiting) and custom middleware creation.
+
 ### Key Patterns
 
 - **Provider Pattern**: Consistent interfaces across auth, LLM, and tool providers
@@ -82,6 +84,30 @@ pip install -e .
 - **Databases**: PostgreSQL with PostGIS and MongoDB for state management
 - **Pre-commit hooks** enforce code quality standards
 
+### Middleware Configuration
+
+Middleware can be configured via `node_kwargs` when building the agent graph:
+
+```python
+from bili.loaders.middleware_loader import initialize_middleware
+
+# Initialize middleware
+middleware = initialize_middleware(
+    active_middleware=["summarization", "model_call_limit"],
+    middleware_params={
+        "summarization": {"max_tokens": 4000},
+        "model_call_limit": {"max_calls": 10}
+    }
+)
+
+# Pass to agent via node_kwargs
+node_kwargs = {
+    "llm_model": my_llm,
+    "tools": my_tools,
+    "middleware": middleware
+}
+```
+
 ### Important Notes
 
 - Always run formatters before committing code
@@ -89,3 +115,4 @@ pip install -e .
 - Use type hints throughout the codebase
 - Follow existing patterns when adding new providers or tools
 - Container development environment includes all dependencies and services
+- Middleware flows through `node_kwargs` to the react agent node automatically

@@ -8,10 +8,12 @@ provided language model (LLM).
 
 Functions:
 ----------
-- build_react_agent_node(tools: list[Tool] = None, state: StateSchema = State, llm_model=None, **kwargs):
+- build_react_agent_node(tools: list[Tool] = None, state: StateSchema = State, llm_model=None,
+                        middleware: list = None, **kwargs):
     Constructs a REACT agent node using the specified tools and state schema. If tools are provided,
-    a REACT agent is created with tool integration. If tools are not supported, a fallback node is
-    created that directly invokes the LLM, filtering and repackaging messages for compatibility.
+    a REACT agent is created with tool integration. Middleware can be provided to intercept and
+    modify agent execution. If tools are not supported, a fallback node is created that directly
+    invokes the LLM, filtering and repackaging messages for compatibility.
 
 Dependencies:
 -------------
@@ -31,11 +33,13 @@ conversational agent workflows.
 Example:
 --------
 from bili.nodes.react_agent_node import build_react_agent_node
+from langchain.agents.middleware import SummarizationMiddleware
 
 agent_node = build_react_agent_node(
     tools=my_tools,
     state=MyStateSchema,
-    llm_model=my_llm
+    llm_model=my_llm,
+    middleware=[SummarizationMiddleware()]
 )
 result = agent_node(state)
 """
@@ -52,7 +56,11 @@ LOGGER = get_logger(__name__)
 
 
 def build_react_agent_node(
-    tools: list[Tool] = None, state: StateSchema = State, llm_model=None, **kwargs
+    tools: list[Tool] = None,
+    state: StateSchema = State,
+    llm_model=None,
+    middleware: list = None,
+    **kwargs
 ):
     """
     Constructs a REACT agent node using the specified tools and state or a fallback
@@ -78,6 +86,11 @@ def build_react_agent_node(
         node. This model processes the input messages and produces responses.
         The exact behavior may vary depending on the model's capabilities.
 
+    :param middleware: List of middleware to be applied to the agent. Middleware
+        can intercept and modify agent execution at various points (before_agent,
+        before_model, after_model, etc.). If None, no middleware is applied.
+    :type middleware: list
+
     :param kwargs: Additional arguments and settings for constructing the REACT
         agent or fallback node. This may include configuration options that are
         passed to internal functions.
@@ -89,9 +102,10 @@ def build_react_agent_node(
     :rtype: Callable or any
     """
     LOGGER.debug(
-        "Using model: %s | Tools enabled: %s",
+        "Using model: %s | Tools enabled: %s | Middleware count: %s",
         getattr(llm_model, "__class__", None),
         tools is not None,
+        len(middleware) if middleware else 0,
     )
     if tools is not None:
         # If tools are supported, create a REACT agent with the provided tools
@@ -100,6 +114,7 @@ def build_react_agent_node(
             model=llm_model,
             state_schema=state,
             tools=tools,
+            middleware=middleware or [],
         )
     else:
         LOGGER.debug(
