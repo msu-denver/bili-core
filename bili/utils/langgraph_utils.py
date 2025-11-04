@@ -22,7 +22,7 @@ Functions:
 Dependencies:
 -------------
 - langchain_core.messages: Provides message classes and utilities for chat history.
-- langgraph.prebuilt.chat_agent_executor: Agent state and schema classes.
+- langchain.agents: Provides AgentState base class for state schema.
 - bili.utils.logging_utils: Logger initialization.
 
 Usage:
@@ -48,7 +48,7 @@ from datetime import datetime
 from typing import List
 
 from langchain_core.messages import AIMessage, RemoveMessage
-from langgraph.prebuilt.chat_agent_executor import AgentState
+from langchain.agents import AgentState
 
 from bili.utils.logging_utils import get_logger
 

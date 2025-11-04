@@ -20,8 +20,8 @@ Dependencies:
 - langchain_core.messages: Provides `AIMessage`, `HumanMessage`, and `SystemMessage`
 classes for chat history.
 - langchain_core.tools: Provides the `Tool` class for agent tool integration.
-- langgraph.prebuilt.chat_agent_executor: Provides `StateSchema` and `create_react_agent`
-for agent construction.
+- langchain.agents: Provides `create_agent` for agent construction with middleware support,
+  and `AgentState` base class for state schema.
 - bili.utils.langgraph_utils.State: Defines the state schema for conversation data.
 - bili.utils.logging_utils.get_logger: Initializes a logger for tracing and debugging.
 
@@ -44,9 +44,11 @@ agent_node = build_react_agent_node(
 result = agent_node(state)
 """
 
+from typing import Type
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import Tool
-from langgraph.prebuilt.chat_agent_executor import StateSchema, create_react_agent
+from langchain.agents import create_agent, AgentState
 
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
@@ -57,7 +59,7 @@ LOGGER = get_logger(__name__)
 
 def build_react_agent_node(
     tools: list[Tool] = None,
-    state: StateSchema = State,
+    state: Type[AgentState] = State,
     llm_model=None,
     middleware: list = None,
     **kwargs
@@ -79,8 +81,8 @@ def build_react_agent_node(
 
     :param state: Represents the schema of the state that interacts with the
         agent or LLM. This includes maintaining messages and other context
-        required for conversation and workflows.
-    :type state: StateSchema
+        required for conversation and workflows. Must be a subclass of AgentState.
+    :type state: Type[AgentState]
 
     :param llm_model: The language model to be used by the agent or fallback
         node. This model processes the input messages and produces responses.
@@ -110,11 +112,11 @@ def build_react_agent_node(
     if tools is not None:
         # If tools are supported, create a REACT agent with the provided tools
         LOGGER.debug("Creating REACT agent with tools: %s", tools)
-        agent = create_react_agent(
+        agent = create_agent(
             model=llm_model,
             state_schema=state,
             tools=tools,
-            middleware=middleware or [],
+            middleware=middleware or (),
         )
     else:
         LOGGER.debug(
