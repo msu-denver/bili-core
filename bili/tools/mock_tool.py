@@ -44,7 +44,9 @@ from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 
 
 @conditional_cache_resource()
-def init_mock_tool(name, description, mock_response, response_time) -> Tool:
+def init_mock_tool(
+    name, description, mock_response, response_time, middleware=None
+) -> Tool:
     """
     Initializes a mock tool with a given name, description, mock response, and an optional
     response time to delay the responses. This function wraps the creation of a `Tool` object
@@ -63,6 +65,9 @@ def init_mock_tool(name, description, mock_response, response_time) -> Tool:
     :param response_time: The time in seconds to delay the response. Can be passed as a
         number or a string convertible to a number. Defaults to 0 if validation fails.
     :type response_time: Union[int, float, str]
+    :param middleware: List of middleware to be applied to the tool. Middleware can
+        intercept and modify tool execution.
+    :type middleware: list
     :return: Returns a `Tool` object initialized with the specified name, description,
         and simulation logic.
     :rtype: Tool
@@ -86,4 +91,5 @@ def init_mock_tool(name, description, mock_response, response_time) -> Tool:
         name=name,
         func=simulate_response,
         description=description,
+        middleware=middleware or [],
     )

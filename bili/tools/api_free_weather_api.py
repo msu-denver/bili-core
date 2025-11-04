@@ -104,7 +104,7 @@ async def fetch_weather(city: str = "denver") -> dict:
 
 
 @conditional_cache_resource()
-def init_weather_tool(name, description) -> Tool:
+def init_weather_tool(name, description, middleware=None) -> Tool:
     """
     Initialize the weather tool.
 
@@ -119,4 +119,5 @@ def init_weather_tool(name, description) -> Tool:
         name=name,
         func=lambda query: asyncio.run(fetch_weather(query)),
         description=description,
+        middleware=middleware or [],
     )

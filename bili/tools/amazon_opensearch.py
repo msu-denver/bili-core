@@ -113,7 +113,7 @@ def build_query_opensearch(
 
 @conditional_cache_resource()
 def init_amazon_opensearch(
-    name, description, _embedding_function, index_name, **_kwargs
+    name, description, _embedding_function, index_name, middleware=None, **_kwargs
 ) -> Tool:
     """
     Initialize an Amazon OpenSearch tool for performing search queries using an embedding
@@ -128,6 +128,9 @@ def init_amazon_opensearch(
     :type _embedding_function: Callable
     :param index_name: Name of the OpenSearch index the tool interacts with.
     :type index_name: str
+    :param middleware: List of middleware to be applied to the tool. Middleware can
+        intercept and modify tool execution.
+    :type middleware: list
     :param _kwargs: Additional keyword arguments required for customization of the
         OpenSearch operation.
     :type _kwargs: dict
@@ -138,4 +141,5 @@ def init_amazon_opensearch(
         name=name,
         func=build_query_opensearch(_embedding_function, index_name, **_kwargs),
         description=description,
+        middleware=middleware or [],
     )

@@ -86,6 +86,10 @@ pip install -e .
 
 ### Middleware Configuration
 
+Middleware can be applied at two levels: agent-level and tool-level.
+
+#### Agent-Level Middleware
+
 Middleware can be configured via `node_kwargs` when building the agent graph:
 
 ```python
@@ -95,8 +99,8 @@ from bili.loaders.middleware_loader import initialize_middleware
 middleware = initialize_middleware(
     active_middleware=["summarization", "model_call_limit"],
     middleware_params={
-        "summarization": {"max_tokens": 4000},
-        "model_call_limit": {"max_calls": 10}
+        "summarization": {"max_tokens_before_summary": 4000, "messages_to_keep": 20},
+        "model_call_limit": {"run_limit": 10}
     }
 )
 
@@ -106,6 +110,47 @@ node_kwargs = {
     "tools": my_tools,
     "middleware": middleware
 }
+```
+
+#### Tool-Level Middleware
+
+Middleware can also be applied to individual tools for fine-grained control:
+
+```python
+from bili.loaders.tools_loader import initialize_tools
+from bili.loaders.middleware_loader import initialize_middleware
+
+# Initialize middleware
+middleware = initialize_middleware(
+    active_middleware=["model_call_limit"],
+    middleware_params={"model_call_limit": {"run_limit": 5}}
+)
+
+# Apply middleware to specific tools (dict approach)
+tools = initialize_tools(
+    active_tools=["weather_api_tool", "serp_api_tool"],
+    tool_prompts={
+        "weather_api_tool": "Get weather data",
+        "serp_api_tool": "Search the web"
+    },
+    tool_params={
+        "weather_api_tool": {"api_key": "your_key"}
+    },
+    tool_middleware={
+        "weather_api_tool": middleware,  # Apply to specific tool
+        "serp_api_tool": []  # No middleware
+    }
+)
+
+# Or apply same middleware to all tools (list approach)
+tools = initialize_tools(
+    active_tools=["weather_api_tool", "serp_api_tool"],
+    tool_prompts={
+        "weather_api_tool": "Get weather data",
+        "serp_api_tool": "Search the web"
+    },
+    tool_middleware=middleware  # Apply to all tools
+)
 ```
 
 ### Important Notes

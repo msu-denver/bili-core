@@ -69,7 +69,7 @@ def execute_query(query: str) -> str:
 
 
 @conditional_cache_resource()
-def init_serp_api_tool(name, description) -> Tool:
+def init_serp_api_tool(name, description, middleware=None) -> Tool:
     """
     Initialize and configure a SERP API tool resource with caching.
 
@@ -90,4 +90,5 @@ def init_serp_api_tool(name, description) -> Tool:
         name=name,
         func=execute_query,
         description=description,
+        middleware=middleware or [],
     )

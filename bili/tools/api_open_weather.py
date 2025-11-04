@@ -236,7 +236,7 @@ def execute_query(query: str) -> str:
 
 
 @conditional_cache_resource()
-def init_weather_api_tool(name, description) -> Tool:
+def init_weather_api_tool(name, description, middleware=None) -> Tool:
     """
     Initializes a Tool object configured for interacting with the OpenWeatherMap API.
 
@@ -263,4 +263,5 @@ def init_weather_api_tool(name, description) -> Tool:
         name=name,
         func=execute_query,
         description=description,
+        middleware=middleware or [],
     )

@@ -157,7 +157,7 @@ def execute_query(query: str) -> str:
 
 
 @conditional_cache_resource()
-def init_weather_gov_api_tool(name, description) -> Tool:
+def init_weather_gov_api_tool(name, description, middleware=None) -> Tool:
     """
     Initializes the Weather.gov API Tool.
 
@@ -177,4 +177,5 @@ def init_weather_gov_api_tool(name, description) -> Tool:
         name=name,
         func=execute_query,
         description=description,
+        middleware=middleware or [],
     )

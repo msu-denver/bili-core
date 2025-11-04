@@ -6,6 +6,9 @@ application. Middleware allows intercepting and modifying agent execution at
 various points in the agent loop, enabling features like logging, monitoring,
 rate limiting, conversation summarization, and more.
 
+Middleware can be applied to both agents and individual tools, providing
+fine-grained control over execution behavior.
+
 Dependencies:
     - None (configuration only)
 
@@ -15,12 +18,46 @@ Usage:
     defines all available middleware with their descriptions, enabled status,
     and configurable parameters.
 
+    Middleware can be applied at two levels:
+    1. Agent-level: Middleware applied to the entire agent execution
+    2. Tool-level: Middleware applied to individual tool invocations
+
 Example:
     from bili.config.middleware_config import MIDDLEWARE
 
     # Get configuration for summarization middleware
     summarization_config = MIDDLEWARE["summarization"]
     print(summarization_config["description"])
+
+    # Apply middleware to agents
+    from bili.loaders.middleware_loader import initialize_middleware
+    agent_middleware = initialize_middleware(
+        active_middleware=["summarization", "model_call_limit"],
+        middleware_params={
+            "summarization": {"max_tokens_before_summary": 4000, "messages_to_keep": 20},
+            "model_call_limit": {"run_limit": 10}
+        }
+    )
+
+    # Apply middleware to specific tools
+    from bili.loaders.tools_loader import initialize_tools
+    tools = initialize_tools(
+        active_tools=["mock_tool", "weather_api_tool"],
+        tool_prompts={"mock_tool": "Mock responses", "weather_api_tool": "Get weather"},
+        tool_params={"mock_tool": {"mock_response": "test", "response_time": 0}},
+        tool_middleware={
+            "mock_tool": agent_middleware,  # Apply to specific tool
+            "weather_api_tool": []  # No middleware for this tool
+        }
+    )
+
+    # Or apply same middleware to all tools
+    tools = initialize_tools(
+        active_tools=["mock_tool", "weather_api_tool"],
+        tool_prompts={"mock_tool": "Mock responses", "weather_api_tool": "Get weather"},
+        tool_params={"mock_tool": {"mock_response": "test", "response_time": 0}},
+        tool_middleware=agent_middleware  # Apply to all tools
+    )
 """
 
 # Available Middleware
@@ -30,11 +67,16 @@ MIDDLEWARE = {
         "a specified token limit, helping to manage context window constraints.",
         "enabled": False,
         "params": {
-            "max_tokens": {
+            "max_tokens_before_summary": {
                 "description": "Maximum number of tokens before triggering summarization. "
                 "When the conversation exceeds this limit, older messages "
                 "will be summarized to reduce token count.",
                 "default": 4000,
+                "type": "int",
+            },
+            "messages_to_keep": {
+                "description": "Number of recent messages to keep unsummarized.",
+                "default": 20,
                 "type": "int",
             },
         },
@@ -44,11 +86,23 @@ MIDDLEWARE = {
         "prevent runaway agents and control costs.",
         "enabled": False,
         "params": {
-            "max_calls": {
-                "description": "Maximum number of model calls allowed in a single agent execution. "
+            "thread_limit": {
+                "description": "Maximum number of model calls allowed per thread. "
+                "Execution will stop if this limit is reached.",
+                "default": None,
+                "type": "int",
+            },
+            "run_limit": {
+                "description": "Maximum number of model calls allowed per run. "
                 "Execution will stop if this limit is reached.",
                 "default": 10,
                 "type": "int",
+            },
+            "exit_behavior": {
+                "description": "Behavior when limit is reached: 'end' to gracefully end, "
+                "'error' to raise an exception.",
+                "default": "end",
+                "type": "str",
             },
         },
     },

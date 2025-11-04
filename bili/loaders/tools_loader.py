@@ -110,7 +110,9 @@ TOOL_REGISTRY = {
 }
 
 
-def initialize_tools(active_tools, tool_prompts, tool_params=None):
+def initialize_tools(
+    active_tools, tool_prompts, tool_params=None, tool_middleware=None
+):
     """
     Initializes and configures a list of tools based on the provided parameters.
 
@@ -127,12 +129,20 @@ def initialize_tools(active_tools, tool_prompts, tool_params=None):
     :param tool_params: Dictionary mapping tool names to their respective parameter
         configurations.
     :type tool_params: dict[str, dict]
+    :param tool_middleware: List of middleware to be applied to all tools, or a dictionary
+        mapping tool names to their specific middleware lists. Middleware can intercept
+        and modify tool execution.
+    :type tool_middleware: list or dict
     :return: A list of initialized tool objects.
     :rtype: list
     """
     if tool_params is None:
         tool_params = {}
-    LOGGER.debug("Initializing tools: %s", active_tools)
+    if tool_middleware is None:
+        tool_middleware = []
+    LOGGER.debug(
+        "Initializing tools: %s with middleware: %s", active_tools, tool_middleware
+    )
 
     tools = []
     for tool in active_tools:
@@ -156,11 +166,23 @@ def initialize_tools(active_tools, tool_prompts, tool_params=None):
                     f"Tool '{tool}' does not have a default prompt and no prompt was provided."
                 )
 
+            # Determine middleware for this specific tool
+            # If tool_middleware is a dict, use tool-specific middleware
+            # Otherwise, use the same middleware for all tools
+            if isinstance(tool_middleware, dict):
+                middleware_for_tool = tool_middleware.get(tool, [])
+            else:
+                middleware_for_tool = tool_middleware
+
+            # Add middleware to tool params
+            params_with_middleware = tool_params.get(tool, {}).copy()
+            params_with_middleware["middleware"] = middleware_for_tool
+
             tools.append(
                 TOOL_REGISTRY[tool](
                     tool,
                     prompt,
-                    tool_params.get(tool, {}),
+                    params_with_middleware,
                 )
             )
         else:
