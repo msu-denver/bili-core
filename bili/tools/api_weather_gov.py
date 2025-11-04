@@ -44,8 +44,7 @@ import json
 import re
 
 import requests
-from langchain.tools import Tool
-from langchain_core.tools import ToolException
+from langchain_core.tools import Tool, ToolException
 
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger

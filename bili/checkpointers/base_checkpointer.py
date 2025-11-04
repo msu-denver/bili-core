@@ -27,7 +27,6 @@ Example:
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -43,10 +42,7 @@ class QueryableCheckpointerMixin(ABC):
 
     @abstractmethod
     def get_user_threads(
-        self,
-        user_identifier: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
         Get all conversation threads for a specific user.
@@ -70,14 +66,10 @@ class QueryableCheckpointerMixin(ABC):
                 ...
             ]
         """
-        pass
 
     @abstractmethod
     def get_thread_messages(
-        self,
-        thread_id: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
         Get all messages from a conversation thread.
@@ -98,7 +90,6 @@ class QueryableCheckpointerMixin(ABC):
                 ...
             ]
         """
-        pass
 
     @abstractmethod
     def delete_thread(self, thread_id: str) -> bool:
@@ -111,7 +102,6 @@ class QueryableCheckpointerMixin(ABC):
         Returns:
             True if deletion was successful, False otherwise
         """
-        pass
 
     @abstractmethod
     def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:
@@ -131,7 +121,6 @@ class QueryableCheckpointerMixin(ABC):
                 "newest_thread": Optional[datetime],
             }
         """
-        pass
 
     @abstractmethod
     def thread_exists(self, thread_id: str) -> bool:
@@ -144,13 +133,8 @@ class QueryableCheckpointerMixin(ABC):
         Returns:
             True if thread exists, False otherwise
         """
-        pass
 
-    def verify_thread_ownership(
-        self,
-        thread_id: str,
-        user_identifier: str
-    ) -> bool:
+    def verify_thread_ownership(self, thread_id: str, user_identifier: str) -> bool:
         """
         Verify that a thread belongs to a specific user.
 
@@ -167,7 +151,6 @@ class QueryableCheckpointerMixin(ABC):
         Returns:
             True if thread belongs to user, False otherwise
         """
-        return (
-            thread_id == user_identifier or
-            thread_id.startswith(f"{user_identifier}_")
+        return thread_id == user_identifier or thread_id.startswith(
+            f"{user_identifier}_"
         )

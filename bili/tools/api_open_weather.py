@@ -48,7 +48,7 @@ import re
 import urllib.parse
 
 import requests
-from langchain.tools import Tool
+from langchain_core.tools import Tool
 
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
@@ -125,6 +125,7 @@ def get_geocode(city_name, state_code="CO", country_code="US"):
         LOGGER.error(f"Error occurred while making the API request: {e}")
         raise e
     return None, None
+
 
 def get_geocode_from_zip(zip_code, country_code="US"):
     """

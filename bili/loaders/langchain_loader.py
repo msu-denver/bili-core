@@ -63,12 +63,12 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from bili.nodes.add_persona_and_summary import build_add_persona_and_summary_node
+from bili.nodes.inject_current_datetime import build_inject_current_date_time
 from bili.nodes.normalize_state import build_normalize_state_node
 from bili.nodes.per_user_state import buld_per_user_state_node
 from bili.nodes.react_agent_node import build_react_agent_node
 from bili.nodes.trim_and_summarize import build_trim_and_summarize_node
 from bili.nodes.update_timestamp import build_update_timestamp_node
-from bili.nodes.inject_current_datetime import build_inject_current_date_time
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -92,7 +92,7 @@ GRAPH_NODE_REGISTRY = {
     "react_agent": build_react_agent_node,
     "trim_summarize": build_trim_and_summarize_node,
     "update_timestamp": build_update_timestamp_node,
-    "inject_current_datetime": build_inject_current_date_time
+    "inject_current_datetime": build_inject_current_date_time,
 }
 
 # Define the default graph definition, which is the default set of nodes that will
@@ -116,6 +116,7 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
     :param node_name: The name of the node for logging purposes.
     :return: A wrapped function that logs execution time.
     """
+
     def wrapper(*args, **kwargs):
         start_time = time.time()
         # CompiledStateGraph objects need to use .invoke() method
@@ -126,6 +127,7 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
         execution_time = (time.time() - start_time) * 1000
         LOGGER.info(f"Node '{node_name}' executed in {execution_time:.2f} ms")
         return result
+
     return wrapper
 
 

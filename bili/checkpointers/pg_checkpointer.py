@@ -45,14 +45,13 @@ Example:
 
 import atexit
 import os
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg_pool import ConnectionPool, AsyncConnectionPool
-from typing import Dict, List
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
@@ -280,10 +279,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
     # QueryableCheckpointerMixin implementation for PostgreSQL
 
     def get_user_threads(
-        self,
-        user_identifier: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from PostgreSQL."""
         with self._cursor() as cur:
@@ -298,7 +294,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 GROUP BY thread_id
                 ORDER BY MAX(checkpoint_id) DESC
             """
-            params = [f"^{user_identifier}(_|$)"]  # Regex: user_identifier or user_identifier_*
+            params = [
+                f"^{user_identifier}(_|$)"
+            ]  # Regex: user_identifier or user_identifier_*
 
             if offset > 0:
                 query += " OFFSET %s"
@@ -329,7 +327,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                     ORDER BY checkpoint_id DESC
                     LIMIT 1
                     """,
-                    (thread_id,)
+                    (thread_id,),
                 )
                 latest = cur.fetchone()
 
@@ -351,28 +349,31 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                         message_count = len(messages)
                         # Get the first user message
                         for msg in messages:
-                            if hasattr(msg, 'content') and msg.content and msg.__class__.__name__ == "HumanMessage":
+                            if (
+                                hasattr(msg, "content")
+                                and msg.content
+                                and msg.__class__.__name__ == "HumanMessage"
+                            ):
                                 first_message = msg.content
                                 break
 
-                threads.append({
-                    "thread_id": thread_id,
-                    "conversation_id": conversation_id,
-                    "last_updated": row["last_checkpoint_id"],
-                    "checkpoint_count": row["checkpoint_count"],
-                    "message_count": message_count,
-                    "first_message": first_message,
-                    "title": title,
-                    "tags": tags,
-                })
+                threads.append(
+                    {
+                        "thread_id": thread_id,
+                        "conversation_id": conversation_id,
+                        "last_updated": row["last_checkpoint_id"],
+                        "checkpoint_count": row["checkpoint_count"],
+                        "message_count": message_count,
+                        "first_message": first_message,
+                        "title": title,
+                        "tags": tags,
+                    }
+                )
 
             return threads
 
     def get_thread_messages(
-        self,
-        thread_id: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
         with self._cursor() as cur:
@@ -385,7 +386,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 ORDER BY checkpoint_id DESC
                 LIMIT 1
                 """,
-                (thread_id,)
+                (thread_id,),
             )
             result = cur.fetchone()
 
@@ -399,11 +400,17 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
 
             messages = []
             for msg in raw_messages:
-                messages.append({
-                    "role": "user" if msg.__class__.__name__ == "HumanMessage" else "assistant",
-                    "content": msg.content if hasattr(msg, 'content') else str(msg),
-                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-                })
+                messages.append(
+                    {
+                        "role": (
+                            "user"
+                            if msg.__class__.__name__ == "HumanMessage"
+                            else "assistant"
+                        ),
+                        "content": msg.content if hasattr(msg, "content") else str(msg),
+                        "timestamp": None,  # Messages don't have individual timestamps in LangGraph
+                    }
+                )
 
             # Apply pagination
             if offset > 0 or limit is not None:
@@ -420,7 +427,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             deleted_count = cur.rowcount
 
             # Also delete writes for this thread
-            cur.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
+            cur.execute(
+                "DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,)
+            )
 
             return deleted_count > 0
 
@@ -439,8 +448,12 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
 
         total_messages = sum(thread["message_count"] for thread in threads)
         total_checkpoints = sum(thread["checkpoint_count"] for thread in threads)
-        oldest_thread = min((t["last_updated"] for t in threads if t["last_updated"]), default=None)
-        newest_thread = max((t["last_updated"] for t in threads if t["last_updated"]), default=None)
+        oldest_thread = min(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
+        newest_thread = max(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
 
         return {
             "total_threads": len(threads),
@@ -454,16 +467,17 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         """Check if a thread exists in PostgreSQL."""
         with self._cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM checkpoints WHERE thread_id = %s LIMIT 1",
-                (thread_id,)
+                "SELECT 1 FROM checkpoints WHERE thread_id = %s LIMIT 1", (thread_id,)
             )
             return cur.fetchone() is not None
 
 
 # Async PostgreSQL Checkpointer Support for Streaming
 
+
 class AsyncConnectionManager:
     """Manages async PostgreSQL connection pool singleton."""
+
     def __init__(self):
         self._pool = None
 
@@ -472,12 +486,16 @@ class AsyncConnectionManager:
         if self._pool is None:
             connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
             if not connection_string:
-                LOGGER.info("POSTGRES_CONNECTION_STRING not set. No async PostgreSQL pool created.")
+                LOGGER.info(
+                    "POSTGRES_CONNECTION_STRING not set. No async PostgreSQL pool created."
+                )
                 return None
 
             pool_max_size = int(os.getenv("POSTGRES_CONNECTION_POOL_MAX_SIZE", "20"))
 
-            LOGGER.info("Initializing shared async PostgreSQL connection pool for streaming.")
+            LOGGER.info(
+                "Initializing shared async PostgreSQL connection pool for streaming."
+            )
             self._pool = AsyncConnectionPool(
                 conninfo=f"{connection_string.rstrip('/')}/langgraph",
                 max_size=pool_max_size,

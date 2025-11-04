@@ -21,6 +21,7 @@ Usage:
 """
 
 from typing import Any, Dict, List, Optional
+
 from langgraph.checkpoint.memory import MemorySaver
 
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
@@ -35,10 +36,7 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
     """
 
     def get_user_threads(
-        self,
-        user_identifier: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from memory storage."""
         # MemorySaver stores data in self.storage dict with keys as (thread_id, checkpoint_ns)
@@ -49,7 +47,9 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         # Iterate through storage to find matching threads
         for (thread_id, checkpoint_ns), checkpoint_tuple in self.storage.items():
             # Check if thread belongs to user
-            if thread_id == user_identifier or thread_id.startswith(f"{user_identifier}_"):
+            if thread_id == user_identifier or thread_id.startswith(
+                f"{user_identifier}_"
+            ):
                 if thread_id not in threads_data:
                     threads_data[thread_id] = {
                         "checkpoints": [],
@@ -61,16 +61,21 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
                 # Track the latest checkpoint (highest checkpoint_id)
                 checkpoint, metadata = checkpoint_tuple[0], checkpoint_tuple[1]
                 if checkpoint:
-                    if (threads_data[thread_id]["last_checkpoint"] is None or
-                        checkpoint["id"] > threads_data[thread_id]["last_checkpoint"]["id"]):
+                    if (
+                        threads_data[thread_id]["last_checkpoint"] is None
+                        or checkpoint["id"]
+                        > threads_data[thread_id]["last_checkpoint"]["id"]
+                    ):
                         threads_data[thread_id]["last_checkpoint"] = checkpoint
 
         # Build thread list
         threads = []
         for thread_id, data in sorted(
             threads_data.items(),
-            key=lambda x: x[1]["last_checkpoint"]["id"] if x[1]["last_checkpoint"] else "",
-            reverse=True
+            key=lambda x: (
+                x[1]["last_checkpoint"]["id"] if x[1]["last_checkpoint"] else ""
+            ),
+            reverse=True,
         ):
             # Extract conversation_id from thread_id
             if "_" in thread_id:
@@ -97,20 +102,26 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
                     message_count = len(messages)
                     # Get the first user message
                     for msg in messages:
-                        if hasattr(msg, 'content') and msg.content and msg.__class__.__name__ == "HumanMessage":
+                        if (
+                            hasattr(msg, "content")
+                            and msg.content
+                            and msg.__class__.__name__ == "HumanMessage"
+                        ):
                             first_message = msg.content
                             break
 
-            threads.append({
-                "thread_id": thread_id,
-                "conversation_id": conversation_id,
-                "last_updated": last_checkpoint["id"] if last_checkpoint else None,
-                "checkpoint_count": len(data["checkpoints"]),
-                "message_count": message_count,
-                "first_message": first_message,
-                "title": title,
-                "tags": tags,
-            })
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "conversation_id": conversation_id,
+                    "last_updated": last_checkpoint["id"] if last_checkpoint else None,
+                    "checkpoint_count": len(data["checkpoints"]),
+                    "message_count": message_count,
+                    "first_message": first_message,
+                    "title": title,
+                    "tags": tags,
+                }
+            )
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -121,10 +132,7 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         return threads
 
     def get_thread_messages(
-        self,
-        thread_id: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
         # Find the latest checkpoint for this thread
@@ -135,7 +143,10 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
             if tid == thread_id:
                 checkpoint, metadata = checkpoint_tuple[0], checkpoint_tuple[1]
                 if checkpoint:
-                    if latest_checkpoint_id is None or checkpoint["id"] > latest_checkpoint_id:
+                    if (
+                        latest_checkpoint_id is None
+                        or checkpoint["id"] > latest_checkpoint_id
+                    ):
                         latest_checkpoint = checkpoint
                         latest_checkpoint_id = checkpoint["id"]
 
@@ -148,11 +159,17 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
         messages = []
         for msg in raw_messages:
-            messages.append({
-                "role": "user" if msg.__class__.__name__ == "HumanMessage" else "assistant",
-                "content": msg.content if hasattr(msg, 'content') else str(msg),
-                "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-            })
+            messages.append(
+                {
+                    "role": (
+                        "user"
+                        if msg.__class__.__name__ == "HumanMessage"
+                        else "assistant"
+                    ),
+                    "content": msg.content if hasattr(msg, "content") else str(msg),
+                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
+                }
+            )
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -165,10 +182,7 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         """Delete all checkpoints for a conversation thread."""
         # MemorySaver already has delete_thread, but we need to return bool
         # Find all keys for this thread and delete them
-        keys_to_delete = [
-            key for key in self.storage.keys()
-            if key[0] == thread_id
-        ]
+        keys_to_delete = [key for key in self.storage.keys() if key[0] == thread_id]
 
         for key in keys_to_delete:
             del self.storage[key]
@@ -190,8 +204,12 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
         total_messages = sum(thread["message_count"] for thread in threads)
         total_checkpoints = sum(thread["checkpoint_count"] for thread in threads)
-        oldest_thread = min((t["last_updated"] for t in threads if t["last_updated"]), default=None)
-        newest_thread = max((t["last_updated"] for t in threads if t["last_updated"]), default=None)
+        oldest_thread = min(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
+        newest_thread = max(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
 
         return {
             "total_threads": len(threads),

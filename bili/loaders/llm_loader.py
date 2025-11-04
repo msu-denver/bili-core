@@ -358,7 +358,14 @@ def load_llamacpp_model(
 #    without Customer's prior permission or instruction."
 @conditional_cache_resource()
 def load_remote_gcp_vertex_model(
-    model_name, max_tokens=None, temperature=None, top_p=None, top_k=None, seed=None, response_schema=None, response_mime_type=None
+    model_name,
+    max_tokens=None,
+    temperature=None,
+    top_p=None,
+    top_k=None,
+    seed=None,
+    response_schema=None,
+    response_mime_type=None,
 ):
     """
     Loads a remote GCP Vertex AI model with the specified configuration parameters.

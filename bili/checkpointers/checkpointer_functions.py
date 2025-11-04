@@ -43,8 +43,14 @@ Example:
 import os
 
 from bili.checkpointers.memory_checkpointer import QueryableMemorySaver
-from bili.checkpointers.mongo_checkpointer import get_mongo_checkpointer, get_async_mongo_checkpointer
-from bili.checkpointers.pg_checkpointer import get_pg_checkpointer, get_async_pg_checkpointer
+from bili.checkpointers.mongo_checkpointer import (
+    get_async_mongo_checkpointer,
+    get_mongo_checkpointer,
+)
+from bili.checkpointers.pg_checkpointer import (
+    get_async_pg_checkpointer,
+    get_pg_checkpointer,
+)
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module
@@ -112,5 +118,7 @@ async def get_async_checkpointer():
         return await get_async_mongo_checkpointer()
 
     # Priority 3: Memory checkpointer (inherently async-compatible, no await needed)
-    LOGGER.debug("Using QueryableMemorySaver for streaming operations (async-compatible fallback).")
+    LOGGER.debug(
+        "Using QueryableMemorySaver for streaming operations (async-compatible fallback)."
+    )
     return QueryableMemorySaver()

@@ -96,7 +96,7 @@ def build_trim_and_summarize_node(
         trims conversation messages or summarizes removed content depending on the provided
         parameters.
     :rtype: Callable
-    
+
     ## Notes:
     - An optional flag in the state ```disable_summarization``` can be set to true to skip the
     summarization and trimming steps. If this flag is set to ```True``` this node will be skipped.
@@ -151,11 +151,11 @@ def build_trim_and_summarize_node(
         )
         last_ai_message_id = last_ai_message.id if last_ai_message else None
 
-        user_profile_message = None 
+        user_profile_message = None
         user_profile_message_id = None
         for message in all_messages:
             if isinstance(message, HumanMessage):
-                if message.content.startswith('USER PROFILE:'):
+                if message.content.startswith("USER PROFILE:"):
                     user_profile_message = message
                     user_profile_message_id = user_profile_message.id
                 break

@@ -54,7 +54,7 @@ import logging
 import os
 
 import requests
-from langchain.tools import Tool
+from langchain_core.tools import Tool
 
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 

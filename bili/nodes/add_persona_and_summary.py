@@ -47,6 +47,7 @@ new_state = add_persona_node(state)
 """
 
 import re
+
 from langchain_core.messages import RemoveMessage, SystemMessage
 
 from bili.utils.langgraph_utils import State
@@ -63,7 +64,7 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
     This function creates a node that inserts a `SystemMessage` at the beginning of the
     conversation state to set up a custom persona for the agent. If a summary of the
     conversation exists, it appends the summary to the `SystemMessage` content.
-    
+
     The persona string can be templated with dynamic values using curly brace placeholders
     (e.g., "You are a {role} assistant") and the template_dict parameter. Extra values
     in template_dict are ignored, and only placeholders present in the persona string
@@ -80,11 +81,11 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
     Returns:
         function: A function that takes a `State` object and returns a dictionary with
         updated messages reflecting the addition of the persona and conversation summary.
-        
+
     Example:
         # Static persona
         node = build_add_persona_and_summary_node("You are a helpful assistant.")
-        
+
         # Templated persona
         persona_template = "You are a {role} in {department}."
         template_data = {"role": "senior analyst", "department": "marketing"}
@@ -113,6 +114,7 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
             of the persona and conversation summary.
         :rtype: dict
         """
+
         # Define custom format function class to override missing
         # This will allow {} to exist in system prompts and only update keys
         # found in the template_dict
@@ -120,12 +122,12 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
             """
             Replace {key} with value from kwargs if key exists, otherwise leave unchanged.
             """
+
             def replacer(match):
                 key = match.group(1)
                 return kwargs.get(key, match.group(0))
 
-            return re.sub(r'\{(\w+)\}', replacer, template)
-
+            return re.sub(r"\{(\w+)\}", replacer, template)
 
         # Retrieve the current list of messages from state for processing
         all_messages = state["messages"]

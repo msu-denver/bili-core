@@ -43,9 +43,9 @@ by default this node will do nothing.
 """
 
 from datetime import datetime, timezone
+
 from langchain_core.messages import RemoveMessage, SystemMessage
 
-from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module
@@ -96,7 +96,9 @@ def build_inject_current_date_time(**kwargs):
 
         if not messages or not isinstance(messages[0], SystemMessage):
             # If no messages exist or the first message is not a SystemMessage, return unchanged
-            LOGGER.trace("No SystemMessage found at position 0, skipping datetime injection")
+            LOGGER.trace(
+                "No SystemMessage found at position 0, skipping datetime injection"
+            )
             return state
 
         # Get the current datetime in UTC
@@ -104,14 +106,18 @@ def build_inject_current_date_time(**kwargs):
         LOGGER.trace(f"Injecting current UTC datetime: {current_time}")
 
         # Create updated system message with current datetime appended
-        updated_message = messages[0].content + " The current time in UTC is " + str(current_time)
+        updated_message = (
+            messages[0].content + " The current time in UTC is " + str(current_time)
+        )
         system_message = SystemMessage(content=updated_message)
 
         # Remove the old system message and insert the new one
         messages.append(RemoveMessage(id=messages[0].id))
         messages.insert(0, system_message)
 
-        LOGGER.trace(f"Updated system message with datetime: {system_message.content[:100]}...")
+        LOGGER.trace(
+            f"Updated system message with datetime: {system_message.content[:100]}..."
+        )
 
         return {"messages": messages}
 

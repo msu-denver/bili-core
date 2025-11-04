@@ -57,7 +57,9 @@ Example:
     # Run the application page
     run_app_page()
 """
+
 import json
+
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver

@@ -45,15 +45,14 @@ Example:
 
 import atexit
 import os
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
-from pymongo import ASCENDING, DESCENDING, MongoClient
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ASCENDING, DESCENDING, MongoClient
 
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
@@ -265,10 +264,7 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
     # QueryableCheckpointerMixin implementation for MongoDB
 
     def get_user_threads(
-        self,
-        user_identifier: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from MongoDB."""
         pipeline = [
@@ -283,12 +279,10 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
                 "$group": {
                     "_id": "$thread_id",
                     "last_updated": {"$max": "$checkpoint.ts"},
-                    "checkpoint_count": {"$sum": 1}
+                    "checkpoint_count": {"$sum": 1},
                 }
             },
-            {
-                "$sort": {"last_updated": DESCENDING}
-            }
+            {"$sort": {"last_updated": DESCENDING}},
         ]
 
         # Add pagination if specified
@@ -311,8 +305,7 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
 
             # Get the latest checkpoint to extract first message
             latest_checkpoint = self.checkpoint_collection.find_one(
-                {"thread_id": thread_id},
-                sort=[("checkpoint.ts", DESCENDING)]
+                {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
             )
 
             first_message = None
@@ -321,7 +314,9 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
             tags = []
 
             if latest_checkpoint and "checkpoint" in latest_checkpoint:
-                channel_values = latest_checkpoint["checkpoint"].get("channel_values", {})
+                channel_values = latest_checkpoint["checkpoint"].get(
+                    "channel_values", {}
+                )
                 messages = channel_values.get("messages", [])
 
                 # Extract title and tags from state
@@ -332,34 +327,36 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
                     message_count = len(messages)
                     # Get the first user message
                     for msg in messages:
-                        if hasattr(msg, 'content') and msg.content and msg.__class__.__name__ == "HumanMessage":
+                        if (
+                            hasattr(msg, "content")
+                            and msg.content
+                            and msg.__class__.__name__ == "HumanMessage"
+                        ):
                             first_message = msg.content
                             break
 
-            threads.append({
-                "thread_id": thread_id,
-                "conversation_id": conversation_id,
-                "last_updated": result["last_updated"],
-                "checkpoint_count": result["checkpoint_count"],
-                "message_count": message_count,
-                "first_message": first_message,
-                "title": title,
-                "tags": tags,
-            })
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "conversation_id": conversation_id,
+                    "last_updated": result["last_updated"],
+                    "checkpoint_count": result["checkpoint_count"],
+                    "message_count": message_count,
+                    "first_message": first_message,
+                    "title": title,
+                    "tags": tags,
+                }
+            )
 
         return threads
 
     def get_thread_messages(
-        self,
-        thread_id: str,
-        limit: Optional[int] = None,
-        offset: int = 0
+        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
         # Get the latest checkpoint for this thread
         latest_checkpoint = self.checkpoint_collection.find_one(
-            {"thread_id": thread_id},
-            sort=[("checkpoint.ts", DESCENDING)]
+            {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
         )
 
         if not latest_checkpoint or "checkpoint" not in latest_checkpoint:
@@ -371,11 +368,17 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
 
         messages = []
         for msg in raw_messages:
-            messages.append({
-                "role": "user" if msg.__class__.__name__ == "HumanMessage" else "assistant",
-                "content": msg.content if hasattr(msg, 'content') else str(msg),
-                "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-            })
+            messages.append(
+                {
+                    "role": (
+                        "user"
+                        if msg.__class__.__name__ == "HumanMessage"
+                        else "assistant"
+                    ),
+                    "content": msg.content if hasattr(msg, "content") else str(msg),
+                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
+                }
+            )
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -406,8 +409,12 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
 
         total_messages = sum(thread["message_count"] for thread in threads)
         total_checkpoints = sum(thread["checkpoint_count"] for thread in threads)
-        oldest_thread = min((t["last_updated"] for t in threads if t["last_updated"]), default=None)
-        newest_thread = max((t["last_updated"] for t in threads if t["last_updated"]), default=None)
+        oldest_thread = min(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
+        newest_thread = max(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
 
         return {
             "total_threads": len(threads),
@@ -419,13 +426,20 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
 
     def thread_exists(self, thread_id: str) -> bool:
         """Check if a thread exists in MongoDB."""
-        return self.checkpoint_collection.count_documents({"thread_id": thread_id}, limit=1) > 0
+        return (
+            self.checkpoint_collection.count_documents(
+                {"thread_id": thread_id}, limit=1
+            )
+            > 0
+        )
 
 
 # Async MongoDB Checkpointer Support for Streaming
 
+
 class AsyncClientManager:
     """Manages async MongoDB client singleton."""
+
     def __init__(self):
         self._client = None
 
@@ -434,7 +448,9 @@ class AsyncClientManager:
         if self._client is None:
             connection_string = os.getenv("MONGO_CONNECTION_STRING")
             if not connection_string:
-                LOGGER.info("MONGO_CONNECTION_STRING not set. No async MongoDB client created.")
+                LOGGER.info(
+                    "MONGO_CONNECTION_STRING not set. No async MongoDB client created."
+                )
                 return None
 
             LOGGER.info("Initializing shared async MongoDB client for streaming.")
@@ -450,7 +466,9 @@ class AsyncClientManager:
             self._client.close()
             self._client = None
 
+
 _async_client_manager = AsyncClientManager()
+
 
 async def get_async_mongo_client():
     """Get async MongoDB database."""
@@ -548,7 +566,7 @@ class AsyncPruningMongoDBSaver(AsyncMongoDBSaver):
         :return: Updated configuration
         """
         # Ensure indexes exist on first use
-        if not hasattr(self, '_indexes_ensured'):
+        if not hasattr(self, "_indexes_ensured"):
             await self._ensure_indexes()
             self._indexes_ensured = True
 
@@ -564,11 +582,13 @@ class AsyncPruningMongoDBSaver(AsyncMongoDBSaver):
         query = {"thread_id": thread_id}
 
         # Find documents to potentially delete
-        cursor = self.checkpoint_collection.find(query).sort("checkpoint_id", DESCENDING)
+        cursor = self.checkpoint_collection.find(query).sort(
+            "checkpoint_id", DESCENDING
+        )
         docs = await cursor.to_list(length=None)
 
         if len(docs) > self.keep_last_n:
-            to_delete = docs[self.keep_last_n:]
+            to_delete = docs[self.keep_last_n :]
 
             # Delete old checkpoints and writes asynchronously
             for doc in to_delete:

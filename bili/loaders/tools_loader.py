@@ -59,7 +59,7 @@ Example:
     )
 """
 
-from langchain.agents.agent_toolkits import create_retriever_tool
+from langchain_classic.agents.agent_toolkits import create_retriever_tool
 
 from bili.config.tool_config import TOOLS
 from bili.loaders.embeddings_loader import load_embedding_function
