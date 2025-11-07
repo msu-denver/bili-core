@@ -318,10 +318,10 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 else:
                     conversation_id = "default"
 
-                # Get the latest checkpoint to extract first message
+                # Get the latest checkpoint for metadata
                 cur.execute(
                     """
-                    SELECT checkpoint, parent_checkpoint_id
+                    SELECT checkpoint
                     FROM checkpoints
                     WHERE thread_id = %s
                     ORDER BY checkpoint_id DESC
@@ -332,39 +332,80 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 latest = cur.fetchone()
 
                 first_message = None
+                last_message = None
                 message_count = 0
                 title = None
                 tags = []
+                latest_checkpoint_ts = None
 
                 if latest and latest["checkpoint"]:
                     checkpoint_data = latest["checkpoint"]
                     channel_values = checkpoint_data.get("channel_values", {})
-                    messages = channel_values.get("messages", [])
 
-                    # Extract title and tags from state
+                    # Extract timestamp from checkpoint (not UUID!)
+                    latest_checkpoint_ts = checkpoint_data.get("ts")
+
+                    # Extract title from channel_values (small scalar, stored directly)
                     title = channel_values.get("title")
-                    tags = channel_values.get("tags", [])
 
-                    if messages:
-                        message_count = len(messages)
-                        # Get the first user message
-                        for msg in messages:
-                            if (
-                                hasattr(msg, "content")
-                                and msg.content
-                                and msg.__class__.__name__ == "HumanMessage"
-                            ):
-                                first_message = msg.content
-                                break
+                    # Get tags from checkpoint_writes if not in channel_values
+                    tags = channel_values.get("tags", [])
+                    if not tags:
+                        # Query checkpoint_writes for tags channel
+                        cur.execute(
+                            """
+                            SELECT blob
+                            FROM checkpoint_writes
+                            WHERE thread_id = %s AND channel = 'tags'
+                            ORDER BY checkpoint_id DESC
+                            LIMIT 1
+                            """,
+                            (thread_id,),
+                        )
+                        tags_row = cur.fetchone()
+                        if tags_row and tags_row["blob"]:
+                            # Deserialize the value (it's stored as bytes/msgpack)
+                            import msgpack
+                            tags = msgpack.unpackb(tags_row["blob"], raw=False)
+
+                    # Get message count from checkpoint_writes without loading all messages
+                    cur.execute(
+                        """
+                        SELECT blob
+                        FROM checkpoint_writes
+                        WHERE thread_id = %s AND channel = 'messages'
+                        ORDER BY checkpoint_id DESC
+                        LIMIT 1
+                        """,
+                        (thread_id,),
+                    )
+                    messages_row = cur.fetchone()
+                    if messages_row and messages_row["blob"]:
+                        # Deserialize to get message count and first message
+                        import msgpack
+                        messages = msgpack.unpackb(messages_row["blob"], raw=False)
+                        if messages:
+                            message_count = len(messages)
+                            # Get the first and last user messages
+                            for msg in messages:
+                                if (
+                                    hasattr(msg, "content")
+                                    and msg.content
+                                    and msg.__class__.__name__ == "HumanMessage"
+                                ):
+                                    if not first_message:
+                                        first_message = msg.content
+                                    last_message = msg.content  # Keep updating to get the last one
 
                 threads.append(
                     {
                         "thread_id": thread_id,
                         "conversation_id": conversation_id,
-                        "last_updated": row["last_checkpoint_id"],
+                        "last_updated": latest_checkpoint_ts,
                         "checkpoint_count": row["checkpoint_count"],
                         "message_count": message_count,
                         "first_message": first_message,
+                        "last_message": last_message,
                         "title": title,
                         "tags": tags,
                     }
@@ -373,51 +414,104 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             return threads
 
     def get_thread_messages(
-        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
+        self, thread_id: str, limit: Optional[int] = None, offset: int = 0,
+        message_types: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
-        """Get all messages from a conversation thread."""
-        with self._cursor() as cur:
-            # Get the latest checkpoint for this thread
-            cur.execute(
-                """
-                SELECT checkpoint
-                FROM checkpoints
-                WHERE thread_id = %s
-                ORDER BY checkpoint_id DESC
-                LIMIT 1
-                """,
-                (thread_id,),
+        """
+        Get all messages from a conversation thread.
+
+        Args:
+            thread_id: Thread ID to retrieve messages from
+            limit: Maximum number of messages to return
+            offset: Number of messages to skip
+            message_types: Optional list of message type names to include
+                          (e.g., ["HumanMessage", "AIMessage"])
+                          If None, returns all message types
+
+        Returns:
+            List of message dictionaries with role, content, and timestamp
+        """
+        import re
+
+        # Use LangGraph's get() method to retrieve fully reconstructed checkpoint
+        # This properly merges channel_values with data from checkpoint_writes table
+        config = {"configurable": {"thread_id": thread_id}}
+        checkpoint = self.get(config)
+
+        if not checkpoint:
+            return []
+
+        # Extract messages from the reconstructed checkpoint
+        channel_values = checkpoint.get("channel_values", {})
+        raw_messages = channel_values.get("messages", [])
+
+        messages = []
+        for msg in raw_messages:
+            # Get message type
+            msg_class = msg.__class__.__name__
+
+            # Apply message type filter if specified
+            if message_types is not None and msg_class not in message_types:
+                continue
+
+            # Map message types to roles
+            role_mapping = {
+                "HumanMessage": "user",
+                "AIMessage": "assistant",
+                "SystemMessage": "system",
+                "ToolMessage": "tool",
+                "FunctionMessage": "function",
+            }
+            role = role_mapping.get(msg_class, "unknown")
+
+            # Get content, handling both string and multimodal formats
+            content = msg.content if hasattr(msg, "content") else str(msg)
+
+            # Handle multimodal content (list of {text, type} objects)
+            if isinstance(content, list):
+                # Extract text from multimodal format
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and "text" in item:
+                        text_parts.append(item["text"])
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                content = " ".join(text_parts)
+
+            # Strip thinking tags from AI messages (application can control this via filtering)
+            if msg_class == "AIMessage":
+                # Patterns for different LLM providers (case-insensitive)
+                patterns = [
+                    r"<thinking>(.*?)</thinking>",
+                    r"<think>(.*?)</think>",
+                    r"<reasoning>(.*?)</reasoning>",
+                    r"<internal>(.*?)</internal>",
+                ]
+
+                for pattern in patterns:
+                    content = re.sub(pattern, "", content, flags=re.DOTALL | re.IGNORECASE)
+
+                # Clean up extra whitespace
+                content = content.strip()
+
+                # Skip empty AI messages (they should have been removed by normalize_state)
+                if not content:
+                    continue
+
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
+                }
             )
-            result = cur.fetchone()
 
-            if not result or not result["checkpoint"]:
-                return []
+        # Apply pagination
+        if offset > 0 or limit is not None:
+            end_index = offset + limit if limit is not None else None
+            messages = messages[offset:end_index]
 
-            # Extract messages from checkpoint
-            checkpoint_data = result["checkpoint"]
-            channel_values = checkpoint_data.get("channel_values", {})
-            raw_messages = channel_values.get("messages", [])
-
-            messages = []
-            for msg in raw_messages:
-                messages.append(
-                    {
-                        "role": (
-                            "user"
-                            if msg.__class__.__name__ == "HumanMessage"
-                            else "assistant"
-                        ),
-                        "content": msg.content if hasattr(msg, "content") else str(msg),
-                        "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-                    }
-                )
-
-            # Apply pagination
-            if offset > 0 or limit is not None:
-                end_index = offset + limit if limit is not None else None
-                messages = messages[offset:end_index]
-
-            return messages
+        return messages
 
     def delete_thread(self, thread_id: str) -> bool:
         """Delete all checkpoints for a conversation thread."""

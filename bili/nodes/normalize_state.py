@@ -115,6 +115,11 @@ def build_normalize_state_node(**kwargs):
                 )
                 messages_to_remove.append(RemoveMessage(id=message.id))
 
-        return {"messages": messages_to_remove}
+        # Only return message removals if there are messages to remove
+        # Returning empty list would clear all messages from state
+        if messages_to_remove:
+            return {"messages": messages_to_remove}
+        else:
+            return {}  # No state changes
 
     return normalize_state
