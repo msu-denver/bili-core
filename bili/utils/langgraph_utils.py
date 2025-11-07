@@ -8,7 +8,7 @@ formatting messages with citations and clearing conversation state.
 Classes:
 --------
 - State:
-    Extends AgentState to represent user-specific state, including summary and owner fields.
+    Extends MessagesState to represent user-specific state, including summary and owner fields.
 
 Functions:
 ----------
@@ -22,7 +22,7 @@ Functions:
 Dependencies:
 -------------
 - langchain_core.messages: Provides message classes and utilities for chat history.
-- langchain.agents: Provides AgentState base class for state schema.
+- langgraph.graph: Provides MessagesState base class for state schema.
 - bili.utils.logging_utils: Logger initialization.
 
 Usage:
@@ -48,7 +48,7 @@ from datetime import datetime
 from typing import List
 
 from langchain_core.messages import AIMessage, RemoveMessage
-from langchain.agents import AgentState
+from langgraph.graph import MessagesState
 
 from bili.utils.logging_utils import get_logger
 
@@ -92,11 +92,11 @@ def format_message_with_citations(message):
     return formatted_message
 
 
-class State(AgentState):
+class State(MessagesState):
     """
     Represents the state of an agent with user-specific preferences or state data.
 
-    This class extends `AgentState` and includes additional attributes to track user-specific
+    This class extends `MessagesState` and includes additional attributes to track user-specific
     preferences or state like summary, user ownership information, message timestamps,
     conversation metadata (title and tags), as well as the time difference between current
     and previous messages.
