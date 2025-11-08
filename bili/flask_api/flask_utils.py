@@ -66,6 +66,7 @@ if __name__ == '__main__':
 """
 
 from functools import wraps
+from dataclasses import replace
 
 from flask import g, jsonify, make_response, request
 from langchain_core.messages import HumanMessage
@@ -73,6 +74,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from bili.auth.auth_manager import AuthManager
 from bili.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
+from bili.nodes.per_user_state import per_user_state_node
+from bili.nodes.add_persona_and_summary import persona_and_summary_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -293,7 +296,7 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
 def per_user_agent(
     checkpoint_saver: BaseCheckpointSaver,
-    graph_definition: list[str],
+    graph_definition: list,
     node_kwargs: dict,
     state: type = State,
     custom_node_registry: dict = None,
@@ -347,10 +350,19 @@ def per_user_agent(
                 # Use g.user if user_profile is not available
                 node_kwargs["current_user"] = g.user
 
-            # Check that the graph definition contains the per_user_state node at position 1
-            # If not, add it
-            if "per_user_state" not in graph_definition:
-                graph_definition.insert(1, "per_user_state")
+            # Check that the graph definition contains the per_user_state node
+            # If not, insert it between persona_and_summary and inject_current_datetime
+            if per_user_state_node not in graph_definition:
+
+                # Create modified copies with updated edges
+                persona_node_modified = replace(persona_and_summary_node, edges=["per_user_state"])
+                per_user_state_modified = replace(per_user_state_node, edges=["inject_current_datetime"])
+
+                # Rebuild graph definition: persona → per_user_state → rest
+                graph_definition = [
+                    persona_node_modified,
+                    per_user_state_modified,
+                ] + graph_definition[1:]  # Skip original persona_and_summary_node
 
             # Build the agent graph using the provided parameters
             agent_graph = build_agent_graph(

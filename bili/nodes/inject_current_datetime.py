@@ -43,7 +43,9 @@ by default this node will do nothing.
 """
 
 from datetime import datetime, timezone
+from functools import partial
 
+from bili.graph_builder.classes.node import Node
 from langchain_core.messages import RemoveMessage, SystemMessage
 
 from bili.utils.logging_utils import get_logger
@@ -122,3 +124,5 @@ def build_inject_current_date_time(**kwargs):
         return {"messages": messages}
 
     return _execute_node
+
+inject_current_datetime_node = partial(Node,"inject_current_datetime", build_inject_current_date_time)

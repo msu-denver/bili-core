@@ -59,7 +59,9 @@ Example:
 """
 
 import json
+import copy
 
+from bili.graph_builder.classes.conditional_edge import ConditionalEdge
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -77,6 +79,7 @@ from bili.streamlit_ui.utils.state_management import (
     enable_form,
     get_state_config,
 )
+from bili.nodes.per_user_state import per_user_state_node
 from bili.utils.langgraph_utils import State, clear_state, format_message_with_citations
 
 
@@ -576,8 +579,10 @@ def load_system_components(checkpointer):
     }
 
     # Add per-user state node to the graph nodes since UI is per-user
-    graph_definition = DEFAULT_GRAPH_DEFINITION.copy()
-    graph_definition.insert(1, "per_user_state")
+    # Use deepcopy to avoid mutating the original node objects
+    graph_definition = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
+    graph_definition[graph_definition.index("inject_current_datetime")].edges = ["per_user_state"]
+    graph_definition.append(per_user_state_node(edges=["react_agent"]))
 
     # Create the langgraph agent
     conversation_agent = build_agent_graph(

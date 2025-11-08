@@ -38,7 +38,8 @@ from bili.nodes.normalize_tool_state import build_normalize_tool_state_node
 normalize_node = build_normalize_tool_state_node()
 new_state = normalize_node(state)
 """
-
+from functools import partial
+from bili.graph_builder.classes.node import Node
 from langchain_core.messages import AIMessage, RemoveMessage
 
 from bili.utils.logging_utils import get_logger
@@ -123,3 +124,5 @@ def build_normalize_state_node(**kwargs):
             return {}  # No state changes
 
     return normalize_state
+
+normalize_state_node = partial(Node, "normalize_state", build_normalize_state_node)

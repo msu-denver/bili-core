@@ -62,7 +62,7 @@ pip install -e .
 
 4. **Tools Framework** (`bili/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
 
-5. **LangGraph Workflows** (`bili/loaders/`, `bili/nodes/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
+5. **LangGraph Workflows** (`bili/loaders/`, `bili/nodes/`, `bili/graph_builder/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → per_user_state → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
 
 6. **Middleware System** (`bili/loaders/middleware_loader.py`, `bili/config/middleware_config.py`): Extensible middleware framework for intercepting and modifying agent execution. Supports built-in middleware (summarization, model call limiting) and custom middleware creation.
 
@@ -153,6 +153,82 @@ tools = initialize_tools(
 )
 ```
 
+### Graph Building and Node Architecture
+
+#### Node Definition Pattern
+
+Nodes are defined using `functools.partial` to create node factories:
+
+```python
+from functools import partial
+from bili.graph_builder.classes.node import Node
+
+def build_my_node(**kwargs):
+    def _execute_node(state: dict) -> dict:
+        # Node logic here
+        return {"messages": updated_messages}
+    return _execute_node
+
+# Create a node factory using partial
+my_node = partial(Node, "my_node_name", build_my_node)
+```
+
+#### Graph Definition
+
+The default graph is defined in `bili/loaders/langchain_loader.py`:
+
+1. **Node Instantiation**: Node factories (partials) are called to create Node instances
+2. **Property Configuration**: Node properties (edges, is_entry, routes_to_end) are set on instances
+3. **Registry**: `GRAPH_NODE_REGISTRY` stores node factories (partials) for dynamic graph building
+4. **Default Definition**: `DEFAULT_GRAPH_DEFINITION` contains pre-configured Node instances
+
+```python
+# Node instances are created from partials
+persona_node_instance = persona_and_summary_node()
+
+# Properties are set on instances
+persona_node_instance.is_entry = True
+persona_node_instance.edges.append("inject_current_datetime")
+
+# Registry stores partials for dynamic creation
+GRAPH_NODE_REGISTRY = {
+    "add_persona_and_summary": persona_and_summary_node,  # Partial function
+    ...
+}
+```
+
+#### Custom Graph Modification
+
+When modifying graphs (e.g., in Streamlit UI), **always use `copy.deepcopy`** to avoid mutating global node objects:
+
+```python
+import copy
+from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
+
+# CORRECT: Deep copy to avoid mutations
+graph_definition = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
+graph_definition[graph_definition.index("inject_current_datetime")].edges = ["per_user_state"]
+
+# INCORRECT: Shallow copy causes mutations across requests
+graph_definition = DEFAULT_GRAPH_DEFINITION.copy()  # DON'T DO THIS
+```
+
+#### Node Wrapper for Performance Monitoring
+
+The `wrap_node` function in `langchain_loader.py` wraps each node to log execution time:
+
+```python
+def wrap_node(node_func: Callable, node_name: str) -> Callable:
+    """Wraps a node function to log its execution time."""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = node_func(*args, **kwargs)
+        execution_time = (time.time() - start_time) * 1000
+        LOGGER.info(f"Node '{node_name}' executed in {execution_time:.2f} ms")
+        return result
+    return wrapper
+```
+
 ### Important Notes
 
 - Always run formatters before committing code
@@ -161,3 +237,6 @@ tools = initialize_tools(
 - Follow existing patterns when adding new providers or tools
 - Container development environment includes all dependencies and services
 - Middleware flows through `node_kwargs` to the react agent node automatically
+- **Node Architecture**: Nodes use `functools.partial` pattern; call them to create Node instances
+- **Graph Mutations**: Always use `copy.deepcopy()` when modifying graph definitions to prevent cross-request mutations
+- **Performance**: All nodes are automatically wrapped with execution time logging

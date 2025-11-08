@@ -42,6 +42,8 @@ trim_node = build_trim_and_summarize_node(llm_model=my_llm, k=10, memory_strateg
 new_state = trim_node(state)
 """
 
+from functools import partial
+from bili.graph_builder.classes.node import Node
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -269,3 +271,5 @@ def build_trim_and_summarize_node(
         return {"messages": messages_to_remove, "summary": new_summary}
 
     return trim_and_summarize_state
+
+trim_summarize_node = partial(Node, "trim_summarize", build_trim_and_summarize_node)

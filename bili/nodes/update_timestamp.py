@@ -28,8 +28,11 @@ update_timestamp_node = build_update_timestamp_node()
 new_state = update_timestamp_node(state)
 """
 
+from functools import partial
 import time
 from datetime import datetime, timezone
+
+from bili.graph_builder.classes.node import Node
 
 
 def build_update_timestamp_node(**kwargs):
@@ -87,3 +90,4 @@ def build_update_timestamp_node(**kwargs):
         }
 
     return update_timestamps_node
+update_timestamp_node = partial(Node, "update_timestamp", build_update_timestamp_node)

@@ -44,8 +44,10 @@ agent_node = build_react_agent_node(
 result = agent_node(state)
 """
 
+from functools import partial
 from typing import Type
 
+from bili.graph_builder.classes.node import Node
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import Tool
 from langchain.agents import create_agent, AgentState
@@ -148,3 +150,5 @@ def build_react_agent_node(
 
         agent = call_model
     return agent
+
+react_agent_node = partial(Node, "react_agent", build_react_agent_node)
