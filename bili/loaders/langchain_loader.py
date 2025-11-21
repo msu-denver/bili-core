@@ -315,4 +315,15 @@ def build_agent_graph(
         if node.routes_to_end:
             graph.add_edge(node.name, END)
 
+    # Validate that conditional_entry and is_entry are not mixed
+    has_conditional_entry = any(node.conditional_entry for node in graph_definition)
+    has_direct_entries = any(node.is_entry for node in graph_definition)
+
+    if has_conditional_entry and has_direct_entries:
+        raise ValueError(
+            "Invalid graph configuration: Cannot mix conditional entry points with direct entry points. "
+            "When using conditional_entry on any node, all nodes must have is_entry=False. "
+            "The conditional_entry routing function determines which node executes at START."
+        )
+
     return graph.compile(checkpointer=checkpoint_saver)
