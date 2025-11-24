@@ -145,7 +145,11 @@ def build_react_agent_node(
             messages_to_send = [
                 HumanMessage(content=str(message.content)) for message in messages
             ]
-            response = llm_model.invoke(messages_to_send)
+            
+            # Load the llm config if one exists, otherwise pass an empty dict
+            llm_config = state.get("llm_config", {})
+
+            response = llm_model.invoke(messages_to_send, config=llm_config)
             return {"messages": [response]}
 
         agent = call_model

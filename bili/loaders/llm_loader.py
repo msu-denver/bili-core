@@ -9,6 +9,9 @@ The functions are conditionally cached to optimize resource usage in Streamlit a
 Functions:
     - load_model(model_type, **kwargs):
       Loads a machine learning model based on the provided model type.
+    - prepare_runtime_config(model_type, thinking_config=None, **kwargs):
+      Transform simple thinking configuration dict into provider-specific runtime config
+      for use with model.invoke().
     - load_huggingface_model(model_name, max_tokens, temperature, top_p=0.1, top_k=None, seed=None):
       Loads a locally available HuggingFace model and initializes a text generation pipeline.
     - load_llamacpp_model(model_name, max_tokens, temperature, top_p=1.0, top_k=50, seed=None):
@@ -128,6 +131,99 @@ def load_model(
         raise ValueError(f"Invalid model type: {model_type}")
 
     return llm_model
+
+
+def prepare_runtime_config(
+    model_type: str,
+    thinking_config: dict = None,
+    **kwargs
+) -> dict:
+    """
+    Transform simple thinking configuration dict into provider-specific runtime config.
+
+    This function prepares the runtime configuration that will be passed to the
+    model's invoke() method. Different LLM providers require different configuration
+    formats - for example, Google Vertex AI uses a ThinkingConfig object while
+    other providers may ignore thinking parameters entirely.
+
+    :param model_type: The type of model being used (e.g., "remote_google_vertex",
+        "remote_openai", "remote_aws_bedrock"). This determines how the config
+        will be formatted.
+    :type model_type: str
+    :param thinking_config: Optional dictionary containing thinking-related parameters.
+        Expected keys may include "budget" for thinking budget. The structure should
+        be simple and provider-agnostic (e.g., {"budget": 0}).
+    :type thinking_config: dict or None
+    :param kwargs: Additional runtime configuration parameters to include in the
+        returned config dictionary.
+    :type kwargs: dict
+    :return: Provider-specific runtime configuration dictionary formatted for use
+        with model.invoke(config=...). For Google Vertex AI, this includes a nested
+        "thinking_config" key with ThinkingConfig object. For other providers, this
+        may be empty or include only the kwargs.
+    :rtype: dict
+
+    Example:
+        >>> # For Google Vertex AI
+        >>> config = prepare_runtime_config(
+        ...     model_type="remote_google_vertex",
+        ...     thinking_config={"budget": 5000}
+        ... )
+        >>> # Returns: {"thinking_config": ThinkingConfig(thinking_budget=5000)}
+
+        >>> # For OpenAI (thinking config not supported)
+        >>> config = prepare_runtime_config(
+        ...     model_type="remote_openai",
+        ...     thinking_config={"budget": 0}
+        ... )
+        >>> # Returns: {}
+    """
+    runtime_config = {}
+
+    # Handle Google Vertex AI thinking configuration
+    if model_type == "remote_google_vertex" and thinking_config:
+        try:
+            from google.genai import types
+
+            # Extract budget from the thinking_config dict
+            budget = thinking_config.get("budget", 0)
+
+            # Only create ThinkingConfig if budget is specified
+            if budget is not None:
+                # Convert to int if it's a string
+                if isinstance(budget, str):
+                    budget = int(budget)
+
+                runtime_config["thinking_config"] = types.ThinkingConfig(
+                    thinking_budget=budget
+                )
+
+                LOGGER.debug(
+                    f"Created ThinkingConfig with budget={budget} for Vertex AI"
+                )
+        except ImportError:
+            LOGGER.warning(
+                "langchain_google_vertexai.types.ThinkingConfig not available. "
+                "Thinking configuration will be ignored."
+            )
+        except (ValueError, TypeError) as e:
+            LOGGER.error(
+                f"Error creating ThinkingConfig: {e}. "
+                f"Budget value: {thinking_config.get('budget')}"
+            )
+    elif model_type != "remote_google_vertex" and thinking_config:
+        LOGGER.warning(
+                f"{model_type} thinking configuration is not supported at this time."
+                "Thinking configuration will be ignored."
+            )
+        
+    # Other providers (OpenAI, Azure, Bedrock, etc.) don't use thinking config
+    # They will simply ignore unknown config keys, so we don't need special handling
+
+    # Add any additional kwargs to the runtime config
+    runtime_config.update(kwargs)
+
+    return runtime_config
 
 
 # This method initializes and loads the Llama model for CUDA-compatible machines.
