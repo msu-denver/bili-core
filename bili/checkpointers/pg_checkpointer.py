@@ -282,6 +282,10 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from PostgreSQL."""
+        # First, collect all thread metadata using a single cursor
+        # We avoid calling get_tuple() inside the cursor block to prevent connection pool deadlock
+        thread_metadata = []
+
         with self._cursor() as cur:
             # Find all unique thread IDs for this user with metadata
             query = """
@@ -308,7 +312,6 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             cur.execute(query, params)
             results = cur.fetchall()
 
-            threads = []
             for row in results:
                 thread_id = row["thread_id"]
 
@@ -318,7 +321,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 else:
                     conversation_id = "default"
 
-                # Get the latest checkpoint for metadata
+                # Get the latest checkpoint for metadata (title, tags, timestamp)
                 cur.execute(
                     """
                     SELECT checkpoint
@@ -331,9 +334,6 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 )
                 latest = cur.fetchone()
 
-                first_message = None
-                last_message = None
-                message_count = 0
                 title = None
                 tags = []
                 latest_checkpoint_ts = None
@@ -348,7 +348,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                     # Extract title from channel_values (small scalar, stored directly)
                     title = channel_values.get("title")
 
-                    # Get tags from checkpoint_writes if not in channel_values
+                    # Get tags from channel_values first
                     tags = channel_values.get("tags", [])
                     if not tags:
                         # Query checkpoint_writes for tags channel
@@ -368,44 +368,61 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                             import msgpack
                             tags = msgpack.unpackb(tags_row["blob"], raw=False)
 
-                    # Get message count using get_tuple for proper deserialization
-                    # This is more reliable than manually deserializing checkpoint_writes
-                    try:
-                        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-                        checkpoint_tuple = self.get_tuple(config)
-                        if checkpoint_tuple and checkpoint_tuple.checkpoint:
-                            cv = checkpoint_tuple.checkpoint.get("channel_values", {})
-                            messages = cv.get("messages", [])
-                            if messages:
-                                message_count = len(messages)
-                                # Get the first and last user messages
-                                for msg in messages:
-                                    if (
-                                        hasattr(msg, "content")
-                                        and msg.content
-                                        and msg.__class__.__name__ == "HumanMessage"
-                                    ):
-                                        if not first_message:
-                                            first_message = msg.content
-                                        last_message = msg.content  # Keep updating to get the last one
-                    except Exception as e:
-                        LOGGER.warning(f"get_user_threads: Failed to get messages for {thread_id}: {e}")
+                thread_metadata.append({
+                    "thread_id": thread_id,
+                    "conversation_id": conversation_id,
+                    "checkpoint_count": row["checkpoint_count"],
+                    "latest_checkpoint_ts": latest_checkpoint_ts,
+                    "title": title,
+                    "tags": tags,
+                })
 
-                threads.append(
-                    {
-                        "thread_id": thread_id,
-                        "conversation_id": conversation_id,
-                        "last_updated": latest_checkpoint_ts,
-                        "checkpoint_count": row["checkpoint_count"],
-                        "message_count": message_count,
-                        "first_message": first_message,
-                        "last_message": last_message,
-                        "title": title,
-                        "tags": tags,
-                    }
-                )
+        # Now, outside the cursor block, call get_tuple() for each thread
+        # This avoids connection pool deadlock from nested cursor usage
+        threads = []
+        for meta in thread_metadata:
+            thread_id = meta["thread_id"]
+            first_message = None
+            last_message = None
+            message_count = 0
 
-            return threads
+            # Get message count using get_tuple for proper deserialization
+            try:
+                config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                checkpoint_tuple = self.get_tuple(config)
+                if checkpoint_tuple and checkpoint_tuple.checkpoint:
+                    cv = checkpoint_tuple.checkpoint.get("channel_values", {})
+                    messages = cv.get("messages", [])
+                    if messages:
+                        message_count = len(messages)
+                        # Get the first and last user messages
+                        for msg in messages:
+                            if (
+                                hasattr(msg, "content")
+                                and msg.content
+                                and msg.__class__.__name__ == "HumanMessage"
+                            ):
+                                if not first_message:
+                                    first_message = msg.content
+                                last_message = msg.content  # Keep updating to get the last one
+            except Exception as e:
+                LOGGER.warning(f"get_user_threads: Failed to get messages for {thread_id}: {e}")
+
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "conversation_id": meta["conversation_id"],
+                    "last_updated": meta["latest_checkpoint_ts"],
+                    "checkpoint_count": meta["checkpoint_count"],
+                    "message_count": message_count,
+                    "first_message": first_message,
+                    "last_message": last_message,
+                    "title": meta["title"],
+                    "tags": meta["tags"],
+                }
+            )
+
+        return threads
 
     def get_thread_messages(
         self, thread_id: str, limit: Optional[int] = None, offset: int = 0,
