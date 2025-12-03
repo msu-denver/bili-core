@@ -77,14 +77,22 @@ def get_pg_connection_pool():
     :rtype: Optional[ConnectionPool]
     """
     postgres_connection_string = os.getenv("POSTGRES_CONNECTION_STRING", None)
+    postgres_connection_pool_min_size = int(
+        os.getenv("POSTGRES_CONNECTION_POOL_MIN_SIZE", "1")
+    )
     postgres_connection_pool_max_size = int(
         os.getenv("POSTGRES_CONNECTION_POOL_MAX_SIZE", "20")
     )
 
     if postgres_connection_string:
-        LOGGER.info("Initializing shared Postgres connection pool.")
+        LOGGER.info(
+            "Initializing shared Postgres connection pool (min=%d, max=%d).",
+            postgres_connection_pool_min_size,
+            postgres_connection_pool_max_size,
+        )
         pool = ConnectionPool(
             conninfo=f"{postgres_connection_string.rstrip('/')}/langgraph",
+            min_size=postgres_connection_pool_min_size,
             max_size=postgres_connection_pool_max_size,
             kwargs={"autocommit": True},
         )
@@ -366,16 +374,19 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                         if tags_row and tags_row["blob"]:
                             # Deserialize the value (it's stored as bytes/msgpack)
                             import msgpack
+
                             tags = msgpack.unpackb(tags_row["blob"], raw=False)
 
-                thread_metadata.append({
-                    "thread_id": thread_id,
-                    "conversation_id": conversation_id,
-                    "checkpoint_count": row["checkpoint_count"],
-                    "latest_checkpoint_ts": latest_checkpoint_ts,
-                    "title": title,
-                    "tags": tags,
-                })
+                thread_metadata.append(
+                    {
+                        "thread_id": thread_id,
+                        "conversation_id": conversation_id,
+                        "checkpoint_count": row["checkpoint_count"],
+                        "latest_checkpoint_ts": latest_checkpoint_ts,
+                        "title": title,
+                        "tags": tags,
+                    }
+                )
 
         # Now, outside the cursor block, call get_tuple() for each thread
         # This avoids connection pool deadlock from nested cursor usage
@@ -404,9 +415,13 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                             ):
                                 if not first_message:
                                     first_message = msg.content
-                                last_message = msg.content  # Keep updating to get the last one
+                                last_message = (
+                                    msg.content
+                                )  # Keep updating to get the last one
             except Exception as e:
-                LOGGER.warning(f"get_user_threads: Failed to get messages for {thread_id}: {e}")
+                LOGGER.warning(
+                    f"get_user_threads: Failed to get messages for {thread_id}: {e}"
+                )
 
             threads.append(
                 {
@@ -425,8 +440,11 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         return threads
 
     def get_thread_messages(
-        self, thread_id: str, limit: Optional[int] = None, offset: int = 0,
-        message_types: Optional[List[str]] = None
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all messages from a conversation thread.
@@ -449,13 +467,17 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         checkpoint_tuple = self.get_tuple(config)
 
         if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
-            LOGGER.warning(f"get_thread_messages: No checkpoint found for thread {thread_id}")
+            LOGGER.warning(
+                f"get_thread_messages: No checkpoint found for thread {thread_id}"
+            )
             return []
 
         channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
         raw_messages = channel_values.get("messages", [])
 
-        LOGGER.info(f"get_thread_messages: Thread {thread_id} - Found {len(raw_messages)} messages")
+        LOGGER.info(
+            f"get_thread_messages: Thread {thread_id} - Found {len(raw_messages)} messages"
+        )
 
         # Log message types for debugging
         if raw_messages:
@@ -472,7 +494,11 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 msg_class = msg.get("type", msg.get("__class__", "unknown"))
                 # Handle serialized format where type might be in different places
                 if msg_class == "unknown" and "kwargs" in msg:
-                    msg_class = msg.get("id", ["unknown"])[-1] if isinstance(msg.get("id"), list) else "unknown"
+                    msg_class = (
+                        msg.get("id", ["unknown"])[-1]
+                        if isinstance(msg.get("id"), list)
+                        else "unknown"
+                    )
             else:
                 msg_class = "unknown"
 
@@ -484,11 +510,17 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 "tool": "ToolMessage",
                 "function": "FunctionMessage",
             }
-            msg_class = type_normalization.get(msg_class.lower(), msg_class) if isinstance(msg_class, str) else msg_class
+            msg_class = (
+                type_normalization.get(msg_class.lower(), msg_class)
+                if isinstance(msg_class, str)
+                else msg_class
+            )
 
             # Apply message type filter if specified
             if message_types is not None and msg_class not in message_types:
-                LOGGER.debug(f"get_thread_messages: Filtering out message of type {msg_class}")
+                LOGGER.debug(
+                    f"get_thread_messages: Filtering out message of type {msg_class}"
+                )
                 continue
 
             # Map message types to roles
@@ -506,7 +538,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 content = msg.content
             elif isinstance(msg, dict):
                 # Try different possible content locations in dict
-                content = msg.get("content", msg.get("kwargs", {}).get("content", str(msg)))
+                content = msg.get(
+                    "content", msg.get("kwargs", {}).get("content", str(msg))
+                )
             else:
                 content = str(msg)
 
@@ -532,7 +566,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                 ]
 
                 for pattern in patterns:
-                    content = re.sub(pattern, "", content, flags=re.DOTALL | re.IGNORECASE)
+                    content = re.sub(
+                        pattern, "", content, flags=re.DOTALL | re.IGNORECASE
+                    )
 
                 # Clean up extra whitespace
                 content = content.strip()
@@ -555,7 +591,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             end_index = offset + limit if limit is not None else None
             messages = messages[offset:end_index]
 
-        LOGGER.info(f"get_thread_messages: Returning {len(messages)} messages after filtering")
+        LOGGER.info(
+            f"get_thread_messages: Returning {len(messages)} messages after filtering"
+        )
         if messages:
             roles = [m["role"] for m in messages]
             LOGGER.info(f"get_thread_messages: Message roles: {roles}")
@@ -634,13 +672,17 @@ class AsyncConnectionManager:
                 )
                 return None
 
+            pool_min_size = int(os.getenv("POSTGRES_CONNECTION_POOL_MIN_SIZE", "1"))
             pool_max_size = int(os.getenv("POSTGRES_CONNECTION_POOL_MAX_SIZE", "20"))
 
             LOGGER.info(
-                "Initializing shared async PostgreSQL connection pool for streaming."
+                "Initializing shared async PostgreSQL connection pool (min=%d, max=%d).",
+                pool_min_size,
+                pool_max_size,
             )
             self._pool = AsyncConnectionPool(
                 conninfo=f"{connection_string.rstrip('/')}/langgraph",
+                min_size=pool_min_size,
                 max_size=pool_max_size,
                 kwargs={"autocommit": True},
             )
