@@ -132,6 +132,7 @@ class State(MessagesState):
     template_dict: dict
     title: str
     tags: List[str]
+    llm_config: dict
 
 
 def clear_state(state: State) -> dict:

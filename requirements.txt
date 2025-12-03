@@ -36,9 +36,9 @@ scikit-learn~=1.7.2
 sentence-transformers~=5.1.2
 tensorflow~=2.18.0
 tf-keras~=2.18.0
-torch==2.4.1
-torchaudio==2.4.1
-torchvision==0.19.1
+torch==2.6.0
+torchaudio==2.6.0
+torchvision==0.21.0
 transformers~=4.57.1
 
 # -----------------------------------------------------------------------------

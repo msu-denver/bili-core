@@ -444,7 +444,7 @@ class AsyncClientManager:
         self._client = None
 
     async def get_client(self):
-        """Get async MongoDB database."""
+        """Get async MongoDB client (not database)."""
         if self._client is None:
             connection_string = os.getenv("MONGO_CONNECTION_STRING")
             if not connection_string:
@@ -457,7 +457,7 @@ class AsyncClientManager:
             self._client = AsyncIOMotorClient(connection_string)
             atexit.register(self._close_client)
 
-        return self._client["langgraph"]
+        return self._client
 
     def _close_client(self):
         """Close async client."""
@@ -471,21 +471,25 @@ _async_client_manager = AsyncClientManager()
 
 
 async def get_async_mongo_client():
-    """Get async MongoDB database."""
+    """Get async MongoDB client."""
     return await _async_client_manager.get_client()
 
 
 async def get_async_mongo_checkpointer(keep_last_n: int = 5):
     """
-    Creates and returns an async MongoDB checkpointer instance for streaming operations.
+    Creates and returns an async-capable MongoDB checkpointer instance for streaming operations.
+
+    Note: Uses MongoDBSaver (sync init) with async methods as AsyncMongoDBSaver is deprecated.
 
     :param keep_last_n: Number of checkpoints to keep per thread
-    :return: AsyncPruningMongoDBSaver instance or None
-    :rtype: AsyncPruningMongoDBSaver | None
+    :return: PruningMongoDBSaver instance or None (supports async methods)
+    :rtype: PruningMongoDBSaver | None
     """
-    mongo_db = await get_async_mongo_client()
+    # Use synchronous client initialization as MongoDBSaver expects a database object
+    mongo_db = get_mongo_client()
     if mongo_db is not None:
-        return AsyncPruningMongoDBSaver(mongo_db, keep_last_n=keep_last_n)
+        LOGGER.info("Using MongoDBSaver with async method support for checkpointing.")
+        return PruningMongoDBSaver(mongo_db, keep_last_n=keep_last_n)
     return None
 
 
