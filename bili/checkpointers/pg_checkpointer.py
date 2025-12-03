@@ -368,34 +368,28 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                             import msgpack
                             tags = msgpack.unpackb(tags_row["blob"], raw=False)
 
-                    # Get message count from checkpoint_writes without loading all messages
-                    cur.execute(
-                        """
-                        SELECT blob
-                        FROM checkpoint_writes
-                        WHERE thread_id = %s AND channel = 'messages'
-                        ORDER BY checkpoint_id DESC
-                        LIMIT 1
-                        """,
-                        (thread_id,),
-                    )
-                    messages_row = cur.fetchone()
-                    if messages_row and messages_row["blob"]:
-                        # Deserialize to get message count and first message
-                        import msgpack
-                        messages = msgpack.unpackb(messages_row["blob"], raw=False)
-                        if messages:
-                            message_count = len(messages)
-                            # Get the first and last user messages
-                            for msg in messages:
-                                if (
-                                    hasattr(msg, "content")
-                                    and msg.content
-                                    and msg.__class__.__name__ == "HumanMessage"
-                                ):
-                                    if not first_message:
-                                        first_message = msg.content
-                                    last_message = msg.content  # Keep updating to get the last one
+                    # Get message count using get_tuple for proper deserialization
+                    # This is more reliable than manually deserializing checkpoint_writes
+                    try:
+                        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                        checkpoint_tuple = self.get_tuple(config)
+                        if checkpoint_tuple and checkpoint_tuple.checkpoint:
+                            cv = checkpoint_tuple.checkpoint.get("channel_values", {})
+                            messages = cv.get("messages", [])
+                            if messages:
+                                message_count = len(messages)
+                                # Get the first and last user messages
+                                for msg in messages:
+                                    if (
+                                        hasattr(msg, "content")
+                                        and msg.content
+                                        and msg.__class__.__name__ == "HumanMessage"
+                                    ):
+                                        if not first_message:
+                                            first_message = msg.content
+                                        last_message = msg.content  # Keep updating to get the last one
+                    except Exception as e:
+                        LOGGER.warning(f"get_user_threads: Failed to get messages for {thread_id}: {e}")
 
                 threads.append(
                     {
@@ -433,25 +427,51 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         """
         import re
 
-        # Use LangGraph's get() method to retrieve fully reconstructed checkpoint
-        # This properly merges channel_values with data from checkpoint_writes table
-        config = {"configurable": {"thread_id": thread_id}}
-        checkpoint = self.get(config)
+        # Use LangGraph's get_tuple() to retrieve the fully reconstructed checkpoint
+        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        checkpoint_tuple = self.get_tuple(config)
 
-        if not checkpoint:
+        if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
+            LOGGER.warning(f"get_thread_messages: No checkpoint found for thread {thread_id}")
             return []
 
-        # Extract messages from the reconstructed checkpoint
-        channel_values = checkpoint.get("channel_values", {})
+        channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
         raw_messages = channel_values.get("messages", [])
+
+        LOGGER.info(f"get_thread_messages: Thread {thread_id} - Found {len(raw_messages)} messages")
+
+        # Log message types for debugging
+        if raw_messages:
+            msg_types = [type(msg).__name__ for msg in raw_messages]
+            LOGGER.info(f"get_thread_messages: Message types: {msg_types}")
 
         messages = []
         for msg in raw_messages:
-            # Get message type
-            msg_class = msg.__class__.__name__
+            # Get message type - handle both objects and dicts
+            if hasattr(msg, "__class__"):
+                msg_class = msg.__class__.__name__
+            elif isinstance(msg, dict):
+                # For dict-like messages, try to determine type from 'type' field
+                msg_class = msg.get("type", msg.get("__class__", "unknown"))
+                # Handle serialized format where type might be in different places
+                if msg_class == "unknown" and "kwargs" in msg:
+                    msg_class = msg.get("id", ["unknown"])[-1] if isinstance(msg.get("id"), list) else "unknown"
+            else:
+                msg_class = "unknown"
+
+            # Map various type representations to standard names
+            type_normalization = {
+                "human": "HumanMessage",
+                "ai": "AIMessage",
+                "system": "SystemMessage",
+                "tool": "ToolMessage",
+                "function": "FunctionMessage",
+            }
+            msg_class = type_normalization.get(msg_class.lower(), msg_class) if isinstance(msg_class, str) else msg_class
 
             # Apply message type filter if specified
             if message_types is not None and msg_class not in message_types:
+                LOGGER.debug(f"get_thread_messages: Filtering out message of type {msg_class}")
                 continue
 
             # Map message types to roles
@@ -464,8 +484,14 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             }
             role = role_mapping.get(msg_class, "unknown")
 
-            # Get content, handling both string and multimodal formats
-            content = msg.content if hasattr(msg, "content") else str(msg)
+            # Get content, handling both objects, dicts, and multimodal formats
+            if hasattr(msg, "content"):
+                content = msg.content
+            elif isinstance(msg, dict):
+                # Try different possible content locations in dict
+                content = msg.get("content", msg.get("kwargs", {}).get("content", str(msg)))
+            else:
+                content = str(msg)
 
             # Handle multimodal content (list of {text, type} objects)
             if isinstance(content, list):
@@ -496,6 +522,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
 
                 # Skip empty AI messages (they should have been removed by normalize_state)
                 if not content:
+                    LOGGER.debug(f"get_thread_messages: Skipping empty AI message")
                     continue
 
             messages.append(
@@ -510,6 +537,11 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         if offset > 0 or limit is not None:
             end_index = offset + limit if limit is not None else None
             messages = messages[offset:end_index]
+
+        LOGGER.info(f"get_thread_messages: Returning {len(messages)} messages after filtering")
+        if messages:
+            roles = [m["role"] for m in messages]
+            LOGGER.info(f"get_thread_messages: Message roles: {roles}")
 
         return messages
 
