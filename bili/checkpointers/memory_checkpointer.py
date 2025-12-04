@@ -83,8 +83,9 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
             else:
                 conversation_id = "default"
 
-            # Extract first message and message count from latest checkpoint
+            # Extract first/last message and message count from latest checkpoint
             first_message = None
+            last_message = None
             message_count = 0
             title = None
             tags = []
@@ -100,15 +101,26 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
                 if messages:
                     message_count = len(messages)
-                    # Get the first user message
+                    # Get the first and last user messages
                     for msg in messages:
                         if (
                             hasattr(msg, "content")
                             and msg.content
                             and msg.__class__.__name__ == "HumanMessage"
                         ):
-                            first_message = msg.content
-                            break
+                            # Extract text content (handle multimodal)
+                            content = msg.content
+                            if isinstance(content, list):
+                                text_parts = [
+                                    p.get("text", "")
+                                    for p in content
+                                    if isinstance(p, dict) and p.get("type") == "text"
+                                ]
+                                content = " ".join(text_parts)
+
+                            if first_message is None:
+                                first_message = content
+                            last_message = content
 
             threads.append(
                 {
@@ -118,6 +130,7 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
                     "checkpoint_count": len(data["checkpoints"]),
                     "message_count": message_count,
                     "first_message": first_message,
+                    "last_message": last_message,
                     "title": title,
                     "tags": tags,
                 }
@@ -132,7 +145,11 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         return threads
 
     def get_thread_messages(
-        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
         # Find the latest checkpoint for this thread
@@ -159,14 +176,30 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
         messages = []
         for msg in raw_messages:
+            msg_type = msg.__class__.__name__
+
+            # Apply message type filter if specified
+            if message_types is not None and msg_type not in message_types:
+                continue
+
+            # Extract content (handle multimodal)
+            content = msg.content if hasattr(msg, "content") else str(msg)
+            if isinstance(content, list):
+                text_parts = [
+                    p.get("text", "")
+                    for p in content
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ]
+                content = " ".join(text_parts)
+
+            # Strip thinking blocks from AI messages
+            if msg_type == "AIMessage":
+                content = self._strip_thinking_blocks(content)
+
             messages.append(
                 {
-                    "role": (
-                        "user"
-                        if msg.__class__.__name__ == "HumanMessage"
-                        else "assistant"
-                    ),
-                    "content": msg.content if hasattr(msg, "content") else str(msg),
+                    "role": "user" if msg_type == "HumanMessage" else "assistant",
+                    "content": content,
                     "timestamp": None,  # Messages don't have individual timestamps in LangGraph
                 }
             )

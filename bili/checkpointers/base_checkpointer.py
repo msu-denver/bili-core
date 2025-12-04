@@ -26,6 +26,7 @@ Example:
             pass
 """
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -62,6 +63,9 @@ class QueryableCheckpointerMixin(ABC):
                     "checkpoint_count": int,
                     "message_count": int,
                     "first_message": Optional[str],  # For title generation
+                    "last_message": Optional[str],  # Last user message preview
+                    "title": Optional[str],
+                    "tags": List[str],
                 },
                 ...
             ]
@@ -69,7 +73,11 @@ class QueryableCheckpointerMixin(ABC):
 
     @abstractmethod
     def get_thread_messages(
-        self, thread_id: str, limit: Optional[int] = None, offset: int = 0
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all messages from a conversation thread.
@@ -78,13 +86,15 @@ class QueryableCheckpointerMixin(ABC):
             thread_id: Thread ID to retrieve messages from
             limit: Maximum number of messages to return (None for all)
             offset: Number of messages to skip for pagination
+            message_types: Optional list of message types to filter by
+                (e.g., ["HumanMessage", "AIMessage"]). If None, returns all messages.
 
         Returns:
             List of message objects:
             [
                 {
                     "role": str,  # "user" or "assistant"
-                    "content": str,
+                    "content": str,  # Thinking blocks are stripped from AI messages
                     "timestamp": Optional[datetime],
                 },
                 ...
@@ -154,3 +164,35 @@ class QueryableCheckpointerMixin(ABC):
         return thread_id == user_identifier or thread_id.startswith(
             f"{user_identifier}_"
         )
+
+    def _strip_thinking_blocks(self, content: str) -> str:
+        """
+        Strip thinking/reasoning tags from message content.
+
+        Removes XML-style blocks commonly used by LLMs for chain-of-thought:
+        - <thinking>...</thinking>
+        - <think>...</think>
+        - <reasoning>...</reasoning>
+
+        Args:
+            content: The message content to process
+
+        Returns:
+            Content with thinking blocks removed and cleaned up
+        """
+        if not content:
+            return content
+
+        # Remove thinking blocks (case-insensitive, dotall for multiline)
+        patterns = [
+            r"<thinking>.*?</thinking>",
+            r"<think>.*?</think>",
+            r"<reasoning>.*?</reasoning>",
+            r"<internal>.*?</internal>",
+        ]
+        for pattern in patterns:
+            content = re.sub(pattern, "", content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Clean up extra whitespace left behind
+        content = re.sub(r"\n{3,}", "\n\n", content)
+        return content.strip()

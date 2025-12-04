@@ -413,11 +413,22 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                                 and msg.content
                                 and msg.__class__.__name__ == "HumanMessage"
                             ):
+                                # Extract text content (handle multimodal)
+                                content = msg.content
+                                if isinstance(content, list):
+                                    text_parts = [
+                                        p.get("text", "")
+                                        for p in content
+                                        if isinstance(p, dict)
+                                        and p.get("type") == "text"
+                                    ]
+                                    content = " ".join(text_parts)
+
                                 if not first_message:
-                                    first_message = msg.content
+                                    first_message = content
                                 last_message = (
-                                    msg.content
-                                )  # Keep updating to get the last one
+                                    content  # Keep updating to get the last one
+                                )
             except Exception as e:
                 LOGGER.warning(
                     f"get_user_threads: Failed to get messages for {thread_id}: {e}"
@@ -460,8 +471,6 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         Returns:
             List of message dictionaries with role, content, and timestamp
         """
-        import re
-
         # Use LangGraph's get_tuple() to retrieve the fully reconstructed checkpoint
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
         checkpoint_tuple = self.get_tuple(config)
@@ -555,23 +564,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                         text_parts.append(item)
                 content = " ".join(text_parts)
 
-            # Strip thinking tags from AI messages (application can control this via filtering)
+            # Strip thinking tags from AI messages using shared helper
             if msg_class == "AIMessage":
-                # Patterns for different LLM providers (case-insensitive)
-                patterns = [
-                    r"<thinking>(.*?)</thinking>",
-                    r"<think>(.*?)</think>",
-                    r"<reasoning>(.*?)</reasoning>",
-                    r"<internal>(.*?)</internal>",
-                ]
-
-                for pattern in patterns:
-                    content = re.sub(
-                        pattern, "", content, flags=re.DOTALL | re.IGNORECASE
-                    )
-
-                # Clean up extra whitespace
-                content = content.strip()
+                content = self._strip_thinking_blocks(content)
 
                 # Skip empty AI messages (they should have been removed by normalize_state)
                 if not content:
