@@ -321,6 +321,57 @@ class PruningMongoDBSaver(
         # Now safe to call parent's get_tuple
         return super().get_tuple(config)
 
+    async def aget_tuple(self, config: RunnableConfig):
+        """
+        Get checkpoint tuple with automatic migration support (async version).
+
+        Checks if the checkpoint needs migration before calling the parent's
+        aget_tuple method to avoid deserialization errors.
+
+        :param config: Runnable configuration with thread_id
+        :return: Checkpoint tuple or None
+        """
+        thread_id = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        # Migrate checkpoint if needed before LangGraph deserializes it
+        # Note: Migration uses sync methods since it's infrequent
+        try:
+            self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            LOGGER.warning(
+                "Migration failed for thread %s, returning None: %s", thread_id, e
+            )
+            return None
+
+        # Now safe to call parent's aget_tuple
+        return await super().aget_tuple(config)
+
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        """
+        Async version of put method with format versioning.
+
+        Saves a checkpoint with format version metadata for future migrations.
+
+        :param config: Runnable configuration
+        :param checkpoint: Checkpoint to save
+        :param metadata: Checkpoint metadata
+        :param new_versions: Channel versions
+        :return: Updated configuration
+        """
+        # Add format version to metadata for future migrations
+        versioned_metadata = dict(metadata) if metadata else {}
+        versioned_metadata["format_version"] = self.format_version
+
+        # Save the checkpoint with versioned metadata
+        return await super().aput(config, checkpoint, versioned_metadata, new_versions)
+
     def put(
         self,
         config: RunnableConfig,
@@ -652,13 +703,22 @@ async def get_async_mongo_checkpointer(keep_last_n: int = 5):
     return None
 
 
-class AsyncPruningMongoDBSaver(AsyncMongoDBSaver):
+class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
     """
     Async version of PruningMongoDBSaver for streaming operations.
 
     Manages saving and pruning of checkpoints in MongoDB using async operations
     for improved performance during streaming.
+
+    Also implements:
+    - VersionedCheckpointerMixin: Version detection and lazy migration
     """
+
+    # Identify this checkpointer type for migrations
+    checkpointer_type: str = "mongo"
+
+    # Use the global format version
+    format_version: int = CURRENT_FORMAT_VERSION
 
     def __init__(
         self,
@@ -712,6 +772,132 @@ class AsyncPruningMongoDBSaver(AsyncMongoDBSaver):
             background=True,
         )
 
+    # VersionedCheckpointerMixin implementation for async MongoDB
+
+    def _get_sync_db(self):
+        """Get a sync MongoDB database for migration operations."""
+        # For migrations, we need a sync client since VersionedCheckpointerMixin expects sync methods
+        # Use the connection string from the async client to create a sync client
+        if not hasattr(self, "_sync_db"):
+            # Get a sync mongo client for migrations
+            sync_db = get_mongo_client()
+            if sync_db is None:
+                LOGGER.error("Failed to get sync MongoDB client for migrations")
+                raise RuntimeError("Sync MongoDB client not available for migrations")
+            self._sync_db = sync_db
+        return self._sync_db
+
+    def _get_raw_checkpoint(
+        self, thread_id: str, checkpoint_ns: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get raw checkpoint document directly from MongoDB (sync method for migration).
+
+        Bypasses LangGraph's deserialization to allow inspection and migration
+        of incompatible formats.
+
+        :param thread_id: Thread ID to retrieve
+        :param checkpoint_ns: Checkpoint namespace
+        :return: Raw checkpoint document or None
+        """
+        # Use sync client for migration (migration is infrequent)
+        sync_db = self._get_sync_db()
+        collection_name = self.checkpoint_collection.name
+        sync_collection = sync_db[collection_name]
+
+        query = {
+            "thread_id": thread_id,
+            "checkpoint_ns": checkpoint_ns,
+        }
+        return sync_collection.find_one(query, sort=[("checkpoint_id", DESCENDING)])
+
+    def _replace_raw_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+    ) -> bool:
+        """
+        Replace raw checkpoint document in MongoDB (sync method for migration).
+
+        :param thread_id: Thread ID to update
+        :param document: Migrated document to write
+        :param checkpoint_ns: Checkpoint namespace
+        :return: True if replacement was successful
+        """
+        if "_id" not in document:
+            LOGGER.warning(
+                "Cannot replace document without _id for thread %s", thread_id
+            )
+            return False
+
+        # Use sync client for migration
+        sync_db = self._get_sync_db()
+        collection_name = self.checkpoint_collection.name
+        sync_collection = sync_db[collection_name]
+
+        result = sync_collection.replace_one({"_id": document["_id"]}, document)
+        return result.modified_count > 0
+
+    def _archive_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], error: Exception
+    ) -> None:
+        """
+        Archive a checkpoint that failed migration.
+
+        Moves the document to a separate collection for manual review.
+
+        :param thread_id: Thread ID of failed checkpoint
+        :param document: Raw document that couldn't be migrated
+        :param error: Exception that occurred during migration
+        """
+        sync_db = self._get_sync_db()
+        archive_collection = sync_db["checkpoints_archive"]
+
+        # Add migration failure metadata
+        archived_doc = {
+            **document,
+            "_migration_error": str(error),
+            "_migration_timestamp": __import__("datetime").datetime.utcnow(),
+            "_original_thread_id": thread_id,
+        }
+
+        try:
+            archive_collection.insert_one(archived_doc)
+            LOGGER.info("Archived failed checkpoint for thread %s", thread_id)
+
+            # Remove from main collection
+            if "_id" in document:
+                collection_name = self.checkpoint_collection.name
+                sync_collection = sync_db[collection_name]
+                sync_collection.delete_one({"_id": document["_id"]})
+                LOGGER.info("Removed failed checkpoint from main collection")
+        except Exception as archive_error:  # pylint: disable=broad-exception-caught
+            LOGGER.error("Failed to archive checkpoint: %s", archive_error)
+
+    async def aget_tuple(self, config: RunnableConfig):
+        """
+        Get checkpoint tuple with automatic migration support (async version).
+
+        Checks if the checkpoint needs migration before calling the parent's
+        aget_tuple method to avoid deserialization errors.
+
+        :param config: Runnable configuration with thread_id
+        :return: Checkpoint tuple or None
+        """
+        thread_id = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        # Migrate checkpoint if needed before LangGraph deserializes it
+        # Note: Migration methods are sync since they're infrequent
+        try:
+            self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            LOGGER.warning(
+                "Migration failed for thread %s, returning None: %s", thread_id, e
+            )
+            return None
+
+        # Now safe to call parent's aget_tuple
+        return await super().aget_tuple(config)
+
     async def aput(
         self,
         config: RunnableConfig,
@@ -720,7 +906,7 @@ class AsyncPruningMongoDBSaver(AsyncMongoDBSaver):
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
         """
-        Async version of put method with pruning support.
+        Async version of put method with pruning support and format versioning.
 
         :param config: Runnable configuration
         :param checkpoint: Checkpoint to save
@@ -733,8 +919,12 @@ class AsyncPruningMongoDBSaver(AsyncMongoDBSaver):
             await self._ensure_indexes()
             self._indexes_ensured = True
 
-        # Save the checkpoint using parent's async method
-        result_config = await super().aput(config, checkpoint, metadata, new_versions)
+        # Add format version to metadata for future migrations
+        versioned_metadata = dict(metadata) if metadata else {}
+        versioned_metadata["format_version"] = self.format_version
+
+        # Save the checkpoint using parent's async method with versioned metadata
+        result_config = await super().aput(config, checkpoint, versioned_metadata, new_versions)
 
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:
