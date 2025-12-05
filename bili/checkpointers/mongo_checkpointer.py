@@ -54,7 +54,13 @@ from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, MongoClient
 
+# Import MongoDB-specific migrations to register them
+import bili.checkpointers.migrations.mongo  # noqa: F401
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
+from bili.checkpointers.versioning import (
+    CURRENT_FORMAT_VERSION,
+    VersionedCheckpointerMixin,
+)
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
@@ -117,7 +123,9 @@ def get_mongo_checkpointer(keep_last_n: int = 5):
     return None
 
 
-class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
+class PruningMongoDBSaver(
+    VersionedCheckpointerMixin, QueryableCheckpointerMixin, MongoDBSaver
+):
     """
     Manages saving and pruning of checkpoints in MongoDB for efficient storage.
 
@@ -127,13 +135,19 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
     in the database. The class also ensures necessary MongoDB indexes exist for optimal
     performance.
 
-    Also implements QueryableCheckpointerMixin to provide query methods for conversation
-    data retrieval without exposing MongoDB-specific implementation details.
+    Also implements:
+    - QueryableCheckpointerMixin: Query methods for conversation data retrieval
+    - VersionedCheckpointerMixin: Version detection and lazy migration
 
     :ivar keep_last_n: Determines the maximum number of recent checkpoints to retain
         in the database. If set to -1 or None, pruning is disabled.
     :type keep_last_n: int
+    :ivar format_version: Current checkpoint format version for migrations.
+    :type format_version: int
     """
+
+    # Use the global format version
+    format_version: int = CURRENT_FORMAT_VERSION
 
     def __init__(
         self,
@@ -201,6 +215,109 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
             background=True,
         )
 
+    # VersionedCheckpointerMixin implementation for MongoDB
+
+    def _get_raw_checkpoint(
+        self, thread_id: str, checkpoint_ns: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get raw checkpoint document directly from MongoDB.
+
+        Bypasses LangGraph's deserialization to allow inspection
+        and migration of incompatible formats.
+
+        :param thread_id: Thread ID to retrieve
+        :param checkpoint_ns: Checkpoint namespace
+        :return: Raw checkpoint document or None
+        """
+        query = {
+            "thread_id": thread_id,
+            "checkpoint_ns": checkpoint_ns,
+        }
+        return self.checkpoint_collection.find_one(
+            query, sort=[("checkpoint_id", DESCENDING)]
+        )
+
+    def _replace_raw_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+    ) -> bool:
+        """
+        Replace raw checkpoint document in MongoDB.
+
+        :param thread_id: Thread ID to update
+        :param document: Migrated document to write
+        :param checkpoint_ns: Checkpoint namespace
+        :return: True if replacement was successful
+        """
+        if "_id" not in document:
+            LOGGER.warning(
+                "Cannot replace document without _id for thread %s", thread_id
+            )
+            return False
+
+        result = self.checkpoint_collection.replace_one(
+            {"_id": document["_id"]}, document
+        )
+        return result.modified_count > 0
+
+    def _archive_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], error: Exception
+    ) -> None:
+        """
+        Archive a checkpoint that failed migration.
+
+        Moves the document to a separate collection for manual review.
+
+        :param thread_id: Thread ID of failed checkpoint
+        :param document: Raw document that couldn't be migrated
+        :param error: Exception that occurred during migration
+        """
+        archive_collection = self.db["checkpoints_archive"]
+
+        # Add migration failure metadata
+        archived_doc = {
+            **document,
+            "_migration_error": str(error),
+            "_migration_timestamp": __import__("datetime").datetime.utcnow(),
+            "_original_thread_id": thread_id,
+        }
+
+        try:
+            archive_collection.insert_one(archived_doc)
+            LOGGER.info("Archived failed checkpoint for thread %s", thread_id)
+
+            # Remove from main collection
+            if "_id" in document:
+                self.checkpoint_collection.delete_one({"_id": document["_id"]})
+                LOGGER.info("Removed failed checkpoint from main collection")
+        except Exception as archive_error:  # pylint: disable=broad-exception-caught
+            LOGGER.error("Failed to archive checkpoint: %s", archive_error)
+
+    def get_tuple(self, config: RunnableConfig):
+        """
+        Get checkpoint tuple with automatic migration support.
+
+        Checks if the checkpoint needs migration before calling the parent's
+        get_tuple method to avoid deserialization errors.
+
+        :param config: Runnable configuration with thread_id
+        :return: Checkpoint tuple or None
+        """
+        thread_id = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        # Migrate checkpoint if needed before LangGraph deserializes it
+        try:
+            self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            LOGGER.warning(
+                "Migration failed for thread %s, returning None: %s", thread_id, e
+            )
+            return None
+
+        # Now safe to call parent's get_tuple
+        return super().get_tuple(config)
+
     def put(
         self,
         config: RunnableConfig,
@@ -230,8 +347,14 @@ class PruningMongoDBSaver(QueryableCheckpointerMixin, MongoDBSaver):
             checkpoint and performing potential pruning actions.
         :rtype: RunnableConfig
         """
-        # Save the checkpoint
-        result_config = super().put(config, checkpoint, metadata, new_versions)
+        # Add format version to metadata for future migrations
+        versioned_metadata = dict(metadata) if metadata else {}
+        versioned_metadata["format_version"] = self.format_version
+
+        # Save the checkpoint with versioned metadata
+        result_config = super().put(
+            config, checkpoint, versioned_metadata, new_versions
+        )
 
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:

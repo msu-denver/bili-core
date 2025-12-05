@@ -53,7 +53,13 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+# Import PostgreSQL-specific migrations (none registered yet, for future-proofing)
+import bili.checkpointers.migrations.pg  # noqa: F401
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
+from bili.checkpointers.versioning import (
+    CURRENT_FORMAT_VERSION,
+    VersionedCheckpointerMixin,
+)
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
@@ -153,20 +159,28 @@ def get_pg_checkpointer(keep_last_n: int = 5) -> Optional[PostgresSaver]:
     return None
 
 
-class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
+class PruningPostgresSaver(
+    VersionedCheckpointerMixin, QueryableCheckpointerMixin, PostgresSaver
+):
     """
     Handles saving checkpoints to a PostgreSQL database with additional logic
     for pruning old checkpoints. The class ensures the database has the
     necessary indexes for pruning and optimizes performance for checkpoint
     storage and retrieval operations.
 
-    Also implements QueryableCheckpointerMixin to provide query methods for conversation
-    data retrieval without exposing PostgreSQL-specific implementation details.
+    Also implements:
+    - QueryableCheckpointerMixin: Query methods for conversation data retrieval
+    - VersionedCheckpointerMixin: Version detection and lazy migration (future-proofing)
 
     :ivar keep_last_n: Specifies the number of most recent checkpoints to keep.
                        If set to a negative value, pruning is disabled.
     :type keep_last_n: int
+    :ivar format_version: Current checkpoint format version for migrations.
+    :type format_version: int
     """
+
+    # Use the global format version
+    format_version: int = CURRENT_FORMAT_VERSION
 
     def __init__(self, *args: Any, keep_last_n: int = -1, **kwargs: Any) -> None:
         """
@@ -225,6 +239,169 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                         """
             )
 
+    # VersionedCheckpointerMixin implementation for PostgreSQL
+    # Note: Currently no migrations are registered for PostgreSQL.
+    # These methods are implemented for future-proofing.
+
+    def _get_raw_checkpoint(
+        self, thread_id: str, checkpoint_ns: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get raw checkpoint data directly from PostgreSQL.
+
+        Note: PostgreSQL checkpoints use msgpack for some fields, so the raw
+        data may need different handling than MongoDB's JSON format.
+
+        :param thread_id: Thread ID to retrieve
+        :param checkpoint_ns: Checkpoint namespace
+        :return: Raw checkpoint data or None
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata
+                FROM checkpoints
+                WHERE thread_id = %s AND checkpoint_ns = %s
+                ORDER BY checkpoint_id DESC
+                LIMIT 1
+                """,
+                (thread_id, checkpoint_ns),
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    "thread_id": row["thread_id"],
+                    "checkpoint_ns": row["checkpoint_ns"],
+                    "checkpoint_id": row["checkpoint_id"],
+                    "checkpoint": row["checkpoint"],
+                    "metadata": row["metadata"],
+                }
+        return None
+
+    def _replace_raw_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+    ) -> bool:
+        """
+        Replace raw checkpoint data in PostgreSQL.
+
+        :param thread_id: Thread ID to update
+        :param document: Migrated document to write
+        :param checkpoint_ns: Checkpoint namespace
+        :return: True if replacement was successful
+        """
+        if "checkpoint_id" not in document:
+            LOGGER.warning(
+                "Cannot replace checkpoint without checkpoint_id for thread %s",
+                thread_id,
+            )
+            return False
+
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                UPDATE checkpoints
+                SET checkpoint = %s, metadata = %s
+                WHERE thread_id = %s AND checkpoint_ns = %s AND checkpoint_id = %s
+                """,
+                (
+                    document.get("checkpoint"),
+                    document.get("metadata"),
+                    thread_id,
+                    checkpoint_ns,
+                    document["checkpoint_id"],
+                ),
+            )
+            return cur.rowcount > 0
+
+    def _archive_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], error: Exception
+    ) -> None:
+        """
+        Archive a checkpoint that failed migration.
+
+        For PostgreSQL, we create an archive table if needed and move the data there.
+
+        :param thread_id: Thread ID of failed checkpoint
+        :param document: Raw document that couldn't be migrated
+        :param error: Exception that occurred during migration
+        """
+
+        with self._cursor() as cur:
+            # Create archive table if it doesn't exist
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS checkpoints_archive (
+                    id SERIAL PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    checkpoint_ns TEXT NOT NULL DEFAULT '',
+                    checkpoint_id TEXT NOT NULL,
+                    checkpoint JSONB,
+                    metadata JSONB,
+                    migration_error TEXT,
+                    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            # Insert into archive
+            cur.execute(
+                """
+                INSERT INTO checkpoints_archive
+                (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata, migration_error)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    thread_id,
+                    document.get("checkpoint_ns", ""),
+                    document.get("checkpoint_id", ""),
+                    document.get("checkpoint"),
+                    document.get("metadata"),
+                    str(error),
+                ),
+            )
+
+            LOGGER.info("Archived failed checkpoint for thread %s", thread_id)
+
+            # Remove from main table
+            if document.get("checkpoint_id"):
+                cur.execute(
+                    """
+                    DELETE FROM checkpoints
+                    WHERE thread_id = %s AND checkpoint_id = %s
+                    """,
+                    (thread_id, document["checkpoint_id"]),
+                )
+                LOGGER.info("Removed failed checkpoint from main table")
+
+    def get_tuple(self, config: RunnableConfig):
+        """
+        Get checkpoint tuple with automatic migration support.
+
+        Checks if the checkpoint needs migration before calling the parent's
+        get_tuple method to avoid deserialization errors.
+
+        Note: Currently no PostgreSQL migrations are registered, so this
+        method simply calls the parent implementation.
+
+        :param config: Runnable configuration with thread_id
+        :return: Checkpoint tuple or None
+        """
+        thread_id = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        # Migrate checkpoint if needed before LangGraph deserializes it
+        # Note: This is a no-op if no migrations are registered
+        try:
+            self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            LOGGER.warning(
+                "Migration failed for thread %s, returning None: %s", thread_id, e
+            )
+            return None
+
+        # Now safe to call parent's get_tuple
+        return super().get_tuple(config)
+
     def put(
         self,
         config: RunnableConfig,
@@ -249,8 +426,12 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         :return: Updated runnable configuration after saving the checkpoint and
         performing pruning, if applicable.
         """
-        # Save checkpoint using base implementation
-        next_config = super().put(config, checkpoint, metadata, new_versions)
+        # Add format version to metadata for future migrations
+        versioned_metadata = dict(metadata) if metadata else {}
+        versioned_metadata["format_version"] = self.format_version
+
+        # Save checkpoint using base implementation with versioned metadata
+        next_config = super().put(config, checkpoint, versioned_metadata, new_versions)
 
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:
@@ -429,9 +610,9 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
                                 last_message = (
                                     content  # Keep updating to get the last one
                                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 LOGGER.warning(
-                    f"get_user_threads: Failed to get messages for {thread_id}: {e}"
+                    "get_user_threads: Failed to get messages for %s: %s", thread_id, e
                 )
 
             threads.append(
@@ -477,7 +658,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
 
         if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
             LOGGER.warning(
-                f"get_thread_messages: No checkpoint found for thread {thread_id}"
+                "get_thread_messages: No checkpoint found for thread %s", thread_id
             )
             return []
 
@@ -485,13 +666,15 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
         raw_messages = channel_values.get("messages", [])
 
         LOGGER.info(
-            f"get_thread_messages: Thread {thread_id} - Found {len(raw_messages)} messages"
+            "get_thread_messages: Thread %s - Found %d messages",
+            thread_id,
+            len(raw_messages),
         )
 
         # Log message types for debugging
         if raw_messages:
             msg_types = [type(msg).__name__ for msg in raw_messages]
-            LOGGER.info(f"get_thread_messages: Message types: {msg_types}")
+            LOGGER.info("get_thread_messages: Message types: %s", msg_types)
 
         messages = []
         for msg in raw_messages:
@@ -528,7 +711,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             # Apply message type filter if specified
             if message_types is not None and msg_class not in message_types:
                 LOGGER.debug(
-                    f"get_thread_messages: Filtering out message of type {msg_class}"
+                    "get_thread_messages: Filtering out message of type %s", msg_class
                 )
                 continue
 
@@ -570,7 +753,7 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
 
                 # Skip empty AI messages (they should have been removed by normalize_state)
                 if not content:
-                    LOGGER.debug(f"get_thread_messages: Skipping empty AI message")
+                    LOGGER.debug("get_thread_messages: Skipping empty AI message")
                     continue
 
             messages.append(
@@ -587,11 +770,11 @@ class PruningPostgresSaver(QueryableCheckpointerMixin, PostgresSaver):
             messages = messages[offset:end_index]
 
         LOGGER.info(
-            f"get_thread_messages: Returning {len(messages)} messages after filtering"
+            "get_thread_messages: Returning %d messages after filtering", len(messages)
         )
         if messages:
             roles = [m["role"] for m in messages]
-            LOGGER.info(f"get_thread_messages: Message roles: {roles}")
+            LOGGER.info("get_thread_messages: Message roles: %s", roles)
 
         return messages
 
