@@ -904,13 +904,22 @@ async def get_async_pg_checkpointer(keep_last_n: int = 5):
     return None
 
 
-class AsyncPruningPostgresSaver(AsyncPostgresSaver):
+class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
     """
     Async version of PruningPostgresSaver for streaming operations.
 
     Manages saving and pruning of checkpoints in PostgreSQL using async operations
     for improved performance during streaming.
+
+    Also implements:
+    - VersionedCheckpointerMixin: Version detection and lazy migration
     """
+
+    # Identify this checkpointer type for migrations
+    checkpointer_type: str = "pg"
+
+    # Use the global format version
+    format_version: int = CURRENT_FORMAT_VERSION
 
     def __init__(
         self,
@@ -1010,3 +1019,187 @@ class AsyncPruningPostgresSaver(AsyncPostgresSaver):
                 )
 
         return next_config
+
+    # VersionedCheckpointerMixin implementation for async PostgreSQL
+
+    def _get_sync_pool(self) -> ConnectionPool:
+        """Get a sync PostgreSQL connection pool for migration operations."""
+        # For migrations, we need a sync pool since VersionedCheckpointerMixin expects sync methods
+        if not hasattr(self, "_sync_pool"):
+            sync_pool = get_pg_connection_pool()
+            if sync_pool is None:
+                LOGGER.error("Failed to get sync PostgreSQL pool for migrations")
+                raise RuntimeError("Sync PostgreSQL pool not available for migrations")
+            self._sync_pool = sync_pool
+        return self._sync_pool
+
+    def _get_raw_checkpoint(
+        self, thread_id: str, checkpoint_ns: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get raw checkpoint data directly from PostgreSQL (sync method for migration).
+
+        Bypasses LangGraph's deserialization to allow inspection and migration
+        of incompatible formats.
+
+        :param thread_id: Thread ID to retrieve
+        :param checkpoint_ns: Checkpoint namespace
+        :return: Raw checkpoint data or None
+        """
+        # Use sync pool for migration (migration is infrequent)
+        sync_pool = self._get_sync_pool()
+
+        with sync_pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata
+                    FROM checkpoints
+                    WHERE thread_id = %s AND checkpoint_ns = %s
+                    ORDER BY checkpoint_id DESC
+                    LIMIT 1
+                    """,
+                    (thread_id, checkpoint_ns),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "thread_id": row[0],
+                        "checkpoint_ns": row[1],
+                        "checkpoint_id": row[2],
+                        "checkpoint": row[3],
+                        "metadata": row[4],
+                    }
+        return None
+
+    def _replace_raw_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+    ) -> bool:
+        """
+        Replace raw checkpoint data in PostgreSQL (sync method for migration).
+
+        :param thread_id: Thread ID to update
+        :param document: Migrated document to write
+        :param checkpoint_ns: Checkpoint namespace
+        :return: True if replacement was successful
+        """
+        if "checkpoint_id" not in document:
+            LOGGER.warning(
+                "Cannot replace checkpoint without checkpoint_id for thread %s",
+                thread_id,
+            )
+            return False
+
+        # Use sync pool for migration
+        sync_pool = self._get_sync_pool()
+
+        with sync_pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE checkpoints
+                    SET checkpoint = %s, metadata = %s
+                    WHERE thread_id = %s AND checkpoint_ns = %s AND checkpoint_id = %s
+                    """,
+                    (
+                        document.get("checkpoint"),
+                        document.get("metadata"),
+                        thread_id,
+                        checkpoint_ns,
+                        document["checkpoint_id"],
+                    ),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+
+    def _archive_checkpoint(
+        self, thread_id: str, document: Dict[str, Any], error: Exception
+    ) -> None:
+        """
+        Archive a checkpoint that failed migration.
+
+        For PostgreSQL, we create an archive table if needed and move the data there.
+
+        :param thread_id: Thread ID of failed checkpoint
+        :param document: Raw document that couldn't be migrated
+        :param error: Exception that occurred during migration
+        """
+        # Use sync pool for migration
+        sync_pool = self._get_sync_pool()
+
+        with sync_pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Create archive table if it doesn't exist
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS checkpoints_archive (
+                        id SERIAL PRIMARY KEY,
+                        thread_id TEXT NOT NULL,
+                        checkpoint_ns TEXT NOT NULL DEFAULT '',
+                        checkpoint_id TEXT NOT NULL,
+                        checkpoint JSONB,
+                        metadata JSONB,
+                        migration_error TEXT,
+                        archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+
+                # Insert into archive
+                cur.execute(
+                    """
+                    INSERT INTO checkpoints_archive
+                    (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata, migration_error)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        thread_id,
+                        document.get("checkpoint_ns", ""),
+                        document.get("checkpoint_id", ""),
+                        document.get("checkpoint"),
+                        document.get("metadata"),
+                        str(error),
+                    ),
+                )
+
+                LOGGER.info("Archived failed checkpoint for thread %s", thread_id)
+
+                # Remove from main table
+                if document.get("checkpoint_id"):
+                    cur.execute(
+                        """
+                        DELETE FROM checkpoints
+                        WHERE thread_id = %s AND checkpoint_id = %s
+                        """,
+                        (thread_id, document["checkpoint_id"]),
+                    )
+                    LOGGER.info("Removed failed checkpoint from main table")
+
+                conn.commit()
+
+    async def aget_tuple(self, config: RunnableConfig):
+        """
+        Get checkpoint tuple with automatic migration support (async version).
+
+        Checks if the checkpoint needs migration before calling the parent's
+        aget_tuple method to avoid deserialization errors.
+
+        :param config: Runnable configuration with thread_id
+        :return: Checkpoint tuple or None
+        """
+        thread_id = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        # Migrate checkpoint if needed before LangGraph deserializes it
+        # Note: Migration uses sync methods internally
+        try:
+            self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            LOGGER.warning(
+                "Migration failed for thread %s, continuing anyway: %s",
+                thread_id,
+                str(e),
+            )
+
+        # Now call parent's async get_tuple
+        return await super().aget_tuple(config)
