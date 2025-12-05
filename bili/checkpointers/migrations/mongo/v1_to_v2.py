@@ -154,11 +154,11 @@ def _migrate_blob(doc: Dict[str, Any]) -> Tuple[Optional[str], Optional[Any]]:
     """
     Migrates blob from msgpack to json encoding.
 
-    Old: type='msgpack', value=Binary(msgpack bytes)
-    New: type='json', value=Binary(JSON bytes)
+    Old: type='msgpack', value/checkpoint=Binary(msgpack bytes)
+    New: type='json', value/checkpoint=Binary(JSON bytes)
 
     Args:
-        doc: Document containing 'type' and 'value' fields
+        doc: Document containing 'type' and 'value' or 'checkpoint' fields
 
     Returns:
         Tuple of (new_type, new_value) or (None, None) if no migration needed
@@ -171,7 +171,8 @@ def _migrate_blob(doc: Dict[str, Any]) -> Tuple[Optional[str], Optional[Any]]:
     if current_type == "msgpack":
         try:
             # 1. Decode MsgPack -> Python Object
-            value = doc.get("value")
+            # MongoDB uses 'checkpoint' field, some versions may use 'value'
+            value = doc.get("checkpoint", doc.get("value")) 
 
             # Handle bson.Binary if available
             if BSON_AVAILABLE and isinstance(value, bson.Binary):
@@ -276,13 +277,15 @@ def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
             updates["metadata"] = new_metadata
             LOGGER.debug("Migrated metadata to tuple format")
 
-    # 2. Migrate blob (type and value fields)
-    if "value" in document and "type" in document:
+    # 2. Migrate blob (type and value/checkpoint fields)
+    # MongoDB uses 'checkpoint' field, some versions may use 'value'
+    blob_field = "checkpoint" if "checkpoint" in document else "value"
+    if blob_field in document and "type" in document:
         new_type, new_value = _migrate_blob(document)
         if new_type:
             updates["type"] = new_type
-            updates["value"] = new_value
-            LOGGER.debug("Migrated blob from msgpack to json")
+            updates[blob_field] = new_value
+            LOGGER.debug("Migrated %s blob from msgpack to json", blob_field)
 
     # Apply updates to document
     if updates:
