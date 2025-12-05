@@ -250,9 +250,25 @@ class VersionedCheckpointerMixin(ABC):
         document["metadata"]["format_version"] = version
         return document
 
+    def _has_registered_migrations(self) -> bool:
+        """
+        Check if there are any migrations registered for this checkpointer type.
+
+        Returns:
+            True if migrations exist for this checkpointer type
+        """
+        return any(
+            ct == self.checkpointer_type for ct, _, _ in MIGRATION_REGISTRY.keys()
+        )
+
     def _needs_migration(self, document: Optional[Dict[str, Any]]) -> bool:
         """
         Check if a document needs migration.
+
+        A document needs migration only if:
+        1. It exists
+        2. Its version is lower than the current format version
+        3. There are actually migrations registered for this checkpointer type
 
         Args:
             document: Raw checkpoint document
@@ -262,6 +278,11 @@ class VersionedCheckpointerMixin(ABC):
         """
         if document is None:
             return False
+
+        # Only consider migration if there are registered migrations for this type
+        if not self._has_registered_migrations():
+            return False
+
         return self._get_document_version(document) < self.format_version
 
     def _migrate_document(self, document: Dict[str, Any]) -> Dict[str, Any]:
