@@ -615,6 +615,9 @@ LLM_MODELS = {
                 "response_mime_type": "string",
                 "response_schema": {"type": "string"},
                 "supports_structured_output": True,
+                "supports_thinking_budget": True,
+                "thinking_budget_max": 24576,
+                "thinking_budget_default": 0,
             },
             {
                 "model_name": "Gemini 2.5 Flash",
@@ -631,6 +634,9 @@ LLM_MODELS = {
                 "response_mime_type": "string",
                 "response_schema": {"type": "string"},
                 "supports_structured_output": True,
+                "supports_thinking_budget": True,
+                "thinking_budget_max": 24576,
+                "thinking_budget_default": 0,
             },
             {
                 "model_name": "Gemini 2.5 Flash Lite",
@@ -647,6 +653,9 @@ LLM_MODELS = {
                 "response_mime_type": "string",
                 "response_schema": {"type": "string"},
                 "supports_structured_output": True,
+                "supports_thinking_budget": True,
+                "thinking_budget_max": 24576,
+                "thinking_budget_default": 0,
             },
             {
                 "model_name": "Gemini 2.0 Flash",

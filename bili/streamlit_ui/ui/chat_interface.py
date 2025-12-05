@@ -58,10 +58,9 @@ Example:
     run_app_page()
 """
 
-import json
 import copy
+import json
 
-from bili.graph_builder.classes.conditional_edge import ConditionalEdge
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -71,6 +70,8 @@ from bili.config.tool_config import TOOLS
 from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION, build_agent_graph
 from bili.loaders.llm_loader import load_model
 from bili.loaders.tools_loader import initialize_tools
+from bili.nodes.per_user_state import per_user_state_node
+from bili.nodes.prepare_llm_config_node import prepare_llm_config_node
 from bili.streamlit_ui.query.streamlit_query_handler import process_query
 from bili.streamlit_ui.ui.auth_ui import display_login_signup, is_authenticated
 from bili.streamlit_ui.ui.configuration_panels import display_configuration_panels
@@ -79,7 +80,6 @@ from bili.streamlit_ui.utils.state_management import (
     enable_form,
     get_state_config,
 )
-from bili.nodes.per_user_state import per_user_state_node
 from bili.utils.langgraph_utils import State, clear_state, format_message_with_citations
 
 
@@ -576,13 +576,34 @@ def load_system_components(checkpointer):
         "k": memory_limit_value,
         "trim_k": memory_limit_trim_value,
         "current_user": st.session_state.get("user_profile"),
+        # Model type for runtime configuration (e.g., thinking budget)
+        "model_type": st.session_state.get("model_type"),
     }
+
+    # Add thinking config if set (for Gemini 2.5 models with extended reasoning)
+    thinking_budget = st.session_state.get("thinking_budget", 0)
+    if thinking_budget and thinking_budget > 0:
+        node_kwargs["thinking_config"] = {"budget": thinking_budget}
 
     # Add per-user state node to the graph nodes since UI is per-user
     # Use deepcopy to avoid mutating the original node objects
     graph_definition = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
-    graph_definition[graph_definition.index("inject_current_datetime")].edges = ["per_user_state"]
-    graph_definition.append(per_user_state_node(edges=["react_agent"]))
+
+    # If thinking budget is set, insert prepare_llm_config node before per_user_state
+    if thinking_budget and thinking_budget > 0:
+        # inject_current_datetime -> prepare_llm_config -> per_user_state -> react_agent
+        datetime_idx = graph_definition.index("inject_current_datetime")
+        graph_definition[datetime_idx].edges = ["prepare_llm_config"]
+        graph_definition.insert(
+            datetime_idx + 1, prepare_llm_config_node(edges=["per_user_state"])
+        )
+        graph_definition.append(per_user_state_node(edges=["react_agent"]))
+    else:
+        # Normal flow: inject_current_datetime -> per_user_state -> react_agent
+        graph_definition[graph_definition.index("inject_current_datetime")].edges = [
+            "per_user_state"
+        ]
+        graph_definition.append(per_user_state_node(edges=["react_agent"]))
 
     # Create the langgraph agent
     conversation_agent = build_agent_graph(

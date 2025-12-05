@@ -138,6 +138,7 @@ def display_configuration_panels():
                 "memory_limit_trim_value": st.session_state.get(
                     "memory_limit_trim_value"
                 ),
+                "thinking_budget": st.session_state.get("thinking_budget"),
             }
             st.download_button(
                 label="Download Configuration as JSON",
@@ -569,6 +570,56 @@ def display_configuration_panels():
                     del st.session_state["custom_response_schema"]
                 if "schema_preset" in st.session_state:
                     del st.session_state["schema_preset"]
+
+        # Thinking Budget for Gemini 2.5 models
+        if selected_model.get("supports_thinking_budget", False):
+            st.markdown("---")
+            st.markdown("**Thinking Budget (Extended Reasoning)**")
+
+            thinking_budget_max = selected_model.get("thinking_budget_max", 24576)
+            thinking_budget_default = selected_model.get("thinking_budget_default", 0)
+
+            # Initialize session state
+            if "thinking_budget" not in st.session_state:
+                st.session_state["thinking_budget"] = thinking_budget_default
+
+            st.session_state["thinking_budget"] = st.number_input(
+                f"Thinking Budget (0 to disable, max {thinking_budget_max} tokens)",
+                min_value=0,
+                max_value=thinking_budget_max,
+                value=st.session_state.get("thinking_budget", thinking_budget_default),
+                step=1024,
+                key="thinking_budget_setting",
+                help="Set the token budget for extended thinking/reasoning. "
+                "Higher values allow more thorough reasoning but increase latency and cost. "
+                "Set to 0 to disable extended thinking.",
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.button(
+                    "Disable Thinking",
+                    on_click=lambda: st.session_state.update(
+                        {"thinking_budget_setting": 0}
+                    ),
+                    use_container_width=True,
+                )
+            with col2:
+                st.button(
+                    "Set Recommended",
+                    on_click=lambda: st.session_state.update(
+                        {"thinking_budget_setting": 8192}
+                    ),
+                    help="Set to recommended value (8192 tokens)",
+                    use_container_width=True,
+                )
+
+            st.markdown(
+                "[📚 Learn about Gemini thinking]"
+                "(https://cloud.google.com/vertex-ai/generative-ai/docs/thinking)"
+            )
+        else:
+            st.session_state["thinking_budget"] = None
 
     # ---- Prompt Customization ----
     with st.expander("Prompt Customization"):

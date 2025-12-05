@@ -115,6 +115,7 @@ Important Notes:
 - Node factories in the registry accept **kwargs for dynamic configuration
 - Custom nodes can be added via custom_node_registry parameter
 """
+
 import difflib
 import logging
 import time
@@ -127,16 +128,17 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from bili.graph_builder.classes.node import Node
 from bili.nodes.add_persona_and_summary import persona_and_summary_node
 from bili.nodes.inject_current_datetime import inject_current_datetime_node
 from bili.nodes.normalize_state import normalize_state_node
 from bili.nodes.per_user_state import per_user_state_node
+from bili.nodes.prepare_llm_config_node import prepare_llm_config_node
 from bili.nodes.react_agent_node import react_agent_node
 from bili.nodes.trim_and_summarize import trim_summarize_node
 from bili.nodes.update_timestamp import update_timestamp_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
-from bili.graph_builder.classes.node import Node
 
 # Get the logger for the module
 LOGGER = get_logger(__name__)
@@ -184,12 +186,14 @@ DEFAULT_GRAPH_DEFINITION = [
 GRAPH_NODE_REGISTRY = {
     "add_persona_and_summary": persona_and_summary_node,
     "inject_current_datetime": inject_current_datetime_node,
+    "prepare_llm_config": prepare_llm_config_node,
     "react_agent": react_agent_node,
     "update_timestamp": update_timestamp_node,
     "trim_summarize": trim_summarize_node,
     "normalize_state": normalize_state_node,
     "per_user_state": per_user_state_node,
 }
+
 
 def wrap_node(node_func: Callable, node_name: str) -> Callable:
     """
@@ -212,6 +216,7 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
         return result
 
     return wrapper
+
 
 def build_agent_graph(
     checkpoint_saver: BaseCheckpointSaver = None,
@@ -287,7 +292,7 @@ def build_agent_graph(
         wrapped_node_func = wrap_node(node_func, node.name)
         nodes[node.name] = wrapped_node_func
         graph.add_node(node.name, nodes[node.name])
-        
+
     # Build the edges and conditional edges
     for node in graph_definition:
 
@@ -297,19 +302,21 @@ def build_agent_graph(
 
         # Conditional edges
         for cond_edge in node.conditional_edges:
-            graph.add_conditional_edges(node.name, cond_edge.routing_function, cond_edge.path_map)
+            graph.add_conditional_edges(
+                node.name, cond_edge.routing_function, cond_edge.path_map
+            )
 
         # Construct the start
         if node.is_entry:
             graph.add_edge(START, node.name)
-         
+
         # Construct the start - conditional entry
         if node.conditional_entry:
-          graph.add_conditional_edges(
-              START,
-              node.conditional_entry.routing_function,
-              node.conditional_entry.path_map
-          )
+            graph.add_conditional_edges(
+                START,
+                node.conditional_entry.routing_function,
+                node.conditional_entry.path_map,
+            )
 
         # Construct the end
         if node.routes_to_end:

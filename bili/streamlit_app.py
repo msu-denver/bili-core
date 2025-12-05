@@ -106,7 +106,7 @@ def configure_streamlit():
     st.set_page_config(
         page_title="Bili Core Sandbox Application", page_icon=logo, layout="wide"
     )
-    st.image(logo, width=100, use_column_width=False)
+    st.image(logo, width=100, use_container_width=False)
 
     st.markdown(
         """<h1>Welcome to the BiliCore LLM Comparison Sandbox!</h1>

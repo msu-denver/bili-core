@@ -15,10 +15,6 @@ Functions:
       Decorator to conditionally cache the output of a function using
       Streamlit's `st.cache_data` decorator if the `STREAMLIT_SERVER_ADDRESS`
       environment variable is present.
-    - conditional_cache():
-      Decorator to conditionally cache computations or function results using
-      Streamlit's `st.cache` decorator if the `STREAMLIT_SERVER_ADDRESS`
-      environment variable is present.
 
 Dependencies:
     - os: Provides a way of using operating system dependent functionality.
@@ -95,31 +91,5 @@ def conditional_cache_data():
             return st.cache_data(func)
         else:
             return func
-
-    return decorator
-
-
-def conditional_cache():
-    """
-    Determines whether to apply caching functionality to a function based on the environment.
-    The decorator applies the Streamlit `@st.cache` caching mechanism if the current environment
-    is identified as a Streamlit environment (by the presence of the "STREAMLIT_SERVER_ADDRESS"
-    environment variable). Otherwise, the original function is returned without modification.
-
-    :return: A decorator function that applies Streamlit's caching mechanism if executed in
-             a Streamlit environment; returns the original function otherwise.
-    :rtype: Callable
-    """
-
-    def decorator(func):
-        # If STREAMLIT_SERVER_ADDRESS exists in the environment, then we are running in Streamlit
-        # and should use the @st.cache decorator.
-        # Otherwise, we are running in a different environment and should not use the decorator.
-        if "STREAMLIT_SERVER_ADDRESS" in os.environ:
-            import streamlit as st
-
-            return st.cache(func)
-
-        return func
 
     return decorator
