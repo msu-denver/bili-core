@@ -245,9 +245,18 @@ class VersionedCheckpointerMixin(ABC):
         Returns:
             Updated document
         """
+        import json
+
         if "metadata" not in document:
             document["metadata"] = {}
-        document["metadata"]["format_version"] = version
+
+        # For v2+, metadata values must be in tuple format [type, value]
+        # This matches the format expected by loads_metadata/loads_typed
+        if version >= 2:
+            document["metadata"]["format_version"] = ["json", json.dumps(version)]
+        else:
+            document["metadata"]["format_version"] = version
+
         return document
 
     def _has_registered_migrations(self) -> bool:

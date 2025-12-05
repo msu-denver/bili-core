@@ -311,10 +311,15 @@ class PruningMongoDBSaver(
 
         # Migrate checkpoint if needed before LangGraph deserializes it
         try:
-            self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+            LOGGER.debug("Checking if migration needed for thread %s", thread_id)
+            did_migrate = self.migrate_checkpoint_if_needed(thread_id, checkpoint_ns)
+            if did_migrate:
+                LOGGER.info("Migration completed for thread %s", thread_id)
+            else:
+                LOGGER.debug("No migration needed for thread %s", thread_id)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            LOGGER.warning(
-                "Migration failed for thread %s, returning None: %s", thread_id, e
+            LOGGER.error(
+                "Migration failed for thread %s: %s", thread_id, e, exc_info=True
             )
             return None
 
@@ -365,9 +370,17 @@ class PruningMongoDBSaver(
         :param new_versions: Channel versions
         :return: Updated configuration
         """
+        import json
+
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
-        versioned_metadata["format_version"] = self.format_version
+
+        # For v2+, metadata values must be in tuple format [type, value]
+        # This matches the format expected by loads_metadata/loads_typed
+        if self.format_version >= 2:
+            versioned_metadata["format_version"] = ["json", json.dumps(self.format_version)]
+        else:
+            versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint with versioned metadata
         return await super().aput(config, checkpoint, versioned_metadata, new_versions)
@@ -401,9 +414,17 @@ class PruningMongoDBSaver(
             checkpoint and performing potential pruning actions.
         :rtype: RunnableConfig
         """
+        import json
+
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
-        versioned_metadata["format_version"] = self.format_version
+
+        # For v2+, metadata values must be in tuple format [type, value]
+        # This matches the format expected by loads_metadata/loads_typed
+        if self.format_version >= 2:
+            versioned_metadata["format_version"] = ["json", json.dumps(self.format_version)]
+        else:
+            versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint with versioned metadata
         result_config = super().put(
@@ -914,6 +935,8 @@ class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
         :param new_versions: Channel versions
         :return: Updated configuration
         """
+        import json
+
         # Ensure indexes exist on first use
         if not hasattr(self, "_indexes_ensured"):
             await self._ensure_indexes()
@@ -921,7 +944,13 @@ class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
 
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
-        versioned_metadata["format_version"] = self.format_version
+
+        # For v2+, metadata values must be in tuple format [type, value]
+        # This matches the format expected by loads_metadata/loads_typed
+        if self.format_version >= 2:
+            versioned_metadata["format_version"] = ["json", json.dumps(self.format_version)]
+        else:
+            versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint using parent's async method with versioned metadata
         result_config = await super().aput(config, checkpoint, versioned_metadata, new_versions)
