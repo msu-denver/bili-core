@@ -146,6 +146,9 @@ class PruningMongoDBSaver(
     :type format_version: int
     """
 
+    # Identify this checkpointer type for migrations
+    checkpointer_type: str = "mongo"
+
     # Use the global format version
     format_version: int = CURRENT_FORMAT_VERSION
 

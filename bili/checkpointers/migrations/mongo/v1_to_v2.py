@@ -229,7 +229,7 @@ def _needs_migration(doc: Dict[str, Any]) -> bool:
     return False
 
 
-@register_migration(1, 2)
+@register_migration("mongo", 1, 2)
 def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
     """
     Migrate a checkpoint document from v1 (msgpack) to v2 (json) format.

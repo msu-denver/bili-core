@@ -37,41 +37,51 @@ LOGGER = get_logger(__name__)
 # Current format version - increment when making breaking changes
 CURRENT_FORMAT_VERSION = 2
 
-# Migration registry: maps (from_version, to_version) -> migration function
+# Migration registry: maps (checkpointer_type, from_version, to_version) -> migration function
 # Migrations are applied sequentially to upgrade through multiple versions
+# checkpointer_type is a string like "mongo" or "pg"
 MIGRATION_REGISTRY: Dict[
-    Tuple[int, int], Callable[[Dict[str, Any]], Dict[str, Any]]
+    Tuple[str, int, int], Callable[[Dict[str, Any]], Dict[str, Any]]
 ] = {}
 
 
-def register_migration(from_version: int, to_version: int):
+def register_migration(checkpointer_type: str, from_version: int, to_version: int):
     """
-    Decorator to register a migration function.
+    Decorator to register a migration function for a specific checkpointer type.
 
     Args:
+        checkpointer_type: Type of checkpointer (e.g., "mongo", "pg")
         from_version: Source format version
         to_version: Target format version
 
     Example:
-        @register_migration(1, 2)
+        @register_migration("mongo", 1, 2)
         def migrate_v1_to_v2(document: dict) -> dict:
             # Migration logic
             return document
     """
 
     def decorator(func: Callable[[Dict[str, Any]], Dict[str, Any]]):
-        MIGRATION_REGISTRY[(from_version, to_version)] = func
-        LOGGER.info("Registered migration: v%d -> v%d", from_version, to_version)
+        MIGRATION_REGISTRY[(checkpointer_type, from_version, to_version)] = func
+        LOGGER.info(
+            "Registered %s migration: v%d -> v%d",
+            checkpointer_type,
+            from_version,
+            to_version,
+        )
         return func
 
     return decorator
 
 
-def get_migration_path(from_version: int, to_version: int) -> List[Tuple[int, int]]:
+def get_migration_path(
+    checkpointer_type: str, from_version: int, to_version: int
+) -> List[Tuple[int, int]]:
     """
-    Calculate the migration path from one version to another.
+    Calculate the migration path from one version to another for a checkpointer type.
 
     Args:
+        checkpointer_type: Type of checkpointer (e.g., "mongo", "pg")
         from_version: Starting version
         to_version: Target version
 
@@ -84,22 +94,37 @@ def get_migration_path(from_version: int, to_version: int) -> List[Tuple[int, in
     if from_version >= to_version:
         return []  # Already at or past target version
 
+    # Filter migrations for this checkpointer type
+    type_migrations = {
+        (fv, tv): func
+        for (ct, fv, tv), func in MIGRATION_REGISTRY.items()
+        if ct == checkpointer_type
+    }
+
+    if not type_migrations:
+        # No migrations registered for this checkpointer type - that's OK
+        return []
+
     path = []
     current = from_version
 
     while current < to_version:
         # Find the next step
         next_step = None
-        for fv, tv in MIGRATION_REGISTRY.keys():
+        for fv, tv in type_migrations.keys():
             if fv == current and tv <= to_version:
                 if next_step is None or tv > next_step[1]:
                     next_step = (fv, tv)
 
         if next_step is None:
-            raise ValueError(
-                f"No migration path from version {current} to {to_version}. "
-                f"Available migrations: {list(MIGRATION_REGISTRY.keys())}"
+            # No migration path found - could be intentional (no migrations needed)
+            LOGGER.debug(
+                "No %s migration path from v%d to v%d",
+                checkpointer_type,
+                current,
+                to_version,
             )
+            break
 
         path.append(next_step)
         current = next_step[1]
@@ -118,7 +143,13 @@ class VersionedCheckpointerMixin(ABC):
 
     The migration happens BEFORE LangGraph's deserialization to avoid errors
     from incompatible serialization formats.
+
+    Subclasses must define:
+    - checkpointer_type: str identifying the checkpointer (e.g., "mongo", "pg")
     """
+
+    # Subclasses must override this to identify their type
+    checkpointer_type: str = ""
 
     # Subclasses can override this
     format_version: int = CURRENT_FORMAT_VERSION
@@ -252,10 +283,25 @@ class VersionedCheckpointerMixin(ABC):
         if current_version >= target_version:
             return document
 
-        # Get migration path
-        path = get_migration_path(current_version, target_version)
+        # Get migration path for this checkpointer type
+        path = get_migration_path(
+            self.checkpointer_type, current_version, target_version
+        )
+
+        # If no migrations registered for this checkpointer type, just update version
+        if not path:
+            LOGGER.debug(
+                "No %s migrations needed from v%d to v%d",
+                self.checkpointer_type,
+                current_version,
+                target_version,
+            )
+            document = self._set_document_version(document, target_version)
+            return document
+
         LOGGER.info(
-            "Migrating checkpoint from v%d to v%d. Path: %s",
+            "Migrating %s checkpoint from v%d to v%d. Path: %s",
+            self.checkpointer_type,
             current_version,
             target_version,
             path,
@@ -263,15 +309,30 @@ class VersionedCheckpointerMixin(ABC):
 
         # Apply migrations sequentially
         for from_v, to_v in path:
-            migration_func = MIGRATION_REGISTRY.get((from_v, to_v))
+            migration_func = MIGRATION_REGISTRY.get(
+                (self.checkpointer_type, from_v, to_v)
+            )
             if migration_func is None:
-                raise ValueError(f"Missing migration function for v{from_v} -> v{to_v}")
+                raise ValueError(
+                    f"Missing {self.checkpointer_type} migration for v{from_v} -> v{to_v}"
+                )
 
             try:
                 document = migration_func(document)
-                LOGGER.debug("Applied migration v%d -> v%d", from_v, to_v)
+                LOGGER.debug(
+                    "Applied %s migration v%d -> v%d",
+                    self.checkpointer_type,
+                    from_v,
+                    to_v,
+                )
             except Exception as e:  # pylint: disable=broad-exception-caught
-                LOGGER.error("Migration v%d -> v%d failed: %s", from_v, to_v, e)
+                LOGGER.error(
+                    "%s migration v%d -> v%d failed: %s",
+                    self.checkpointer_type,
+                    from_v,
+                    to_v,
+                    e,
+                )
                 raise
 
         # Update version stamp
