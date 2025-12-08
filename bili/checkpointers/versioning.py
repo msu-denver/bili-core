@@ -220,14 +220,58 @@ class VersionedCheckpointerMixin(ABC):
         Returns:
             Format version number
         """
+        import json as json_module
+
+        # Try to import msgpack for handling msgpack-encoded metadata
+        try:
+            import msgpack
+            msgpack_available = True
+        except ImportError:
+            msgpack_available = False
+
         # Check metadata first (preferred location)
         metadata = document.get("metadata", {})
         if isinstance(metadata, dict) and "format_version" in metadata:
-            return metadata["format_version"]
+            version_value = metadata["format_version"]
+
+            # Handle v2+ format: ["json"|"msgpack", serialized_value]
+            if isinstance(version_value, list) and len(version_value) == 2:
+                serializer_type, serialized_value = version_value
+
+                if serializer_type == "json":
+                    try:
+                        return int(json_module.loads(serialized_value))
+                    except (ValueError, TypeError, json_module.JSONDecodeError):
+                        # Fallback if deserialization fails
+                        pass
+                elif serializer_type == "msgpack" and msgpack_available:
+                    try:
+                        # Handle bson.Binary if present
+                        if hasattr(serialized_value, '__bytes__'):
+                            serialized_value = bytes(serialized_value)
+
+                        if isinstance(serialized_value, (bytes, bytearray)):
+                            unpacked = msgpack.unpackb(serialized_value, raw=False)
+                            # The unpacked value might be a list like ["json", "2"]
+                            if isinstance(unpacked, list) and len(unpacked) == 2:
+                                if unpacked[0] == "json":
+                                    return int(json_module.loads(unpacked[1]))
+                            # Or it might be a direct integer
+                            if isinstance(unpacked, int):
+                                return unpacked
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        # Fallback if deserialization fails
+                        pass
+
+            # Handle v1 format: direct integer value
+            if isinstance(version_value, int):
+                return version_value
 
         # Check top-level
         if "format_version" in document:
-            return document["format_version"]
+            version_value = document["format_version"]
+            if isinstance(version_value, int):
+                return version_value
 
         # Default to version 1 (pre-versioning)
         return 1
