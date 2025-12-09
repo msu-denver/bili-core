@@ -370,17 +370,12 @@ class PruningMongoDBSaver(
         :param new_versions: Channel versions
         :return: Updated configuration
         """
-        import json
-
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
 
-        # For v2+, metadata values must be in tuple format [type, value]
-        # This matches the format expected by loads_metadata/loads_typed
-        if self.format_version >= 2:
-            versioned_metadata["format_version"] = ["json", json.dumps(self.format_version)]
-        else:
-            versioned_metadata["format_version"] = self.format_version
+        # Store format_version as a plain integer
+        # LangGraph's dumps_metadata will automatically wrap it in the appropriate format
+        versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint with versioned metadata
         return await super().aput(config, checkpoint, versioned_metadata, new_versions)
@@ -414,17 +409,12 @@ class PruningMongoDBSaver(
             checkpoint and performing potential pruning actions.
         :rtype: RunnableConfig
         """
-        import json
-
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
 
-        # For v2+, metadata values must be in tuple format [type, value]
-        # This matches the format expected by loads_metadata/loads_typed
-        if self.format_version >= 2:
-            versioned_metadata["format_version"] = ["json", json.dumps(self.format_version)]
-        else:
-            versioned_metadata["format_version"] = self.format_version
+        # Store format_version as a plain integer
+        # LangGraph's dumps_metadata will automatically wrap it in the appropriate format
+        versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint with versioned metadata
         result_config = super().put(
@@ -935,8 +925,6 @@ class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
         :param new_versions: Channel versions
         :return: Updated configuration
         """
-        import json
-
         # Ensure indexes exist on first use
         if not hasattr(self, "_indexes_ensured"):
             await self._ensure_indexes()
@@ -945,15 +933,14 @@ class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
 
-        # For v2+, metadata values must be in tuple format [type, value]
-        # This matches the format expected by loads_metadata/loads_typed
-        if self.format_version >= 2:
-            versioned_metadata["format_version"] = ["json", json.dumps(self.format_version)]
-        else:
-            versioned_metadata["format_version"] = self.format_version
+        # Store format_version as a plain integer
+        # LangGraph's dumps_metadata will automatically wrap it in the appropriate format
+        versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint using parent's async method with versioned metadata
-        result_config = await super().aput(config, checkpoint, versioned_metadata, new_versions)
+        result_config = await super().aput(
+            config, checkpoint, versioned_metadata, new_versions
+        )
 
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:

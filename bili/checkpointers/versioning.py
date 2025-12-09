@@ -225,6 +225,7 @@ class VersionedCheckpointerMixin(ABC):
         # Try to import msgpack for handling msgpack-encoded metadata
         try:
             import msgpack
+
             msgpack_available = True
         except ImportError:
             msgpack_available = False
@@ -244,21 +245,39 @@ class VersionedCheckpointerMixin(ABC):
                     except (ValueError, TypeError, json_module.JSONDecodeError):
                         # Fallback if deserialization fails
                         pass
-                elif serializer_type == "msgpack" and msgpack_available:
+                elif serializer_type == "msgpack":
                     try:
                         # Handle bson.Binary if present
-                        if hasattr(serialized_value, '__bytes__'):
+                        if hasattr(serialized_value, "__bytes__"):
                             serialized_value = bytes(serialized_value)
 
                         if isinstance(serialized_value, (bytes, bytearray)):
-                            unpacked = msgpack.unpackb(serialized_value, raw=False)
-                            # The unpacked value might be a list like ["json", "2"]
-                            if isinstance(unpacked, list) and len(unpacked) == 2:
-                                if unpacked[0] == "json":
-                                    return int(json_module.loads(unpacked[1]))
-                            # Or it might be a direct integer
-                            if isinstance(unpacked, int):
-                                return unpacked
+                            # LangGraph's JsonPlusSerializer actually uses JSON encoding,
+                            # despite the "msgpack" wrapper from dumps_metadata
+                            # Try JSON decode first
+                            try:
+                                decoded_str = serialized_value.decode("utf-8")
+                                return int(json_module.loads(decoded_str))
+                            except (
+                                UnicodeDecodeError,
+                                json_module.JSONDecodeError,
+                                ValueError,
+                            ):
+                                # If JSON fails, try msgpack (for old double-wrapped data)
+                                if msgpack_available:
+                                    unpacked = msgpack.unpackb(
+                                        serialized_value, raw=False
+                                    )
+                                    # The unpacked value might be a list like ["json", "2"]
+                                    if (
+                                        isinstance(unpacked, list)
+                                        and len(unpacked) == 2
+                                    ):
+                                        if unpacked[0] == "json":
+                                            return int(json_module.loads(unpacked[1]))
+                                    # Or it might be a direct integer
+                                    elif isinstance(unpacked, int):
+                                        return unpacked
                     except Exception:  # pylint: disable=broad-exception-caught
                         # Fallback if deserialization fails
                         pass

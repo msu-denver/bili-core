@@ -234,6 +234,7 @@ def build_trim_and_summarize_node(
         new_summary = existing_summary_content = (
             state["summary"] if "summary" in state else ""
         )
+        
         if memory_strategy == "summarize":
             if len(removed_messages) > 0:
                 # Merge old summary + newly removed text
