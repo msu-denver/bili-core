@@ -141,6 +141,16 @@ def _migrate_metadata(metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         ):
             new_metadata[key] = value
         else:
+            # Special handling for 'step' field - must always be an integer
+            # This fixes cases where step was incorrectly stored as a string
+            if key == "step":
+                try:
+                    value = int(value)
+                except (ValueError, TypeError):
+                    LOGGER.warning(
+                        "Failed to convert step value %r to int, using as-is", value
+                    )
+
             # Needs migration: Wrap the value in a json tuple
             new_metadata[key] = ["json", json.dumps(value, default=_json_bytes_handler)]
             modified = True
