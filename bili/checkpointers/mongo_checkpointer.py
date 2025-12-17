@@ -323,8 +323,29 @@ class PruningMongoDBSaver(
             )
             return None
 
-        # Now safe to call parent's get_tuple
-        return super().get_tuple(config)
+        # Call parent's get_tuple
+        result = super().get_tuple(config)
+
+        # Fix corrupted step value if present (handles legacy data where step was stored as string)
+        if result and result.metadata:
+            step = result.metadata.get("step")
+            if isinstance(step, str):
+                try:
+                    result.metadata["step"] = int(step)
+                    LOGGER.debug(
+                        "Fixed corrupted step value for thread %s: %r -> %d",
+                        thread_id,
+                        step,
+                        result.metadata["step"],
+                    )
+                except (ValueError, TypeError):
+                    LOGGER.warning(
+                        "Could not convert step value %r to int for thread %s",
+                        step,
+                        thread_id,
+                    )
+
+        return result
 
     async def aget_tuple(self, config: RunnableConfig):
         """
@@ -349,8 +370,29 @@ class PruningMongoDBSaver(
             )
             return None
 
-        # Now safe to call parent's aget_tuple
-        return await super().aget_tuple(config)
+        # Call parent's aget_tuple
+        result = await super().aget_tuple(config)
+
+        # Fix corrupted step value if present (handles legacy data where step was stored as string)
+        if result and result.metadata:
+            step = result.metadata.get("step")
+            if isinstance(step, str):
+                try:
+                    result.metadata["step"] = int(step)
+                    LOGGER.debug(
+                        "Fixed corrupted step value for thread %s: %r -> %d",
+                        thread_id,
+                        step,
+                        result.metadata["step"],
+                    )
+                except (ValueError, TypeError):
+                    LOGGER.warning(
+                        "Could not convert step value %r to int for thread %s",
+                        step,
+                        thread_id,
+                    )
+
+        return result
 
     async def aput(
         self,
