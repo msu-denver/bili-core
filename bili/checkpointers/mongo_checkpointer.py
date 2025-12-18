@@ -360,6 +360,16 @@ class PruningMongoDBSaver(
             )
             return None
 
+        # Verify migration succeeded - if checkpoint still needs migration, it's corrupted
+        raw_doc = self._get_raw_checkpoint(thread_id, checkpoint_ns)
+        if self._needs_migration(raw_doc):
+            LOGGER.error(
+                "Checkpoint for thread %s still needs migration after migration attempt. "
+                "This checkpoint is corrupted and cannot be recovered. Returning None to force fresh start.",
+                thread_id,
+            )
+            return None
+
         # Call parent's get_tuple
         result = super().get_tuple(config)
 
@@ -427,6 +437,16 @@ class PruningMongoDBSaver(
         except Exception as e:  # pylint: disable=broad-exception-caught
             LOGGER.warning(
                 "Migration failed for thread %s, returning None: %s", thread_id, e
+            )
+            return None
+
+        # Verify migration succeeded - if checkpoint still needs migration, it's corrupted
+        raw_doc = self._get_raw_checkpoint(thread_id, checkpoint_ns)
+        if self._needs_migration(raw_doc):
+            LOGGER.error(
+                "Checkpoint for thread %s still needs migration after migration attempt. "
+                "This checkpoint is corrupted and cannot be recovered. Returning None to force fresh start.",
+                thread_id,
             )
             return None
 

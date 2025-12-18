@@ -113,12 +113,45 @@ def _json_bytes_handler(obj: Any) -> str:
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
+def _unwrap_binary_value(value: Any) -> Any:
+    """
+    Unwraps bson.Binary objects to their underlying value.
+
+    Handles Binary-wrapped metadata values from v1 checkpoints.
+
+    Args:
+        value: Potentially Binary-wrapped value
+
+    Returns:
+        Unwrapped value (decoded from bytes if Binary)
+    """
+    # Handle bson.Binary wrapper
+    if BSON_AVAILABLE and isinstance(value, bson.Binary):
+        try:
+            # Try to decode as UTF-8 string
+            decoded = bytes(value).decode("utf-8")
+            # Try to parse as JSON if it looks like JSON
+            if decoded.startswith('"') or decoded.startswith('[') or decoded.startswith('{'):
+                try:
+                    return json.loads(decoded)
+                except json.JSONDecodeError:
+                    pass
+            return decoded
+        except UnicodeDecodeError:
+            # Return raw bytes if can't decode
+            return bytes(value)
+
+    return value
+
+
 def _migrate_metadata(metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Migrates metadata from old format to new tuple format.
 
     Old format: {'source': 'loop', 'step': 1}
     New format: {'source': ['json', '"loop"'], 'step': ['json', '1']}
+
+    Also handles Binary-wrapped values from v1 checkpoints.
 
     Args:
         metadata: Original metadata dict
@@ -141,8 +174,11 @@ def _migrate_metadata(metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         ):
             new_metadata[key] = value
         else:
+            # Unwrap Binary values if present
+            value = _unwrap_binary_value(value)
+
             # Special handling for 'step' field - must always be an integer
-            # This fixes cases where step was incorrectly stored as a string
+            # This fixes cases where step was incorrectly stored as a string or Binary
             if key == "step":
                 try:
                     value = int(value)
@@ -272,10 +308,11 @@ def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
     """
-    LOGGER.info("Starting v1 to v2 migration (msgpack -> json)")
+    thread_id = document.get("thread_id", "unknown")
+    LOGGER.info("Starting v1 to v2 migration for thread %s", thread_id)
 
     if not _needs_migration(document):
-        LOGGER.debug("Document already in v2 format, skipping migration")
+        LOGGER.debug("Document for thread %s already in v2 format, skipping migration", thread_id)
         return document
 
     updates = {}
@@ -285,7 +322,7 @@ def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
         new_metadata = _migrate_metadata(document["metadata"])
         if new_metadata:
             updates["metadata"] = new_metadata
-            LOGGER.debug("Migrated metadata to tuple format")
+            LOGGER.debug("Migrated metadata to tuple format for thread %s", thread_id)
 
     # 2. Migrate blob (type and value/checkpoint fields)
     # MongoDB uses 'checkpoint' field, some versions may use 'value'
@@ -295,14 +332,19 @@ def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
         if new_type:
             updates["type"] = new_type
             updates[blob_field] = new_value
-            LOGGER.debug("Migrated %s blob from msgpack to json", blob_field)
+            LOGGER.debug("Migrated %s blob from msgpack to json for thread %s", blob_field, thread_id)
+        else:
+            LOGGER.warning(
+                "Blob migration returned no changes for thread %s (type=%s)",
+                thread_id, document.get("type")
+            )
 
     # Apply updates to document
     if updates:
         document.update(updates)
-        LOGGER.info("Migration completed, updated fields: %s", list(updates.keys()))
+        LOGGER.info("Migration completed for thread %s, updated fields: %s", thread_id, list(updates.keys()))
     else:
-        LOGGER.debug("No fields needed migration")
+        LOGGER.warning("No fields were migrated for thread %s - migration may have failed", thread_id)
 
     return document
 
