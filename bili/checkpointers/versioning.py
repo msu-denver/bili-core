@@ -337,10 +337,9 @@ class VersionedCheckpointerMixin(ABC):
         """
         Check if a document needs migration.
 
-        A document needs migration only if:
-        1. It exists
-        2. Its version is lower than the current format version
-        3. There are actually migrations registered for this checkpointer type
+        A document needs migration if:
+        1. Its version is lower than the current format version, OR
+        2. Version is 2+ but blob type is still "msgpack" (inconsistent state)
 
         Args:
             document: Raw checkpoint document
@@ -355,7 +354,22 @@ class VersionedCheckpointerMixin(ABC):
         if not self._has_registered_migrations():
             return False
 
-        return self._get_document_version(document) < self.format_version
+        # Check version
+        doc_version = self._get_document_version(document)
+        if doc_version < self.format_version:
+            return True
+
+        # Check for inconsistent state: v2+ metadata but msgpack blob
+        # This can happen if migration was interrupted or partially applied
+        if doc_version >= 2 and document.get("type") == "msgpack":
+            LOGGER.warning(
+                "Detected inconsistent checkpoint state: version %d but type='msgpack'. "
+                "Will trigger migration to repair.",
+                doc_version,
+            )
+            return True
+
+        return False
 
     def _migrate_document(self, document: Dict[str, Any]) -> Dict[str, Any]:
         """

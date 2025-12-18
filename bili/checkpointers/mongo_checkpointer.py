@@ -296,6 +296,43 @@ class PruningMongoDBSaver(
         except Exception as archive_error:  # pylint: disable=broad-exception-caught
             LOGGER.error("Failed to archive checkpoint: %s", archive_error)
 
+    def _extract_version_from_value(self, version_value):
+        """
+        Extract integer version from complex serialized format.
+
+        Handles multiple version storage formats:
+        - Direct int: 2
+        - V2 tuple: ["json", "2"] or ["msgpack", Binary("2")]
+
+        :param version_value: Version value from checkpoint metadata
+        :return: Integer version number or 1 if cannot parse
+        """
+        import json as json_module
+
+        # Handle direct integer
+        if isinstance(version_value, int):
+            return version_value
+
+        # Handle v2+ tuple format: [serializer_type, serialized_value]
+        if isinstance(version_value, list) and len(version_value) == 2:
+            serializer_type, serialized = version_value
+
+            if serializer_type in ["json", "msgpack"]:
+                try:
+                    # Handle Binary wrapper (from bson)
+                    if hasattr(serialized, "__bytes__"):
+                        serialized = bytes(serialized)
+
+                    if isinstance(serialized, (bytes, bytearray)):
+                        decoded_str = serialized.decode("utf-8")
+                        return int(json_module.loads(decoded_str))
+                except Exception:  # pylint: disable=broad-exception-caught
+                    # Fallback if deserialization fails
+                    pass
+
+        # Default to v1 if cannot parse
+        return 1
+
     def get_tuple(self, config: RunnableConfig):
         """
         Get checkpoint tuple with automatic migration support.
@@ -325,6 +362,29 @@ class PruningMongoDBSaver(
 
         # Call parent's get_tuple
         result = super().get_tuple(config)
+
+        # Safety check: Detect corrupted/unmigratable checkpoints
+        # This handles edge cases where migration detection failed
+        if result and result.checkpoint:
+            raw_doc = self._get_raw_checkpoint(thread_id, checkpoint_ns)
+            if (
+                raw_doc
+                and raw_doc.get("type") == "msgpack"
+                and raw_doc.get("metadata", {}).get("format_version")
+            ):
+                # Extract version from complex format
+                version_value = raw_doc["metadata"]["format_version"]
+                doc_version = self._extract_version_from_value(version_value)
+
+                if doc_version >= 2:
+                    LOGGER.error(
+                        "Detected corrupted checkpoint for thread %s: "
+                        "version %d but blob type is 'msgpack' (should be 'json'). "
+                        "This checkpoint cannot be recovered. Returning None to force fresh start.",
+                        thread_id,
+                        doc_version,
+                    )
+                    return None
 
         # Fix corrupted step value if present (handles legacy data where step was stored as string)
         if result and result.metadata:
@@ -372,6 +432,29 @@ class PruningMongoDBSaver(
 
         # Call parent's aget_tuple
         result = await super().aget_tuple(config)
+
+        # Safety check: Detect corrupted/unmigratable checkpoints
+        # This handles edge cases where migration detection failed
+        if result and result.checkpoint:
+            raw_doc = self._get_raw_checkpoint(thread_id, checkpoint_ns)
+            if (
+                raw_doc
+                and raw_doc.get("type") == "msgpack"
+                and raw_doc.get("metadata", {}).get("format_version")
+            ):
+                # Extract version from complex format
+                version_value = raw_doc["metadata"]["format_version"]
+                doc_version = self._extract_version_from_value(version_value)
+
+                if doc_version >= 2:
+                    LOGGER.error(
+                        "Detected corrupted checkpoint for thread %s: "
+                        "version %d but blob type is 'msgpack' (should be 'json'). "
+                        "This checkpoint cannot be recovered. Returning None to force fresh start.",
+                        thread_id,
+                        doc_version,
+                    )
+                    return None
 
         # Fix corrupted step value if present (handles legacy data where step was stored as string)
         if result and result.metadata:
