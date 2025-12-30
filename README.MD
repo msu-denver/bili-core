@@ -106,10 +106,11 @@ With the Flask integration, you can:
    cd bili-core
    ```
 2. **Install Dependencies**
-   - To install BiliCore locally, run:
+   - To install BiliCore locally with pre-commit hooks, run:
        ```bash
-       pip install .
+       python setup.py install
        ```
+       This installs all dependencies, sets up pre-commit hooks, and installs any git-based dependencies.
    - If you want to use BiliCore as a dependency in another project, add the following line to your requirements.txt file:
         ```bash
         git+https://github.com/msu-denver/bili-core.git@main

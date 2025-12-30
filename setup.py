@@ -23,17 +23,8 @@ class PostInstallCommand(install):
 
         is_wheel_build = "bdist_wheel" in sys.argv
 
-        # Only install pre-commit hooks if this is a Git repository and NOT building a wheel
-        if not is_wheel_build and os.path.isdir(".git"):
-            print("Installing pre-commit hooks...")
-            try:
-                subprocess.check_call(["pre-commit", "install"])
-            except:
-                print("Warning: pre-commit install failed. Skipping hook setup.")
-        elif not is_wheel_build:
-            print("Skipping pre-commit hook installation (not a Git repository).")
-
-        # Install excluded HTTP/Git-based dependencies separately
+        # Install git-based dependencies FIRST
+        # Note: This may fail in isolated build environments (PEP 517)
         http_git_deps = read_http_git_requirements()
         if http_git_deps:
             print("Installing HTTP/Git-based dependencies separately...")
@@ -45,6 +36,16 @@ class PostInstallCommand(install):
                     "Please install them manually with: pip install "
                     + " ".join(http_git_deps)
                 )
+
+        # THEN install pre-commit hooks
+        if not is_wheel_build and os.path.isdir(".git"):
+            print("Installing pre-commit hooks...")
+            try:
+                subprocess.check_call(["pre-commit", "install"])
+            except:
+                print("Warning: pre-commit install failed. Skipping hook setup.")
+        elif not is_wheel_build:
+            print("Skipping pre-commit hook installation (not a Git repository).")
 
 
 def read_requirements():
