@@ -36,6 +36,8 @@ Example:
 
 import json
 import os
+import re
+import urllib.parse
 
 import requests
 from langchain_core.tools import Tool
@@ -47,14 +49,49 @@ from bili.utils.logging_utils import get_logger
 LOGGER = get_logger(__name__)
 
 
+def sanitize_serp_query(query: str) -> str:
+    """
+    Sanitizes user input for SERP API queries to prevent injection attacks.
+
+    This function performs the following sanitization steps:
+    1. Removes control characters and null bytes
+    2. Removes potentially harmful characters (<, >, ", ')
+    3. Limits query length to prevent abuse
+    4. Normalizes whitespace
+    5. URL-encodes the result
+
+    :param query: The raw search query string from user input.
+    :type query: str
+    :return: A sanitized and URL-encoded query string safe for API use.
+    :rtype: str
+    """
+    if not query:
+        return ""
+
+    # Remove control characters and null bytes
+    sanitized = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", query)
+
+    # Remove potential injection patterns (HTML/script tags, quotes)
+    sanitized = re.sub(r"[<>\"']", "", sanitized)
+
+    # Limit length to prevent abuse (SERP API handles ~2048 chars, we limit to 500)
+    sanitized = sanitized[:500]
+
+    # Strip and normalize whitespace
+    sanitized = " ".join(sanitized.split())
+
+    # URL-encode the result
+    return urllib.parse.quote(sanitized)
+
+
 def execute_query(query: str) -> str:
     """
     Executes a search query using the SERP API and returns the result as a JSON-formatted string.
 
     This function interacts with the SERP API by sending an HTTP GET request with the specified
     search query. The function expects the API key to be defined in the environment variables
-    under "SERP_API_KEY". The response is parsed and converted to a JSON-formatted string before
-    being returned.
+    under "SERP_API_KEY". The query is sanitized before being sent to prevent injection attacks.
+    The response is parsed and converted to a JSON-formatted string before being returned.
 
     :param query: The search query string to be sent to the SERP API.
     :type query: str
@@ -62,7 +99,11 @@ def execute_query(query: str) -> str:
     :rtype: str
     """
     api_key = os.environ["SERP_API_KEY"]
-    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
+    sanitized_query = sanitize_serp_query(query)
+    LOGGER.debug(
+        "Executing SERP query: %s (sanitized from: %s)", sanitized_query, query[:50]
+    )
+    url = f"https://serpapi.com/search.json?q={sanitized_query}&api_key={api_key}"
     response = requests.get(url, timeout=10)
     data = response.json()
     return json.dumps(data)
