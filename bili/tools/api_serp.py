@@ -84,6 +84,57 @@ def sanitize_serp_query(query: str) -> str:
     return urllib.parse.quote(sanitized)
 
 
+def filter_serp_results(data: dict, max_results: int = 5) -> dict:
+    """
+    Filter SERP API results to reduce token usage while preserving key information.
+
+    This function extracts only the most relevant fields from the full SERP API
+    response, significantly reducing the token count when passed to an LLM.
+
+    :param data: The full SERP API response as a dictionary.
+    :type data: dict
+    :param max_results: Maximum number of organic results to include (default: 5).
+    :type max_results: int
+    :return: A filtered dictionary containing only essential search result data.
+    :rtype: dict
+    """
+    filtered = {
+        "query": data.get("search_parameters", {}).get("q", ""),
+        "results": [],
+    }
+
+    # Extract top organic results with truncated snippets
+    for result in data.get("organic_results", [])[:max_results]:
+        snippet = result.get("snippet", "")
+        filtered["results"].append(
+            {
+                "title": result.get("title", ""),
+                "link": result.get("link", ""),
+                "snippet": snippet[:300] if snippet else "",
+                "source": result.get("source", ""),
+            }
+        )
+
+    # Include knowledge panel if present (often has authoritative info)
+    knowledge_graph = data.get("knowledge_graph")
+    if knowledge_graph:
+        description = knowledge_graph.get("description", "")
+        filtered["knowledge_panel"] = {
+            "title": knowledge_graph.get("title", ""),
+            "description": description[:500] if description else "",
+        }
+
+    # Include answer box if present (direct answers)
+    answer_box = data.get("answer_box")
+    if answer_box:
+        filtered["answer_box"] = {
+            "title": answer_box.get("title", ""),
+            "answer": answer_box.get("answer", answer_box.get("snippet", ""))[:300],
+        }
+
+    return filtered
+
+
 def execute_query(query: str) -> str:
     """
     Executes a search query using the SERP API and returns the result as a JSON-formatted string.
@@ -91,11 +142,12 @@ def execute_query(query: str) -> str:
     This function interacts with the SERP API by sending an HTTP GET request with the specified
     search query. The function expects the API key to be defined in the environment variables
     under "SERP_API_KEY". The query is sanitized before being sent to prevent injection attacks.
-    The response is parsed and converted to a JSON-formatted string before being returned.
+    The response is parsed, filtered for token efficiency, and converted to a JSON-formatted
+    string before being returned.
 
     :param query: The search query string to be sent to the SERP API.
     :type query: str
-    :return: A JSON-formatted string containing the API response for the given query.
+    :return: A JSON-formatted string containing the filtered API response for the given query.
     :rtype: str
     """
     api_key = os.environ["SERP_API_KEY"]
@@ -106,7 +158,14 @@ def execute_query(query: str) -> str:
     url = f"https://serpapi.com/search.json?q={sanitized_query}&api_key={api_key}"
     response = requests.get(url, timeout=10)
     data = response.json()
-    return json.dumps(data)
+
+    # Filter results to reduce token usage
+    filtered_data = filter_serp_results(data)
+    LOGGER.debug(
+        "SERP results filtered: %d organic results",
+        len(filtered_data.get("results", [])),
+    )
+    return json.dumps(filtered_data)
 
 
 @conditional_cache_resource()
