@@ -262,6 +262,9 @@ package/
 # Ignore secrets file
 secrets
 
+# Claude Code
+.claude/
+
 
 
 
