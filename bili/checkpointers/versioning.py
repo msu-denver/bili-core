@@ -35,7 +35,10 @@ from bili.utils.logging_utils import get_logger
 LOGGER = get_logger(__name__)
 
 # Current format version - increment when making breaking changes
-CURRENT_FORMAT_VERSION = 2
+# NOTE: Set to 1 to disable migrations until LangGraph fixes dumps_metadata bug
+# See: langgraph/checkpoint/mongodb/utils.py line 47
+# TODO: Re-enable to 2 when LangGraph is fixed
+CURRENT_FORMAT_VERSION = 1
 
 # Migration registry: maps (checkpointer_type, from_version, to_version) -> migration function
 # Migrations are applied sequentially to upgrade through multiple versions
@@ -356,11 +359,25 @@ class VersionedCheckpointerMixin(ABC):
 
         # Check version
         doc_version = self._get_document_version(document)
+
+        # If document version is HIGHER than current format version,
+        # we've likely downgraded as a workaround (e.g., for LangGraph bug).
+        # Don't try to migrate - just use existing checkpoint as-is.
+        if doc_version > self.format_version:
+            LOGGER.debug(
+                "Document version %d > current format version %d. "
+                "Skipping migration (likely intentional downgrade).",
+                doc_version,
+                self.format_version,
+            )
+            return False
+
         if doc_version < self.format_version:
             return True
 
         # Check for inconsistent state: v2+ metadata but msgpack blob
         # This can happen if migration was interrupted or partially applied
+        # Only applies when doc_version == format_version (not when downgraded)
         if doc_version >= 2 and document.get("type") == "msgpack":
             LOGGER.warning(
                 "Detected inconsistent checkpoint state: version %d but type='msgpack'. "
