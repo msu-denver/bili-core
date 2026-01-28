@@ -1,4 +1,4 @@
-# AETHER: Agentic Testing for Hardened Execution and Resilience
+# AETHER: Agent Ecosystems for Testing, Hardening, Evaluation, and Research
 
 AETHER is a multi-agent system (MAS) security testing framework built as an extension to bili-core. It enables researchers to declaratively configure multi-agent systems and test security vulnerabilities specific to LLM-based agent architectures.
 
@@ -25,35 +25,6 @@ bili/aether/
 ├── execution/            # MAS runtime controller
 └── attacks/              # Security testing framework
 ```
-
-## Development Phases
-
-### Phase 1: Hardcoded MAS Configuration (Tasks 1-8)
-
-Build core AETHER functionality using programmatic (Python/YAML) MAS configuration without UI.
-
-**Completed:**
-
-- [x] Task 1: Set up AETHER module structure
-
-**In Progress:**
-
-- [ ] Task 2: Define Agent Specification Schema
-- [ ] Task 3: Define Hardcoded MAS Configuration Format
-- [ ] Task 4: Build Static MAS Validation Engine
-- [ ] Task 5: Build AETHER-to-LangGraph Compiler
-- [ ] Task 6: Implement Static Agent Communication Protocol
-- [ ] Task 7: Integrate bili-core Features into AETHER Agents
-- [ ] Task 8: Build MAS Execution Controller
-
-### Phase 2: Visual Graph Builder & Attack Framework (Tasks 9-17)
-
-Add ReactFlow UI for visual MAS configuration and comprehensive attack testing capabilities.
-
-**Future:**
-
-- [ ] Task 9: Build ReactFlow Graph Visualization
-- [ ] Task 10-17: Attack vector framework and UI enhancements
 
 ## Integration with bili-core
 
