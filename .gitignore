@@ -248,6 +248,7 @@ data/
 env/
 staging/
 models/
+models
 *.gz
 *.zip
 !geoportal-manager/solr-blackligh-core.zip
