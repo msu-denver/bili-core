@@ -124,3 +124,14 @@ anyio==4.12.0
 opencv-python==4.10.0.84
 pi-heif==0.21.0
 unstructured-client==0.42.3
+
+# =============================================================================
+# AETHER Framework (added for security testing)
+# =============================================================================
+
+# Anthropic Claude support (for cross-model testing)
+langchain-anthropic~=1.0.0
+
+# YAML config parsing
+pyyaml~=6.0  # Might already be transitive, but explicit is better
+pylint-pydantic==0.3.2
