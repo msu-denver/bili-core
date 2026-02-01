@@ -252,15 +252,15 @@ class MASConfig(BaseModel):
         """Validate that channel source/target agents exist."""
         agent_ids = [a.agent_id for a in self.agents]
 
-        for chan in self.channels:  # Renamed to avoid shadowing
-            if channel.source not in agent_ids and channel.source != "any":
+        for chan in self.channels:
+            if chan.source not in agent_ids and chan.source != "any":
                 raise ValueError(
-                    f"Channel '{channel.channel_id}' source '{channel.source}' "
+                    f"Channel '{chan.channel_id}' source '{chan.source}' "
                     f"not found in agents"
                 )
-            if channel.target not in agent_ids and channel.target != "all":
+            if chan.target not in agent_ids and chan.target != "all":
                 raise ValueError(
-                    f"Channel '{channel.channel_id}' target '{channel.target}' "
+                    f"Channel '{chan.channel_id}' target '{chan.target}' "
                     f"not found in agents"
                 )
         return self

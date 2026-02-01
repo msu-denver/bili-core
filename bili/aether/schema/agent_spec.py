@@ -136,7 +136,47 @@ class AgentSpec(BaseModel):
 
     inherit_from_bili_core: bool = Field(
         False,
-        description="Whether to inherit prompts, tools, and configs from bili-core",
+        description="Master toggle: inherit config from bili-core",
+    )
+
+    inherit_llm_config: bool = Field(
+        True,
+        description=(
+            "Inherit LLM model/temperature from bili-core "
+            "(only applies when inherit_from_bili_core=True)"
+        ),
+    )
+
+    inherit_tools: bool = Field(
+        True,
+        description=(
+            "Inherit tool configuration from bili-core "
+            "(only applies when inherit_from_bili_core=True)"
+        ),
+    )
+
+    inherit_system_prompt: bool = Field(
+        True,
+        description=(
+            "Inherit system prompt from bili-core "
+            "(only applies when inherit_from_bili_core=True)"
+        ),
+    )
+
+    inherit_memory: bool = Field(
+        True,
+        description=(
+            "Inherit memory management config from bili-core "
+            "(only applies when inherit_from_bili_core=True)"
+        ),
+    )
+
+    inherit_checkpoint: bool = Field(
+        True,
+        description=(
+            "Inherit checkpoint/state persistence from bili-core "
+            "(only applies when inherit_from_bili_core=True)"
+        ),
     )
 
     # =========================================================================
@@ -202,6 +242,19 @@ class AgentSpec(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_inheritance_flags(self):
+        """Reset sub-flags when master inheritance toggle is off."""
+        if not self.inherit_from_bili_core:
+            # Sub-flags are meaningless when master toggle is off;
+            # normalise them so serialised output is unambiguous.
+            self.inherit_llm_config = True
+            self.inherit_tools = True
+            self.inherit_system_prompt = True
+            self.inherit_memory = True
+            self.inherit_checkpoint = True
+        return self
+
+    @model_validator(mode="after")
     def validate_consensus_field(self):
         """Validate consensus vote field if specified."""
         if self.consensus_vote_field:
@@ -261,7 +314,7 @@ if __name__ == "__main__":
     )
     print(simple_agent)
 
-    # Example 2: Agent with bili-core inheritance
+    # Example 2: Agent with full bili-core inheritance
     bili_agent = AgentSpec(
         agent_id="judge",
         role=AgentRole.JUDGE,
@@ -269,6 +322,18 @@ if __name__ == "__main__":
         inherit_from_bili_core=True,
     )
     print(f"Is bili-core role: {bili_agent.is_bili_core_role()}")
+
+    # Example 2b: Selective bili-core inheritance (custom prompt, inherit rest)
+    selective_agent = AgentSpec(
+        agent_id="custom_judge",
+        role=AgentRole.JUDGE,
+        objective="Make final moderation decision with custom prompt",
+        inherit_from_bili_core=True,
+        inherit_system_prompt=False,  # Use own prompt, inherit everything else
+        system_prompt="You are a strict content moderator.",
+    )
+    print(f"Inherits tools: {selective_agent.inherit_tools}")
+    print(f"Inherits prompt: {selective_agent.inherit_system_prompt}")
 
     # Example 3: Hierarchical agent (MAS #2)
     vote_agent = AgentSpec(

@@ -25,7 +25,7 @@ def test_custom_role_requires_name():
         AgentSpec(
             agent_id="custom_agent",
             role=AgentRole.CUSTOM,  # Requires custom_role_name!
-            objective="Test",
+            objective="Test objective for validation",
         )
 
 
@@ -35,7 +35,7 @@ def test_custom_role_with_name():
         agent_id="analyzer",
         role=AgentRole.CUSTOM,
         custom_role_name="Sentiment Analyzer",
-        objective="Analyze sentiment",
+        objective="Analyze sentiment of flagged content",
     )
     assert agent.get_display_name() == "Sentiment Analyzer"
 
@@ -46,7 +46,7 @@ def test_structured_output_requires_schema():
         AgentSpec(
             agent_id="test",
             role=AgentRole.JUDGE,
-            objective="Test",
+            objective="Test objective for validation",
             output_format=OutputFormat.STRUCTURED,
             # Missing output_schema!
         )
@@ -57,7 +57,7 @@ def test_structured_output_with_schema():
     agent = AgentSpec(
         agent_id="test",
         role=AgentRole.JUDGE,
-        objective="Test",
+        objective="Test objective for validation",
         output_format=OutputFormat.STRUCTURED,
         output_schema={"type": "object", "properties": {}},
     )
@@ -69,7 +69,7 @@ def test_hierarchical_agent():
     agent = AgentSpec(
         agent_id="vote_agent",
         role=AgentRole.JUDGE,
-        objective="Vote",
+        objective="Vote on content moderation",
         tier=1,
         voting_weight=2.0,
     )
@@ -91,14 +91,16 @@ def test_supervisor_agent():
 def test_bili_core_role_detection():
     """Test bili-core role detection."""
     bili_agent = AgentSpec(
-        agent_id="reviewer", role=AgentRole.CONTENT_REVIEWER, objective="Review"
+        agent_id="reviewer",
+        role=AgentRole.CONTENT_REVIEWER,
+        objective="Review flagged content",
     )
 
     custom_agent = AgentSpec(
         agent_id="custom",
         role=AgentRole.CUSTOM,
         custom_role_name="Custom",
-        objective="Custom task",
+        objective="Custom task for testing",
     )
 
     assert bili_agent.is_bili_core_role() is True
@@ -111,7 +113,7 @@ def test_invalid_agent_id():
         AgentSpec(
             agent_id="invalid id with spaces",  # no spaces allowed
             role=AgentRole.JUDGE,
-            objective="Test",
+            objective="Test objective for validation",
         )
 
 
@@ -121,6 +123,58 @@ def test_temperature_bounds():
         AgentSpec(
             agent_id="test",
             role=AgentRole.JUDGE,
-            objective="Test",
+            objective="Test objective for validation",
             temperature=3.0,  # too high
         )
+
+
+# =========================================================================
+# INHERITANCE TESTS
+# =========================================================================
+
+
+def test_inherit_defaults():
+    """Test that inheritance sub-flags default to True."""
+    agent = AgentSpec(
+        agent_id="test_inherit",
+        role=AgentRole.JUDGE,
+        objective="Test inheritance defaults",
+        inherit_from_bili_core=True,
+    )
+    assert agent.inherit_from_bili_core is True
+    assert agent.inherit_llm_config is True
+    assert agent.inherit_tools is True
+    assert agent.inherit_system_prompt is True
+    assert agent.inherit_memory is True
+    assert agent.inherit_checkpoint is True
+
+
+def test_inherit_selective():
+    """Test selective inheritance (opt out of specific features)."""
+    agent = AgentSpec(
+        agent_id="selective",
+        role=AgentRole.JUDGE,
+        objective="Test selective inheritance",
+        inherit_from_bili_core=True,
+        inherit_system_prompt=False,
+        inherit_tools=False,
+        system_prompt="Custom prompt override",
+    )
+    assert agent.inherit_from_bili_core is True
+    assert agent.inherit_system_prompt is False
+    assert agent.inherit_tools is False
+    assert agent.inherit_llm_config is True  # Still inherited
+
+
+def test_inherit_disabled_resets_subflags():
+    """Test that sub-flags are reset when master toggle is off."""
+    agent = AgentSpec(
+        agent_id="no_inherit",
+        role=AgentRole.JUDGE,
+        objective="Test inheritance disabled",
+        inherit_from_bili_core=False,
+        inherit_tools=False,  # Should be reset to True
+    )
+    assert agent.inherit_from_bili_core is False
+    # Sub-flags normalised to defaults when master toggle is off
+    assert agent.inherit_tools is True
