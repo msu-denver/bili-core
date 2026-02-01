@@ -20,9 +20,10 @@ Author: MSU Denver Cybersecurity Research
 License: MIT
 """
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 __author__ = "MSU Denver Cybersecurity Research, MonRos3"
 
+from .config import load_mas_from_dict, load_mas_from_yaml
 from .schema import (
     AgentCapability,
     AgentRole,
@@ -49,4 +50,7 @@ __all__ = [
     "OutputFormat",
     "WorkflowType",
     "CommunicationProtocol",
+    # Config loaders
+    "load_mas_from_yaml",
+    "load_mas_from_dict",
 ]

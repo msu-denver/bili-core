@@ -1,0 +1,112 @@
+# =============================================================================
+# MAS #3: Supervisor Content Moderation (Hub-and-Spoke)
+# =============================================================================
+#
+# Communication: cooperative, role-based, centralized
+#
+# Use case: A flagged post goes to the Judge agent, who then calls any
+# of the attached specialist agents (Content Reviewer, Policy Expert,
+# Appeals Specialist) as needed to determine whether the post should
+# be allowed or removed.
+#
+# Expected flow:
+#
+#   Appeals Specialist ↔ Judge ↔ Policy Expert
+#                         ↕
+#                   Content Reviewer
+# =============================================================================
+
+mas_id: supervisor_moderation
+name: Supervisor Content Moderation
+description: >
+  A hub-and-spoke system where the Judge agent acts as a supervisor,
+  dynamically calling specialist agents (Content Reviewer, Policy Expert,
+  Appeals Specialist) as needed to determine whether a flagged post
+  should be allowed or removed.  Communication channels are cooperative,
+  role-based, and centralized.
+version: "1.0.0"
+
+workflow_type: supervisor
+entry_point: judge
+
+agents:
+  - agent_id: judge
+    role: judge
+    objective: >
+      Use other LLM agents as needed to determine whether the flagged
+      input should be deleted or allowed to stay on the social platform.
+      Route tasks to the appropriate specialist and synthesize their
+      assessments into a final decision.
+    temperature: 0.1
+    is_supervisor: true
+    capabilities:
+      - tool_calling
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: content_reviewer
+    role: content_reviewer
+    objective: >
+      Review content to ensure it follows the criteria put forth in
+      Meta's community standards.  If it doesn't, recommend that the
+      post be flagged as inappropriate and removed from the platform.
+    temperature: 0.2
+    capabilities:
+      - rag_retrieval
+      - policy_lookup
+      - tool_calling
+    output_format: json
+
+  - agent_id: policy_expert
+    role: policy_expert
+    objective: >
+      Review content to ensure it doesn't violate the policies outlined
+      in OpenAI's Usage Policies.  Provide a detailed policy analysis
+      and recommendation.
+    temperature: 0.1
+    capabilities:
+      - policy_lookup
+      - rag_retrieval
+    output_format: json
+
+  - agent_id: appeals_specialist
+    role: appeals_specialist
+    objective: >
+      Provide clarity when the assessments of the other agents or the
+      evaluation of the judge are unclear.  Act as a last call for
+      clarity on ambiguous moderation cases.
+    temperature: 0.3
+    capabilities:
+      - memory_access
+      - policy_lookup
+      - rag_retrieval
+    output_format: json
+
+channels:
+  - channel_id: judge_to_reviewer
+    protocol: direct
+    source: judge
+    target: content_reviewer
+    description: Judge routes content to reviewer for Meta standards analysis
+
+  - channel_id: judge_to_policy
+    protocol: request_response
+    source: judge
+    target: policy_expert
+    description: Judge consults policy expert on OpenAI policy compliance
+    bidirectional: true
+
+  - channel_id: judge_to_appeals
+    protocol: request_response
+    source: judge
+    target: appeals_specialist
+    description: Judge consults appeals specialist for clarity
+    bidirectional: true
+
+tags:
+  - content-moderation
+  - supervisor
+  - cooperative
+  - role-based
+  - centralized
+  - hub-and-spoke
