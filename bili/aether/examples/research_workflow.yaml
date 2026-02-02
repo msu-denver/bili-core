@@ -1,0 +1,91 @@
+# Example: Research Analysis MAS
+# This demonstrates AETHER used for academic research workflows.
+# Same framework, completely different domain.
+
+version: "1.0.0"
+mas_id: "research_analysis_v1"
+name: "Research Analysis Pipeline"
+description: "A multi-agent workflow for researching topics, analyzing findings, and producing summaries."
+
+workflow_type: sequential
+
+agents:
+  - agent_id: researcher
+    role: research_analyst  # Domain-specific role, not predefined
+    objective: "Search for and gather relevant research papers and sources on the given topic"
+    temperature: 0.5
+    capabilities:
+      - web_search
+      - literature_review
+      - source_evaluation
+    tools:
+      - serp_api_tool
+      - arxiv_search  # hypothetical tool
+    output_format: json
+    output_schema:
+      type: object
+      properties:
+        topic:
+          type: string
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+              url:
+                type: string
+              relevance_score:
+                type: number
+              key_findings:
+                type: array
+
+  - agent_id: analyst
+    role: data_analyst
+    objective: "Analyze the gathered sources, identify patterns, and extract key insights"
+    temperature: 0.3
+    capabilities:
+      - pattern_recognition
+      - statistical_analysis
+      - insight_extraction
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        key_themes:
+          type: array
+        consensus_findings:
+          type: array
+        contradictions:
+          type: array
+        gaps_in_research:
+          type: array
+        confidence_assessment:
+          type: object
+
+  - agent_id: writer
+    role: technical_writer
+    objective: "Synthesize analysis into a clear, well-structured research summary"
+    temperature: 0.7
+    capabilities:
+      - technical_writing
+      - summarization
+      - citation_formatting
+    output_format: text
+
+channels:
+  - channel_id: research_to_analysis
+    protocol: direct
+    source: researcher
+    target: analyst
+
+  - channel_id: analysis_to_writing
+    protocol: direct
+    source: analyst
+    target: writer
+
+tags:
+  - research
+  - academic
+  - sequential

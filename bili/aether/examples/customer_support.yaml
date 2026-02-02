@@ -1,0 +1,113 @@
+# Example: Customer Support MAS (Supervisor Pattern)
+# This demonstrates the supervisor workflow pattern for customer support.
+
+version: "1.0.0"
+mas_id: "customer_support_v1"
+name: "Customer Support System"
+description: "A supervisor-based support system that routes inquiries to specialist agents."
+
+workflow_type: supervisor
+
+agents:
+  # The supervisor routes incoming requests to appropriate specialists
+  - agent_id: triage_supervisor
+    role: support_supervisor
+    objective: "Analyze customer inquiries and route to the most appropriate specialist agent"
+    temperature: 0.3
+    is_supervisor: true
+    capabilities:
+      - intent_classification
+      - priority_assessment
+      - routing
+    output_format: json
+    output_schema:
+      type: object
+      properties:
+        classified_intent:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        route_to:
+          type: string
+        reasoning:
+          type: string
+
+  # Technical support specialist
+  - agent_id: tech_support
+    role: technical_support_specialist
+    objective: "Help customers with technical issues, troubleshooting, and product configuration"
+    temperature: 0.5
+    capabilities:
+      - troubleshooting
+      - technical_documentation
+      - product_knowledge
+    tools:
+      - knowledge_base
+      - diagnostic_tool
+    output_format: text
+
+  # Billing specialist
+  - agent_id: billing_support
+    role: billing_specialist
+    objective: "Assist customers with billing inquiries, refunds, and payment issues"
+    temperature: 0.3
+    capabilities:
+      - billing_lookup
+      - refund_processing
+      - payment_troubleshooting
+    tools:
+      - billing_system
+      - payment_gateway
+    output_format: text
+
+  # Account specialist
+  - agent_id: account_support
+    role: account_specialist
+    objective: "Help customers with account management, settings, and profile updates"
+    temperature: 0.5
+    capabilities:
+      - account_management
+      - settings_configuration
+      - security_verification
+    tools:
+      - account_system
+    output_format: text
+
+  # Escalation handler for complex issues
+  - agent_id: escalation_handler
+    role: senior_support_agent
+    objective: "Handle escalated issues that require special attention or policy exceptions"
+    temperature: 0.4
+    tier: 1  # Highest tier for hierarchical fallback
+    capabilities:
+      - complex_resolution
+      - policy_exception
+      - customer_retention
+    tools:
+      - knowledge_base
+      - crm_system
+    output_format: text
+
+entry_point: triage_supervisor
+
+channels:
+  - channel_id: supervisor_broadcast
+    protocol: broadcast
+    source: triage_supervisor
+    target: all
+    description: "Supervisor can communicate with any specialist"
+
+  - channel_id: escalation_channel
+    protocol: direct
+    source: any
+    target: escalation_handler
+    description: "Any specialist can escalate to senior handler"
+
+human_in_loop: true
+human_escalation_condition: "state.requires_human or state.customer_requests_human"
+
+tags:
+  - customer_support
+  - supervisor
+  - routing

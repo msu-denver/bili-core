@@ -1,0 +1,98 @@
+# Example: Content Moderation MAS
+# This demonstrates how AETHER can be used for content moderation.
+# Note: The framework doesn't enforce this domain - it's just one example.
+
+version: "1.0.0"
+mas_id: "content_moderation_v1"
+name: "Content Moderation Pipeline"
+description: "A three-stage content moderation workflow with review, analysis, and decision."
+
+workflow_type: sequential
+
+agents:
+  - agent_id: reviewer
+    role: content_reviewer  # Free-form string, not an enum
+    objective: "Review incoming content and flag potential policy violations"
+    temperature: 0.0
+    capabilities:
+      - text_analysis
+      - policy_evaluation
+    tools:
+      - policy_lookup
+    output_format: json
+    output_schema:
+      type: object
+      properties:
+        content_id:
+          type: string
+        flags:
+          type: array
+          items:
+            type: string
+        severity:
+          type: string
+          enum: [low, medium, high]
+        analysis:
+          type: string
+
+  - agent_id: policy_expert
+    role: policy_expert
+    objective: "Analyze flagged content against specific policy guidelines"
+    temperature: 0.0
+    capabilities:
+      - policy_interpretation
+      - precedent_analysis
+    tools:
+      - policy_lookup
+      - precedent_search
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        policy_violations:
+          type: array
+        recommendation:
+          type: string
+          enum: [allow, remove, escalate]
+        confidence:
+          type: number
+
+  - agent_id: judge
+    role: judge
+    objective: "Make final moderation decision based on reviewer and expert analysis"
+    temperature: 0.0
+    capabilities:
+      - decision_making
+      - evidence_synthesis
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [allow, remove, escalate_human]
+        reasoning:
+          type: string
+        confidence:
+          type: number
+
+channels:
+  - channel_id: reviewer_to_expert
+    protocol: direct
+    source: reviewer
+    target: policy_expert
+    description: "Passes flagged content to policy expert"
+
+  - channel_id: expert_to_judge
+    protocol: direct
+    source: policy_expert
+    target: judge
+    description: "Sends policy analysis to judge"
+
+human_in_loop: true
+human_escalation_condition: "state.decision == 'escalate_human' or state.confidence < 0.7"
+
+tags:
+  - content_moderation
+  - trust_and_safety
+  - sequential

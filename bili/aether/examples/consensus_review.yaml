@@ -1,0 +1,120 @@
+# Example: Consensus-Based Code Review MAS
+# This demonstrates the consensus workflow pattern for peer code review.
+
+version: "1.0.0"
+mas_id: "code_review_consensus_v1"
+name: "Peer Code Review System"
+description: "Multiple reviewer agents evaluate code changes and must reach consensus."
+
+workflow_type: consensus
+consensus_threshold: 0.66  # 2/3 majority required
+max_consensus_rounds: 5
+consensus_detection: majority
+
+agents:
+  - agent_id: security_reviewer
+    role: security_reviewer
+    objective: "Review code for security vulnerabilities, injection risks, and authentication issues"
+    temperature: 0.1
+    capabilities:
+      - security_analysis
+      - vulnerability_detection
+      - owasp_compliance
+    voting_weight: 1.5  # Security issues weighted higher
+    consensus_vote_field: "verdict"
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [approve, request_changes, block]
+        security_issues:
+          type: array
+        severity:
+          type: string
+        recommendations:
+          type: array
+
+  - agent_id: performance_reviewer
+    role: performance_reviewer
+    objective: "Review code for performance issues, efficiency, and scalability concerns"
+    temperature: 0.2
+    capabilities:
+      - performance_analysis
+      - complexity_assessment
+      - optimization_suggestion
+    voting_weight: 1.0
+    consensus_vote_field: "verdict"
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [approve, request_changes, block]
+        performance_issues:
+          type: array
+        complexity_score:
+          type: number
+        recommendations:
+          type: array
+
+  - agent_id: style_reviewer
+    role: code_style_reviewer
+    objective: "Review code for style consistency, readability, and best practices"
+    temperature: 0.3
+    capabilities:
+      - style_checking
+      - readability_assessment
+      - best_practices
+    voting_weight: 0.8  # Style issues weighted lower
+    consensus_vote_field: "verdict"
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [approve, request_changes, block]
+        style_issues:
+          type: array
+        readability_score:
+          type: number
+        recommendations:
+          type: array
+
+  - agent_id: architecture_reviewer
+    role: architecture_reviewer
+    objective: "Review code for architectural consistency and design pattern adherence"
+    temperature: 0.2
+    capabilities:
+      - architecture_analysis
+      - pattern_recognition
+      - coupling_assessment
+    voting_weight: 1.2
+    consensus_vote_field: "verdict"
+    output_format: structured
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [approve, request_changes, block]
+        architecture_issues:
+          type: array
+        design_recommendations:
+          type: array
+
+channels:
+  - channel_id: deliberation
+    protocol: consensus
+    source: any
+    target: all
+    description: "All reviewers share findings during deliberation"
+    bidirectional: true
+
+tags:
+  - code_review
+  - consensus
+  - development
