@@ -1,51 +1,48 @@
 """
 Agent specification schema.
 
-Defines the structure for individual agents in a multi-agent system.
-Supports all 5 MAS patterns through optional fields.
+Defines a domain-agnostic structure for individual agents in a multi-agent system.
+Agent roles and capabilities are free-form strings to support any use case.
 """
 
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from .enums import AgentCapability, AgentRole, OutputFormat
+from .enums import OutputFormat
 
 
 class AgentSpec(BaseModel):
     """
-    Specification for a single agent in a multi-agent system.
+    Domain-agnostic specification for a single agent in a multi-agent system.
 
-    This schema supports:
-    - Sequential workflows (MAS #1: Chain)
-    - Hierarchical workflows (MAS #2: Tree/voting)
-    - Supervisor patterns (MAS #3: Hub-and-spoke)
-    - Consensus workflows (MAS #4: Network)
-    - Custom workflows (MAS #5: Deliberative with escalation)
+    This schema is intentionally flexible:
+    - `role` is a free-form string (not an enum) - use any role you need
+    - `capabilities` are free-form strings - define your own capabilities
+    - Use the preset system for convenience without restrictions
 
     Examples:
-        >>> # Simple agent
+        >>> # Content moderation agent
         >>> agent = AgentSpec(
         ...     agent_id="reviewer",
         ...     role="content_reviewer",
-        ...     objective="Review content for violations"
+        ...     objective="Review content for policy violations"
         ... )
 
-        >>> # Agent with bili-core inheritance
+        >>> # Research agent
         >>> agent = AgentSpec(
-        ...     agent_id="judge",
-        ...     role="judge",
-        ...     objective="Make final decision",
-        ...     inherit_from_bili_core=True
+        ...     agent_id="researcher",
+        ...     role="researcher",
+        ...     objective="Research and analyze topics",
+        ...     capabilities=["web_search", "document_analysis"]
         ... )
 
-        >>> # Hierarchical agent (MAS #2)
+        >>> # Custom domain agent
         >>> agent = AgentSpec(
-        ...     agent_id="vote_agent",
-        ...     role="judge",
-        ...     objective="Vote on content",
-        ...     tier=1,
-        ...     voting_weight=2.0
+        ...     agent_id="code_reviewer",
+        ...     role="senior_engineer",
+        ...     objective="Review code for quality and security",
+        ...     capabilities=["static_analysis", "security_scanning"]
         ... )
     """
 
@@ -58,15 +55,14 @@ class AgentSpec(BaseModel):
         description="Unique identifier for this agent",
         min_length=1,
         max_length=100,
-        pattern="^[a-zA-Z0-9_-]+$",  # Alphanumeric, underscore, hyphen only
+        pattern="^[a-zA-Z0-9_-]+$",
     )
 
-    role: AgentRole = Field(
-        ..., description="Agent's role (determines behavior and capabilities)"
-    )
-
-    custom_role_name: Optional[str] = Field(
-        None, description="Human-readable name if role='custom'", max_length=200
+    role: str = Field(
+        ...,
+        description="Agent's role (free-form string - use any role you need)",
+        min_length=1,
+        max_length=100,
     )
 
     objective: str = Field(
@@ -107,14 +103,14 @@ class AgentSpec(BaseModel):
     # CAPABILITIES & TOOLS
     # =========================================================================
 
-    capabilities: List[AgentCapability] = Field(
+    capabilities: List[str] = Field(
         default_factory=list,
-        description="Agent capabilities (e.g., RAG, memory, tools)",
+        description="Agent capabilities (free-form strings - define your own)",
     )
 
     tools: List[str] = Field(
         default_factory=list,
-        description="Tool names this agent can use (e.g., 'rag_retrieval', 'web_search')",
+        description="Tool names this agent can use (must exist in tool registry)",
     )
 
     # =========================================================================
@@ -180,13 +176,13 @@ class AgentSpec(BaseModel):
     )
 
     # =========================================================================
-    # HIERARCHICAL WORKFLOWS (MAS #2)
+    # HIERARCHICAL WORKFLOWS
     # =========================================================================
 
     tier: Optional[int] = Field(
         None,
         ge=1,
-        description="Agent tier in hierarchical workflows (1=highest authority, 3=lowest)",
+        description="Agent tier in hierarchical workflows (1=highest authority)",
     )
 
     voting_weight: float = Field(
@@ -196,7 +192,7 @@ class AgentSpec(BaseModel):
     )
 
     # =========================================================================
-    # SUPERVISOR PATTERN (MAS #3)
+    # SUPERVISOR PATTERN
     # =========================================================================
 
     is_supervisor: bool = Field(
@@ -205,7 +201,7 @@ class AgentSpec(BaseModel):
     )
 
     # =========================================================================
-    # CONSENSUS WORKFLOWS (MAS #4)
+    # CONSENSUS WORKFLOWS
     # =========================================================================
 
     consensus_vote_field: Optional[str] = Field(
@@ -226,13 +222,6 @@ class AgentSpec(BaseModel):
     # =========================================================================
 
     @model_validator(mode="after")
-    def validate_custom_role(self):
-        """Validate that custom roles have a name."""
-        if self.role == AgentRole.CUSTOM and not self.custom_role_name:
-            raise ValueError("Agents with role='custom' must specify custom_role_name")
-        return self
-
-    @model_validator(mode="after")
     def validate_structured_output(self):
         """Validate that structured output has a schema."""
         if self.output_format == OutputFormat.STRUCTURED and not self.output_schema:
@@ -245,8 +234,6 @@ class AgentSpec(BaseModel):
     def validate_inheritance_flags(self):
         """Reset sub-flags when master inheritance toggle is off."""
         if not self.inherit_from_bili_core:
-            # Sub-flags are meaningless when master toggle is off;
-            # normalise them so serialised output is unambiguous.
             self.inherit_llm_config = True
             self.inherit_tools = True
             self.inherit_system_prompt = True
@@ -268,35 +255,19 @@ class AgentSpec(BaseModel):
     # HELPER METHODS
     # =========================================================================
 
-    def is_bili_core_role(self) -> bool:
-        """Check if this agent uses a bili-core role."""
-        bili_core_roles = {
-            AgentRole.CONTENT_REVIEWER,
-            AgentRole.POLICY_EXPERT,
-            AgentRole.JUDGE,
-            AgentRole.APPEALS_SPECIALIST,
-            AgentRole.COMMUNITY_MANAGER,
-        }
-        return self.role in bili_core_roles
-
     def get_display_name(self) -> str:
         """Get human-readable agent name."""
-        if self.role == AgentRole.CUSTOM and self.custom_role_name:
-            return self.custom_role_name
-        # pylint: disable=no-member
-        return self.role.value.replace("_", " ").title()
+        return self.role.replace("_", " ").title()
 
     def __str__(self) -> str:
         """String representation."""
-        # pylint: disable=no-member
-        return f"Agent({self.agent_id}, role={self.role.value})"
+        return f"Agent({self.agent_id}, role={self.role})"
 
     def __repr__(self) -> str:
         """Detailed representation."""
         return (
             f"AgentSpec(agent_id='{self.agent_id}', "
-            # pylint: disable=no-member
-            f"role={self.role.value}, "
+            f"role='{self.role}', "
             f"objective='{self.objective[:50]}...')"
         )
 
@@ -306,61 +277,49 @@ class AgentSpec(BaseModel):
 # =============================================================================
 
 if __name__ == "__main__":
-    # Example 1: Simple agent
-    simple_agent = AgentSpec(
+    # Example 1: Content moderation agent
+    moderation_agent = AgentSpec(
         agent_id="reviewer",
-        role=AgentRole.CONTENT_REVIEWER,
+        role="content_reviewer",
         objective="Review content for policy violations",
     )
-    print(simple_agent)
+    print(moderation_agent)
 
-    # Example 2: Agent with full bili-core inheritance
+    # Example 2: Research agent
+    research_agent = AgentSpec(
+        agent_id="researcher",
+        role="researcher",
+        objective="Research and analyze technical topics",
+        capabilities=["web_search", "document_analysis", "summarization"],
+        tools=["serp_api_tool", "faiss_retriever"],
+    )
+    print(research_agent)
+
+    # Example 3: Code review agent (custom domain)
+    code_agent = AgentSpec(
+        agent_id="security_reviewer",
+        role="security_engineer",
+        objective="Review code for security vulnerabilities",
+        capabilities=["static_analysis", "vulnerability_detection"],
+        temperature=0.1,
+    )
+    print(f"Display name: {code_agent.get_display_name()}")
+
+    # Example 4: Agent with bili-core inheritance
     bili_agent = AgentSpec(
         agent_id="judge",
-        role=AgentRole.JUDGE,
-        objective="Make final moderation decision",
+        role="judge",
+        objective="Make final decision based on evidence",
         inherit_from_bili_core=True,
     )
-    print(f"Is bili-core role: {bili_agent.is_bili_core_role()}")
+    print(bili_agent)
 
-    # Example 2b: Selective bili-core inheritance (custom prompt, inherit rest)
-    selective_agent = AgentSpec(
-        agent_id="custom_judge",
-        role=AgentRole.JUDGE,
-        objective="Make final moderation decision with custom prompt",
-        inherit_from_bili_core=True,
-        inherit_system_prompt=False,  # Use own prompt, inherit everything else
-        system_prompt="You are a strict content moderator.",
-    )
-    print(f"Inherits tools: {selective_agent.inherit_tools}")
-    print(f"Inherits prompt: {selective_agent.inherit_system_prompt}")
-
-    # Example 3: Hierarchical agent (MAS #2)
+    # Example 5: Hierarchical agent with voting
     vote_agent = AgentSpec(
-        agent_id="tier1_vote",
-        role=AgentRole.JUDGE,
-        objective="Aggregate votes from tier 2",
+        agent_id="tier1_judge",
+        role="senior_judge",
+        objective="Aggregate votes from junior judges",
         tier=1,
         voting_weight=2.0,
     )
     print(vote_agent)
-
-    # Example 4: Custom agent with structured output
-    custom_agent = AgentSpec(
-        agent_id="analyzer",
-        role=AgentRole.CUSTOM,
-        custom_role_name="Sentiment Analyzer",
-        objective="Analyze sentiment of content",
-        output_format=OutputFormat.STRUCTURED,
-        output_schema={
-            "type": "object",
-            "properties": {
-                "sentiment": {
-                    "type": "string",
-                    "enum": ["positive", "negative", "neutral"],
-                },
-                "confidence": {"type": "number"},
-            },
-        },
-    )
-    print(f"Display name: {custom_agent.get_display_name()}")

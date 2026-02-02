@@ -60,10 +60,9 @@ def test_load_hierarchical_yaml():
     assert tier_1[0].agent_id == "vote_agent"
     assert tier_1[0].voting_weight == 2.0
 
-    # Tier 2 agents use custom roles
+    # Tier 2 agents are aggregators
     for agent in tier_2:
-        assert agent.role.value == "custom"
-        assert agent.custom_role_name is not None
+        assert "aggregator" in agent.role
 
 
 def test_load_supervisor_yaml():
@@ -84,7 +83,7 @@ def test_load_supervisor_yaml():
     # Verify appeals_specialist is present
     appeals = config.get_agent("appeals_specialist")
     assert appeals is not None
-    assert appeals.role.value == "appeals_specialist"
+    assert appeals.role == "appeals_specialist"
 
 
 def test_load_consensus_yaml():

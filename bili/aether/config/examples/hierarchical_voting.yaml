@@ -99,8 +99,7 @@ agents:
   # =========================================================================
 
   - agent_id: content_agent
-    role: custom
-    custom_role_name: Content Agent
+    role: content_aggregator
     objective: >
       Receive the arguments from the allow and block content agents
       and determine what verdict to pass to the vote agent based on
@@ -114,8 +113,7 @@ agents:
     output_format: json
 
   - agent_id: policy_agent
-    role: custom
-    custom_role_name: Policy Agent
+    role: policy_aggregator
     objective: >
       Receive the arguments from the allow and block policy agents
       and determine what verdict to pass to the vote agent based on
