@@ -20,7 +20,7 @@ Author: MSU Denver Cybersecurity Research
 License: MIT
 """
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 __author__ = "MSU Denver Cybersecurity Research, MonRos3"
 
 from .config import load_mas_from_dict, load_mas_from_yaml
@@ -35,6 +35,7 @@ from .schema import (
     WorkflowEdge,
     WorkflowType,
 )
+from .validation import MASValidator, ValidationResult, validate_mas
 
 __all__ = [
     "__version__",
@@ -53,4 +54,8 @@ __all__ = [
     # Config loaders
     "load_mas_from_yaml",
     "load_mas_from_dict",
+    # Validation
+    "MASValidator",
+    "ValidationResult",
+    "validate_mas",
 ]
