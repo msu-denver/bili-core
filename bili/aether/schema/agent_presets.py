@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional
 
 from .agent_spec import AgentSpec
 
-
 # =============================================================================
 # PRESET REGISTRY
 # =============================================================================
@@ -201,8 +200,7 @@ def create_agent_from_preset(
     preset = get_preset(preset_name)
     if preset is None:
         raise ValueError(
-            f"Unknown preset: {preset_name}. "
-            f"Available: {list_presets()}"
+            f"Unknown preset: {preset_name}. " f"Available: {list_presets()}"
         )
 
     # Merge preset with overrides
@@ -214,41 +212,3 @@ def create_agent_from_preset(
     }
 
     return AgentSpec(**config)
-
-
-# =============================================================================
-# EXAMPLE USAGE
-# =============================================================================
-
-if __name__ == "__main__":
-    print("Available presets:", list_presets())
-
-    # Create agent from preset
-    researcher = create_agent_from_preset(
-        preset_name="researcher",
-        agent_id="tech_researcher",
-        objective="Research and summarize AI developments",
-    )
-    print(f"\nResearcher: {researcher}")
-    print(f"  Role: {researcher.role}")
-    print(f"  Capabilities: {researcher.capabilities}")
-    print(f"  Temperature: {researcher.temperature}")
-
-    # Create with overrides
-    custom_reviewer = create_agent_from_preset(
-        preset_name="code_reviewer",
-        agent_id="python_expert",
-        objective="Review Python code for best practices",
-        temperature=0.1,
-        capabilities=["python_analysis", "pep8_compliance", "type_checking"],
-    )
-    print(f"\nCustom Reviewer: {custom_reviewer}")
-    print(f"  Capabilities: {custom_reviewer.capabilities}")
-
-    # Register custom preset
-    register_preset("my_custom_agent", {
-        "role": "custom_role",
-        "capabilities": ["custom_cap"],
-        "temperature": 0.4,
-    })
-    print(f"\nAfter registering custom preset: {list_presets()}")
