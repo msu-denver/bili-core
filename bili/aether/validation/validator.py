@@ -6,7 +6,7 @@ instance that has already passed Pydantic's basic field validation.
 
 from typing import Dict, List, Set
 
-from bili.aether.schema import AgentCapability, MASConfig, WorkflowType
+from bili.aether.schema import MASConfig, WorkflowType
 
 from .result import ValidationResult
 
@@ -86,7 +86,7 @@ class MASValidator:
         """W2: Warn if supervisor agent lacks inter_agent_communication."""
         for agent in self._config.agents:
             if agent.is_supervisor:
-                if AgentCapability.INTER_AGENT_COMMUNICATION not in agent.capabilities:
+                if "inter_agent_communication" not in agent.capabilities:
                     self._result.add_warning(
                         f"Supervisor agent '{agent.agent_id}' should have "
                         f"'inter_agent_communication' capability"

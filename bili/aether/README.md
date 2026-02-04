@@ -444,6 +444,40 @@ The MAS configuration expresses the four communication dimensions through its co
 
 Use `tags` to label these dimensions for search and documentation purposes. See the [MAS Communication Framework](#mas-communication-framework) section for details and examples.
 
+## Validating a Configuration
+
+After building a `MASConfig`, run it through the static validator to catch structural issues before execution:
+
+```python
+from bili.aether import validate_mas, load_mas_from_yaml
+
+config = load_mas_from_yaml("path/to/config.yaml")
+result = validate_mas(config)
+
+if not result:
+    print(result)  # Prints numbered errors and warnings
+```
+
+The validator checks for **errors** (fatal — block execution) and **warnings** (non-fatal — should review):
+
+| Type | Check |
+|------|-------|
+| Error | Duplicate channels (same source + target + protocol) |
+| Error | Circular dependencies in sequential workflows |
+| Error | Hierarchical workflow missing tier 1 agent |
+| Warning | Agent with no channel connections (orphaned) |
+| Warning | Supervisor agent missing `inter_agent_communication` capability |
+| Warning | Bidirectional channel with redundant reverse channel |
+| Warning | Sequential workflow agent with multiple outgoing edges |
+| Warning | Unreachable agent from entry point in custom workflow |
+| Warning | Custom workflow with no path to END |
+| Warning | Consensus agent missing `consensus_vote_field` |
+| Warning | Hierarchical tier gap (e.g., tier 1 and 3 but no 2) |
+| Warning | Supervisor entry point not marked `is_supervisor` |
+| Warning | `human_in_loop` enabled without `human_escalation_condition` |
+
+Validation runs on top of Pydantic's field-level validation — it catches cross-field and structural issues that individual field constraints can't express.
+
 ## Example Workflows
 
 AETHER includes example YAML configurations for multiple domains:

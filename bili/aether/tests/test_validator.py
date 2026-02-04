@@ -4,8 +4,6 @@ import os
 
 from bili.aether.config.loader import load_mas_from_yaml
 from bili.aether.schema import (
-    AgentCapability,
-    AgentRole,
     AgentSpec,
     Channel,
     CommunicationProtocol,
@@ -31,7 +29,7 @@ _EXAMPLES_DIR = os.path.join(
 def _agent(agent_id: str, **kwargs) -> AgentSpec:
     """Shortcut to build an AgentSpec with sensible defaults."""
     defaults = {
-        "role": AgentRole.JUDGE,
+        "role": "judge",
         "objective": f"Test objective for {agent_id}",
     }
     defaults.update(kwargs)
@@ -150,7 +148,7 @@ def test_supervisor_with_capability_no_warning():
             _agent(
                 "sup",
                 is_supervisor=True,
-                capabilities=[AgentCapability.INTER_AGENT_COMMUNICATION],
+                capabilities=["inter_agent_communication"],
             )
         ],
     )
