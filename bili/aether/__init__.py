@@ -25,6 +25,7 @@ License: MIT
 __version__ = "0.0.7"
 __author__ = "MSU Denver Cybersecurity Research, MonRos3"
 
+from .compiler import CompiledMAS, compile_mas
 from .config import load_mas_from_dict, load_mas_from_yaml
 from .schema import (
     AGENT_PRESETS,
@@ -67,4 +68,7 @@ __all__ = [
     "MASValidator",
     "ValidationResult",
     "validate_mas",
+    # Compiler
+    "CompiledMAS",
+    "compile_mas",
 ]

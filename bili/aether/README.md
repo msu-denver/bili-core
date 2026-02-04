@@ -478,6 +478,104 @@ The validator checks for **errors** (fatal — block execution) and **warnings**
 
 Validation runs on top of Pydantic's field-level validation — it catches cross-field and structural issues that individual field constraints can't express.
 
+## Compiling to LangGraph
+
+After validation, compile a `MASConfig` into an executable [LangGraph](https://langchain-ai.github.io/langgraph/) `StateGraph`:
+
+```python
+from bili.aether import compile_mas, load_mas_from_yaml
+
+config = load_mas_from_yaml("path/to/config.yaml")
+compiled = compile_mas(config)       # Validates, then builds the graph
+graph = compiled.compile_graph()     # Returns a CompiledStateGraph
+
+# graph is ready for .invoke() or .stream()
+```
+
+`compile_mas()` runs the validator first — if validation produces errors, it raises `ValueError` with the full report. Warnings do not block compilation.
+
+### What the Compiler Produces
+
+`compile_mas()` returns a `CompiledMAS` object with:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `config` | `MASConfig` | The original configuration used to build the graph |
+| `graph` | `StateGraph` | The uncompiled LangGraph graph (can be inspected or modified before compilation) |
+| `state_schema` | `TypedDict` | The generated state class with workflow-specific fields |
+| `agent_nodes` | `Dict[str, Callable]` | Mapping of `agent_id` to its node callable |
+| `checkpoint_config` | `Dict` | Checkpoint backend configuration |
+
+**Methods:**
+- `compile_graph(checkpointer=None)` — Compile to an executable `CompiledStateGraph`. If `checkpointer` is `None` and `checkpoint_enabled` is `True`, uses an in-memory checkpointer.
+- `get_agent_node(agent_id)` — Look up a specific agent's callable by ID.
+
+### How Workflow Types Map to Graph Topologies
+
+The compiler builds a different graph topology for each `workflow_type`:
+
+| Workflow Type | Graph Topology |
+|---------------|----------------|
+| `sequential` | Linear chain: `START → A → B → C → END` |
+| `hierarchical` | Tier-based fan-out: `START → [leaf tier] → [mid tiers] → [tier 1] → END`. Uses channel definitions for specific inter-tier routing. |
+| `supervisor` | Hub-and-spoke: `START → supervisor ⇄ [workers] → END`. Supervisor conditionally routes to workers via `state["next_agent"]`. |
+| `consensus` | Round-based deliberation: `START → [all agents] → consensus check → (repeat or END)`. Loops until consensus or `max_consensus_rounds`. |
+| `parallel` | Fan-out/fan-in: `START → [all agents] → END`. All agents execute simultaneously. |
+| `deliberative` | Delegates to `custom` if `workflow_edges` are defined, otherwise falls back to `sequential`. |
+| `custom` | Explicit edges from `workflow_edges`. Supports conditional routing via `condition` expressions evaluated against state. |
+
+### Generated State Schema
+
+Each compiled graph gets a dynamic `TypedDict` state schema. Base fields are always present; workflow-specific fields are added automatically:
+
+**Base fields (all workflows):**
+- `messages` — LangGraph message list with `add_messages` reducer
+- `current_agent` — ID of the currently executing agent
+- `agent_outputs` — `Dict[str, Any]` mapping each agent's ID to its latest output
+- `mas_id` — The MAS identifier
+
+**Workflow-specific fields:**
+
+| Workflow Type | Additional State Fields |
+|---------------|------------------------|
+| `consensus` | `current_round`, `votes`, `consensus_reached`, `max_rounds` |
+| `hierarchical` | `current_tier`, `tier_results` |
+| `supervisor` | `next_agent`, `pending_tasks`, `completed_tasks` |
+| `custom` (with `human_in_loop`) | `needs_human_review` |
+
+### Agent Nodes
+
+Agent nodes are generated in one of three modes based on the `AgentSpec` configuration:
+
+1. **Tool-enabled LLM node** — When `model_name` is set and `tools` are configured, the node uses `create_agent()` from `langchain.agents` with resolved tool instances. This mirrors the pattern used by `bili/nodes/react_agent_node.py`.
+
+2. **Direct LLM node** — When `model_name` is set but no tools are configured, the node calls `llm.invoke(messages)` directly. Messages are filtered to compatible types (`AIMessage`, `HumanMessage`, `SystemMessage`).
+
+3. **Stub node** — When `model_name` is `None`, the node emits a placeholder `AIMessage` without making LLM calls. This allows compilation and graph execution without API keys (all example YAMLs use this mode).
+
+Model resolution is handled by `llm_resolver.py`, which maps `AgentSpec.model_name` to a `(provider_type, model_id)` pair. It searches `bili.config.llm_config.LLM_MODELS` first (by `model_id`, then by display name), and falls back to heuristic prefix-based detection. LLM instances are created via `bili.loaders.llm_loader.load_model()`. Tool names are resolved via `bili.loaders.tools_loader.initialize_tools()`.
+
+Each agent node callable has an `.agent_spec` attribute attached for introspection:
+
+```python
+compiled = compile_mas(config)
+node = compiled.get_agent_node("content_reviewer")
+print(node.agent_spec.role)       # "content_reviewer"
+print(node.agent_spec.model_name) # "gpt-4o" (or None for stub mode)
+```
+
+### CLI Tool
+
+A CLI tool is included for quick compilation testing:
+
+```bash
+# Compile all example configs
+python bili/aether/compiler/cli.py
+
+# Compile a specific YAML
+python bili/aether/compiler/cli.py path/to/config.yaml
+```
+
 ## Example Workflows
 
 AETHER includes example YAML configurations for multiple domains:
@@ -505,11 +603,22 @@ bili/aether/
 │   ├── agent_spec.py     # Domain-agnostic AgentSpec
 │   ├── agent_presets.py  # Preset registry system
 │   ├── mas_config.py     # MASConfig, Channel, WorkflowEdge
-│   └── enums.py          # Structural enums only (WorkflowType, etc.)
+│   └── enums.py          # Structural enums (WorkflowType, etc.)
 ├── config/               # YAML loading and examples
 │   ├── loader.py         # load_mas_from_yaml, load_mas_from_dict
 │   └── examples/         # Example YAML configurations
-└── tests/                # Test suite
+├── compiler/             # AETHER-to-LangGraph compiler
+│   ├── __init__.py       # compile_mas() entry point
+│   ├── graph_builder.py  # StateGraph construction
+│   ├── agent_generator.py # LLM-backed and stub agent nodes
+│   ├── llm_resolver.py   # Model resolution and LLM instantiation
+│   ├── state_generator.py # TypedDict state schema generation
+│   ├── compiled_mas.py   # CompiledMAS container
+│   └── cli.py            # CLI compilation tool
+├── validation/           # Static MAS validation engine
+│   ├── __init__.py       # validate_mas() entry point
+│   └── engine.py         # 13 structural validation checks
+└── tests/                # Test suite (104 tests)
 ```
 
 ## Integration with bili-core
