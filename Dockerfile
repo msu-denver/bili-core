@@ -71,12 +71,11 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 # Install LocalStack for local development and testing using AWS
 RUN pip3 install localstack awscli-local boto3
 
-# Install gcloud SDK
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-    | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
-RUN apt-get update && apt-get install -y google-cloud-sdk
+# Install gcloud SDK (standalone archive to avoid Python version conflicts with apt package)
+RUN curl -sSL https://sdk.cloud.google.com > /tmp/install_gcloud.sh && \
+    bash /tmp/install_gcloud.sh --disable-prompts --install-dir=/opt && \
+    rm /tmp/install_gcloud.sh
+ENV PATH="/opt/google-cloud-sdk/bin:${PATH}"
 
 # Install Azure CLI
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
