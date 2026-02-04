@@ -1,52 +1,12 @@
 """
 Enumerations for AETHER schema.
 
-This module defines all enum types used across agent and MAS configurations.
+This module defines structural enum types used across MAS configurations.
+Note: Agent roles and capabilities are intentionally NOT enums - they are
+free-form strings to support any domain without code changes.
 """
 
 from enum import Enum
-
-
-class AgentRole(str, Enum):
-    """
-    Agent roles for content moderation MAS.
-
-    Includes bili-core standard roles and new roles for your 5 MAS patterns.
-    """
-
-    # bili-core standard roles (Task 7 integration)
-    CONTENT_REVIEWER = "content_reviewer"
-    POLICY_EXPERT = "policy_expert"
-    JUDGE = "judge"
-    APPEALS_SPECIALIST = "appeals_specialist"
-    COMMUNITY_MANAGER = "community_manager"
-
-    # NEW: Adversarial/debate roles (MAS #2 - Hierarchical)
-    ALLOW_ADVOCATE = "allow_advocate"
-    BLOCK_ADVOCATE = "block_advocate"
-
-    # Catch-all for custom roles
-    CUSTOM = "custom"
-
-
-class AgentCapability(str, Enum):
-    """
-    Agent capabilities (features an agent can use).
-
-    These correspond to bili-core features and LangGraph capabilities.
-    """
-
-    # bili-core integration
-    RAG_RETRIEVAL = "rag_retrieval"
-    POLICY_LOOKUP = "policy_lookup"
-    MEMORY_ACCESS = "memory_access"
-
-    # LangGraph features
-    CHECKPOINT_PERSISTENCE = "checkpoint_persistence"
-    TOOL_CALLING = "tool_calling"
-
-    # Communication
-    INTER_AGENT_COMMUNICATION = "inter_agent_communication"
 
 
 class OutputFormat(str, Enum):
@@ -65,12 +25,14 @@ class WorkflowType(str, Enum):
     """
     MAS workflow execution patterns.
 
-    Maps to your 5 MAS configurations:
-    - SEQUENTIAL: MAS #1 (Chain)
-    - HIERARCHICAL: MAS #2 (Tree/voting)
-    - SUPERVISOR: MAS #3 (Hub-and-spoke)
-    - CONSENSUS: MAS #4 (Network/deliberation)
-    - DELIBERATIVE: MAS #5 (Custom with escalation)
+    Maps to common multi-agent patterns:
+    - SEQUENTIAL: Chain pattern (A -> B -> C)
+    - HIERARCHICAL: Tree/voting pattern with tiers
+    - SUPERVISOR: Hub-and-spoke pattern
+    - CONSENSUS: Network/deliberation pattern
+    - DELIBERATIVE: Custom with escalation
+    - PARALLEL: All agents execute simultaneously
+    - CUSTOM: User-defined workflow with explicit edges
     """
 
     SEQUENTIAL = "sequential"
@@ -89,11 +51,9 @@ class CommunicationProtocol(str, Enum):
     Defines how agents exchange messages.
     """
 
-    DIRECT = "direct"  # Point-to-point: A → B
-    BROADCAST = "broadcast"  # One-to-many: A → All
-    REQUEST_RESPONSE = "request_response"  # Bidirectional: A ↔ B
+    DIRECT = "direct"  # Point-to-point: A -> B
+    BROADCAST = "broadcast"  # One-to-many: A -> All
+    REQUEST_RESPONSE = "request_response"  # Bidirectional: A <-> B
     PUBSUB = "pubsub"  # Publish-subscribe pattern
-
-    # NEW: For your MAS patterns
-    COMPETITIVE = "competitive"  # MAS #2: Adversarial debate
-    CONSENSUS = "consensus"  # MAS #4: Peer deliberation
+    COMPETITIVE = "competitive"  # Adversarial debate pattern
+    CONSENSUS = "consensus"  # Peer deliberation pattern

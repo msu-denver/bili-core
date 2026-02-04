@@ -1,20 +1,22 @@
 """
 AETHER: Agent Ecosystems for Testing, Hardening, Evaluation, and Research
 
-AETHER is a multi-agent system (MAS) security testing framework built as an
-extension to bili-core. It enables declarative configuration of multi-agent
-systems for testing security vulnerabilities in LLM-based agent architectures.
+AETHER is a multi-agent system (MAS) framework built as an extension to
+bili-core. It enables declarative configuration of multi-agent systems
+for any domain - research, content moderation, code review, and more.
+
+Design Philosophy:
+- Domain-agnostic: Agent roles and capabilities are free-form strings
+- Preset system: Common patterns available without restrictions
+- Extensible: Register custom presets at runtime
+- bili-core integration: Inherit LLM, tool, and state management features
 
 Core Capabilities:
 - Multi-agent system configuration and orchestration
 - Agent-to-agent communication protocols
-- Security attack vector testing (prompt injection, memory poisoning, etc.)
+- Multiple workflow patterns (sequential, hierarchical, supervisor, consensus)
 - Transparent agent communication logging
-- Integration with bili-core's LLM, tool, and state management features
-
-AETHER extends bili-core's single-agent RAG workflows to support complex
-multi-agent security testing scenarios while inheriting all bili-core
-capabilities (authentication, checkpointing, tool access, LLM configuration).
+- Full bili-core integration (auth, checkpoints, tools, LLMs)
 
 Author: MSU Denver Cybersecurity Research
 License: MIT
@@ -25,8 +27,7 @@ __author__ = "MSU Denver Cybersecurity Research, MonRos3"
 
 from .config import load_mas_from_dict, load_mas_from_yaml
 from .schema import (
-    AgentCapability,
-    AgentRole,
+    AGENT_PRESETS,
     AgentSpec,
     Channel,
     CommunicationProtocol,
@@ -34,6 +35,10 @@ from .schema import (
     OutputFormat,
     WorkflowEdge,
     WorkflowType,
+    create_agent_from_preset,
+    get_preset,
+    list_presets,
+    register_preset,
 )
 from .validation import MASValidator, ValidationResult, validate_mas
 
@@ -45,12 +50,16 @@ __all__ = [
     "MASConfig",
     "Channel",
     "WorkflowEdge",
-    # Enums
-    "AgentRole",
-    "AgentCapability",
+    # Structural enums
     "OutputFormat",
     "WorkflowType",
     "CommunicationProtocol",
+    # Preset system
+    "AGENT_PRESETS",
+    "create_agent_from_preset",
+    "get_preset",
+    "list_presets",
+    "register_preset",
     # Config loaders
     "load_mas_from_yaml",
     "load_mas_from_dict",
