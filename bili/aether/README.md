@@ -621,6 +621,70 @@ if mgr:
     mgr.close()  # Flush and close the JSONL log
 ```
 
+### bili-core Inheritance
+
+When an agent sets `inherit_from_bili_core: true`, the compiler automatically enriches its `AgentSpec` with role-based defaults before generating nodes. This activates the dormant inheritance flags on `AgentSpec` and connects agents to bili-core's system prompts, tools, and LLM configuration.
+
+#### How It Works
+
+1. **At compile time** — `GraphBuilder` calls `apply_inheritance()` for each agent with `inherit_from_bili_core=True`. The function looks up the agent's `role` in `ROLE_DEFAULTS` and merges defaults per the enabled sub-flags.
+
+2. **Priority rule** — User-specified values **always** take priority over inherited defaults. A custom `system_prompt`, explicit `temperature`, or manually listed `tools` will never be overridden.
+
+3. **Granular control** — Five sub-flags allow selective inheritance:
+
+| Flag | What It Controls | Inheritance Rule |
+|------|-----------------|------------------|
+| `inherit_system_prompt` | System prompt | Set from registry if agent's is `None` |
+| `inherit_llm_config` | Temperature, model_name | Temperature inherited if `0.0` (default); model_name if `None` |
+| `inherit_tools` | Tools and capabilities | Additive merge (registry tools + agent tools, deduplicated) |
+| `inherit_memory` | Memory management | Extension point (no-op) |
+| `inherit_checkpoint` | Checkpoint config | Extension point (no-op, MAS-level) |
+
+#### Role Registry
+
+The registry maps role strings to `RoleDefaults` (system prompt, tools, temperature, capabilities):
+
+| Role | Default Tools | Temperature |
+|------|--------------|-------------|
+| `content_reviewer` | — | 0.3 |
+| `policy_expert` | `faiss_retriever` | 0.2 |
+| `judge` | — | 0.1 |
+| `appeals_specialist` | `faiss_retriever` | 0.3 |
+| `researcher` | `serp_api_tool` | 0.5 |
+| `fact_checker` | `serp_api_tool` | 0.2 |
+| `support_agent` | `faiss_retriever` | 0.4 |
+| `supervisor` | — | 0.2 |
+
+Custom roles can be registered at runtime via `register_role_defaults()`.
+
+#### YAML Example
+
+```yaml
+agents:
+  - agent_id: reviewer
+    role: content_reviewer
+    objective: "Review content for policy violations"
+    model_name: gpt-4o
+    inherit_from_bili_core: true
+    # Gets: system_prompt, temperature=0.3, capabilities
+
+  - agent_id: policy
+    role: policy_expert
+    objective: "Provide policy guidance"
+    model_name: gpt-4o
+    inherit_from_bili_core: true
+    # Gets: system_prompt, tools=[faiss_retriever], temperature=0.2
+
+  - agent_id: analyst
+    role: analyst
+    objective: "Analyse findings"
+    model_name: gpt-4o
+    inherit_from_bili_core: true
+    inherit_tools: false  # Opt out of tool inheritance
+    system_prompt: "Custom prompt overrides registry default"
+```
+
 ### CLI Tool
 
 A CLI tool is included for quick compilation testing:
@@ -646,6 +710,7 @@ AETHER includes example YAML configurations for multiple domains:
 
 ### Research (Domain-Agnostic)
 - `research_analysis.yaml` - Research → Fact-check → Analyze → Synthesize
+- `inherited_research.yaml` - Same pipeline using `inherit_from_bili_core: true`
 
 ### Software Engineering (Domain-Agnostic)
 - `code_review.yaml` - Lead engineer routes to security/performance/style reviewers
@@ -678,10 +743,15 @@ bili/aether/
 │   ├── channels.py       # DirectChannel, BroadcastChannel, RequestResponseChannel
 │   ├── channel_manager.py # ChannelManager
 │   └── communication_state.py # LangGraph state integration helpers
+├── integration/          # bili-core inheritance layer
+│   ├── __init__.py       # Package exports
+│   ├── role_registry.py  # RoleDefaults registry (16 roles)
+│   ├── inheritance.py    # apply_inheritance() resolution logic
+│   └── state_integration.py # State schema extension hook
 ├── validation/           # Static MAS validation engine
 │   ├── __init__.py       # validate_mas() entry point
 │   └── engine.py         # 13 structural validation checks
-└── tests/                # Test suite (133 tests)
+└── tests/                # Test suite (157 tests)
 ```
 
 ## Integration with bili-core

@@ -1,0 +1,62 @@
+# =============================================================================
+# Research Pipeline with bili-core Inheritance
+# =============================================================================
+#
+# Demonstrates using inherit_from_bili_core to get default system prompts,
+# tools, and temperature from the role registry.
+#
+# Agents only need: agent_id, role, and objective. Everything else is
+# inherited from bili-core's role defaults.
+#
+# To use real LLMs, add model_name to each agent (e.g. model_name: gpt-4o).
+# Without model_name, agents run in stub mode for testing.
+# =============================================================================
+
+mas_id: inherited_research
+name: Research Pipeline (with bili-core Inheritance)
+description: >
+  Minimal agent definitions that inherit system prompts, tools, and
+  temperature from bili-core's role registry.
+version: "1.0.0"
+
+workflow_type: sequential
+
+agents:
+  - agent_id: researcher
+    role: researcher
+    objective: >
+      Search for information on the assigned topic and compile findings.
+    inherit_from_bili_core: true
+    # Inherits: system_prompt, tools=[serp_api_tool], temperature=0.5
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: fact_checker
+    role: fact_checker
+    objective: >
+      Verify the claims gathered by the researcher.
+    inherit_from_bili_core: true
+    # Inherits: system_prompt, tools=[serp_api_tool], temperature=0.2
+
+  - agent_id: analyst
+    role: analyst
+    objective: >
+      Analyse verified findings and identify patterns.
+    inherit_from_bili_core: true
+    inherit_tools: false
+    # Inherits: system_prompt, temperature=0.3 (but NOT tools)
+
+  - agent_id: writer
+    role: documentation_writer
+    objective: >
+      Write a comprehensive report from the analysis.
+    inherit_from_bili_core: true
+    system_prompt: >
+      You are a report writer. Synthesise all findings into a clear,
+      well-structured report with executive summary and recommendations.
+    # Custom system_prompt overrides registry default
+    # Inherits: temperature=0.4
+
+tags:
+  - research
+  - inheritance
+  - bili-core

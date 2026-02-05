@@ -64,6 +64,16 @@ def generate_state_schema(config: MASConfig) -> Type:
         annotations["pending_messages"] = Dict[str, list]
         annotations["communication_log"] = list
 
+    # Inheritance state fields (when agents use bili-core inheritance)
+    try:
+        from bili.aether.integration.state_integration import (  # pylint: disable=import-outside-toplevel
+            get_inheritance_state_fields,
+        )
+
+        annotations.update(get_inheritance_state_fields(config.agents))
+    except ImportError:
+        pass  # integration package not available
+
     # Build a valid Python identifier from the mas_id
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", config.mas_id)
     class_name = f"{safe_name}_State"

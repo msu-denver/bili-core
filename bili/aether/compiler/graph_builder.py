@@ -53,6 +53,9 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         # 1. Generate state schema
         self._state_schema = generate_state_schema(self._config)
 
+        # 1b. Apply bili-core inheritance to agents that opted in
+        self._apply_inheritance()
+
         # 2. Generate agent node callables
         for agent in self._config.agents:
             node_fn = generate_agent_node(agent)
@@ -95,6 +98,37 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
             checkpoint_config=self._config.checkpoint_config,
             channel_manager=channel_manager,
         )
+
+    # ------------------------------------------------------------------
+    # Inheritance
+    # ------------------------------------------------------------------
+
+    def _apply_inheritance(self) -> None:
+        """Apply bili-core inheritance to agents with ``inherit_from_bili_core=True``.
+
+        Replaces ``self._config.agents`` with enriched copies where
+        inheritance is enabled.  Gracefully skips if the integration
+        package is unavailable.
+        """
+        has_inheritance = any(a.inherit_from_bili_core for a in self._config.agents)
+        if not has_inheritance:
+            return
+
+        try:
+            from bili.aether.integration import (  # pylint: disable=import-outside-toplevel
+                apply_inheritance_to_all,
+            )
+        except ImportError:
+            LOGGER.warning(
+                "bili.aether.integration not available; "
+                "skipping inheritance resolution for %d agent(s)",
+                sum(1 for a in self._config.agents if a.inherit_from_bili_core),
+            )
+            return
+
+        enriched = apply_inheritance_to_all(self._config.agents, self._config)
+        self._config.agents = enriched
+        LOGGER.info("Applied bili-core inheritance to agents")
 
     # ------------------------------------------------------------------
     # Workflow dispatch
