@@ -209,8 +209,13 @@ class MASConfig(BaseModel):
     )
 
     checkpoint_config: Dict[str, Any] = Field(
-        default_factory=lambda: {"type": "sqlite", "path": "checkpoints.db"},
-        description="Checkpoint configuration (type, path, etc.)",
+        default_factory=lambda: {"type": "memory"},
+        description=(
+            "Checkpoint backend configuration. Supported types: "
+            "'memory' (default), 'postgres'/'pg', 'mongo'/'mongodb', "
+            "'auto' (env-based detection). Additional keys like "
+            "'keep_last_n' are forwarded to the checkpointer constructor."
+        ),
     )
 
     # =========================================================================
