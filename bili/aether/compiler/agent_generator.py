@@ -9,7 +9,7 @@ real LLM calls using bili-core's ``llm_loader``.  If the agent also has
 import json
 import logging
 import time
-from typing import Callable
+from typing import Any, Callable, Dict
 
 from bili.aether.schema import AgentSpec, OutputFormat
 
@@ -79,7 +79,7 @@ def _generate_tool_agent_node(
 
     react_agent = create_agent(model=llm, tools=tools)
 
-    def _agent_node(state: dict) -> dict:
+    def _agent_node(state: dict) -> dict:  # pylint: disable=too-many-locals
         start_time = time.time()
 
         from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
@@ -89,6 +89,12 @@ def _generate_tool_agent_node(
 
         # Inject system prompt into messages if not already present
         system_prompt = agent.system_prompt or agent.objective
+
+        # Append pending inter-agent messages to system prompt
+        comm_context = _get_communication_context(state, agent.agent_id)
+        if comm_context:
+            system_prompt += "\n\n--- Messages from other agents ---\n" + comm_context
+
         messages = list(state.get("messages", []))
 
         has_system = any(isinstance(m, SystemMessage) for m in messages)
@@ -122,11 +128,13 @@ def _generate_tool_agent_node(
             AIMessage,
         )
 
-        return {
+        state_update: Dict[str, Any] = {
             "messages": [AIMessage(content=content, name=agent.agent_id)],
             "current_agent": agent.agent_id,
             "agent_outputs": agent_outputs,
         }
+        state_update.update(_build_communication_update(state, agent.agent_id, content))
+        return state_update
 
     _agent_node.agent_spec = agent  # type: ignore[attr-defined]
     _agent_node.__name__ = f"agent_{agent.agent_id}"
@@ -141,7 +149,7 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
     Mirrors the fallback path in ``bili/nodes/react_agent_node.py``.
     """
 
-    def _agent_node(state: dict) -> dict:
+    def _agent_node(state: dict) -> dict:  # pylint: disable=too-many-locals
         start_time = time.time()
 
         from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
@@ -152,6 +160,12 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
 
         # Build message list
         system_prompt = agent.system_prompt or agent.objective
+
+        # Append pending inter-agent messages to system prompt
+        comm_context = _get_communication_context(state, agent.agent_id)
+        if comm_context:
+            system_prompt += "\n\n--- Messages from other agents ---\n" + comm_context
+
         messages = [SystemMessage(content=system_prompt)]
 
         # Filter state messages to compatible types, matching
@@ -182,11 +196,13 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
         agent_outputs = dict(state.get("agent_outputs") or {})
         agent_outputs[agent.agent_id] = output
 
-        return {
+        state_update: Dict[str, Any] = {
             "messages": [AIMessage(content=content, name=agent.agent_id)],
             "current_agent": agent.agent_id,
             "agent_outputs": agent_outputs,
         }
+        state_update.update(_build_communication_update(state, agent.agent_id, content))
+        return state_update
 
     _agent_node.agent_spec = agent  # type: ignore[attr-defined]
     _agent_node.__name__ = f"agent_{agent.agent_id}"
@@ -229,11 +245,14 @@ def _generate_stub_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
             execution_ms,
         )
 
+        # Consume any pending inter-agent messages (for state bookkeeping)
+        _get_communication_context(state, agent.agent_id)
+
         from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
             AIMessage,
         )
 
-        return {
+        state_update: Dict[str, Any] = {
             "messages": [
                 AIMessage(
                     content=stub_output["message"],
@@ -243,6 +262,10 @@ def _generate_stub_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
             "current_agent": agent.agent_id,
             "agent_outputs": agent_outputs,
         }
+        state_update.update(
+            _build_communication_update(state, agent.agent_id, stub_output["message"])
+        )
+        return state_update
 
     # Attach metadata for introspection
     _agent_node.agent_spec = agent  # type: ignore[attr-defined]
@@ -302,3 +325,51 @@ def _build_output(agent: AgentSpec, content: str) -> dict:
         output["raw"] = content
 
     return output
+
+
+def _get_communication_context(state: dict, agent_id: str) -> str:
+    """Build a text block from pending messages for LLM context injection.
+
+    Returns an empty string when no communication fields are present.
+    """
+    # pylint: disable=import-outside-toplevel
+    from bili.aether.runtime.communication_state import (
+        format_messages_for_context,
+        get_pending_messages,
+    )
+
+    pending = get_pending_messages(state, agent_id)
+    if not pending:
+        return ""
+    return format_messages_for_context(pending)
+
+
+def _build_communication_update(
+    state: dict, agent_id: str, content: str
+) -> Dict[str, Any]:
+    """Record agent output in communication_log if communication is active.
+
+    Returns a dict of state fields to merge (empty if communication is
+    not configured).
+    """
+    if "communication_log" not in state:
+        return {}
+
+    comm_log = list(state.get("communication_log") or [])
+    comm_log.append(
+        {
+            "sender": agent_id,
+            "receiver": "__all__",
+            "channel": "__agent_output__",
+            "content": content,
+        }
+    )
+
+    # Clear pending messages for this agent after consumption
+    pending = dict(state.get("pending_messages") or {})
+    pending[agent_id] = []
+
+    return {
+        "communication_log": comm_log,
+        "pending_messages": pending,
+    }

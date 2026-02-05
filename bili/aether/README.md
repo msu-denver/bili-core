@@ -505,6 +505,7 @@ graph = compiled.compile_graph()     # Returns a CompiledStateGraph
 | `state_schema` | `TypedDict` | The generated state class with workflow-specific fields |
 | `agent_nodes` | `Dict[str, Callable]` | Mapping of `agent_id` to its node callable |
 | `checkpoint_config` | `Dict` | Checkpoint backend configuration |
+| `channel_manager` | `ChannelManager` (optional) | Manages inter-agent channels; `None` if no channels configured |
 
 **Methods:**
 - `compile_graph(checkpointer=None)` — Compile to an executable `CompiledStateGraph`. If `checkpointer` is `None` and `checkpoint_enabled` is `True`, uses an in-memory checkpointer.
@@ -542,6 +543,7 @@ Each compiled graph gets a dynamic `TypedDict` state schema. Base fields are alw
 | `hierarchical` | `current_tier`, `tier_results` |
 | `supervisor` | `next_agent`, `pending_tasks`, `completed_tasks` |
 | `custom` (with `human_in_loop`) | `needs_human_review` |
+| Any workflow with `channels` | `channel_messages`, `pending_messages`, `communication_log` |
 
 ### Agent Nodes
 
@@ -562,6 +564,61 @@ compiled = compile_mas(config)
 node = compiled.get_agent_node("content_reviewer")
 print(node.agent_spec.role)       # "content_reviewer"
 print(node.agent_spec.model_name) # "gpt-4o" (or None for stub mode)
+```
+
+### Agent Communication Protocol (Runtime)
+
+When a MAS config includes `channels`, the compiler activates the **runtime communication layer**. This enables agents to send and receive structured messages through declared channels, with every message logged to a JSONL audit file.
+
+#### How It Works
+
+1. **At compile time** — `GraphBuilder` creates a `ChannelManager` from the config's `channels` list. Communication state fields (`channel_messages`, `pending_messages`, `communication_log`) are added to the LangGraph state schema.
+
+2. **At execution time** — Before each agent node runs, pending messages addressed to that agent are retrieved from state and injected into its system prompt:
+   ```
+   --- Messages from other agents ---
+   [From content_reviewer via reviewer_to_judge]: Content violates policy section 3.2.
+   [From policy_expert via policy_to_judge]: No policy violations found.
+   ```
+
+3. **After execution** — The agent's output is recorded in `communication_log` and its pending messages are cleared.
+
+#### Implemented Channel Types
+
+| Protocol | Class | Behaviour |
+|----------|-------|-----------|
+| `direct` | `DirectChannel` | Point-to-point (A → B). Supports `bidirectional: true` for two-way. |
+| `broadcast` | `BroadcastChannel` | One-to-many (A → all agents except sender). |
+| `request_response` | `RequestResponseChannel` | Bidirectional with request/response correlation tracking. |
+| `pubsub`, `competitive`, `consensus` | Falls back to `DirectChannel` | Not yet implemented — planned for future tasks. |
+
+#### JSONL Communication Log
+
+Every message is appended to a JSONL file (one JSON object per line):
+
+```json
+{"message_id": "a1b2c3...", "timestamp": "2026-02-04T12:00:00+00:00", "sender": "reviewer", "receiver": "judge", "channel": "reviewer_to_judge", "content": "Content violates policy.", "message_type": "direct", "metadata": {}, "in_reply_to": null}
+```
+
+Log files are created per execution in the working directory: `communication_{mas_id}_{hash}.jsonl`.
+
+#### Programmatic Usage
+
+The `ChannelManager` can also be used directly outside the compiled graph:
+
+```python
+from bili.aether.compiler import compile_mas
+from bili.aether.config.loader import load_mas_from_yaml
+
+config = load_mas_from_yaml("path/to/config.yaml")
+compiled = compile_mas(config)
+
+# Access the channel manager
+mgr = compiled.channel_manager
+if mgr:
+    mgr.send_message("reviewer_to_judge", "reviewer", "Looks good.")
+    pending = mgr.get_messages_for_agent("judge")
+    mgr.close()  # Flush and close the JSONL log
 ```
 
 ### CLI Tool
@@ -615,10 +672,16 @@ bili/aether/
 │   ├── state_generator.py # TypedDict state schema generation
 │   ├── compiled_mas.py   # CompiledMAS container
 │   └── cli.py            # CLI compilation tool
+├── runtime/              # Agent communication protocol
+│   ├── messages.py       # Message, MessageType, MessageHistory
+│   ├── logger.py         # CommunicationLogger (JSONL)
+│   ├── channels.py       # DirectChannel, BroadcastChannel, RequestResponseChannel
+│   ├── channel_manager.py # ChannelManager
+│   └── communication_state.py # LangGraph state integration helpers
 ├── validation/           # Static MAS validation engine
 │   ├── __init__.py       # validate_mas() entry point
 │   └── engine.py         # 13 structural validation checks
-└── tests/                # Test suite (104 tests)
+└── tests/                # Test suite (133 tests)
 ```
 
 ## Integration with bili-core
@@ -817,5 +880,5 @@ MIT License - See LICENSE file in the repository root.
 ---
 
 **AETHER Version:** 0.1.0
-**Last Updated:** February 2, 2026
+**Last Updated:** February 4, 2026
 **bili-core Version Required:** ≥3.0.0

@@ -58,6 +58,12 @@ def generate_state_schema(config: MASConfig) -> Type:
     if wtype == WorkflowType.CUSTOM and config.human_in_loop:
         annotations["needs_human_review"] = bool
 
+    # Communication fields (present when channels are configured)
+    if config.channels:
+        annotations["channel_messages"] = Dict[str, Any]
+        annotations["pending_messages"] = Dict[str, list]
+        annotations["communication_log"] = list
+
     # Build a valid Python identifier from the mas_id
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", config.mas_id)
     class_name = f"{safe_name}_State"

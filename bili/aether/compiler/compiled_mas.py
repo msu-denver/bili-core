@@ -23,6 +23,7 @@ class CompiledMAS:
     state_schema: Type
     agent_nodes: Dict[str, Callable]
     checkpoint_config: Dict[str, Any] = field(default_factory=dict)
+    channel_manager: Any = field(default=None)  # Optional ChannelManager
 
     def compile_graph(self, checkpointer=None):
         """Compile the StateGraph into an executable CompiledStateGraph.
