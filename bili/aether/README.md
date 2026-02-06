@@ -685,7 +685,7 @@ agents:
     system_prompt: "Custom prompt overrides registry default"
 ```
 
-### CLI Tool
+### CLI Tool (Compiler)
 
 A CLI tool is included for quick compilation testing:
 
@@ -695,6 +695,100 @@ python bili/aether/compiler/cli.py
 
 # Compile a specific YAML
 python bili/aether/compiler/cli.py path/to/config.yaml
+```
+
+## Executing a MAS
+
+After compilation, the **MAS Execution Controller** runs the graph end-to-end and collects structured results.
+
+### Basic Execution
+
+```python
+from bili.aether import load_mas_from_yaml, MASExecutor, execute_mas
+
+# Option 1: MASExecutor (full control)
+config = load_mas_from_yaml("simple_chain.yaml")
+executor = MASExecutor(config, log_dir="logs")
+executor.initialize()
+result = executor.run({"messages": [HumanMessage(content="Test content")]})
+
+print(result.get_summary())           # Concise text summary
+print(result.get_formatted_output())  # Asterisk-bordered output
+
+# Option 2: execute_mas() convenience function
+result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
+```
+
+### MASExecutor Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `initialize()` | `None` | Compile config to executable LangGraph |
+| `run(input_data, thread_id, save_results)` | `MASExecutionResult` | Execute graph, collect results |
+| `run_with_checkpoint_persistence(input_data, thread_id)` | `(original, restored)` | Run twice with checkpoint save/restore |
+| `run_cross_model_test(input_data, source_model, target_model, thread_id)` | `(source, target)` | Run with two different model configurations |
+
+### MASExecutionResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mas_id` | `str` | MAS identifier |
+| `execution_id` | `str` | Unique execution run ID |
+| `start_time` / `end_time` | `str` | ISO-8601 UTC timestamps |
+| `total_execution_time_ms` | `float` | Total wall-clock time |
+| `agent_results` | `List[AgentExecutionResult]` | Per-agent outputs and statistics |
+| `total_messages` | `int` | Total inter-agent messages |
+| `messages_by_channel` | `Dict[str, int]` | Message counts by channel |
+| `checkpoint_saved` | `bool` | Whether checkpoint was persisted |
+| `success` | `bool` | Whether execution succeeded |
+| `error` | `str` (optional) | Error message on failure |
+
+**Methods:** `to_dict()`, `save_to_file(path)`, `get_summary()`, `get_formatted_output()`
+
+### Checkpoint Persistence Testing
+
+```python
+executor = MASExecutor(config)
+executor.initialize()
+
+# Run twice — first saves checkpoint, second restores it
+original, restored = executor.run_with_checkpoint_persistence(
+    input_data={"messages": [HumanMessage(content="Test")]},
+    thread_id="test_001"
+)
+print(f"Original: {original.success}, Restored: {restored.success}")
+```
+
+### Cross-Model Transfer Testing
+
+```python
+source, target = executor.run_cross_model_test(
+    input_data={"messages": [HumanMessage(content="Test")]},
+    source_model="gpt-4",
+    target_model="claude-sonnet-3-5-20241022",
+    thread_id="transfer_001"
+)
+```
+
+### CLI Tool (Runtime)
+
+```bash
+# Basic execution
+python bili/aether/runtime/cli.py configs/simple_chain.yaml \
+    --input "Test content to review"
+
+# With input file
+python bili/aether/runtime/cli.py configs/production.yaml \
+    --input-file input.txt --log-dir my_logs
+
+# Test checkpoint persistence
+python bili/aether/runtime/cli.py configs/production.yaml \
+    --input "Test payload" --test-checkpoint --thread-id test_001
+
+# Test cross-model transfer
+python bili/aether/runtime/cli.py configs/production.yaml \
+    --input "Test payload" --test-cross-model \
+    --source-model gpt-4 --target-model claude-sonnet-3-5-20241022
 ```
 
 ## Example Workflows
@@ -737,12 +831,15 @@ bili/aether/
 │   ├── state_generator.py # TypedDict state schema generation
 │   ├── compiled_mas.py   # CompiledMAS container
 │   └── cli.py            # CLI compilation tool
-├── runtime/              # Agent communication protocol
+├── runtime/              # Agent communication and execution
 │   ├── messages.py       # Message, MessageType, MessageHistory
 │   ├── logger.py         # CommunicationLogger (JSONL)
 │   ├── channels.py       # DirectChannel, BroadcastChannel, RequestResponseChannel
 │   ├── channel_manager.py # ChannelManager
-│   └── communication_state.py # LangGraph state integration helpers
+│   ├── communication_state.py # LangGraph state integration helpers
+│   ├── execution_result.py # AgentExecutionResult, MASExecutionResult
+│   ├── executor.py       # MASExecutor, execute_mas()
+│   └── cli.py            # Runtime CLI tool
 ├── integration/          # bili-core inheritance layer
 │   ├── __init__.py       # Package exports
 │   ├── role_registry.py  # RoleDefaults registry (16 roles)
@@ -751,7 +848,9 @@ bili/aether/
 ├── validation/           # Static MAS validation engine
 │   ├── __init__.py       # validate_mas() entry point
 │   └── engine.py         # 13 structural validation checks
-└── tests/                # Test suite (157 tests)
+├── examples/             # Complete workflow examples
+│   └── complete_aether_workflow.py
+└── tests/                # Test suite (187 tests)
 ```
 
 ## Integration with bili-core
@@ -950,5 +1049,5 @@ MIT License - See LICENSE file in the repository root.
 ---
 
 **AETHER Version:** 0.1.0
-**Last Updated:** February 4, 2026
+**Last Updated:** February 5, 2026
 **bili-core Version Required:** ≥3.0.0

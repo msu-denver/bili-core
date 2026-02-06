@@ -1,0 +1,57 @@
+{
+  "mas_id": "test_seq",
+  "execution_id": "test_seq_a178652b",
+  "start_time": "2026-02-05T22:14:13.710446+00:00",
+  "end_time": "2026-02-05T22:14:13.710791+00:00",
+  "total_execution_time_ms": 0.3457069396972656,
+  "agent_results": [
+    {
+      "agent_id": "agent_0",
+      "role": "test_role",
+      "output": {
+        "agent_id": "agent_0",
+        "role": "test_role",
+        "status": "stub",
+        "message": "[STUB] Agent 'agent_0' (test_role) executed."
+      },
+      "execution_time_ms": 0.0,
+      "error": null,
+      "tools_used": [],
+      "messages_sent": 0,
+      "messages_received": 0
+    }
+  ],
+  "final_state": {
+    "messages": [
+      {
+        "type": "HumanMessage",
+        "content": "Test input"
+      },
+      {
+        "type": "AIMessage",
+        "content": "[STUB] Agent 'agent_0' (test_role) executed.",
+        "name": "agent_0"
+      }
+    ],
+    "current_agent": "agent_0",
+    "agent_outputs": {
+      "agent_0": {
+        "agent_id": "agent_0",
+        "role": "test_role",
+        "status": "stub",
+        "message": "[STUB] Agent 'agent_0' (test_role) executed."
+      }
+    },
+    "mas_id": "test_seq"
+  },
+  "total_messages": 0,
+  "messages_by_channel": {},
+  "communication_log_path": null,
+  "checkpoint_saved": false,
+  "checkpoint_path": null,
+  "success": true,
+  "error": null,
+  "metadata": {
+    "thread_id": null
+  }
+}

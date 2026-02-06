@@ -27,6 +27,7 @@ __author__ = "MSU Denver Cybersecurity Research, MonRos3"
 
 from .compiler import CompiledMAS, compile_mas
 from .config import load_mas_from_dict, load_mas_from_yaml
+from .runtime import AgentExecutionResult, MASExecutionResult, MASExecutor, execute_mas
 from .schema import (
     AGENT_PRESETS,
     AgentSpec,
@@ -71,4 +72,9 @@ __all__ = [
     # Compiler
     "CompiledMAS",
     "compile_mas",
+    # Runtime / Execution
+    "AgentExecutionResult",
+    "MASExecutionResult",
+    "MASExecutor",
+    "execute_mas",
 ]
