@@ -350,26 +350,21 @@ def _build_communication_update(
     """Record agent output in communication_log if communication is active.
 
     Returns a dict of state fields to merge (empty if communication is
-    not configured).
+    not configured).  Only **new** entries are returned — the state
+    schema uses ``operator.add`` / ``_merge_dicts`` reducers to combine
+    them with existing values, which supports concurrent agent execution.
     """
     if "communication_log" not in state:
         return {}
 
-    comm_log = list(state.get("communication_log") or [])
-    comm_log.append(
-        {
-            "sender": agent_id,
-            "receiver": "__all__",
-            "channel": "__agent_output__",
-            "content": content,
-        }
-    )
-
-    # Clear pending messages for this agent after consumption
-    pending = dict(state.get("pending_messages") or {})
-    pending[agent_id] = []
+    new_entry = {
+        "sender": agent_id,
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": content,
+    }
 
     return {
-        "communication_log": comm_log,
-        "pending_messages": pending,
+        "communication_log": [new_entry],
+        "pending_messages": {agent_id: []},
     }
