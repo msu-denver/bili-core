@@ -262,7 +262,7 @@ class PruningMongoDBSaver(
         result = self.checkpoint_collection.replace_one(
             {"_id": document["_id"]}, document
         )
-        return result.modified_count > 0
+        return result.matched_count > 0
 
     def _archive_checkpoint(
         self, thread_id: str, document: Dict[str, Any], error: Exception
@@ -1020,7 +1020,7 @@ class AsyncPruningMongoDBSaver(
         sync_collection = sync_db[collection_name]
 
         result = sync_collection.replace_one({"_id": document["_id"]}, document)
-        return result.modified_count > 0
+        return result.matched_count > 0
 
     def _archive_checkpoint(
         self, thread_id: str, document: Dict[str, Any], error: Exception
