@@ -45,6 +45,7 @@ Example:
 
 import atexit
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from langchain_core.runnables import RunnableConfig
@@ -596,23 +597,50 @@ class PruningMongoDBSaver(
 
     # QueryableCheckpointerMixin implementation for MongoDB
 
+    def _deserialize_checkpoint_data(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Deserialize a raw checkpoint document, handling both legacy dict and serialized bytes formats.
+
+        After the v1→v2 migration, checkpoints are stored as serialized bytes (msgpack).
+        Legacy checkpoints may still be stored as plain dicts.
+
+        :param doc: Raw MongoDB checkpoint document
+        :return: Deserialized checkpoint dict
+        """
+        checkpoint_data = doc.get("checkpoint")
+        if checkpoint_data is None:
+            return {}
+        if isinstance(checkpoint_data, bytes):
+            doc_type = doc.get("type", "json")
+            return self.serde.loads_typed((doc_type, checkpoint_data))
+        # Legacy format: already a dict
+        return checkpoint_data
+
     def get_user_threads(
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from MongoDB."""
+        escaped_id = re.escape(user_identifier)
         pipeline = [
             {
                 "$match": {
                     "thread_id": {
-                        "$regex": f"^{user_identifier}(_|$)"  # Matches user_identifier or user_identifier_*
+                        "$regex": f"^{escaped_id}(_|$)"  # Matches user_identifier or user_identifier_*
                     }
                 }
             },
             {
                 "$group": {
                     "_id": "$thread_id",
-                    "last_updated": {"$max": "$checkpoint.ts"},
+                    # Use max ObjectId to derive timestamp — works for both
+                    # v1 (dict) and v2 (binary) checkpoint formats, unlike
+                    # $checkpoint.ts which is inaccessible in binary data.
+                    "last_oid": {"$max": "$_id"},
                     "checkpoint_count": {"$sum": 1},
+                }
+            },
+            {
+                "$addFields": {
+                    "last_updated": {"$toDate": "$last_oid"},
                 }
             },
             {"$sort": {"last_updated": DESCENDING}},
@@ -648,9 +676,8 @@ class PruningMongoDBSaver(
             tags = []
 
             if latest_checkpoint and "checkpoint" in latest_checkpoint:
-                channel_values = latest_checkpoint["checkpoint"].get(
-                    "channel_values", {}
-                )
+                checkpoint_data = self._deserialize_checkpoint_data(latest_checkpoint)
+                channel_values = checkpoint_data.get("channel_values", {})
                 messages = channel_values.get("messages", [])
 
                 # Extract title and tags from state
@@ -712,8 +739,9 @@ class PruningMongoDBSaver(
         if not latest_checkpoint or "checkpoint" not in latest_checkpoint:
             return []
 
-        # Extract messages from checkpoint
-        channel_values = latest_checkpoint["checkpoint"].get("channel_values", {})
+        # Extract messages from checkpoint (handles both legacy dict and serialized bytes)
+        checkpoint_data = self._deserialize_checkpoint_data(latest_checkpoint)
+        channel_values = checkpoint_data.get("channel_values", {})
         raw_messages = channel_values.get("messages", [])
 
         messages = []
@@ -859,7 +887,9 @@ async def get_async_mongo_checkpointer(keep_last_n: int = 5):
     return None
 
 
-class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
+class AsyncPruningMongoDBSaver(
+    VersionedCheckpointerMixin, QueryableCheckpointerMixin, AsyncMongoDBSaver
+):
     """
     Async version of PruningMongoDBSaver for streaming operations.
 
@@ -1114,3 +1144,167 @@ class AsyncPruningMongoDBSaver(VersionedCheckpointerMixin, AsyncMongoDBSaver):
                 await self.writes_collection.delete_many(del_query)
 
         return result_config
+
+    # Async query methods for conversation data retrieval
+
+    def _deserialize_checkpoint_data(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Deserialize a raw checkpoint document, handling both legacy dict and serialized bytes formats.
+
+        :param doc: Raw MongoDB checkpoint document
+        :return: Deserialized checkpoint dict
+        """
+        checkpoint_data = doc.get("checkpoint")
+        if checkpoint_data is None:
+            return {}
+        if isinstance(checkpoint_data, bytes):
+            doc_type = doc.get("type", "json")
+            return self.serde.loads_typed((doc_type, checkpoint_data))
+        return checkpoint_data
+
+    async def aget_user_threads(
+        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get all conversation threads for a user from MongoDB (async)."""
+        escaped_id = re.escape(user_identifier)
+        pipeline = [
+            {"$match": {"thread_id": {"$regex": f"^{escaped_id}(_|$)"}}},
+            {
+                "$group": {
+                    "_id": "$thread_id",
+                    "last_oid": {"$max": "$_id"},
+                    "checkpoint_count": {"$sum": 1},
+                }
+            },
+            {
+                "$addFields": {
+                    "last_updated": {"$toDate": "$last_oid"},
+                }
+            },
+            {"$sort": {"last_updated": -1}},
+        ]
+
+        if offset > 0:
+            pipeline.append({"$skip": offset})
+        if limit is not None:
+            pipeline.append({"$limit": limit})
+
+        results = await self.checkpoint_collection.aggregate(pipeline).to_list(
+            length=None
+        )
+
+        threads = []
+        for result in results:
+            thread_id = result["_id"]
+
+            if "_" in thread_id:
+                conversation_id = thread_id.split("_", 1)[1]
+            else:
+                conversation_id = "default"
+
+            latest_checkpoint = await self.checkpoint_collection.find_one(
+                {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
+            )
+
+            first_message = None
+            last_message = None
+            message_count = 0
+            title = None
+            tags = []
+
+            if latest_checkpoint and "checkpoint" in latest_checkpoint:
+                checkpoint_data = self._deserialize_checkpoint_data(latest_checkpoint)
+                channel_values = checkpoint_data.get("channel_values", {})
+                messages = channel_values.get("messages", [])
+
+                title = channel_values.get("title")
+                tags = channel_values.get("tags", [])
+
+                if messages:
+                    message_count = len(messages)
+                    for msg in messages:
+                        if (
+                            hasattr(msg, "content")
+                            and msg.content
+                            and msg.__class__.__name__ == "HumanMessage"
+                        ):
+                            content = msg.content
+                            if isinstance(content, list):
+                                text_parts = [
+                                    p.get("text", "")
+                                    for p in content
+                                    if isinstance(p, dict) and p.get("type") == "text"
+                                ]
+                                content = " ".join(text_parts)
+
+                            if first_message is None:
+                                first_message = content
+                            last_message = content
+
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "conversation_id": conversation_id,
+                    "last_updated": result["last_updated"],
+                    "checkpoint_count": result["checkpoint_count"],
+                    "message_count": message_count,
+                    "first_message": first_message,
+                    "last_message": last_message,
+                    "title": title,
+                    "tags": tags,
+                }
+            )
+
+        return threads
+
+    async def aget_thread_messages(
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        message_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get all messages from a conversation thread (async)."""
+        latest_checkpoint = await self.checkpoint_collection.find_one(
+            {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
+        )
+
+        if not latest_checkpoint or "checkpoint" not in latest_checkpoint:
+            return []
+
+        checkpoint_data = self._deserialize_checkpoint_data(latest_checkpoint)
+        channel_values = checkpoint_data.get("channel_values", {})
+        raw_messages = channel_values.get("messages", [])
+
+        messages = []
+        for msg in raw_messages:
+            msg_type = msg.__class__.__name__
+
+            if message_types is not None and msg_type not in message_types:
+                continue
+
+            content = msg.content if hasattr(msg, "content") else str(msg)
+            if isinstance(content, list):
+                text_parts = [
+                    p.get("text", "")
+                    for p in content
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ]
+                content = " ".join(text_parts)
+
+            if msg_type == "AIMessage":
+                content = self._strip_thinking_blocks(content)
+
+            messages.append(
+                {
+                    "role": "user" if msg_type == "HumanMessage" else "assistant",
+                    "content": content,
+                    "timestamp": None,
+                }
+            )
+
+        if offset > 0:
+            messages = messages[offset:]
+        if limit is not None:
+            messages = messages[:limit]
+
+        return messages
