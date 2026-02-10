@@ -2,6 +2,77 @@
 
 AETHER is a domain-agnostic multi-agent system (MAS) framework built as an extension to bili-core. It enables declarative configuration of multi-agent systems for any domain - research, content moderation, code review, customer support, and more.
 
+## Table of Contents
+
+- [How to Use](#how-to-use)
+- [Design Philosophy](#design-philosophy)
+- [Quick Start](#quick-start)
+  - [Minimal Agent (Required Fields Only)](#minimal-agent-required-fields-only)
+  - [Fully-Configured Agent (All Options)](#fully-configured-agent-all-options)
+  - [Agent Field Reference](#agent-field-reference)
+  - [Objective vs. System Prompt](#objective-vs-system-prompt)
+  - [Use Presets for Common Patterns](#use-presets-for-common-patterns)
+  - [Register Custom Presets](#register-custom-presets)
+- [Configuring a Multi-Agent System](#configuring-a-multi-agent-system)
+  - [Minimal MAS (Sequential Chain)](#minimal-mas-sequential-chain)
+  - [Fully-Configured MAS (All Options)](#fully-configured-mas-all-options)
+  - [MAS Field Reference](#mas-field-reference)
+  - [How MAS Fields Map to Communication Dimensions](#how-mas-fields-map-to-communication-dimensions)
+- [Validating a Configuration](#validating-a-configuration)
+- [Compiling to LangGraph](#compiling-to-langgraph)
+  - [What the Compiler Produces](#what-the-compiler-produces)
+  - [How Workflow Types Map to Graph Topologies](#how-workflow-types-map-to-graph-topologies)
+  - [Generated State Schema](#generated-state-schema)
+  - [Agent Nodes](#agent-nodes)
+  - [Agent Communication Protocol (Runtime)](#agent-communication-protocol-runtime)
+  - [bili-core Inheritance](#bili-core-inheritance)
+  - [CLI Tool (Compiler)](#cli-tool-compiler)
+- [Executing a MAS](#executing-a-mas)
+  - [Basic Execution](#basic-execution)
+  - [MASExecutor Methods](#masexecutor-methods)
+  - [MASExecutionResult](#masexecutionresult)
+  - [Checkpoint Persistence Testing](#checkpoint-persistence-testing)
+  - [Cross-Model Transfer Testing](#cross-model-transfer-testing)
+  - [CLI Tool (Runtime)](#cli-tool-runtime)
+- [Example Workflows](#example-workflows)
+- [Architecture](#architecture)
+- [Integration with bili-core](#integration-with-bili-core)
+- [Workflow Types](#workflow-types)
+- [MAS Communication Framework](#mas-communication-framework)
+  - [Communication Channels](#communication-channels)
+  - [Collaboration Types](#collaboration-types)
+  - [Communication Strategies](#communication-strategies)
+  - [Communication Structures](#communication-structures)
+  - [Design Rationale](#design-rationale)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## How to Use
+
+AETHER follows a five-step workflow: **Define → Configure → Validate → Compile → Execute**.
+
+**1. Define your agents** — Create `AgentSpec` objects with a role, objective, and optional LLM/tool configuration. Start with the [Minimal Agent](#minimal-agent-required-fields-only) example or use a [preset](#use-presets-for-common-patterns) for common patterns.
+
+**2. Configure a MAS** — Assemble agents into a `MASConfig` with a [workflow type](#workflow-types) (`sequential`, `hierarchical`, `supervisor`, `consensus`, `parallel`, or `custom`) and [communication channels](#communication-channels). See [Configuring a Multi-Agent System](#configuring-a-multi-agent-system) for YAML and Python examples.
+
+**3. Validate** — Run `validate_mas(config)` to catch structural issues (duplicate channels, circular dependencies, orphaned agents) before execution. See [Validating a Configuration](#validating-a-configuration).
+
+**4. Compile** — Call `compile_mas(config)` to transform the declarative config into an executable LangGraph `StateGraph`. See [Compiling to LangGraph](#compiling-to-langgraph).
+
+**5. Execute** — Use `MASExecutor` or the `execute_mas()` convenience function to run the graph and collect structured results. See [Executing a MAS](#executing-a-mas).
+
+```python
+from bili.aether import load_mas_from_yaml, compile_mas, execute_mas
+
+config = load_mas_from_yaml("path/to/config.yaml")   # Steps 1-2: Load agents + MAS
+compiled = compile_mas(config)                         # Steps 3-4: Validate + compile
+result = execute_mas(config, {"messages": [...]})      # Step 5: Execute
+print(result.get_summary())
+```
+
+For CLI usage, see the [Compiler CLI](#cli-tool-compiler) and [Runtime CLI](#cli-tool-runtime) sections.
+
 ## Design Philosophy
 
 AETHER uses a **domain-agnostic** design where agent roles and capabilities are **free-form strings**, not restrictive enums. This means:
