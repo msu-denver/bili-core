@@ -5,6 +5,7 @@ AETHER is a domain-agnostic multi-agent system (MAS) framework built as an exten
 ## Table of Contents
 
 - [How to Use](#how-to-use)
+  - [Using Presets](#using-presets)
 - [Design Philosophy](#design-philosophy)
 - [Quick Start](#quick-start)
   - [Minimal Agent (Required Fields Only)](#minimal-agent-required-fields-only)
@@ -70,6 +71,41 @@ compiled = compile_mas(config)                         # Steps 3-4: Validate + c
 result = execute_mas(config, {"messages": [...]})      # Step 5: Execute
 print(result.get_summary())
 ```
+
+### Using Presets
+
+Presets let you skip manual agent configuration by providing sensible defaults for common roles. You can list available presets, create agents from them with optional overrides, and register your own:
+
+```python
+from bili.aether.schema import create_agent_from_preset, list_presets, register_preset
+
+# See what's available
+print(list_presets())
+# ['content_reviewer', 'researcher', 'code_reviewer', 'supervisor', ...]
+
+# Create an agent from a preset (override any defaults as needed)
+agent = create_agent_from_preset(
+    preset_name="researcher",
+    agent_id="ai_researcher",
+    objective="Research quantum computing advances",
+    temperature=0.6,
+)
+
+# Register a custom preset for reuse across projects
+register_preset("my_analyst", {
+    "role": "analyst",
+    "capabilities": ["data_analysis", "reporting"],
+    "temperature": 0.3,
+})
+
+agent = create_agent_from_preset(
+    preset_name="my_analyst",
+    agent_id="analyst_1",
+    objective="Analyze quarterly trends",
+)
+```
+
+For the full preset API, see [Use Presets for Common Patterns](#use-presets-for-common-patterns) and [Register Custom Presets](#register-custom-presets).
 
 For CLI usage, see the [Compiler CLI](#cli-tool-compiler) and [Runtime CLI](#cli-tool-runtime) sections.
 
