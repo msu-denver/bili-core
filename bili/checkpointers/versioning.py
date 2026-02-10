@@ -337,9 +337,10 @@ class VersionedCheckpointerMixin(ABC):
         """
         Check if a document needs migration.
 
-        A document needs migration if:
-        1. Its version is lower than the current format version, OR
-        2. Version is 2+ but blob type is still "msgpack" (inconsistent state)
+        A document needs migration if its version is lower than the
+        current format version. Note: the blob 'type' field (e.g. 'msgpack')
+        is controlled by LangGraph's serializer and is NOT an indicator
+        of migration state.
 
         Args:
             document: Raw checkpoint document
@@ -357,16 +358,6 @@ class VersionedCheckpointerMixin(ABC):
         # Check version
         doc_version = self._get_document_version(document)
         if doc_version < self.format_version:
-            return True
-
-        # Check for inconsistent state: v2+ metadata but msgpack blob
-        # This can happen if migration was interrupted or partially applied
-        if doc_version >= 2 and document.get("type") == "msgpack":
-            LOGGER.warning(
-                "Detected inconsistent checkpoint state: version %d but type='msgpack'. "
-                "Will trigger migration to repair.",
-                doc_version,
-            )
             return True
 
         return False

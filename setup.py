@@ -85,7 +85,7 @@ def read_http_git_requirements():
 
 setup(
     name="bili-core",
-    version="3.0.1",
+    version="3.0.2",
     packages=find_packages(),  # Automatically detect all packages
     install_requires=read_requirements(),  # Load only standard dependencies
     cmdclass={
