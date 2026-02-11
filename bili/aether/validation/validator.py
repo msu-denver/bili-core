@@ -161,7 +161,11 @@ class MASValidator:
                 )
 
     def _check_circular_dependencies(self) -> None:
-        """E2: Error on cycles in SEQUENTIAL workflows (DFS)."""
+        """E2: Error on cycles in SEQUENTIAL workflows (DFS).
+
+        Checks all nodes in the graph, including disconnected components,
+        to catch cycles that may not be reachable from the entry point.
+        """
         if not self._config.workflow_edges:
             return
 
@@ -182,12 +186,22 @@ class MASValidator:
             rec_stack.discard(node)
             return False
 
+        # Check from entry point first
         entry = self._config.entry_point or self._config.agents[0].agent_id
         if _has_cycle(entry):
             self._result.add_error(
                 f"Circular dependency detected in SEQUENTIAL workflow "
                 f"starting from '{entry}'"
             )
+
+        # Check any remaining unvisited nodes (disconnected cycles)
+        for agent in self._config.agents:
+            if agent.agent_id not in visited:
+                if _has_cycle(agent.agent_id):
+                    self._result.add_error(
+                        f"Circular dependency detected in disconnected "
+                        f"component starting from '{agent.agent_id}'"
+                    )
 
     def _check_unreachable_agents(self) -> None:
         """W5: Warn about agents unreachable from entry point (BFS)."""
@@ -213,15 +227,36 @@ class MASValidator:
                 )
 
     def _check_path_to_end(self) -> None:
-        """W6: Warn if CUSTOM workflow has no path to END."""
+        """W6: Warn if CUSTOM workflow has no path to END from entry.
+
+        Uses BFS to check if END is reachable from the entry point,
+        not just whether any edge targets END (which could be disconnected).
+        """
         if not self._config.workflow_edges:
             return
 
-        has_end = any(edge.to_agent == "END" for edge in self._config.workflow_edges)
-        if not has_end:
+        entry = self._config.entry_point or self._config.agents[0].agent_id
+        visited: Set[str] = {entry}
+        queue = [entry]
+        found_end = False
+
+        # BFS to find if END is reachable from entry
+        while queue:
+            current = queue.pop(0)
+            for neighbor in self._edge_graph.get(current, []):
+                if neighbor == "END":
+                    found_end = True
+                    break
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+            if found_end:
+                break
+
+        if not found_end:
             self._result.add_warning(
-                "CUSTOM workflow has no edges leading to 'END' "
-                "- workflow may not terminate"
+                f"CUSTOM workflow has no path to 'END' from entry point "
+                f"'{entry}' - workflow may not terminate"
             )
 
     # ==================================================================
