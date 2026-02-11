@@ -317,25 +317,16 @@ def _generate_stub_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
 
 
 def wrap_agent_node(node_func: Callable, agent_id: str) -> Callable:
-    """Wrap an agent node with performance logging.
+    """Return unwrapped agent node (no-op wrapper).
 
-    Mirrors the ``wrap_node`` pattern from
-    ``bili/loaders/langchain_loader.py``.
+    Individual agent nodes already log their own execution time with
+    detailed context (tool-agent vs LLM vs stub), so wrapping would
+    create duplicate timing logs. This function is kept for backward
+    compatibility but returns the node unmodified.
     """
-
-    def wrapper(state: dict) -> dict:
-        start_time = time.time()
-        result = node_func(state)
-        execution_ms = (time.time() - start_time) * 1000
-        LOGGER.info("Agent '%s' executed in %.2f ms", agent_id, execution_ms)
-        return result
-
-    wrapper.__name__ = node_func.__name__
-    wrapper.__qualname__ = node_func.__qualname__
-    if hasattr(node_func, "agent_spec"):
-        wrapper.agent_spec = node_func.agent_spec  # type: ignore[attr-defined]
-
-    return wrapper
+    # pylint: disable=unused-argument
+    # Return unwrapped - agent nodes already have detailed timing
+    return node_func
 
 
 # =========================================================================

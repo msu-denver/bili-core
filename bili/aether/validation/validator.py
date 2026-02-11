@@ -29,7 +29,6 @@ class MASValidator:
     def __init__(self) -> None:
         self._config: MASConfig = None  # type: ignore[assignment]
         self._result: ValidationResult = None  # type: ignore[assignment]
-        self._agent_ids: Set[str] = set()
         self._channel_agents: Set[str] = set()
         self._edge_graph: Dict[str, List[str]] = {}
 
@@ -55,8 +54,6 @@ class MASValidator:
     # ------------------------------------------------------------------
 
     def _build_caches(self) -> None:
-        self._agent_ids = {a.agent_id for a in self._config.agents}
-
         self._channel_agents = set()
         for channel in self._config.channels:
             self._channel_agents.add(channel.source)
