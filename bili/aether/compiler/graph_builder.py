@@ -6,7 +6,8 @@ Supports all seven ``WorkflowType`` values defined in the AETHER schema.
 import ast
 import logging
 import operator
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from typing import Any, Callable, Dict, List, Set
 
 from bili.aether.schema import MASConfig, WorkflowType
@@ -436,11 +437,78 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         self._graph.add_node("__round_start__", round_start)
 
         def consensus_checker(state: dict) -> dict:
+            """Check if agents have reached consensus based on their votes.
+
+            Extracts votes from agent outputs and checks if the agreement ratio
+            meets the configured consensus_threshold. Falls back to round limit
+            if threshold not met.
+            """
             current_round = (state.get("current_round") or 0) + 1
-            consensus_reached = current_round >= max_rounds
+            agent_outputs = state.get("agent_outputs", {})
+            threshold = self._config.consensus_threshold or 0.66
+
+            # Extract votes from agent outputs
+            votes = {}
+            for agent_id, output in agent_outputs.items():
+                vote = None
+
+                # Try to get vote from consensus_vote_field if configured
+                agent_spec = next(
+                    (a for a in self._config.agents if a.agent_id == agent_id), None
+                )
+                if agent_spec and agent_spec.consensus_vote_field:
+                    # Try to extract from parsed JSON output
+                    if "parsed" in output and isinstance(output["parsed"], dict):
+                        vote = output["parsed"].get(agent_spec.consensus_vote_field)
+
+                # Fallback: look for common vote patterns in message
+                if not vote and "message" in output:
+                    message = output["message"].lower()
+                    if "vote:" in message or "decision:" in message:
+                        # Extract vote after "vote:" or "decision:"
+                        match = re.search(
+                            r"(?:vote|decision):\s*(\w+)", message, re.IGNORECASE
+                        )
+                        if match:
+                            vote = match.group(1)
+
+                if vote:
+                    votes[agent_id] = str(vote).lower()
+
+            # Check if consensus reached
+            consensus_reached = False
+            if len(votes) >= 2:  # Need at least 2 agents to have consensus
+                # Count votes for each option
+                vote_counts = Counter(votes.values())
+                most_common_vote, count = vote_counts.most_common(1)[0]
+
+                # Check if agreement ratio meets threshold
+                agreement_ratio = count / len(votes)
+                consensus_reached = agreement_ratio >= threshold
+
+                LOGGER.info(
+                    "Consensus check (round %d): %d/%d agents agree on '%s' (%.1f%%, threshold %.1f%%)",
+                    current_round,
+                    count,
+                    len(votes),
+                    most_common_vote,
+                    agreement_ratio * 100,
+                    threshold * 100,
+                )
+
+            # Fall back to round limit if no consensus yet
+            if not consensus_reached and current_round >= max_rounds:
+                consensus_reached = True
+                LOGGER.info(
+                    "Consensus reached by round limit (round %d/%d)",
+                    current_round,
+                    max_rounds,
+                )
+
             return {
                 "current_round": current_round,
                 "consensus_reached": consensus_reached,
+                "votes": votes,
             }
 
         self._graph.add_node("__consensus_checker__", consensus_checker)
