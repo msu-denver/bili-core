@@ -1,0 +1,105 @@
+# =============================================================================
+# MAS #4: Complete Content Moderation (Consensus / Network)
+# =============================================================================
+#
+# Communication: cooperative, model-based, decentralized
+#
+# Use case: Either a user or the community manager flags a post, which
+# is then input to all agents.  The agents deliberate with each other
+# until they reach a consensus on whether the content should be allowed
+# or removed.
+#
+# Expected flow:
+#   A flagged post goes to all agents.  The agents then deliberate
+#   until they reach a consensus, which is the resulting outcome.
+#
+#   Community Manager ↔ Content Reviewer
+#          ↕                    ↕
+#        Policy Expert ←------→ (all connected)
+# =============================================================================
+
+mas_id: consensus_network
+name: Complete Content Moderation
+description: >
+  A complete/network architecture where each agent holds a dialogue
+  with the others until a consensus is reached.  Communication channels
+  are cooperative, model-based, and decentralized.  Each agent brings
+  a different perspective to the moderation decision.
+version: "1.0.0"
+
+workflow_type: consensus
+consensus_threshold: 0.66
+max_consensus_rounds: 5
+consensus_detection: majority
+
+agents:
+  - agent_id: community_manager
+    role: community_manager
+    objective: >
+      Review content on the platform and assess whether it should be
+      flagged for removal.  Determine what to flag based on key words
+      and perceived intent of the post.  Deliberate with other agents
+      to reach a consensus.
+    temperature: 0.3
+    output_format: json
+    consensus_vote_field: decision
+    capabilities:
+      - tool_calling
+      - inter_agent_communication
+
+  - agent_id: content_reviewer
+    role: content_reviewer
+    objective: >
+      Review content to ensure it follows the criteria put forth in
+      Meta's community standards.  If it doesn't, recommend removal.
+      Deliberate with other agents to reach a consensus.
+    temperature: 0.3
+    output_format: json
+    consensus_vote_field: decision
+    capabilities:
+      - rag_retrieval
+      - policy_lookup
+      - inter_agent_communication
+
+  - agent_id: policy_expert
+    role: policy_expert
+    objective: >
+      Review content to ensure it doesn't violate the policies outlined
+      in OpenAI's Usage Policies.  Deliberate with other agents to
+      reach a consensus.
+    temperature: 0.3
+    output_format: json
+    consensus_vote_field: decision
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+
+channels:
+  - channel_id: manager_reviewer
+    protocol: consensus
+    source: community_manager
+    target: content_reviewer
+    description: Deliberation channel between community manager and content reviewer
+    bidirectional: true
+
+  - channel_id: reviewer_policy
+    protocol: consensus
+    source: content_reviewer
+    target: policy_expert
+    description: Deliberation channel between content reviewer and policy expert
+    bidirectional: true
+
+  - channel_id: manager_policy
+    protocol: consensus
+    source: community_manager
+    target: policy_expert
+    description: Deliberation channel between community manager and policy expert
+    bidirectional: true
+
+tags:
+  - content-moderation
+  - consensus
+  - cooperative
+  - model-based
+  - decentralized
+  - peer-deliberation

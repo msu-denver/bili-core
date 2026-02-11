@@ -209,8 +209,13 @@ class MASConfig(BaseModel):
     )
 
     checkpoint_config: Dict[str, Any] = Field(
-        default_factory=lambda: {"type": "sqlite", "path": "checkpoints.db"},
-        description="Checkpoint configuration (type, path, etc.)",
+        default_factory=lambda: {"type": "memory"},
+        description=(
+            "Checkpoint backend configuration. Supported types: "
+            "'memory' (default), 'postgres'/'pg', 'mongo'/'mongodb', "
+            "'auto' (env-based detection). Additional keys like "
+            "'keep_last_n' are forwarded to the checkpointer constructor."
+        ),
     )
 
     # =========================================================================
@@ -336,37 +341,3 @@ class MASConfig(BaseModel):
         """String representation."""
         # pylint: disable=no-member
         return f"MASConfig({self.mas_id}, {len(self.agents)} agents, {self.workflow_type.value})"
-
-
-# =============================================================================
-# EXAMPLE USAGE
-# =============================================================================
-
-if __name__ == "__main__":
-    # Create example agents
-    agent1 = AgentSpec(
-        agent_id="reviewer", role="content_reviewer", objective="Review content"
-    )
-
-    agent2 = AgentSpec(agent_id="judge", role="judge", objective="Make decision")
-
-    # Create channel
-    channel = Channel(
-        channel_id="reviewer_to_judge",
-        protocol="direct",
-        source="reviewer",
-        target="judge",
-    )
-
-    # Create MAS config
-    config = MASConfig(
-        mas_id="simple_test",
-        name="Simple Test MAS",
-        description="Test configuration",
-        agents=[agent1, agent2],
-        channels=[channel],
-        workflow_type="sequential",
-    )
-
-    print(config)
-    print(f"Entry agent: {config.get_entry_agent()}")

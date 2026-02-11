@@ -1,0 +1,121 @@
+# =============================================================================
+# Code Review Workflow (Domain-Agnostic Example)
+# =============================================================================
+#
+# This example demonstrates AETHER's domain-agnostic design with a
+# software engineering use case - code review.
+#
+# Pattern: Supervisor routes code to specialized reviewers
+#
+# Use case: A lead engineer receives code for review and routes it to
+# specialist reviewers (security, performance, style) who provide feedback,
+# which is then synthesized into a final review.
+# =============================================================================
+
+mas_id: code_review
+name: Code Review Pipeline
+description: >
+  A supervisor-based code review workflow where a lead engineer routes
+  code to specialist reviewers (security, performance, style) and
+  synthesizes their feedback into a final review.
+version: "1.0.0"
+
+workflow_type: supervisor
+entry_point: lead_engineer
+
+agents:
+  - agent_id: lead_engineer
+    role: lead_engineer
+    objective: >
+      Review incoming code submissions and route them to appropriate
+      specialist reviewers based on the type of changes. Synthesize
+      reviewer feedback into a final code review decision.
+    temperature: 0.2
+    is_supervisor: true
+    capabilities:
+      - code_analysis
+      - task_routing
+      - feedback_synthesis
+    output_format: json
+
+  - agent_id: security_reviewer
+    role: security_engineer
+    objective: >
+      Review code for security vulnerabilities including injection attacks,
+      authentication issues, data exposure, and OWASP Top 10 concerns.
+      Provide detailed security recommendations.
+    temperature: 0.1
+    capabilities:
+      - vulnerability_detection
+      - security_analysis
+      - threat_modeling
+    output_format: json
+
+  - agent_id: performance_reviewer
+    role: performance_engineer
+    objective: >
+      Analyze code for performance issues including algorithmic complexity,
+      memory usage, database query efficiency, and potential bottlenecks.
+      Suggest optimizations where appropriate.
+    temperature: 0.2
+    capabilities:
+      - performance_analysis
+      - complexity_analysis
+      - optimization_suggestions
+    output_format: json
+
+  - agent_id: style_reviewer
+    role: code_quality_engineer
+    objective: >
+      Review code for style consistency, readability, maintainability,
+      and adherence to coding standards. Check documentation and naming
+      conventions.
+    temperature: 0.3
+    capabilities:
+      - style_analysis
+      - readability_assessment
+      - documentation_review
+    output_format: json
+
+channels:
+  - channel_id: lead_to_security
+    protocol: direct
+    source: lead_engineer
+    target: security_reviewer
+    description: Code routed to security reviewer
+
+  - channel_id: lead_to_performance
+    protocol: direct
+    source: lead_engineer
+    target: performance_reviewer
+    description: Code routed to performance reviewer
+
+  - channel_id: lead_to_style
+    protocol: direct
+    source: lead_engineer
+    target: style_reviewer
+    description: Code routed to style reviewer
+
+  - channel_id: security_to_lead
+    protocol: direct
+    source: security_reviewer
+    target: lead_engineer
+    description: Security review feedback returned
+
+  - channel_id: performance_to_lead
+    protocol: direct
+    source: performance_reviewer
+    target: lead_engineer
+    description: Performance review feedback returned
+
+  - channel_id: style_to_lead
+    protocol: direct
+    source: style_reviewer
+    target: lead_engineer
+    description: Style review feedback returned
+
+tags:
+  - code-review
+  - software-engineering
+  - supervisor
+  - domain-agnostic
