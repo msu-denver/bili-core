@@ -1,0 +1,212 @@
+# =============================================================================
+# MAS #2: Hierarchical Content Moderation (Tree / Voting)
+# =============================================================================
+#
+# Communication: competitive, rule-based, centralized
+#
+# Use case: User-flagged content or content flagged by the Community
+# Manager enters the system at Tier 3.  For/against advocate pairs
+# debate the content from two perspectives (Meta community standards
+# and OpenAI usage policies).  Tier 2 agents aggregate those arguments
+# and pass verdicts up to the Tier 1 vote agent for a final decision.
+#
+# Expected flow:
+#
+#   Tier 1:                        Vote Agent
+#                                  ↑       ↑
+#   Tier 2:              Content Agent   Policy Agent
+#                         ↑       ↑       ↑       ↑
+#   Tier 3:  Allow Content ↔ Block Content   Allow Policy ↔ Block Policy
+# =============================================================================
+
+mas_id: hierarchical_voting
+name: Hierarchical Content Moderation
+description: >
+  A three-tier hierarchical tree with adversarial debate at the lowest
+  tier.  Tier 3 advocate pairs argue for and against the content from
+  two perspectives (Meta community standards and OpenAI usage policies).
+  Tier 2 agents aggregate those arguments and pass verdicts to the
+  Tier 1 vote agent for a final decision.  Communication channels are
+  competitive, rule-based, and centralized.
+version: "1.0.0"
+
+workflow_type: hierarchical
+hierarchical_voting: true
+min_debate_rounds: 2
+
+# =========================================================================
+# TIER 3 — Advocate pairs (for/against debate)
+# =========================================================================
+
+agents:
+  - agent_id: allow_content_agent
+    role: allow_advocate
+    objective: >
+      Argue that the flagged content IS valid and should remain on the
+      platform, given the criteria put forth in Meta's community
+      standards.
+    temperature: 0.7
+    tier: 3
+    voting_weight: 1.0
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: block_content_agent
+    role: block_advocate
+    objective: >
+      Argue that the flagged content IS NOT valid and should be removed
+      from the platform, given the criteria put forth in Meta's
+      community standards.
+    temperature: 0.7
+    tier: 3
+    voting_weight: 1.0
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: allow_policy_agent
+    role: allow_advocate
+    objective: >
+      Argue that the flagged content IS valid and should remain on the
+      platform, given the policies outlined in OpenAI's Usage Policies.
+    temperature: 0.7
+    tier: 3
+    voting_weight: 1.0
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: block_policy_agent
+    role: block_advocate
+    objective: >
+      Argue that the flagged content IS NOT valid and should be removed
+      from the platform, given the policies outlined in OpenAI's Usage
+      Policies.
+    temperature: 0.7
+    tier: 3
+    voting_weight: 1.0
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+    output_format: json
+
+  # =========================================================================
+  # TIER 2 — Aggregator agents
+  # =========================================================================
+
+  - agent_id: content_agent
+    role: content_aggregator
+    objective: >
+      Receive the arguments from the allow and block content agents
+      and determine what verdict to pass to the vote agent based on
+      the strength of each argument regarding Meta's community standards.
+    temperature: 0.3
+    tier: 2
+    voting_weight: 1.0
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: policy_agent
+    role: policy_aggregator
+    objective: >
+      Receive the arguments from the allow and block policy agents
+      and determine what verdict to pass to the vote agent based on
+      the strength of each argument regarding OpenAI's Usage Policies.
+    temperature: 0.3
+    tier: 2
+    voting_weight: 1.0
+    capabilities:
+      - policy_lookup
+      - inter_agent_communication
+    output_format: json
+
+  # =========================================================================
+  # TIER 1 — Final decision
+  # =========================================================================
+
+  - agent_id: vote_agent
+    role: judge
+    objective: >
+      Receive the verdicts from the content agent and policy agent
+      and make the final moderation decision on whether the flagged
+      content should be removed or allowed to stay on the platform.
+    temperature: 0.0
+    tier: 1
+    voting_weight: 2.0
+    capabilities:
+      - policy_lookup
+      - memory_access
+    output_format: json
+
+# =========================================================================
+# CHANNELS
+# =========================================================================
+
+channels:
+  # Tier 3 adversarial debate channels
+  - channel_id: content_debate
+    protocol: competitive
+    source: allow_content_agent
+    target: block_content_agent
+    description: Adversarial debate between content advocates (Meta standards)
+    bidirectional: true
+
+  - channel_id: policy_debate
+    protocol: competitive
+    source: allow_policy_agent
+    target: block_policy_agent
+    description: Adversarial debate between policy advocates (OpenAI policies)
+    bidirectional: true
+
+  # Tier 3 → Tier 2 channels
+  - channel_id: allow_content_to_content_agent
+    protocol: direct
+    source: allow_content_agent
+    target: content_agent
+    description: Allow content advocate submits argument to content agent
+
+  - channel_id: block_content_to_content_agent
+    protocol: direct
+    source: block_content_agent
+    target: content_agent
+    description: Block content advocate submits argument to content agent
+
+  - channel_id: allow_policy_to_policy_agent
+    protocol: direct
+    source: allow_policy_agent
+    target: policy_agent
+    description: Allow policy advocate submits argument to policy agent
+
+  - channel_id: block_policy_to_policy_agent
+    protocol: direct
+    source: block_policy_agent
+    target: policy_agent
+    description: Block policy advocate submits argument to policy agent
+
+  # Tier 2 → Tier 1 channels
+  - channel_id: content_agent_to_vote
+    protocol: direct
+    source: content_agent
+    target: vote_agent
+    description: Content agent passes verdict to vote agent
+
+  - channel_id: policy_agent_to_vote
+    protocol: direct
+    source: policy_agent
+    target: vote_agent
+    description: Policy agent passes verdict to vote agent
+
+tags:
+  - content-moderation
+  - hierarchical
+  - competitive
+  - rule-based
+  - centralized
+  - adversarial-debate
+  - voting

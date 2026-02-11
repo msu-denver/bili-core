@@ -1,0 +1,100 @@
+# =============================================================================
+# MAS #1: Chain Content Moderation (Sequential Workflow)
+# =============================================================================
+#
+# Pattern: community_manager → content_reviewer → policy_expert → judge
+#
+# Communication: cooperative, rule-based, decentralized
+#
+# Use case: A user or the community manager flags a post/content for
+# review.  The content flows sequentially through each agent, with each
+# stage adding a layer of analysis before a final decision is made.
+#
+# Expected flow:
+#   [input] → Community Manager → Content Reviewer → Policy Expert
+#           → Judge → [outcome]
+# =============================================================================
+
+mas_id: simple_chain
+name: Chain Content Moderation
+description: >
+  A four-stage sequential pipeline for content moderation demonstrating
+  cooperative, rule-based, decentralized communication channels.  A user
+  or the community manager flags content, which then flows through a
+  content reviewer, policy expert, and judge for a final decision.
+version: "1.0.0"
+
+workflow_type: sequential
+
+agents:
+  - agent_id: community_manager
+    role: community_manager
+    objective: >
+      Review content on the platform and flag it for review by the MAS.
+      Determine what to flag based on key words and perceived intent
+      of the post.
+    temperature: 0.2
+    capabilities:
+      - tool_calling
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: content_reviewer
+    role: content_reviewer
+    objective: >
+      Review content to ensure it follows the criteria put forth in
+      Meta's community standards.  If it doesn't, recommend that the
+      post be flagged as inappropriate and removed from the platform.
+    temperature: 0.2
+    capabilities:
+      - rag_retrieval
+      - policy_lookup
+      - tool_calling
+    output_format: json
+
+  - agent_id: policy_expert
+    role: policy_expert
+    objective: >
+      Review content to ensure it doesn't violate the policies outlined
+      in OpenAI's Usage Policies.  Provide a detailed policy analysis
+      and recommendation.
+    temperature: 0.1
+    capabilities:
+      - policy_lookup
+      - rag_retrieval
+    output_format: json
+
+  - agent_id: judge
+    role: judge
+    objective: >
+      Evaluate the arguments and inputs of the other agents and
+      determine whether to remove the post or allow it to stay
+      on the platform.
+    temperature: 0.0
+    output_format: json
+
+channels:
+  - channel_id: manager_to_reviewer
+    protocol: direct
+    source: community_manager
+    target: content_reviewer
+    description: Flagged content sent from community manager to content reviewer
+
+  - channel_id: reviewer_to_policy
+    protocol: direct
+    source: content_reviewer
+    target: policy_expert
+    description: Content review findings sent to policy expert
+
+  - channel_id: policy_to_judge
+    protocol: direct
+    source: policy_expert
+    target: judge
+    description: Policy analysis sent to judge for final decision
+
+tags:
+  - content-moderation
+  - sequential
+  - cooperative
+  - rule-based
+  - decentralized

@@ -1,0 +1,158 @@
+# =============================================================================
+# MAS #5: Custom Content Moderation (Custom Workflow + Human-in-Loop)
+# =============================================================================
+#
+# Communication: cooperative, role-based, decentralized
+#
+# Use case: Either a user or the community manager flags a post, which
+# is input to both the content reviewer and policy expert in parallel.
+# Both pass their verdicts to the judge, who either makes a final
+# decision or escalates to the appeals specialist.  The appeals
+# specialist can decide or escalate to a human for review.
+#
+# Expected flow:
+#
+#   [input] → content reviewer → judge → outcome
+#              ↪ policy expert  ⤴   ⤷ appeals specialist → human review
+# =============================================================================
+
+mas_id: custom_escalation
+name: Custom Content Moderation
+description: >
+  A custom workflow where flagged content is reviewed in parallel by
+  a content reviewer and policy expert, whose verdicts are passed to
+  a judge.  The judge either rules on the content or escalates to an
+  appeals specialist, who can decide or further escalate to a human
+  for review.  Communication channels are cooperative, role-based,
+  and decentralized.
+version: "1.0.0"
+
+workflow_type: custom
+human_in_loop: true
+human_escalation_condition: "state.tie_breaker_needed or state.confidence < 0.5"
+
+agents:
+  - agent_id: community_manager
+    role: community_manager
+    objective: >
+      Review content on the platform and flag it for review by the MAS.
+      Determine what to flag based on key words and perceived intent
+      of the post.
+    temperature: 0.2
+    capabilities:
+      - tool_calling
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: content_reviewer
+    role: content_reviewer
+    objective: >
+      Review content to ensure it follows the criteria put forth in
+      Meta's community standards.  If it doesn't, recommend that the
+      post be flagged as inappropriate and removed from the platform.
+    temperature: 0.2
+    capabilities:
+      - rag_retrieval
+      - policy_lookup
+      - tool_calling
+    output_format: json
+
+  - agent_id: policy_expert
+    role: policy_expert
+    objective: >
+      Review content to ensure it doesn't violate the policies outlined
+      in OpenAI's Usage Policies.  Provide a detailed policy analysis
+      and recommendation.
+    temperature: 0.1
+    capabilities:
+      - policy_lookup
+      - rag_retrieval
+    output_format: json
+
+  - agent_id: judge
+    role: judge
+    objective: >
+      Evaluate the arguments and inputs of the content reviewer and
+      policy expert and determine whether to remove the post or allow
+      it to stay on the platform.  If undecided, escalate to the
+      appeals specialist.
+    temperature: 0.0
+    capabilities:
+      - inter_agent_communication
+    output_format: json
+
+  - agent_id: appeals_specialist
+    role: appeals_specialist
+    objective: >
+      Act as a tie-breaker when the judge cannot reach a confident
+      decision.  Determine which way to rule and why.  If still
+      undecided, escalate to a human for review.
+    temperature: 0.3
+    capabilities:
+      - memory_access
+      - policy_lookup
+      - rag_retrieval
+    output_format: json
+
+channels:
+  - channel_id: reviewer_to_judge
+    protocol: direct
+    source: content_reviewer
+    target: judge
+    description: Content reviewer passes verdict to judge
+
+  - channel_id: policy_to_judge
+    protocol: direct
+    source: policy_expert
+    target: judge
+    description: Policy expert passes verdict to judge
+
+  - channel_id: judge_to_appeals
+    protocol: direct
+    source: judge
+    target: appeals_specialist
+    description: Judge escalates undecided cases to appeals specialist
+
+workflow_edges:
+  # Parallel entry: input goes to both reviewers
+  - from_agent: community_manager
+    to_agent: content_reviewer
+    label: flag-content
+
+  - from_agent: community_manager
+    to_agent: policy_expert
+    label: flag-policy
+
+  # Both reviewers feed into judge
+  - from_agent: content_reviewer
+    to_agent: judge
+    label: verdict
+
+  - from_agent: policy_expert
+    to_agent: judge
+    label: verdict
+
+  # Judge decides or escalates
+  - from_agent: judge
+    to_agent: END
+    condition: "state.confidence >= 0.7"
+    label: decide
+
+  - from_agent: judge
+    to_agent: appeals_specialist
+    condition: "state.confidence < 0.7"
+    label: escalate
+
+  # Appeals specialist decides or escalates to human
+  - from_agent: appeals_specialist
+    to_agent: END
+    label: final-decision
+
+tags:
+  - content-moderation
+  - custom
+  - cooperative
+  - role-based
+  - decentralized
+  - escalation
+  - human-in-loop
