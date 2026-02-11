@@ -3,7 +3,9 @@
 Supports all seven ``WorkflowType`` values defined in the AETHER schema.
 """
 
+import ast
 import logging
+import operator
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Set
 
@@ -14,6 +16,152 @@ from .compiled_mas import CompiledMAS
 from .state_generator import generate_state_schema
 
 LOGGER = logging.getLogger(__name__)
+
+
+# Safe expression evaluator for workflow conditions
+# Allows: comparisons, boolean ops, attribute access, constants
+# Blocks: imports, exec, function calls, comprehensions
+class SafeConditionEvaluator(ast.NodeVisitor):
+    """AST-based safe evaluator for workflow condition expressions.
+
+    Only allows a restricted subset of Python expressions:
+    - Attribute access (state.field)
+    - Comparisons (==, !=, <, >, <=, >=, in, not in)
+    - Boolean operations (and, or, not)
+    - Constants (True, False, None, numbers, strings)
+    - Basic arithmetic (+, -, *, /, //, %, **)
+
+    Blocks all dangerous operations like imports, exec, function calls, etc.
+    """
+
+    # Mapping of AST comparison operators to Python operators
+    _COMPARISON_OPS = {
+        ast.Eq: operator.eq,
+        ast.NotEq: operator.ne,
+        ast.Lt: operator.lt,
+        ast.LtE: operator.le,
+        ast.Gt: operator.gt,
+        ast.GtE: operator.ge,
+        ast.In: lambda a, b: a in b,
+        ast.NotIn: lambda a, b: a not in b,
+    }
+
+    # Mapping of AST binary operators to Python operators
+    _BINARY_OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+    }
+
+    # Mapping of AST boolean operators to Python operators
+    _BOOL_OPS = {
+        ast.And: lambda values: all(values),
+        ast.Or: lambda values: any(values),
+    }
+
+    # Mapping of AST unary operators to Python operators
+    _UNARY_OPS = {
+        ast.Not: operator.not_,
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+    }
+
+    def __init__(self, context: Dict[str, Any]):
+        self.context = context
+
+    def eval(self, expression: str) -> Any:
+        """Safely evaluate a Python expression string."""
+        try:
+            tree = ast.parse(expression, mode="eval")
+            return self.visit(tree.body)
+        except (SyntaxError, ValueError, KeyError, AttributeError, TypeError) as exc:
+            raise ValueError(f"Invalid condition expression: {expression}") from exc
+
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        """Allow constants (True, False, None, numbers, strings)."""
+        return node.value
+
+    def visit_Name(self, node: ast.Name) -> Any:
+        """Allow name lookups from context."""
+        try:
+            return self.context[node.id]
+        except KeyError as exc:
+            raise ValueError(f"Undefined variable: {node.id}") from exc
+
+    def visit_Attribute(self, node: ast.Attribute) -> Any:
+        """Allow attribute access (e.g., state.field)."""
+        obj = self.visit(node.value)
+        return getattr(obj, node.attr)
+
+    def visit_Compare(self, node: ast.Compare) -> bool:
+        """Allow comparison operations."""
+        left = self.visit(node.left)
+        result = True
+        for op, comparator in zip(node.ops, node.comparators):
+            right = self.visit(comparator)
+            op_func = self._COMPARISON_OPS.get(type(op))
+            if op_func is None:
+                raise ValueError(
+                    f"Unsupported comparison operator: {type(op).__name__}"
+                )
+            result = result and op_func(left, right)
+            left = right
+        return result
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> bool:
+        """Allow boolean operations (and, or)."""
+        op_func = self._BOOL_OPS.get(type(node.op))
+        if op_func is None:
+            raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
+        values = [self.visit(val) for val in node.values]
+        return op_func(values)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
+        """Allow unary operations (not, +, -)."""
+        op_func = self._UNARY_OPS.get(type(node.op))
+        if op_func is None:
+            raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+        operand = self.visit(node.operand)
+        return op_func(operand)
+
+    def visit_BinOp(self, node: ast.BinOp) -> Any:
+        """Allow binary arithmetic operations."""
+        op_func = self._BINARY_OPS.get(type(node.op))
+        if op_func is None:
+            raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        return op_func(left, right)
+
+    def generic_visit(self, node: ast.AST) -> None:
+        """Block all other node types (function calls, imports, etc.)."""
+        raise ValueError(
+            f"Unsupported expression type: {type(node).__name__}. "
+            f"Only comparisons, boolean operations, and attribute access are allowed."
+        )
+
+
+def safe_eval_condition(condition: str, context: Dict[str, Any]) -> bool:
+    """Safely evaluate a condition expression.
+
+    Args:
+        condition: Python expression string (e.g., "state.field == True")
+        context: Variable context for evaluation (e.g., {"state": state_proxy})
+
+    Returns:
+        Boolean result of the condition evaluation
+
+    Raises:
+        ValueError: If the expression contains unsafe operations
+    """
+    evaluator = SafeConditionEvaluator(context)
+    result = evaluator.eval(condition)
+    # Ensure result is boolean
+    return bool(result)
 
 
 class GraphBuilder:  # pylint: disable=too-few-public-methods
@@ -396,13 +544,18 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
                 for e in edges_list:
                     if e.condition:
                         try:
-                            if eval(  # noqa: S307  pylint: disable=eval-used
+                            if safe_eval_condition(
                                 e.condition,
-                                {"__builtins__": {}},
                                 {"state": _StateProxy(state)},
                             ):
                                 return e.label or e.to_agent
-                        except Exception:  # pylint: disable=broad-exception-caught
+                        except ValueError as exc:
+                            # Log the error for debugging but continue to next condition
+                            LOGGER.warning(
+                                "Condition evaluation failed for edge to %s: %s",
+                                e.to_agent,
+                                exc,
+                            )
                             continue
                 # Fallback: first unconditional edge
                 for e in edges_list:
@@ -457,7 +610,11 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 
 
 class _StateProxy:  # pylint: disable=too-few-public-methods
-    """Allows ``state.field`` attribute access for condition evaluation."""
+    """Allows ``state.field`` attribute access for condition evaluation.
+
+    Raises AttributeError for missing state fields to help catch typos in
+    condition expressions rather than silently returning None.
+    """
 
     def __init__(self, state: dict) -> None:
         self._state = state
@@ -465,5 +622,8 @@ class _StateProxy:  # pylint: disable=too-few-public-methods
     def __getattr__(self, name: str) -> Any:
         try:
             return self._state[name]
-        except KeyError:
-            return None
+        except KeyError as exc:
+            raise AttributeError(
+                f"State field '{name}' not found. Available fields: "
+                f"{', '.join(sorted(self._state.keys()))}"
+            ) from exc
