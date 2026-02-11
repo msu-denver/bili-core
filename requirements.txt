@@ -91,6 +91,7 @@ isort==5.13.2
 pre-commit==4.0.1
 pylint==3.3.1
 pympler==1.1
+pytest~=8.0.0
 setuptools~=65.5.0
 watchdog==5.0.3
 
