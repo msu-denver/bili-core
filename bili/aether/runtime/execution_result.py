@@ -91,9 +91,13 @@ class MASExecutionResult:  # pylint: disable=too-many-instance-attributes
     communication_log_path: Optional[str] = None
     checkpoint_saved: bool = False
     checkpoint_path: Optional[str] = None
-    success: bool = True
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def success(self) -> bool:
+        """True if no error occurred. Computed from error field."""
+        return self.error is None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a JSON-compatible dictionary."""

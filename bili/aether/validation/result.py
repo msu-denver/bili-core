@@ -10,7 +10,7 @@ class ValidationResult:
     Result of MAS configuration validation.
 
     Attributes:
-        valid: True if no errors were found (warnings are allowed).
+        valid: Computed property - True if no errors were found (warnings allowed).
         errors: Fatal issues that should block MAS execution.
         warnings: Non-fatal issues that should be reviewed.
 
@@ -27,14 +27,17 @@ class ValidationResult:
         ...
     """
 
-    valid: bool = True
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
+    @property
+    def valid(self) -> bool:
+        """True if no errors present. Computed from error list."""
+        return len(self.errors) == 0
+
     def add_error(self, message: str) -> None:
-        """Add a fatal error and mark the result as invalid."""
+        """Add a fatal error (automatically marks result as invalid)."""
         self.errors.append(message)
-        self.valid = False
 
     def add_warning(self, message: str) -> None:
         """Add a non-fatal warning."""
@@ -44,8 +47,6 @@ class ValidationResult:
         """Merge another ValidationResult into this one."""
         self.errors.extend(other.errors)
         self.warnings.extend(other.warnings)
-        if not other.valid:
-            self.valid = False
 
     def __str__(self) -> str:
         """Pretty formatted validation report."""
