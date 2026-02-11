@@ -85,6 +85,39 @@ With the Flask integration, you can:
 * Use the same authentication providers (Firebase, In-Memory) as the Streamlit UI
 
 
+### 7. AETHER: Multi-Agent System Framework
+
+BiliCore includes **AETHER** (Agent Ecosystems for Testing, Hardening, Evaluation, and Research), a domain-agnostic framework for building and testing multi-agent systems (MAS).
+
+**Key Capabilities:**
+* **Declarative Configuration**: Define multi-agent systems using YAML or Python
+* **7 Workflow Types**: Sequential, hierarchical, supervisor, consensus, parallel, deliberative, and custom
+* **Agent Communication**: Built-in channels for direct, broadcast, request-response, pub-sub, competitive, and consensus protocols
+* **bili-core Integration**: Leverage checkpointers, middleware, and role registry from bili-core
+* **Execution & Testing**: Built-in executor with checkpoint persistence and cross-model transfer testing
+* **Comprehensive Validation**: Catches structural issues (circular dependencies, orphaned agents) before execution
+
+**Example Use Cases:**
+- Research analysis workflows (gather → analyze → synthesize → review)
+- Content moderation pipelines (detect → classify → escalate → decide)
+- Code review systems (parse → analyze → suggest → approve)
+- Multi-agent debate and consensus building
+- Hierarchical decision-making with escalation
+
+**Quick Example:**
+```python
+from bili.aether import load_mas_from_yaml, compile_mas, execute_mas
+
+# Load configuration
+config = load_mas_from_yaml("examples/research_analysis.yaml")
+
+# Compile to LangGraph and execute
+result = execute_mas(config, {"messages": ["Analyze quantum computing trends"]})
+print(result.get_summary())
+```
+
+For complete documentation, examples, and API reference, see [`bili/aether/README.md`](bili/aether/README.md).
+
 ---
 
 ## Installation
