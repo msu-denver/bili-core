@@ -16,9 +16,6 @@ Modules:
 - enums.py: Structural enumerations (workflow types, protocols, etc.)
 """
 
-# Agent specification
-from .agent_spec import AgentSpec
-
 # Agent presets
 from .agent_presets import (
     AGENT_PRESETS,
@@ -28,12 +25,11 @@ from .agent_presets import (
     register_preset,
 )
 
+# Agent specification
+from .agent_spec import AgentSpec
+
 # Structural enums only (no domain-specific enums)
-from .enums import (
-    CommunicationProtocol,
-    OutputFormat,
-    WorkflowType,
-)
+from .enums import CommunicationProtocol, OutputFormat, WorkflowType
 
 # MAS configuration
 from .mas_config import Channel, MASConfig, WorkflowEdge

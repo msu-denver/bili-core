@@ -1,10 +1,12 @@
-"""Tests for bili-core integration (inheritance resolution) — Task 7.
+"""Tests for bili-core integration — Tasks 7 & 7b.
 
 Covers:
     - Role defaults registry
     - Inheritance resolution logic (per-flag, priority, selectivity)
     - apply_inheritance_to_all batch helper
     - State integration extension point
+    - Checkpointer factory (type dispatch, fallbacks, aliases)
+    - Per-agent middleware fields on AgentSpec
 
 All tests run under the isolated test runner (``run_tests.py``) which
 stubs the top-level ``bili`` package.  No actual bili-core dependencies
@@ -13,6 +15,10 @@ stubs the top-level ``bili`` package.  No actual bili-core dependencies
 
 # pylint: disable=missing-function-docstring
 
+from bili.aether.integration.checkpointer_factory import (
+    _TYPE_ALIASES,
+    create_checkpointer_from_config,
+)
 from bili.aether.integration.inheritance import (
     apply_inheritance,
     apply_inheritance_to_all,
@@ -287,3 +293,106 @@ class TestStateIntegration:  # pylint: disable=too-few-public-methods
         ]
         result = get_inheritance_state_fields(agents)
         assert isinstance(result, dict)
+
+
+# ======================================================================
+# Checkpointer Factory tests
+# ======================================================================
+
+
+class TestCheckpointerFactory:
+    """Tests for create_checkpointer_from_config."""
+
+    def test_memory_type_returns_checkpointer(self):
+        result = create_checkpointer_from_config({"type": "memory"})
+        assert result is not None
+        assert "MemorySaver" in type(result).__name__
+
+    def test_unknown_type_falls_back_to_memory(self):
+        result = create_checkpointer_from_config({"type": "sqlite"})
+        assert result is not None
+        assert "MemorySaver" in type(result).__name__
+
+    def test_empty_config_defaults_to_memory(self):
+        result = create_checkpointer_from_config({})
+        assert result is not None
+
+    def test_postgres_falls_back_when_unavailable(self):
+        # Without POSTGRES_CONNECTION_STRING env var, should fall back
+        result = create_checkpointer_from_config({"type": "postgres"})
+        assert result is not None
+
+    def test_mongo_falls_back_when_unavailable(self):
+        # Without MONGO_CONNECTION_STRING env var, should fall back
+        result = create_checkpointer_from_config({"type": "mongo"})
+        assert result is not None
+
+    def test_auto_type_returns_checkpointer(self):
+        # auto without DB env vars should fall back to memory
+        result = create_checkpointer_from_config({"type": "auto"})
+        assert result is not None
+
+    def test_pg_alias_maps_to_postgres(self):
+        assert _TYPE_ALIASES["pg"] == "postgres"
+        assert _TYPE_ALIASES["postgres"] == "postgres"
+
+    def test_mongodb_alias_maps_to_mongo(self):
+        assert _TYPE_ALIASES["mongodb"] == "mongo"
+        assert _TYPE_ALIASES["mongo"] == "mongo"
+
+    def test_keep_last_n_accepted(self):
+        result = create_checkpointer_from_config({"type": "memory", "keep_last_n": 10})
+        assert result is not None
+
+    def test_case_insensitive_type(self):
+        result = create_checkpointer_from_config({"type": "MEMORY"})
+        assert result is not None
+        assert "MemorySaver" in type(result).__name__
+
+
+# ======================================================================
+# AgentSpec Middleware field tests
+# ======================================================================
+
+
+class TestAgentSpecMiddleware:
+    """Tests for middleware fields on AgentSpec."""
+
+    def test_middleware_defaults_to_empty(self):
+        agent = _make_agent()
+        assert agent.middleware == []
+        assert agent.middleware_params == {}
+
+    def test_middleware_accepts_valid_names(self):
+        agent = _make_agent(
+            middleware=["summarization", "model_call_limit"],
+            middleware_params={
+                "summarization": {"max_tokens_before_summary": 4000},
+                "model_call_limit": {"run_limit": 10},
+            },
+        )
+        assert len(agent.middleware) == 2
+        assert "summarization" in agent.middleware
+        assert agent.middleware_params["model_call_limit"]["run_limit"] == 10
+
+    def test_middleware_preserved_in_model_copy(self):
+        agent = _make_agent(middleware=["summarization"])
+        copy = agent.model_copy(update={"temperature": 0.5})
+        assert copy.middleware == ["summarization"]
+        assert copy.temperature == 0.5
+
+    def test_original_not_mutated_when_middleware_set(self):
+        agent = _make_agent(middleware=["summarization"])
+        original_mw = list(agent.middleware)
+        _ = agent.model_copy(update={"middleware": ["model_call_limit"]})
+        assert agent.middleware == original_mw
+
+    def test_middleware_in_yaml_round_trip(self):
+        agent = _make_agent(
+            middleware=["model_call_limit"],
+            middleware_params={"model_call_limit": {"run_limit": 5}},
+        )
+        data = agent.model_dump()
+        restored = AgentSpec(**data)
+        assert restored.middleware == ["model_call_limit"]
+        assert restored.middleware_params["model_call_limit"]["run_limit"] == 5

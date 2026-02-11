@@ -119,6 +119,8 @@ agents:
 | `tools` | No | `[]` | Tool names from the tool registry |
 | `output_format` | No | `text` | Output format: `text`, `json`, or `structured` |
 | `output_schema` | No | `None` | JSON schema (required when `output_format: structured`) |
+| `middleware` | No | `[]` | Middleware names for agent execution (see Per-Agent Middleware) |
+| `middleware_params` | No | `{}` | Parameters for middleware, keyed by name |
 | `inherit_from_bili_core` | No | `false` | Master toggle: inherit config from bili-core |
 | `inherit_llm_config` | No | `true` | Inherit LLM model/temperature (when master toggle is on) |
 | `inherit_tools` | No | `true` | Inherit tool configuration (when master toggle is on) |
@@ -386,8 +388,8 @@ human_escalation_condition: >-           # Python expression for when to escalat
 # --- Checkpoint Configuration ---
 checkpoint_enabled: true                 # Enable state persistence
 checkpoint_config:
-  type: sqlite                           # sqlite | mongodb | postgresql
-  path: checkpoints.db
+  type: auto                             # memory | postgres | mongo | auto
+  keep_last_n: 10                        # Checkpoints to retain per thread
 
 # --- Metadata ---
 tags:                                    # Searchable labels (not schema-enforced)
@@ -425,7 +427,7 @@ metadata:                                # Arbitrary key-value pairs
 | `human_in_loop` | No | `false` | Whether MAS can escalate to human review |
 | `human_escalation_condition` | No | `None` | Python expression for escalation trigger |
 | `checkpoint_enabled` | No | `true` | Enable state persistence |
-| `checkpoint_config` | No | `{"type": "sqlite", "path": "checkpoints.db"}` | Checkpoint backend configuration |
+| `checkpoint_config` | No | `{"type": "memory"}` | Checkpoint backend config (see Checkpointer Configuration) |
 | `tags` | No | `[]` | Searchable labels for categorization |
 | `metadata` | No | `{}` | Arbitrary key-value pairs |
 
@@ -508,7 +510,7 @@ graph = compiled.compile_graph()     # Returns a CompiledStateGraph
 | `channel_manager` | `ChannelManager` (optional) | Manages inter-agent channels; `None` if no channels configured |
 
 **Methods:**
-- `compile_graph(checkpointer=None)` — Compile to an executable `CompiledStateGraph`. If `checkpointer` is `None` and `checkpoint_enabled` is `True`, uses an in-memory checkpointer.
+- `compile_graph(checkpointer=None)` — Compile to an executable `CompiledStateGraph`. If `checkpointer` is `None` and `checkpoint_enabled` is `True`, creates a checkpointer from `checkpoint_config` via the bili-core factory (falls back to in-memory if unavailable).
 - `get_agent_node(agent_id)` — Look up a specific agent's callable by ID.
 
 ### How Workflow Types Map to Graph Topologies
@@ -685,6 +687,77 @@ agents:
     system_prompt: "Custom prompt overrides registry default"
 ```
 
+### Checkpointer Configuration
+
+The `checkpoint_config` dict in `MASConfig` controls which checkpointer backend is used when compiling the graph. The factory maps `config["type"]` to a bili-core checkpointer:
+
+| Type | Backend | Notes |
+|------|---------|-------|
+| `memory` (default) | `QueryableMemorySaver` | In-memory, no persistence across restarts |
+| `postgres` / `pg` | `PruningPostgresSaver` | Requires `POSTGRES_CONNECTION_STRING` env var |
+| `mongo` / `mongodb` | `PruningMongoDBSaver` | Requires `MONGO_CONNECTION_STRING` env var |
+| `auto` | Auto-detected | Tries postgres, then mongo, then memory (based on env vars) |
+
+Additional keys are forwarded to the checkpointer constructor:
+
+```yaml
+checkpoint_config:
+  type: postgres
+  keep_last_n: 10      # Prune to last 10 checkpoints per thread
+```
+
+**Fallback behaviour:** If the requested backend is unavailable (missing dependency or env var), the factory falls back to `MemorySaver` with a warning. The graph always compiles successfully.
+
+**Explicit override:** Pass a checkpointer directly to `compile_graph()` to bypass the factory:
+
+```python
+from bili.checkpointers.pg_checkpointer import get_pg_checkpointer
+
+compiled = compile_mas(config)
+graph = compiled.compile_graph(checkpointer=get_pg_checkpointer(keep_last_n=5))
+```
+
+### Per-Agent Middleware
+
+Agents can configure middleware to intercept and modify their execution. Middleware is resolved via bili-core's `initialize_middleware()` and passed to `create_agent()` for tool-enabled agents.
+
+```yaml
+agents:
+  - agent_id: researcher
+    role: researcher
+    objective: Research and compile findings
+    tools:
+      - serp_api_tool
+    middleware:
+      - summarization
+    middleware_params:
+      summarization:
+        max_tokens_before_summary: 4000
+        messages_to_keep: 20
+
+  - agent_id: analyst
+    role: analyst
+    objective: Analyse findings with rate limiting
+    tools:
+      - serp_api_tool
+    middleware:
+      - model_call_limit
+    middleware_params:
+      model_call_limit:
+        run_limit: 10
+```
+
+**Available middleware:**
+
+| Name | Description | Key Parameters |
+|------|-------------|---------------|
+| `summarization` | Auto-summarizes conversation when tokens exceed threshold | `max_tokens_before_summary` (default: 4000), `messages_to_keep` (default: 20) |
+| `model_call_limit` | Circuit-breaker for runaway agent loops | `run_limit` (default: 10), `exit_behavior` (`"end"` or `"error"`) |
+
+**Limitations:**
+- Middleware only applies to **tool-enabled agents** (agents with `tools` configured). If middleware is set on an agent without tools, a warning is logged and middleware is skipped.
+- Middleware requires `langchain.agents.middleware` — if unavailable, agents run without middleware.
+
 ### CLI Tool
 
 A CLI tool is included for quick compilation testing:
@@ -711,6 +784,9 @@ AETHER includes example YAML configurations for multiple domains:
 ### Research (Domain-Agnostic)
 - `research_analysis.yaml` - Research → Fact-check → Analyze → Synthesize
 - `inherited_research.yaml` - Same pipeline using `inherit_from_bili_core: true`
+
+### Integration Features
+- `middleware_checkpointer.yaml` - Per-agent middleware + auto-detect checkpoint config
 
 ### Software Engineering (Domain-Agnostic)
 - `code_review.yaml` - Lead engineer routes to security/performance/style reviewers
@@ -743,15 +819,16 @@ bili/aether/
 │   ├── channels.py       # DirectChannel, BroadcastChannel, RequestResponseChannel
 │   ├── channel_manager.py # ChannelManager
 │   └── communication_state.py # LangGraph state integration helpers
-├── integration/          # bili-core inheritance layer
+├── integration/          # bili-core integration layer
 │   ├── __init__.py       # Package exports
 │   ├── role_registry.py  # RoleDefaults registry (16 roles)
 │   ├── inheritance.py    # apply_inheritance() resolution logic
+│   ├── checkpointer_factory.py # Checkpoint config → bili-core checkpointer
 │   └── state_integration.py # State schema extension hook
 ├── validation/           # Static MAS validation engine
 │   ├── __init__.py       # validate_mas() entry point
 │   └── engine.py         # 13 structural validation checks
-└── tests/                # Test suite (157 tests)
+└── tests/                # Test suite (174 tests)
 ```
 
 ## Integration with bili-core
