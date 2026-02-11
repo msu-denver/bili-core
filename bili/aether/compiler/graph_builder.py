@@ -175,7 +175,8 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
     """
 
     def __init__(self, config: MASConfig) -> None:
-        self._config = config
+        # Make a deep copy to avoid mutating caller's config during compilation
+        self._config = config.model_copy(deep=True)
         self._agent_nodes: Dict[str, Callable] = {}
         self._state_schema = None
         self._graph: Any = None

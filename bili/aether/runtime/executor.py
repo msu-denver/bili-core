@@ -165,7 +165,7 @@ class MASExecutor:
                 start_time=start_time,
                 end_time=end_time,
                 total_execution_time_ms=(time.time() - start_ts) * 1000,
-                success=False,
+                # success is computed property (False when error is set)
                 error=str(exc),
             )
 
@@ -200,7 +200,7 @@ class MASExecutor:
             messages_by_channel=messages_by_channel,
             communication_log_path=comm_log_path,
             checkpoint_saved=checkpoint_saved,
-            success=True,
+            # success is computed property (True when error=None)
             metadata={
                 "thread_id": invoke_config.get("configurable", {}).get("thread_id")
             },
@@ -301,12 +301,15 @@ class MASExecutor:
         """
         effective_thread_id = thread_id or f"xm_{uuid.uuid4().hex[:8]}"
 
+        # Save original config to restore afterward (avoid permanent mutation)
+        original_config = self._config
+
         # --- Source model run ---
         source_agents = [
             agent.model_copy(update={"model_name": source_model})
-            for agent in self._config.agents
+            for agent in original_config.agents
         ]
-        source_config = self._config.model_copy(update={"agents": source_agents})
+        source_config = original_config.model_copy(update={"agents": source_agents})
 
         self._config = source_config
         self.initialize()
@@ -336,6 +339,10 @@ class MASExecutor:
         )
         target_result.metadata["cross_model_test"] = "target"
         target_result.metadata["model"] = target_model
+
+        # Restore original config
+        self._config = original_config
+        self.initialize()
 
         LOGGER.info(
             "Cross-model transfer test complete: %s -> %s (thread '%s')",
