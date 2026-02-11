@@ -138,15 +138,18 @@ def register_preset(name: str, preset: Dict[str, Any]) -> None:
 
 def get_preset(name: str) -> Optional[Dict[str, Any]]:
     """
-    Get a preset by name.
+    Get a copy of a preset by name.
+
+    Returns a copy to prevent callers from mutating the global registry.
 
     Args:
         name: Preset name
 
     Returns:
-        Preset dict or None if not found
+        Copy of preset dict or None if not found
     """
-    return AGENT_PRESETS.get(name)
+    preset = AGENT_PRESETS.get(name)
+    return dict(preset) if preset is not None else None
 
 
 def list_presets() -> list:

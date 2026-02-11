@@ -11,6 +11,7 @@ resolution to instances happens downstream in
 """
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -232,9 +233,12 @@ ROLE_DEFAULTS: Dict[str, RoleDefaults] = {
 def get_role_defaults(role: str) -> Optional[RoleDefaults]:
     """Look up defaults for a role.
 
+    Returns a deep copy to prevent callers from mutating the global registry.
+
     Returns ``None`` if the role has no registered defaults.
     """
-    return ROLE_DEFAULTS.get(role)
+    defaults = ROLE_DEFAULTS.get(role)
+    return deepcopy(defaults) if defaults is not None else None
 
 
 def register_role_defaults(role: str, defaults: RoleDefaults) -> None:
