@@ -8,6 +8,7 @@ real LLM calls using bili-core's ``llm_loader``.  If the agent also has
 
 import json
 import logging
+import re
 import time
 from typing import Any, Callable, Dict
 
@@ -147,6 +148,11 @@ def _generate_tool_agent_node(
             "current_agent": agent.agent_id,
             "agent_outputs": agent_outputs,
         }
+
+        # For supervisor agents, extract routing decision
+        if agent.is_supervisor:
+            state_update["next_agent"] = _extract_next_agent(content, agent)
+
         state_update.update(_build_communication_update(state, agent.agent_id, content))
         return state_update
 
@@ -215,6 +221,11 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
             "current_agent": agent.agent_id,
             "agent_outputs": agent_outputs,
         }
+
+        # For supervisor agents, extract routing decision
+        if agent.is_supervisor:
+            state_update["next_agent"] = _extract_next_agent(content, agent)
+
         state_update.update(_build_communication_update(state, agent.agent_id, content))
         return state_update
 
@@ -276,6 +287,13 @@ def _generate_stub_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
             "current_agent": agent.agent_id,
             "agent_outputs": agent_outputs,
         }
+
+        # For supervisor agents, extract routing decision
+        if agent.is_supervisor:
+            state_update["next_agent"] = _extract_next_agent(
+                stub_output["message"], agent
+            )
+
         state_update.update(
             _build_communication_update(state, agent.agent_id, stub_output["message"])
         )
@@ -393,6 +411,47 @@ def _build_output(agent: AgentSpec, content: str) -> dict:
         output["raw"] = content
 
     return output
+
+
+def _extract_next_agent(content: str, agent: AgentSpec) -> str:
+    """Extract next_agent routing decision from supervisor output.
+
+    Looks for routing decisions in these formats:
+    - JSON output with "next_agent" field
+    - Lines like "ROUTE_TO: agent_id" or "NEXT_AGENT: agent_id"
+    - Returns "END" if no routing decision found
+
+    Args:
+        content: Agent output message
+        agent: AgentSpec for the agent
+
+    Returns:
+        Agent ID to route to, or "END" to finish workflow
+    """
+    # Try JSON parsing first
+    if agent.output_format == OutputFormat.JSON:
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict) and "next_agent" in parsed:
+                return parsed["next_agent"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Try text patterns
+    patterns = [
+        r"ROUTE_TO:\s*(\w+)",
+        r"NEXT_AGENT:\s*(\w+)",
+        r"next_agent:\s*(\w+)",
+        r"route\s+to:\s*(\w+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    # Default to END if no routing decision found
+    return "END"
 
 
 def _get_communication_context(state: dict, agent_id: str) -> str:

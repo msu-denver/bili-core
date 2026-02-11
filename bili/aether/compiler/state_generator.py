@@ -68,7 +68,7 @@ def generate_state_schema(config: MASConfig) -> Type:
         annotations["tier_results"] = Dict[str, Any]
 
     if wtype == WorkflowType.SUPERVISOR:
-        annotations["next_agent"] = str
+        annotations["next_agent"] = Annotated[str, _replace_value]
         annotations["pending_tasks"] = List[str]
         annotations["completed_tasks"] = List[str]
 
