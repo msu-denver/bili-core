@@ -53,12 +53,16 @@ class ChannelManager:
         cls,
         config: Any,
         log_dir: Optional[str] = None,
+        enable_logging: bool = False,
     ) -> "ChannelManager":
         """Build a ``ChannelManager`` from a ``MASConfig``.
 
         Args:
             config: A validated ``MASConfig`` instance.
             log_dir: Directory for the JSONL log file. Defaults to cwd.
+            enable_logging: Whether to create a JSONL communication log.
+                Defaults to ``False`` to avoid file pollution during tests
+                and repeated executions.
 
         Returns:
             A fully initialised ``ChannelManager``.
@@ -69,18 +73,25 @@ class ChannelManager:
         for chan_cfg in config.channels:
             channels[chan_cfg.channel_id] = create_channel(chan_cfg, agent_ids)
 
-        # Set up logger
-        log_dir = log_dir or os.getcwd()
-        log_filename = f"communication_{config.mas_id}_{uuid.uuid4().hex[:8]}.jsonl"
-        log_path = os.path.join(log_dir, log_filename)
-        logger = CommunicationLogger(log_path)
-
-        LOGGER.info(
-            "ChannelManager initialised for '%s' with %d channels, logging to %s",
-            config.mas_id,
-            len(channels),
-            log_path,
-        )
+        # Set up logger only if explicitly enabled
+        logger = None
+        if enable_logging:
+            log_dir = log_dir or os.getcwd()
+            log_filename = f"communication_{config.mas_id}_{uuid.uuid4().hex[:8]}.jsonl"
+            log_path = os.path.join(log_dir, log_filename)
+            logger = CommunicationLogger(log_path)
+            LOGGER.info(
+                "ChannelManager initialised for '%s' with %d channels, logging to %s",
+                config.mas_id,
+                len(channels),
+                log_path,
+            )
+        else:
+            LOGGER.info(
+                "ChannelManager initialised for '%s' with %d channels (logging disabled)",
+                config.mas_id,
+                len(channels),
+            )
 
         return cls(channels=channels, logger=logger, agent_ids=agent_ids)
 

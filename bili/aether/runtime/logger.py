@@ -29,6 +29,10 @@ class CommunicationLogger:
         self.log_path = log_path
         self._file_handle: Optional[IO[str]] = None
 
+    def __del__(self) -> None:
+        """Ensure file handle is closed when logger is garbage collected."""
+        self.close()
+
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
