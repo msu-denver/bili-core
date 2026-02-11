@@ -275,7 +275,8 @@ class MASValidator:
         if wtype == WorkflowType.SUPERVISOR:
             self._check_supervisor_workflow()
 
-        if wtype == WorkflowType.CUSTOM and self._config.human_in_loop:
+        # Check human_in_loop for ANY workflow type (not just CUSTOM)
+        if self._config.human_in_loop:
             self._check_human_in_loop()
 
     def _check_consensus_workflow(self) -> None:

@@ -139,20 +139,34 @@ def _create_mongo_checkpointer(config: Dict[str, Any]) -> Any:
     return _create_memory_checkpointer()
 
 
-def _create_auto_checkpointer(
-    _config: Dict[str, Any] = None,  # pylint: disable=unused-argument
-) -> Any:
-    """Auto-detect checkpointer using bili-core's ``get_checkpointer()``."""
+def _create_auto_checkpointer(config: Dict[str, Any] = None) -> Any:
+    """Auto-detect checkpointer using bili-core's ``get_checkpointer()``.
+
+    Forwards keep_last_n parameter if specified in config.
+    """
+    config = config or {}
+    keep_last_n = config.get("keep_last_n", 5)
+
     try:
         from bili.checkpointers.checkpointer_functions import (  # pylint: disable=import-outside-toplevel
             get_checkpointer,
         )
 
-        checkpointer = get_checkpointer()
-        LOGGER.info(
-            "Auto-detected checkpointer: %s",
-            type(checkpointer).__name__,
-        )
+        # Try passing keep_last_n if supported
+        try:
+            checkpointer = get_checkpointer(keep_last_n=keep_last_n)
+            LOGGER.info(
+                "Auto-detected checkpointer: %s (keep_last_n=%d)",
+                type(checkpointer).__name__,
+                keep_last_n,
+            )
+        except TypeError:
+            # Fall back to no args if keep_last_n not supported
+            checkpointer = get_checkpointer()
+            LOGGER.info(
+                "Auto-detected checkpointer: %s (keep_last_n not supported)",
+                type(checkpointer).__name__,
+            )
         return checkpointer
     except ImportError:
         LOGGER.warning(

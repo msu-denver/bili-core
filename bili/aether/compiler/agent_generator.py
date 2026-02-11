@@ -186,17 +186,21 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
         if comm_context:
             system_prompt += "\n\n--- Messages from other agents ---\n" + comm_context
 
-        messages = [SystemMessage(content=system_prompt)]
-
-        # Filter state messages to compatible types, matching
-        # react_agent_node.py's fallback path
+        # Filter state messages to compatible types
         state_messages = state.get("messages", [])
-        if state_messages:
-            compatible = [
-                m
-                for m in state_messages
-                if isinstance(m, (AIMessage, HumanMessage, SystemMessage))
-            ]
+        compatible = [
+            m
+            for m in state_messages
+            if isinstance(m, (AIMessage, HumanMessage, SystemMessage))
+        ]
+
+        # Check if there's already a SystemMessage (avoid duplicates)
+        has_system = any(isinstance(m, SystemMessage) for m in compatible)
+        messages = []
+        if not has_system:
+            messages.append(SystemMessage(content=system_prompt))
+
+        if compatible:
             messages.extend(compatible)
         else:
             messages.append(HumanMessage(content="Begin your task."))
