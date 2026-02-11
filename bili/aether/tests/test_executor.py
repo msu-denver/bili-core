@@ -233,7 +233,6 @@ class TestResultSerialization:
             agent_results=[
                 AgentExecutionResult(agent_id="a", role="r"),
             ],
-            success=True,
         )
         d = mr.to_dict()
         assert d["mas_id"] == "test"
@@ -245,7 +244,6 @@ class TestResultSerialization:
         mr = MASExecutionResult(
             mas_id="test",
             execution_id="test_save",
-            success=True,
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "result.json")
@@ -269,7 +267,6 @@ class TestResultSerialization:
                     output={"message": "hello"},
                 ),
             ],
-            success=True,
         )
         summary = mr.get_summary()
         assert "test" in summary
@@ -287,7 +284,6 @@ class TestResultSerialization:
                     output={"message": "formatted output"},
                 ),
             ],
-            success=True,
         )
         output = mr.get_formatted_output()
         assert output.startswith("*" * 60)
