@@ -1,0 +1,73 @@
+# =============================================================================
+# Middleware + Checkpointer Configuration Example
+# =============================================================================
+#
+# Demonstrates per-agent middleware and MAS-level checkpoint configuration.
+#
+# Features shown:
+#   - Per-agent summarization middleware
+#   - Per-agent model call limiting
+#   - MAS-level checkpoint type selection (auto-detect)
+#   - keep_last_n configuration for checkpointer pruning
+#
+# To use real LLMs, add model_name to each agent (e.g. model_name: gpt-4o).
+# Without model_name, agents run in stub mode for testing.
+# =============================================================================
+
+mas_id: middleware_checkpointer_demo
+name: Middleware and Checkpointer Demo
+description: >
+  Demonstrates per-agent middleware (summarization, model call limiting)
+  and MAS-level checkpoint configuration with auto-detection.
+version: "1.0.0"
+
+workflow_type: sequential
+
+# Checkpoint configuration (MAS-level)
+checkpoint_enabled: true
+checkpoint_config:
+  type: auto        # auto-detect: postgres > mongo > memory
+  keep_last_n: 10   # keep last 10 checkpoints per thread
+
+agents:
+  - agent_id: researcher
+    role: researcher
+    objective: >
+      Search for information on the given topic and compile findings.
+      Summarise sources for downstream analysis.
+    temperature: 0.5
+    tools:
+      - serp_api_tool
+    middleware:
+      - summarization
+    middleware_params:
+      summarization:
+        max_tokens_before_summary: 4000
+        messages_to_keep: 20
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: analyst
+    role: analyst
+    objective: >
+      Analyse the research findings.  Rate-limit model calls to prevent
+      runaway analysis loops.
+    temperature: 0.3
+    tools:
+      - serp_api_tool
+    middleware:
+      - model_call_limit
+    middleware_params:
+      model_call_limit:
+        run_limit: 10
+
+  - agent_id: writer
+    role: documentation_writer
+    objective: >
+      Write a clear, well-structured report from the analysis findings.
+    temperature: 0.4
+    # No middleware — straightforward generation task
+
+tags:
+  - middleware
+  - checkpointer
+  - auto-detection

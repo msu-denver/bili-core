@@ -127,6 +127,28 @@ class AgentSpec(BaseModel):
     )
 
     # =========================================================================
+    # MIDDLEWARE CONFIGURATION
+    # =========================================================================
+
+    middleware: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Middleware names to apply to this agent's execution. "
+            "Available: 'summarization', 'model_call_limit'. "
+            "Middleware only applies to tool-enabled agents (via create_agent)."
+        ),
+    )
+
+    middleware_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Parameters for middleware, keyed by middleware name. "
+            "E.g. {'summarization': {'max_tokens_before_summary': 4000}, "
+            "'model_call_limit': {'run_limit': 10}}"
+        ),
+    )
+
+    # =========================================================================
     # bili-core INTEGRATION
     # =========================================================================
 

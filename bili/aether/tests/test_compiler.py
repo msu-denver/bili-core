@@ -462,6 +462,7 @@ def test_deliberative_without_edges_compiles():
         "research_analysis.yaml",
         "code_review.yaml",
         "inherited_research.yaml",
+        "middleware_checkpointer.yaml",
     ],
 )
 def test_example_yaml_compiles(fname):

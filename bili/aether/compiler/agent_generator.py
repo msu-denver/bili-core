@@ -53,31 +53,45 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     If the agent has ``tools`` configured, resolves them via
     :func:`~bili.aether.compiler.llm_resolver.resolve_tools` and uses
     ``langchain.agents.create_agent`` — the same pattern as
-    ``bili/nodes/react_agent_node.py``.
+    ``bili/nodes/react_agent_node.py``.  Middleware (if configured) is
+    resolved and passed to ``create_agent`` for tool-enabled agents.
     """
     # pylint: disable=import-outside-toplevel
     from bili.aether.compiler.llm_resolver import create_llm, resolve_tools
 
     llm = create_llm(agent)
     tools = resolve_tools(agent)
+    middleware = _resolve_middleware(agent)
 
     if tools:
-        return _generate_tool_agent_node(agent, llm, tools)
+        return _generate_tool_agent_node(agent, llm, tools, middleware)
+
+    if middleware:
+        LOGGER.warning(
+            "Agent '%s' has middleware configured but no tools; "
+            "middleware requires tool-enabled agents (via create_agent). "
+            "Middleware will be ignored.",
+            agent.agent_id,
+        )
     return _generate_direct_llm_node(agent, llm)
 
 
 def _generate_tool_agent_node(
-    agent: AgentSpec, llm: object, tools: list
+    agent: AgentSpec,
+    llm: object,
+    tools: list,
+    middleware: list = None,
 ) -> Callable[[dict], dict]:
     """Create a node using ``create_agent()`` for tool-enabled agents.
 
     Mirrors the tool-enabled path in ``bili/nodes/react_agent_node.py``.
+    Middleware (if provided) is forwarded to ``create_agent()``.
     """
     from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
         create_agent,
     )
 
-    react_agent = create_agent(model=llm, tools=tools)
+    react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
 
     def _agent_node(state: dict) -> dict:  # pylint: disable=too-many-locals
         start_time = time.time()
@@ -300,6 +314,60 @@ def wrap_agent_node(node_func: Callable, agent_id: str) -> Callable:
         wrapper.agent_spec = node_func.agent_spec  # type: ignore[attr-defined]
 
     return wrapper
+
+
+# =========================================================================
+# Middleware resolution
+# =========================================================================
+
+
+def _resolve_middleware(agent: AgentSpec) -> list:
+    """Resolve middleware names to instances via bili-core's middleware loader.
+
+    Args:
+        agent: The ``AgentSpec`` with ``middleware`` and ``middleware_params``.
+
+    Returns:
+        A list of initialised middleware instances, or an empty list
+        if no middleware is configured or the loader is unavailable.
+    """
+    if not agent.middleware:
+        return []
+
+    try:
+        from bili.loaders.middleware_loader import (  # pylint: disable=import-outside-toplevel
+            initialize_middleware,
+        )
+    except ImportError:
+        LOGGER.warning(
+            "bili.loaders.middleware_loader not available; "
+            "skipping middleware for agent '%s'",
+            agent.agent_id,
+        )
+        return []
+
+    try:
+        instances = initialize_middleware(
+            active_middleware=agent.middleware,
+            middleware_params=agent.middleware_params,
+        )
+        if instances:
+            LOGGER.info(
+                "Resolved %d middleware for agent '%s': %s",
+                len(instances),
+                agent.agent_id,
+                agent.middleware,
+            )
+        return instances
+    except Exception:  # pylint: disable=broad-exception-caught
+        LOGGER.warning(
+            "Failed to resolve middleware %s for agent '%s'; "
+            "agent will run without middleware",
+            agent.middleware,
+            agent.agent_id,
+            exc_info=True,
+        )
+        return []
 
 
 # =========================================================================
