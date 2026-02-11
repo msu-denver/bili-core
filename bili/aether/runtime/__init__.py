@@ -28,20 +28,29 @@ from bili.aether.runtime.communication_state import (
     get_pending_messages,
     send_message_in_state,
 )
+from bili.aether.runtime.execution_result import (
+    AgentExecutionResult,
+    MASExecutionResult,
+)
+from bili.aether.runtime.executor import MASExecutor, execute_mas
 from bili.aether.runtime.logger import CommunicationLogger
 from bili.aether.runtime.messages import Message, MessageHistory, MessageType
 
 __all__ = [
+    "AgentExecutionResult",
     "BroadcastChannel",
     "ChannelManager",
     "CommunicationChannel",
     "CommunicationLogger",
     "DirectChannel",
+    "MASExecutionResult",
+    "MASExecutor",
     "Message",
     "MessageHistory",
     "MessageType",
     "RequestResponseChannel",
     "create_channel",
+    "execute_mas",
     "format_messages_for_context",
     "get_pending_messages",
     "send_message_in_state",

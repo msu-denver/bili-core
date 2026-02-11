@@ -1,9 +1,26 @@
 """Dynamic state schema generation for compiled MAS graphs."""
 
+import operator
 import re
 from typing import Any, Dict, List, Type
 
 from bili.aether.schema import MASConfig, WorkflowType
+
+# =========================================================================
+# Reducers for concurrent-write state fields
+# =========================================================================
+
+
+def _replace_value(_existing, new):
+    """Reducer: last writer wins for scalar values."""
+    return new
+
+
+def _merge_dicts(existing, new):
+    """Reducer: shallow-merge dictionaries."""
+    merged = dict(existing or {})
+    merged.update(new or {})
+    return merged
 
 
 def generate_state_schema(config: MASConfig) -> Type:
@@ -33,8 +50,8 @@ def generate_state_schema(config: MASConfig) -> Type:
 
     annotations: Dict[str, Any] = {
         "messages": Annotated[list, add_messages],
-        "current_agent": str,
-        "agent_outputs": Dict[str, Any],
+        "current_agent": Annotated[str, _replace_value],
+        "agent_outputs": Annotated[Dict[str, Any], _merge_dicts],
         "mas_id": str,
     }
 
@@ -61,8 +78,8 @@ def generate_state_schema(config: MASConfig) -> Type:
     # Communication fields (present when channels are configured)
     if config.channels:
         annotations["channel_messages"] = Dict[str, Any]
-        annotations["pending_messages"] = Dict[str, list]
-        annotations["communication_log"] = list
+        annotations["pending_messages"] = Annotated[Dict[str, list], _merge_dicts]
+        annotations["communication_log"] = Annotated[list, operator.add]
 
     # Inheritance state fields (when agents use bili-core inheritance)
     try:

@@ -2,6 +2,113 @@
 
 AETHER is a domain-agnostic multi-agent system (MAS) framework built as an extension to bili-core. It enables declarative configuration of multi-agent systems for any domain - research, content moderation, code review, customer support, and more.
 
+## Table of Contents
+
+- [How to Use](#how-to-use)
+  - [Using Presets](#using-presets)
+- [Design Philosophy](#design-philosophy)
+- [Quick Start](#quick-start)
+  - [Minimal Agent (Required Fields Only)](#minimal-agent-required-fields-only)
+  - [Fully-Configured Agent (All Options)](#fully-configured-agent-all-options)
+  - [Agent Field Reference](#agent-field-reference)
+  - [Objective vs. System Prompt](#objective-vs-system-prompt)
+  - [Use Presets for Common Patterns](#use-presets-for-common-patterns)
+  - [Register Custom Presets](#register-custom-presets)
+- [Configuring a Multi-Agent System](#configuring-a-multi-agent-system)
+  - [Minimal MAS (Sequential Chain)](#minimal-mas-sequential-chain)
+  - [Fully-Configured MAS (All Options)](#fully-configured-mas-all-options)
+  - [MAS Field Reference](#mas-field-reference)
+  - [How MAS Fields Map to Communication Dimensions](#how-mas-fields-map-to-communication-dimensions)
+- [Validating a Configuration](#validating-a-configuration)
+- [Compiling to LangGraph](#compiling-to-langgraph)
+  - [What the Compiler Produces](#what-the-compiler-produces)
+  - [How Workflow Types Map to Graph Topologies](#how-workflow-types-map-to-graph-topologies)
+  - [Generated State Schema](#generated-state-schema)
+  - [Agent Nodes](#agent-nodes)
+  - [Agent Communication Protocol (Runtime)](#agent-communication-protocol-runtime)
+  - [bili-core Inheritance](#bili-core-inheritance)
+  - [CLI Tool (Compiler)](#cli-tool-compiler)
+- [Executing a MAS](#executing-a-mas)
+  - [Basic Execution](#basic-execution)
+  - [MASExecutor Methods](#masexecutor-methods)
+  - [MASExecutionResult](#masexecutionresult)
+  - [Checkpoint Persistence Testing](#checkpoint-persistence-testing)
+  - [Cross-Model Transfer Testing](#cross-model-transfer-testing)
+  - [CLI Tool (Runtime)](#cli-tool-runtime)
+- [Example Workflows](#example-workflows)
+- [Architecture](#architecture)
+- [Integration with bili-core](#integration-with-bili-core)
+- [Workflow Types](#workflow-types)
+- [MAS Communication Framework](#mas-communication-framework)
+  - [Communication Channels](#communication-channels)
+  - [Collaboration Types](#collaboration-types)
+  - [Communication Strategies](#communication-strategies)
+  - [Communication Structures](#communication-structures)
+  - [Design Rationale](#design-rationale)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## How to Use
+
+AETHER follows a five-step workflow: **Define → Configure → Validate → Compile → Execute**.
+
+**1. Define your agents** — Create `AgentSpec` objects with a role, objective, and optional LLM/tool configuration. Start with the [Minimal Agent](#minimal-agent-required-fields-only) example or use a [preset](#use-presets-for-common-patterns) for common patterns.
+
+**2. Configure a MAS** — Assemble agents into a `MASConfig` with a [workflow type](#workflow-types) (`sequential`, `hierarchical`, `supervisor`, `consensus`, `parallel`, or `custom`) and [communication channels](#communication-channels). See [Configuring a Multi-Agent System](#configuring-a-multi-agent-system) for YAML and Python examples.
+
+**3. Validate** — Run `validate_mas(config)` to catch structural issues (duplicate channels, circular dependencies, orphaned agents) before execution. See [Validating a Configuration](#validating-a-configuration).
+
+**4. Compile** — Call `compile_mas(config)` to transform the declarative config into an executable LangGraph `StateGraph`. See [Compiling to LangGraph](#compiling-to-langgraph).
+
+**5. Execute** — Use `MASExecutor` or the `execute_mas()` convenience function to run the graph and collect structured results. See [Executing a MAS](#executing-a-mas).
+
+```python
+from bili.aether import load_mas_from_yaml, compile_mas, execute_mas
+
+config = load_mas_from_yaml("path/to/config.yaml")   # Steps 1-2: Load agents + MAS
+compiled = compile_mas(config)                         # Steps 3-4: Validate + compile
+result = execute_mas(config, {"messages": [...]})      # Step 5: Execute
+print(result.get_summary())
+```
+
+### Using Presets
+
+Presets let you skip manual agent configuration by providing sensible defaults for common roles. You can list available presets, create agents from them with optional overrides, and register your own:
+
+```python
+from bili.aether.schema import create_agent_from_preset, list_presets, register_preset
+
+# See what's available
+print(list_presets())
+# ['content_reviewer', 'researcher', 'code_reviewer', 'supervisor', ...]
+
+# Create an agent from a preset (override any defaults as needed)
+agent = create_agent_from_preset(
+    preset_name="researcher",
+    agent_id="ai_researcher",
+    objective="Research quantum computing advances",
+    temperature=0.6,
+)
+
+# Register a custom preset for reuse across projects
+register_preset("my_analyst", {
+    "role": "analyst",
+    "capabilities": ["data_analysis", "reporting"],
+    "temperature": 0.3,
+})
+
+agent = create_agent_from_preset(
+    preset_name="my_analyst",
+    agent_id="analyst_1",
+    objective="Analyze quarterly trends",
+)
+```
+
+For the full preset API, see [Use Presets for Common Patterns](#use-presets-for-common-patterns) and [Register Custom Presets](#register-custom-presets).
+
+For CLI usage, see the [Compiler CLI](#cli-tool-compiler) and [Runtime CLI](#cli-tool-runtime) sections.
+
 ## Design Philosophy
 
 AETHER uses a **domain-agnostic** design where agent roles and capabilities are **free-form strings**, not restrictive enums. This means:
@@ -758,7 +865,7 @@ agents:
 - Middleware only applies to **tool-enabled agents** (agents with `tools` configured). If middleware is set on an agent without tools, a warning is logged and middleware is skipped.
 - Middleware requires `langchain.agents.middleware` — if unavailable, agents run without middleware.
 
-### CLI Tool
+### CLI Tool (Compiler)
 
 A CLI tool is included for quick compilation testing:
 
@@ -768,6 +875,100 @@ python bili/aether/compiler/cli.py
 
 # Compile a specific YAML
 python bili/aether/compiler/cli.py path/to/config.yaml
+```
+
+## Executing a MAS
+
+After compilation, the **MAS Execution Controller** runs the graph end-to-end and collects structured results.
+
+### Basic Execution
+
+```python
+from bili.aether import load_mas_from_yaml, MASExecutor, execute_mas
+
+# Option 1: MASExecutor (full control)
+config = load_mas_from_yaml("simple_chain.yaml")
+executor = MASExecutor(config, log_dir="logs")
+executor.initialize()
+result = executor.run({"messages": [HumanMessage(content="Test content")]})
+
+print(result.get_summary())           # Concise text summary
+print(result.get_formatted_output())  # Asterisk-bordered output
+
+# Option 2: execute_mas() convenience function
+result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
+```
+
+### MASExecutor Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `initialize()` | `None` | Compile config to executable LangGraph |
+| `run(input_data, thread_id, save_results)` | `MASExecutionResult` | Execute graph, collect results |
+| `run_with_checkpoint_persistence(input_data, thread_id)` | `(original, restored)` | Run twice with checkpoint save/restore |
+| `run_cross_model_test(input_data, source_model, target_model, thread_id)` | `(source, target)` | Run with two different model configurations |
+
+### MASExecutionResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mas_id` | `str` | MAS identifier |
+| `execution_id` | `str` | Unique execution run ID |
+| `start_time` / `end_time` | `str` | ISO-8601 UTC timestamps |
+| `total_execution_time_ms` | `float` | Total wall-clock time |
+| `agent_results` | `List[AgentExecutionResult]` | Per-agent outputs and statistics |
+| `total_messages` | `int` | Total inter-agent messages |
+| `messages_by_channel` | `Dict[str, int]` | Message counts by channel |
+| `checkpoint_saved` | `bool` | Whether checkpoint was persisted |
+| `success` | `bool` | Whether execution succeeded |
+| `error` | `str` (optional) | Error message on failure |
+
+**Methods:** `to_dict()`, `save_to_file(path)`, `get_summary()`, `get_formatted_output()`
+
+### Checkpoint Persistence Testing
+
+```python
+executor = MASExecutor(config)
+executor.initialize()
+
+# Run twice — first saves checkpoint, second restores it
+original, restored = executor.run_with_checkpoint_persistence(
+    input_data={"messages": [HumanMessage(content="Test")]},
+    thread_id="test_001"
+)
+print(f"Original: {original.success}, Restored: {restored.success}")
+```
+
+### Cross-Model Transfer Testing
+
+```python
+source, target = executor.run_cross_model_test(
+    input_data={"messages": [HumanMessage(content="Test")]},
+    source_model="gpt-4",
+    target_model="claude-sonnet-3-5-20241022",
+    thread_id="transfer_001"
+)
+```
+
+### CLI Tool (Runtime)
+
+```bash
+# Basic execution
+python bili/aether/runtime/cli.py configs/simple_chain.yaml \
+    --input "Test content to review"
+
+# With input file
+python bili/aether/runtime/cli.py configs/production.yaml \
+    --input-file input.txt --log-dir my_logs
+
+# Test checkpoint persistence
+python bili/aether/runtime/cli.py configs/production.yaml \
+    --input "Test payload" --test-checkpoint --thread-id test_001
+
+# Test cross-model transfer
+python bili/aether/runtime/cli.py configs/production.yaml \
+    --input "Test payload" --test-cross-model \
+    --source-model gpt-4 --target-model claude-sonnet-3-5-20241022
 ```
 
 ## Example Workflows
@@ -813,12 +1014,15 @@ bili/aether/
 │   ├── state_generator.py # TypedDict state schema generation
 │   ├── compiled_mas.py   # CompiledMAS container
 │   └── cli.py            # CLI compilation tool
-├── runtime/              # Agent communication protocol
+├── runtime/              # Agent communication and execution
 │   ├── messages.py       # Message, MessageType, MessageHistory
 │   ├── logger.py         # CommunicationLogger (JSONL)
 │   ├── channels.py       # DirectChannel, BroadcastChannel, RequestResponseChannel
 │   ├── channel_manager.py # ChannelManager
-│   └── communication_state.py # LangGraph state integration helpers
+│   ├── communication_state.py # LangGraph state integration helpers
+│   ├── execution_result.py # AgentExecutionResult, MASExecutionResult
+│   ├── executor.py       # MASExecutor, execute_mas()
+│   └── cli.py            # Runtime CLI tool
 ├── integration/          # bili-core integration layer
 │   ├── __init__.py       # Package exports
 │   ├── role_registry.py  # RoleDefaults registry (16 roles)
@@ -828,7 +1032,9 @@ bili/aether/
 ├── validation/           # Static MAS validation engine
 │   ├── __init__.py       # validate_mas() entry point
 │   └── engine.py         # 13 structural validation checks
-└── tests/                # Test suite (174 tests)
+├── examples/             # Complete workflow examples
+│   └── complete_aether_workflow.py
+└── tests/                # Test suite (200+ tests)
 ```
 
 ## Integration with bili-core
@@ -1027,5 +1233,5 @@ MIT License - See LICENSE file in the repository root.
 ---
 
 **AETHER Version:** 0.1.0
-**Last Updated:** February 4, 2026
+**Last Updated:** February 5, 2026
 **bili-core Version Required:** ≥3.0.0
