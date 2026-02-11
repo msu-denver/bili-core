@@ -82,11 +82,14 @@ class AgentSpec(BaseModel):
         max_length=10000,
     )
 
-    temperature: float = Field(
-        0.0,
+    temperature: Optional[float] = Field(
+        None,
         ge=0.0,
         le=2.0,
-        description="LLM sampling temperature (0.0=deterministic, 2.0=creative)",
+        description=(
+            "LLM sampling temperature (0.0=deterministic, 2.0=creative). "
+            "Defaults to model provider's default if not specified."
+        ),
     )
 
     model_name: Optional[str] = Field(
@@ -279,7 +282,7 @@ class AgentSpec(BaseModel):
 
     def get_display_name(self) -> str:
         """Get human-readable agent name."""
-        return self.role.replace("_", " ").title()
+        return self.role.replace("_", " ").title()  # pylint: disable=no-member
 
     def __str__(self) -> str:
         """String representation."""

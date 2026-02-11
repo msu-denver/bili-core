@@ -156,9 +156,15 @@ class TestInheritance:
         assert result.tools.index("serp_api_tool") < result.tools.index("mock_tool")
 
     def test_temperature_inherited_when_default(self):
-        agent = _make_agent(temperature=0.0)
+        agent = _make_agent(temperature=None)
         result = apply_inheritance(agent)
         assert result.temperature == 0.5  # researcher default
+
+    def test_temperature_zero_not_overridden(self):
+        # Explicitly set temperature=0.0 (deterministic) should NOT be overridden
+        agent = _make_agent(temperature=0.0)
+        result = apply_inheritance(agent)
+        assert result.temperature == 0.0
 
     def test_temperature_not_overridden_when_set(self):
         agent = _make_agent(temperature=0.8)
@@ -213,7 +219,7 @@ class TestInheritance:
         result = apply_inheritance(agent)
         assert result.system_prompt is not None
         assert result.tools == []
-        assert result.temperature == 0.0
+        assert result.temperature is None  # Not inherited when inherit_llm_config=False
 
     def test_selective_inherit_tools_only(self):
         agent = _make_agent(

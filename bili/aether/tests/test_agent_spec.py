@@ -16,7 +16,7 @@ def test_minimal_agent():
 
     assert agent.agent_id == "test_agent"
     assert agent.role == "content_reviewer"
-    assert agent.temperature == 0.0  # Default
+    assert agent.temperature is None  # Default (uses provider default)
 
 
 def test_any_role_allowed():

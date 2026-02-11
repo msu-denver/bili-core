@@ -112,8 +112,8 @@ def _apply_system_prompt(agent: Any, defaults: Any, updates: Dict[str, object]) 
 
 
 def _apply_llm_config(agent: Any, defaults: Any, updates: Dict[str, object]) -> None:
-    """Inherit temperature (when default 0.0) and model_name (when None)."""
-    if agent.temperature == 0.0 and defaults.temperature is not None:
+    """Inherit temperature (when None) and model_name (when None)."""
+    if agent.temperature is None and defaults.temperature is not None:
         updates["temperature"] = defaults.temperature
         LOGGER.debug(
             "Agent '%s': inherited temperature=%.2f from role '%s'",
