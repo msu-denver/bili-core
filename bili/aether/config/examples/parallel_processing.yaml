@@ -1,0 +1,109 @@
+# =============================================================================
+# Parallel Data Processing Workflow
+# =============================================================================
+#
+# Demonstrates:
+#   - Parallel workflow type (all agents execute simultaneously)
+#   - Broadcast channel (coordinator -> all processors)
+#   - PubSub channel (processors publish results)
+#   - Multiple agents processing data concurrently
+#
+# Use case: A coordinator broadcasts a dataset to multiple processors
+# that analyze different aspects in parallel, then publish their findings.
+#
+# Pattern: Coordinator -> [Processor1, Processor2, Processor3] -> Aggregator
+# =============================================================================
+
+mas_id: parallel_processing
+name: Parallel Data Processing Pipeline
+description: >
+  Demonstrates parallel workflow where multiple agents process data
+  simultaneously using broadcast and pub-sub communication channels.
+version: "1.0.0"
+
+workflow_type: parallel
+
+# All agents execute in parallel
+# In parallel workflow, all agents run concurrently and can communicate
+# via channels during execution
+
+agents:
+  - agent_id: coordinator
+    role: coordinator
+    objective: >
+      Receive the dataset and broadcast it to all processors for parallel analysis.
+      Coordinate the overall processing workflow.
+    temperature: 0.3
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: statistical_processor
+    role: analyst
+    objective: >
+      Perform statistical analysis on the received dataset.
+      Calculate mean, median, std deviation, and identify outliers.
+    temperature: 0.2
+    capabilities:
+      - statistical_analysis
+      - data_validation
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: trend_processor
+    role: analyst
+    objective: >
+      Identify trends and patterns in the dataset.
+      Look for seasonal variations, growth patterns, and anomalies.
+    temperature: 0.5
+    capabilities:
+      - trend_analysis
+      - pattern_recognition
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: quality_processor
+    role: reviewer
+    objective: >
+      Assess data quality and completeness.
+      Identify missing values, duplicates, and data integrity issues.
+    temperature: 0.2
+    capabilities:
+      - quality_assurance
+      - data_validation
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: aggregator
+    role: synthesizer
+    objective: >
+      Subscribe to all processor outputs and synthesize findings.
+      Create a comprehensive analysis combining all perspectives.
+    temperature: 0.4
+    # Add model_name: gpt-4o for real LLM execution
+
+channels:
+  # Broadcast channel: coordinator sends dataset to all processors
+  - channel_id: data_distribution
+    protocol: broadcast
+    source: coordinator
+    description: Coordinator broadcasts dataset to all processors
+
+  # PubSub channels: processors publish results, aggregator subscribes
+  - channel_id: analysis_results
+    protocol: pubsub
+    source: statistical_processor
+    target: aggregator
+    description: Statistical analysis results
+
+  - channel_id: trend_results
+    protocol: pubsub
+    source: trend_processor
+    target: aggregator
+    description: Trend analysis results
+
+  - channel_id: quality_results
+    protocol: pubsub
+    source: quality_processor
+    target: aggregator
+    description: Quality assessment results
+
+# Example execution:
+# result = execute_mas(config, {
+#     "messages": ["Analyze this sales data: Q1=100k, Q2=150k, Q3=120k, Q4=180k"]
+# })

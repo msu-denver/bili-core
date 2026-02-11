@@ -1,0 +1,146 @@
+# =============================================================================
+# Structured Output with Consensus Voting
+# =============================================================================
+#
+# Demonstrates:
+#   - JSON and STRUCTURED output formats
+#   - Consensus workflow with vote_field extraction
+#   - Consensus channels for peer deliberation
+#   - Structured data validation
+#
+# Use case: Research paper review where reviewers provide structured
+# feedback and vote on acceptance, requiring consensus to proceed.
+#
+# Pattern: Multiple reviewers analyze in parallel -> Consensus voting -> Decision
+# =============================================================================
+
+mas_id: structured_consensus
+name: Structured Output with Consensus Voting
+description: >
+  Demonstrates JSON/structured output formats and consensus voting with
+  explicit vote field extraction from agent responses.
+version: "1.0.0"
+
+workflow_type: consensus
+
+# Consensus configuration
+consensus_threshold: 0.66  # 66% agreement required
+consensus_max_rounds: 3    # Maximum deliberation rounds
+
+agents:
+  - agent_id: methodology_reviewer
+    role: reviewer
+    objective: >
+      Review the research methodology and experimental design.
+      Provide structured feedback with a clear accept/reject/revise vote.
+    temperature: 0.3
+    output_format: json  # Structured JSON output
+    consensus_vote_field: decision  # Extract vote from this JSON field
+    capabilities:
+      - methodology_review
+      - experimental_design
+    # Add model_name: gpt-4o for real LLM execution
+
+    # Expected JSON output format:
+    # {
+    #   "decision": "accept|reject|revise",
+    #   "methodology_score": 8,
+    #   "strengths": ["Clear hypothesis", "Robust design"],
+    #   "weaknesses": ["Small sample size"],
+    #   "confidence": 0.85
+    # }
+
+  - agent_id: results_reviewer
+    role: reviewer
+    objective: >
+      Review the results, statistical analysis, and data interpretation.
+      Provide structured feedback with vote in JSON format.
+    temperature: 0.3
+    output_format: json  # Structured JSON output
+    consensus_vote_field: decision  # Extract vote from this JSON field
+    capabilities:
+      - statistical_analysis
+      - results_validation
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: writing_reviewer
+    role: reviewer
+    objective: >
+      Review writing quality, clarity, and organization.
+      Provide structured feedback with vote.
+    temperature: 0.4
+    output_format: json  # Structured JSON output
+    consensus_vote_field: decision  # Extract vote from this JSON field
+    capabilities:
+      - writing_quality
+      - clarity_assessment
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: ethics_reviewer
+    role: reviewer
+    objective: >
+      Review ethical considerations, conflicts of interest, and compliance.
+      Provide structured feedback using STRUCTURED output format with schema.
+    temperature: 0.2
+    output_format: structured  # Schema-validated structured output
+    consensus_vote_field: decision  # Extract vote from validated structure
+    output_schema:  # Pydantic-like schema for validation
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: ["accept", "reject", "revise"]
+        ethics_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+        ethical_concerns:
+          type: array
+          items:
+            type: string
+        compliance_status:
+          type: string
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+      required: ["decision", "ethics_score"]
+    capabilities:
+      - ethics_review
+      - compliance_check
+    # Add model_name: gpt-4o for real LLM execution
+
+channels:
+  # Consensus channels allow all reviewers to see each other's feedback
+  - channel_id: methodology_discussion
+    protocol: consensus
+    source: methodology_reviewer
+    description: Share methodology reviews for consensus
+
+  - channel_id: results_discussion
+    protocol: consensus
+    source: results_reviewer
+    description: Share results reviews for consensus
+
+  - channel_id: writing_discussion
+    protocol: consensus
+    source: writing_reviewer
+    description: Share writing reviews for consensus
+
+  - channel_id: ethics_discussion
+    protocol: consensus
+    source: ethics_reviewer
+    description: Share ethics reviews for consensus
+
+# Example execution:
+# result = execute_mas(config, {
+#     "messages": ["Review this paper: 'Machine Learning for Climate Prediction'..."]
+# })
+#
+# The system will:
+# 1. All reviewers analyze the paper in parallel
+# 2. Each provides structured JSON output with a "decision" field
+# 3. Votes are extracted from the "decision" field
+# 4. If 66%+ agree, consensus is reached
+# 5. Otherwise, reviewers deliberate for up to 3 rounds
+# 6. Final decision based on majority vote or timeout

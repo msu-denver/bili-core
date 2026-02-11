@@ -973,24 +973,85 @@ python bili/aether/runtime/cli.py configs/production.yaml \
 
 ## Example Workflows
 
-AETHER includes example YAML configurations for multiple domains:
+AETHER includes 12 example YAML configurations demonstrating all framework capabilities across multiple domains.
 
-### Content Moderation
+### Feature Coverage Matrix
+
+The table below shows which AETHER features each example demonstrates:
+
+| Example | Domain | Workflow | Channels | Output | Special Features |
+|---------|--------|----------|----------|--------|------------------|
+| `simple_chain.yaml` | Content Mod | **Sequential** | Direct | Text | Basic pipeline |
+| `hierarchical_voting.yaml` | Content Mod | **Hierarchical** | Direct, Competitive | Text | Tier-based voting |
+| `supervisor_moderation.yaml` | Content Mod | **Supervisor** | Direct, Req-Resp | Text | Hub-and-spoke routing |
+| `consensus_network.yaml` | Content Mod | **Consensus** | Consensus | Text | Peer deliberation |
+| `custom_escalation.yaml` | Content Mod | **Custom** | Direct | Text | Conditional edges |
+| `research_analysis.yaml` | Research | **Sequential** | Direct | Text | Multi-step analysis |
+| `inherited_research.yaml` | Research | **Sequential** | Direct | Text | **bili-core Inheritance** |
+| `code_review.yaml` | Software Eng | **Supervisor** | Direct (6) | Text | Specialist routing |
+| `middleware_checkpointer.yaml` | Technical | **Sequential** | Direct | Text | **Middleware**, **Checkpointer** |
+| `parallel_processing.yaml` | Data Analysis | **Parallel** | **Broadcast**, **PubSub** | Text | Concurrent execution |
+| `deliberative_escalation.yaml` | Customer Support | **Deliberative** | Direct, Req-Resp | **JSON** | **Human-in-Loop** |
+| `structured_consensus.yaml` | Peer Review | **Consensus** | Consensus (4) | **JSON**, **Structured** | **Vote Fields**, Schema validation |
+
+### Legend
+
+**Workflow Types:**
+- **Sequential**: Linear chain (A → B → C)
+- **Hierarchical**: Tier-based with aggregation
+- **Supervisor**: Central router dispatches to specialists
+- **Consensus**: Peer deliberation until agreement
+- **Parallel**: All agents execute concurrently
+- **Deliberative**: Custom workflow with escalation
+- **Custom**: User-defined edges and conditions
+
+**Channel Protocols:**
+- **Direct**: Point-to-point (A → B)
+- **Broadcast**: One-to-many (A → All)
+- **PubSub**: Publish-subscribe pattern
+- **Req-Resp**: Request-response (bidirectional)
+- **Competitive**: Adversarial debate
+- **Consensus**: Peer deliberation
+
+**Output Formats:**
+- **Text**: Plain text responses (default)
+- **JSON**: Structured JSON objects
+- **Structured**: Schema-validated JSON
+
+**Special Features:**
+- **Middleware**: Per-agent middleware (summarization, call limits)
+- **Checkpointer**: State persistence configuration
+- **Inheritance**: Inherit defaults from bili-core role registry
+- **Human-in-Loop**: Pause execution for human approval
+- **Vote Fields**: Extract consensus votes from structured output
+
+### Examples by Domain
+
+**Content Moderation (5 examples):**
 - `simple_chain.yaml` - Sequential review pipeline
 - `hierarchical_voting.yaml` - Tiered debate and voting
 - `supervisor_moderation.yaml` - Supervisor-routed specialists
 - `consensus_network.yaml` - Peer deliberation
-- `custom_escalation.yaml` - Human-in-the-loop
+- `custom_escalation.yaml` - Conditional escalation
 
-### Research (Domain-Agnostic)
+**Research (2 examples):**
 - `research_analysis.yaml` - Research → Fact-check → Analyze → Synthesize
 - `inherited_research.yaml` - Same pipeline using `inherit_from_bili_core: true`
 
-### Integration Features
-- `middleware_checkpointer.yaml` - Per-agent middleware + auto-detect checkpoint config
-
-### Software Engineering (Domain-Agnostic)
+**Software Engineering (1 example):**
 - `code_review.yaml` - Lead engineer routes to security/performance/style reviewers
+
+**Data Analysis (1 example):**
+- `parallel_processing.yaml` - Concurrent statistical, trend, and quality analysis
+
+**Customer Support (1 example):**
+- `deliberative_escalation.yaml` - Ticket classification with human escalation
+
+**Peer Review (1 example):**
+- `structured_consensus.yaml` - Research paper review with structured voting
+
+**Technical Demos (1 example):**
+- `middleware_checkpointer.yaml` - Per-agent middleware + auto-detect checkpoint config
 
 ## Architecture
 
