@@ -52,6 +52,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# AETHER test artifacts
+test_seq_*.json
+
 # Translations
 *.mo
 *.pot
@@ -270,3 +273,4 @@ secrets
 
 
 
+coverage.json

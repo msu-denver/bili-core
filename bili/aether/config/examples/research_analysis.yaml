@@ -1,0 +1,104 @@
+# =============================================================================
+# Research Analysis Workflow (Domain-Agnostic Example)
+# =============================================================================
+#
+# This example demonstrates AETHER's domain-agnostic design by showing
+# a research workflow that has nothing to do with content moderation.
+#
+# Pattern: researcher → fact_checker → analyst → synthesizer
+#
+# Use case: Analyze a research topic by gathering information, verifying
+# facts, performing analysis, and synthesizing a final report.
+# =============================================================================
+
+mas_id: research_analysis
+name: Research Analysis Pipeline
+description: >
+  A four-stage research pipeline demonstrating AETHER's domain-agnostic
+  design. Agents have custom roles like researcher, fact_checker, analyst,
+  and synthesizer - not limited to content moderation roles.
+version: "1.0.0"
+
+workflow_type: sequential
+
+agents:
+  - agent_id: researcher
+    role: researcher
+    objective: >
+      Search for and gather information on the given research topic.
+      Compile relevant sources, data points, and findings for further
+      analysis by downstream agents.
+    temperature: 0.5
+    capabilities:
+      - web_search
+      - document_analysis
+      - source_gathering
+    tools:
+      - serp_api_tool
+    output_format: json
+
+  - agent_id: fact_checker
+    role: fact_checker
+    objective: >
+      Verify the claims and data gathered by the researcher. Cross-reference
+      sources, identify potential inaccuracies, and flag claims that need
+      additional verification.
+    temperature: 0.2
+    capabilities:
+      - source_verification
+      - claim_analysis
+      - web_search
+    tools:
+      - serp_api_tool
+    output_format: json
+
+  - agent_id: analyst
+    role: analyst
+    objective: >
+      Analyze the verified research findings. Identify patterns, trends,
+      and insights. Provide quantitative and qualitative analysis of the
+      data gathered by previous agents.
+    temperature: 0.3
+    capabilities:
+      - data_analysis
+      - pattern_recognition
+      - statistical_reasoning
+    output_format: json
+
+  - agent_id: synthesizer
+    role: synthesizer
+    objective: >
+      Synthesize all research, fact-checking, and analysis into a coherent
+      final report. Summarize key findings, highlight important insights,
+      and provide recommendations based on the analysis.
+    temperature: 0.4
+    capabilities:
+      - report_writing
+      - summarization
+      - insight_generation
+    output_format: text
+
+channels:
+  - channel_id: researcher_to_factchecker
+    protocol: direct
+    source: researcher
+    target: fact_checker
+    description: Raw research findings sent for fact-checking
+
+  - channel_id: factchecker_to_analyst
+    protocol: direct
+    source: fact_checker
+    target: analyst
+    description: Verified findings sent for analysis
+
+  - channel_id: analyst_to_synthesizer
+    protocol: direct
+    source: analyst
+    target: synthesizer
+    description: Analysis results sent for final synthesis
+
+tags:
+  - research
+  - analysis
+  - sequential
+  - domain-agnostic

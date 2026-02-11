@@ -1,0 +1,138 @@
+# =============================================================================
+# Deliberative Workflow with Human-in-Loop Escalation
+# =============================================================================
+#
+# Demonstrates:
+#   - Deliberative workflow type (custom with escalation logic)
+#   - Human-in-loop for final approval
+#   - Conditional edges based on confidence levels
+#   - Request-response channels for clarifications
+#
+# Use case: Customer support escalation where agents deliberate on solutions,
+# and difficult cases escalate to human review.
+#
+# Pattern: Classifier -> Resolver -> Reviewer -> [Auto-close OR Human-escalation]
+# =============================================================================
+
+mas_id: deliberative_escalation
+name: Customer Support Deliberation with Escalation
+description: >
+  Demonstrates deliberative workflow where agents collaborate to resolve
+  customer issues, with automatic escalation to human review for complex cases.
+version: "1.0.0"
+
+workflow_type: deliberative
+
+# Human-in-loop configuration
+human_in_loop: true
+human_in_loop_condition: "state.get('escalate_to_human', False)"
+
+agents:
+  - agent_id: classifier
+    role: classifier
+    objective: >
+      Classify incoming customer support tickets by urgency and category.
+      Determine initial routing and set confidence level.
+    temperature: 0.2
+    output_format: json  # Structured output for downstream processing
+    capabilities:
+      - ticket_classification
+      - urgency_assessment
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: resolver
+    role: support_agent
+    objective: >
+      Propose solutions for customer issues based on classification.
+      If confident (>80%), suggest auto-resolution. Otherwise, request review.
+    temperature: 0.5
+    capabilities:
+      - problem_solving
+      - solution_generation
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: reviewer
+    role: reviewer
+    objective: >
+      Review proposed solutions for accuracy and completeness.
+      Flag complex cases (confidence <60%) for human escalation.
+      Set escalate_to_human flag if needed.
+    temperature: 0.3
+    capabilities:
+      - quality_review
+      - escalation_decision
+    # Add model_name: gpt-4o for real LLM execution
+
+  - agent_id: human_agent
+    role: human_expert
+    objective: >
+      Handle escalated cases that require human judgment.
+      Make final decision on complex or sensitive issues.
+    temperature: 0.7
+    is_human: true  # Marker for human-in-loop
+    # This agent pauses execution for human input
+
+channels:
+  # Initial classification
+  - channel_id: classification_to_resolver
+    protocol: direct
+    source: classifier
+    target: resolver
+    description: Classification results to resolver
+
+  # Solution proposal
+  - channel_id: resolution_to_reviewer
+    protocol: direct
+    source: resolver
+    target: reviewer
+    description: Proposed solution for review
+
+  # Clarification requests (bidirectional)
+  - channel_id: clarifications
+    protocol: request_response
+    source: reviewer
+    target: resolver
+    description: Request clarifications on proposed solutions
+
+  # Escalation to human
+  - channel_id: escalation
+    protocol: direct
+    source: reviewer
+    target: human_agent
+    description: Escalate complex cases to human review
+
+# Workflow edges define the deliberative flow
+workflow_edges:
+  - source: START
+    target: classifier
+    description: Begin with classification
+
+  - source: classifier
+    target: resolver
+    condition: "True"  # Always proceed to resolver
+
+  - source: resolver
+    target: reviewer
+    condition: "True"  # Always get review
+
+  - source: reviewer
+    target: END
+    condition: "state.get('confidence', 0) > 0.6 and not state.get('escalate_to_human', False)"
+    description: Auto-close if confident and no escalation needed
+
+  - source: reviewer
+    target: human_agent
+    condition: "state.get('escalate_to_human', False)"
+    description: Escalate to human if flagged
+
+  - source: human_agent
+    target: END
+    condition: "True"  # Human decision is final
+
+# Example execution:
+# result = execute_mas(config, {
+#     "messages": ["Customer reports: Cannot access account after password reset"]
+# })
+#
+# If escalate_to_human is True, execution pauses for human input via
+# human_in_loop interrupt mechanism.

@@ -35,6 +35,6 @@ repos:
         language: python
         types: [ python ]
         # Specify the directories you want to include
-        # files: ^(bili/|project2/).*\.py$
+        # files: ^(bili/!aether/).*\.py$
         files: ^(bili/).*\.py$
         args: ["--fail-under=9"]  # Set the threshold to fail if the score is below 9
