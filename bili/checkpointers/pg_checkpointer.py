@@ -135,7 +135,9 @@ def close_pg_connection_pool():
         LOGGER.info("Shared Postgres connection pool closed.")
 
 
-def get_pg_checkpointer(keep_last_n: int = 5) -> Optional[PostgresSaver]:
+def get_pg_checkpointer(
+    keep_last_n: int = 5, user_id: Optional[str] = None
+) -> Optional[PostgresSaver]:
     """
     Retrieves a PostgreSQL checkpointer.
 
@@ -145,6 +147,9 @@ def get_pg_checkpointer(keep_last_n: int = 5) -> Optional[PostgresSaver]:
     checkpointer. If the connection pool is not available, the function will return
     None.
 
+    :param keep_last_n: Number of checkpoints to retain per thread (-1 for unlimited)
+    :param user_id: Optional user identifier for thread ownership validation.
+        When provided, enables multi-tenant security with automatic schema migration.
     :raises Exception: If there is a failure during the setup process.
     :return: A `PostgresSaver` instance if the PostgreSQL connection pool is
         available, otherwise None.
@@ -152,7 +157,9 @@ def get_pg_checkpointer(keep_last_n: int = 5) -> Optional[PostgresSaver]:
     """
     pg_connection_pool = get_pg_connection_pool()
     if pg_connection_pool:
-        checkpointer = PruningPostgresSaver(pg_connection_pool, keep_last_n=keep_last_n)
+        checkpointer = PruningPostgresSaver(
+            pg_connection_pool, keep_last_n=keep_last_n, user_id=user_id
+        )
         checkpointer.setup()  # Perform setup if this is the first time
         checkpointer.ensure_indexes()  # Create indexes after tables exist
         return checkpointer
@@ -185,7 +192,13 @@ class PruningPostgresSaver(
     # Use the global format version
     format_version: int = CURRENT_FORMAT_VERSION
 
-    def __init__(self, *args: Any, keep_last_n: int = -1, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        keep_last_n: int = -1,
+        user_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Initializes an instance of the class. Configures the object with the provided
         parameters, initializes state, and performs any necessary setup like ensuring
@@ -194,10 +207,89 @@ class PruningPostgresSaver(
         :param args: Positional arguments passed to the parent class constructor.
         :param keep_last_n: Specifies the maximum number of entries to retain. If set
             to -1, no limit is applied.
+        :param user_id: Optional user identifier for thread ownership validation.
+            When provided, automatically adds user_id column to database (on-demand migration)
+            and validates that thread_ids belong to this user.
         :param kwargs: Keyword arguments passed to the parent class constructor.
         """
         super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
+        self.user_id = user_id
+
+        # On-demand migration: Add user_id schema if user_id is provided
+        if self.user_id:
+            self._ensure_user_id_schema()
+
+    def _ensure_user_id_schema(self) -> None:
+        """
+        Ensure user_id column and index exist in checkpoints table (on-demand migration).
+
+        This method performs an idempotent schema migration when user_id validation
+        is first enabled. It checks if the user_id column exists and creates it if missing,
+        along with an index for efficient user-based queries.
+
+        The migration is safe to run multiple times and will not cause errors or
+        duplicate structures if already applied.
+
+        :return: None
+        """
+        with self._cursor() as cur:
+            # Check if user_id column exists
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'checkpoints'
+                AND column_name = 'user_id'
+                """
+            )
+            column_exists = cur.fetchone() is not None
+
+            if not column_exists:
+                LOGGER.info(
+                    "Adding user_id column to checkpoints table (on-demand migration)"
+                )
+                cur.execute("ALTER TABLE checkpoints ADD COLUMN user_id TEXT")
+
+            # Check if index exists
+            cur.execute(
+                """
+                SELECT indexname
+                FROM pg_indexes
+                WHERE tablename = 'checkpoints'
+                AND indexname = 'idx_checkpoints_user_thread'
+                """
+            )
+            index_exists = cur.fetchone() is not None
+
+            if not index_exists:
+                LOGGER.info("Creating user_id index on checkpoints table")
+                cur.execute(
+                    """
+                    CREATE INDEX idx_checkpoints_user_thread
+                    ON checkpoints(user_id, thread_id)
+                    """
+                )
+
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """
+        Validate that thread_id belongs to the authenticated user.
+
+        Checks if the thread_id follows the expected pattern for the configured user_id.
+        Thread IDs must either exactly match the user_id or start with "{user_id}_".
+
+        :param thread_id: Thread ID to validate
+        :raises PermissionError: If thread_id doesn't belong to the configured user_id
+        :return: None
+        """
+        if self.user_id is None:
+            return  # Validation disabled (backward compatible)
+
+        if not (thread_id == self.user_id or thread_id.startswith(f"{self.user_id}_")):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self.user_id}'"
+            )
 
     def ensure_indexes(self) -> None:
         """
@@ -429,6 +521,11 @@ class PruningPostgresSaver(
         :return: Updated runnable configuration after saving the checkpoint and
         performing pruning, if applicable.
         """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate thread ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
         versioned_metadata["format_version"] = self.format_version
@@ -436,11 +533,17 @@ class PruningPostgresSaver(
         # Save checkpoint using base implementation with versioned metadata
         next_config = super().put(config, checkpoint, versioned_metadata, new_versions)
 
+        # Update user_id column if configured
+        if self.user_id:
+            with self._cursor() as cur:
+                cur.execute(
+                    "UPDATE checkpoints SET user_id = %s WHERE thread_id = %s",
+                    (self.user_id, thread_id),
+                )
+
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:
             return next_config
-
-        thread_id = config["configurable"]["thread_id"]
 
         with self._cursor() as cur:
             # Find old checkpoints to prune
@@ -887,17 +990,23 @@ async def get_async_pg_connection_pool():
     return await _async_pool_manager.get_pool()
 
 
-async def get_async_pg_checkpointer(keep_last_n: int = 5):
+async def get_async_pg_checkpointer(
+    keep_last_n: int = 5, user_id: Optional[str] = None
+):
     """
     Creates and returns an async PostgreSQL checkpointer instance for streaming operations.
 
     :param keep_last_n: Number of checkpoints to keep per thread
+    :param user_id: Optional user identifier for thread ownership validation.
+        When provided, enables multi-tenant security with automatic schema migration.
     :return: AsyncPruningPostgresSaver instance or None
     :rtype: AsyncPruningPostgresSaver | None
     """
     pg_pool = await get_async_pg_connection_pool()
     if pg_pool is not None:
-        checkpointer = AsyncPruningPostgresSaver(pg_pool, keep_last_n=keep_last_n)
+        checkpointer = AsyncPruningPostgresSaver(
+            pg_pool, keep_last_n=keep_last_n, user_id=user_id
+        )
         await checkpointer.asetup()  # Async setup
         await checkpointer.aensure_indexes()  # Create indexes
         return checkpointer
@@ -925,6 +1034,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         self,
         *args: Any,
         keep_last_n: int = -1,
+        user_id: Optional[str] = None,
         **kwargs: Any,
     ):
         """
@@ -932,10 +1042,14 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
         :param args: Positional arguments for parent class
         :param keep_last_n: Number of checkpoints to keep (-1 for unlimited)
+        :param user_id: Optional user identifier for thread ownership validation.
+            When provided, automatically adds user_id column to database (on-demand migration)
+            and validates that thread_ids belong to this user.
         :param kwargs: Keyword arguments for parent class
         """
         super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
+        self.user_id = user_id
 
     async def aensure_indexes(self) -> None:
         """
@@ -966,6 +1080,85 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                 """
             )
 
+        # On-demand migration: Add user_id schema if user_id is provided
+        if self.user_id:
+            await self._aensure_user_id_schema()
+
+    async def _aensure_user_id_schema(self) -> None:
+        """
+        Ensure user_id column and index exist in checkpoints table (async, on-demand migration).
+
+        This method performs an idempotent schema migration when user_id validation
+        is first enabled. It checks if the user_id column exists and creates it if missing,
+        along with an index for efficient user-based queries.
+
+        The migration is safe to run multiple times and will not cause errors or
+        duplicate structures if already applied.
+
+        :return: None
+        """
+        async with self._acursor() as cur:
+            # Check if user_id column exists
+            await cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'checkpoints'
+                AND column_name = 'user_id'
+                """
+            )
+            row = await cur.fetchone()
+            column_exists = row is not None
+
+            if not column_exists:
+                LOGGER.info(
+                    "Adding user_id column to checkpoints table (async on-demand migration)"
+                )
+                await cur.execute("ALTER TABLE checkpoints ADD COLUMN user_id TEXT")
+
+            # Check if index exists
+            await cur.execute(
+                """
+                SELECT indexname
+                FROM pg_indexes
+                WHERE tablename = 'checkpoints'
+                AND indexname = 'idx_checkpoints_user_thread'
+                """
+            )
+            row = await cur.fetchone()
+            index_exists = row is not None
+
+            if not index_exists:
+                LOGGER.info("Creating user_id index on checkpoints table (async)")
+                await cur.execute(
+                    """
+                    CREATE INDEX idx_checkpoints_user_thread
+                    ON checkpoints(user_id, thread_id)
+                    """
+                )
+
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """
+        Validate that thread_id belongs to the authenticated user.
+
+        Checks if the thread_id follows the expected pattern for the configured user_id.
+        Thread IDs must either exactly match the user_id or start with "{user_id}_".
+
+        This method is synchronous and used by both sync and async checkpointers.
+
+        :param thread_id: Thread ID to validate
+        :raises PermissionError: If thread_id doesn't belong to the configured user_id
+        :return: None
+        """
+        if self.user_id is None:
+            return  # Validation disabled (backward compatible)
+
+        if not (thread_id == self.user_id or thread_id.startswith(f"{self.user_id}_")):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self.user_id}'"
+            )
+
     async def aput(
         self,
         config: RunnableConfig,
@@ -982,15 +1175,27 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         :param new_versions: Channel versions
         :return: Updated configuration
         """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate thread ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
         # Save the checkpoint using parent's async method
         next_config = await super().aput(config, checkpoint, metadata, new_versions)
+
+        # Update user_id column if configured
+        if self.user_id:
+            async with self._acursor() as cur:
+                await cur.execute(
+                    "UPDATE checkpoints SET user_id = %s WHERE thread_id = %s",
+                    (self.user_id, thread_id),
+                )
 
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:
             return next_config
 
         # Perform async pruning
-        thread_id = config["configurable"]["thread_id"]
 
         async with self._acursor() as cur:
             # Find old checkpoints to prune
