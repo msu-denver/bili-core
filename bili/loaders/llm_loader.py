@@ -462,6 +462,7 @@ def load_remote_gcp_vertex_model(
     seed=None,
     response_schema=None,
     response_mime_type=None,
+    additional_headers=None,
 ):
     """
     Loads a remote GCP Vertex AI model with the specified configuration parameters.
@@ -484,6 +485,10 @@ def load_remote_gcp_vertex_model(
     :type top_k: int, optional
     :param seed: Optional. Seed for reproducibility in model output.
     :type seed: int, optional
+    :param additional_headers: Optional. HTTP headers to include in API requests.
+        Use for Priority PayGo: {"X-Vertex-AI-LLM-Shared-Request-Type": "priority"}
+        Use for Provisioned Throughput: {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
+    :type additional_headers: dict, optional
     :return: An instance of the ChatVertexAI model initialized with the
              specified configuration.
     :rtype: ChatVertexAI
@@ -506,6 +511,8 @@ def load_remote_gcp_vertex_model(
         llm_config["response_mime_type"] = response_mime_type
     if response_schema:
         llm_config["response_schema"] = response_schema
+    if additional_headers:
+        llm_config["additional_headers"] = additional_headers
 
     llm = ChatVertexAI(**llm_config)
 
