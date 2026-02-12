@@ -109,18 +109,21 @@ def close_mongo_client(client):
         LOGGER.info("Shared MongoDB client closed.")
 
 
-def get_mongo_checkpointer(keep_last_n: int = 5):
+def get_mongo_checkpointer(keep_last_n: int = 5, user_id: Optional[str] = None):
     """
     Creates and returns a MongoDB checkpointer instance if a MongoDB database
     can be successfully initialized.
 
+    :param keep_last_n: Number of checkpoints to retain per thread (-1 for unlimited)
+    :param user_id: Optional user identifier for thread ownership validation.
+        When provided, enables multi-tenant security with automatic index creation.
     :return: Returns an instance of `MongoDBSaver` if the MongoDB database
              is successfully initialized, otherwise returns `None`.
     :rtype: MongoDBSaver | None
     """
     mongo_db = get_mongo_client()
     if mongo_db is not None:
-        return PruningMongoDBSaver(mongo_db, keep_last_n=keep_last_n)
+        return PruningMongoDBSaver(mongo_db, keep_last_n=keep_last_n, user_id=user_id)
     return None
 
 
@@ -157,6 +160,7 @@ class PruningMongoDBSaver(
         self,
         *args: Any,
         keep_last_n: int = -1,
+        user_id: Optional[str] = None,
         **kwargs: Any,
     ):
         """
@@ -170,11 +174,16 @@ class PruningMongoDBSaver(
         :param keep_last_n: Number of most recent results to keep. If set to -1,
             all results are retained without deletion. Defaults to -1.
         :type keep_last_n: int
+        :param user_id: Optional user identifier for thread ownership validation.
+            When provided, automatically creates user_id index (on-demand migration)
+            and validates that thread_ids belong to this user.
+        :type user_id: Optional[str]
         :param kwargs: Keyword arguments passed to the parent class.
         :type kwargs: Any
         """
         super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
+        self.user_id = user_id
         self._ensure_indexes()
 
     def _ensure_indexes(self) -> None:
@@ -218,6 +227,35 @@ class PruningMongoDBSaver(
             name="idx_writes_lookup",
             background=True,
         )
+
+        # On-demand migration: Add user_id index if user_id is configured
+        if self.user_id:
+            LOGGER.info("Creating user_id index (on-demand migration)")
+            self.checkpoint_collection.create_index(
+                [("user_id", ASCENDING), ("thread_id", ASCENDING)],
+                name="idx_user_thread",
+                background=True,
+            )
+
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """
+        Validate that thread_id belongs to the authenticated user.
+
+        Checks if the thread_id follows the expected pattern for the configured user_id.
+        Thread IDs must either exactly match the user_id or start with "{user_id}_".
+
+        :param thread_id: Thread ID to validate
+        :raises PermissionError: If thread_id doesn't belong to the configured user_id
+        :return: None
+        """
+        if self.user_id is None:
+            return  # Validation disabled (backward compatible)
+
+        if not (thread_id == self.user_id or thread_id.startswith(f"{self.user_id}_")):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self.user_id}'"
+            )
 
     # VersionedCheckpointerMixin implementation for MongoDB
 
@@ -433,6 +471,11 @@ class PruningMongoDBSaver(
         :param new_versions: Channel versions
         :return: Updated configuration
         """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate thread ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
 
@@ -441,7 +484,17 @@ class PruningMongoDBSaver(
         versioned_metadata["format_version"] = self.format_version
 
         # Save the checkpoint with versioned metadata
-        return await super().aput(config, checkpoint, versioned_metadata, new_versions)
+        result = await super().aput(
+            config, checkpoint, versioned_metadata, new_versions
+        )
+
+        # Update user_id field if configured (using sync update_many since it's just metadata)
+        if self.user_id:
+            self.checkpoint_collection.update_many(
+                {"thread_id": thread_id}, {"$set": {"user_id": self.user_id}}
+            )
+
+        return result
 
     def put(
         self,
@@ -472,6 +525,11 @@ class PruningMongoDBSaver(
             checkpoint and performing potential pruning actions.
         :rtype: RunnableConfig
         """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate thread ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
         # Add format version to metadata for future migrations
         versioned_metadata = dict(metadata) if metadata else {}
 
@@ -484,12 +542,17 @@ class PruningMongoDBSaver(
             config, checkpoint, versioned_metadata, new_versions
         )
 
+        # Update user_id field if configured
+        if self.user_id:
+            self.checkpoint_collection.update_many(
+                {"thread_id": thread_id}, {"$set": {"user_id": self.user_id}}
+            )
+
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:
             return result_config
 
         # Perform pruning
-        thread_id = config["configurable"]["thread_id"]
         query = {
             "thread_id": thread_id,
         }
