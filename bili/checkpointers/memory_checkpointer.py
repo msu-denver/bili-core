@@ -35,6 +35,64 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
     Useful for testing and development without requiring a database.
     """
 
+    def __init__(self, *, user_id: Optional[str] = None):
+        """
+        Initialize memory checkpointer.
+
+        Args:
+            user_id: Optional user identifier for thread ownership validation.
+                    If provided, validates that thread_ids belong to this user.
+                    Used for interface consistency with database checkpointers.
+        """
+        super().__init__()
+        self.user_id = user_id
+
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """
+        Validate that thread_id belongs to the authenticated user.
+
+        Checks if the thread_id follows the expected pattern for the configured user_id.
+        Thread IDs must either exactly match the user_id or start with "{user_id}_".
+
+        Args:
+            thread_id: Thread ID to validate
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to the configured user_id
+        """
+        if self.user_id is None:
+            return  # Validation disabled (backward compatible)
+
+        if not (thread_id == self.user_id or thread_id.startswith(f"{self.user_id}_")):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self.user_id}'"
+            )
+
+    def put(self, config, checkpoint, metadata, new_versions):
+        """
+        Save checkpoint with optional ownership validation.
+
+        Args:
+            config: Runnable configuration with thread_id
+            checkpoint: Checkpoint to save
+            metadata: Checkpoint metadata
+            new_versions: Channel versions
+
+        Returns:
+            Updated configuration
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to configured user_id
+        """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
+        # Use base class implementation
+        return super().put(config, checkpoint, metadata, new_versions)
+
     def get_user_threads(
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
