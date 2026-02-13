@@ -411,6 +411,31 @@ class MASExecutor:
 
             return MemorySaver()
 
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """Validate that thread_id matches the expected pattern for user_id.
+
+        In multi-tenant mode (when user_id is set), thread_id must follow
+        the pattern: ``{user_id}`` or ``{user_id}_*``.
+
+        Args:
+            thread_id: The thread_id to validate.
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to the configured user_id.
+        """
+        if self._user_id is None:
+            return  # No validation in non-multi-tenant mode
+
+        # Thread ID must either exactly match user_id or start with "{user_id}_"
+        if not (
+            thread_id == self._user_id or thread_id.startswith(f"{self._user_id}_")
+        ):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self._user_id}'. Thread IDs must match pattern: "
+                f"'{self._user_id}' or '{self._user_id}_*'"
+            )
+
     def _construct_thread_id(self, thread_id: Optional[str], execution_id: str) -> str:
         """Construct thread_id for checkpointer, handling multi-tenant pattern.
 
@@ -430,7 +455,15 @@ class MASExecutor:
                 # Use provided conversation_id
                 return f"{self._user_id}_{self._conversation_id}"
             if thread_id:
-                # Use provided thread_id (assume it's conversation_id)
+                # Validate if thread_id already has user_id prefix (reuse case)
+                # Otherwise treat as conversation_id and prepend user_id
+                if (
+                    thread_id.startswith(f"{self._user_id}_")
+                    or thread_id == self._user_id
+                ):
+                    self._validate_thread_ownership(thread_id)
+                    return thread_id  # Already has user_id prefix
+                # Treat as conversation_id and construct full thread_id
                 return f"{self._user_id}_{thread_id}"
             # Generate new conversation_id from execution_id
             conversation_id = execution_id.split("_", 1)[-1]  # Strip mas_id prefix
