@@ -25,6 +25,6 @@ jobs:
           claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           comment-pr: true
           upload-results: true
-          claude-model: claude-sonnet-4-5-20250514
+          claude-model: claude-sonnet-4-5-20250929
           claudecode-timeout: 20
           exclude-directories: node_modules,dist,.git,venv,__pycache__,build
