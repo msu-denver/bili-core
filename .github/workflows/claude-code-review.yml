@@ -29,4 +29,5 @@ jobs:
           plugins: 'code-review@claude-code-plugins'
           include_fix_links: true
           track_progress: true
+          claude_args: '--model opus'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
