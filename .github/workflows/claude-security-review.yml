@@ -1,8 +1,8 @@
 name: Claude Security Review
 
 on:
-  push:
-    branches: [main]
+  pull_request:
+    branches: [main, develop]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
 
       - name: Run Claude Security Review
