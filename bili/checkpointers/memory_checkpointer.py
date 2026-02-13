@@ -97,13 +97,13 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from memory storage."""
-        # MemorySaver stores data in self.storage dict with keys as (thread_id, checkpoint_ns)
+        # MemorySaver stores data in self.storage dict with thread_id as string key
         # We need to filter by thread_id that matches user_identifier pattern
 
         threads_data = {}
 
         # Iterate through storage to find matching threads
-        for (thread_id, checkpoint_ns), checkpoint_tuple in self.storage.items():
+        for thread_id, checkpoint_queue in self.storage.items():
             # Check if thread belongs to user
             if thread_id == user_identifier or thread_id.startswith(
                 f"{user_identifier}_"
@@ -114,16 +114,18 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
                         "last_checkpoint": None,
                     }
 
-                threads_data[thread_id]["checkpoints"].append(checkpoint_tuple)
+                # checkpoint_queue is a deque of (checkpoint, metadata) tuples
+                threads_data[thread_id]["checkpoints"] = list(checkpoint_queue)
 
-                # Track the latest checkpoint (highest checkpoint_id)
-                checkpoint, metadata = checkpoint_tuple[0], checkpoint_tuple[1]
-                if checkpoint:
-                    if (
-                        threads_data[thread_id]["last_checkpoint"] is None
-                        or checkpoint["id"]
-                        > threads_data[thread_id]["last_checkpoint"]["id"]
-                    ):
+                # Track the latest checkpoint (last in queue)
+                if checkpoint_queue and len(checkpoint_queue) > 0:
+                    last_item = checkpoint_queue[-1]
+                    # Handle both tuple (checkpoint, metadata) and single checkpoint
+                    if isinstance(last_item, tuple) and len(last_item) == 2:
+                        checkpoint, metadata = last_item
+                    else:
+                        checkpoint = last_item
+                    if checkpoint:
                         threads_data[thread_id]["last_checkpoint"] = checkpoint
 
         # Build thread list
@@ -210,23 +212,19 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
-        # Find the latest checkpoint for this thread
-        latest_checkpoint = None
-        latest_checkpoint_id = None
+        # Get the checkpoint queue for this thread
+        checkpoint_queue = self.storage.get(thread_id)
 
-        for (tid, checkpoint_ns), checkpoint_tuple in self.storage.items():
-            if tid == thread_id:
-                checkpoint, metadata = checkpoint_tuple[0], checkpoint_tuple[1]
-                if checkpoint:
-                    if (
-                        latest_checkpoint_id is None
-                        or checkpoint["id"] > latest_checkpoint_id
-                    ):
-                        latest_checkpoint = checkpoint
-                        latest_checkpoint_id = checkpoint["id"]
-
-        if not latest_checkpoint:
+        if not checkpoint_queue:
             return []
+
+        # Get the latest checkpoint (last in queue)
+        checkpoint, metadata = checkpoint_queue[-1]
+
+        if not checkpoint:
+            return []
+
+        latest_checkpoint = checkpoint
 
         # Extract messages from checkpoint
         channel_values = latest_checkpoint.get("channel_values", {})

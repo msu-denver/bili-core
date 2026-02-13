@@ -11,6 +11,7 @@ Tests the multi-tenant security features implemented in Tasks #15, #16, #17:
 
 import pytest
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
 
 from bili.checkpointers.memory_checkpointer import QueryableMemorySaver
 
@@ -173,21 +174,49 @@ class TestMemoryCheckpointerMultiConversation:
 class TestMemoryCheckpointerQueryable:
     """Tests for queryable interface with user_id."""
 
-    @pytest.mark.skip(
-        reason="get_user_threads implementation has storage structure dependency issues"
-    )
     def test_get_user_threads_with_user_id(self):
         """Test that get_user_threads returns threads for the correct user."""
-        # Skipped: Implementation relies on internal MemorySaver storage structure
-        # which varies between LangGraph versions
+        checkpointer = QueryableMemorySaver(user_id="user@example.com")
 
-    @pytest.mark.skip(
-        reason="get_user_threads implementation has storage structure dependency issues"
-    )
+        # Create multiple conversations
+        conversations = ["conv1", "conv2", "conv3"]
+        checkpoint_data = _make_checkpoint_data()
+
+        for conv_id in conversations:
+            config = _make_config(f"user@example.com_{conv_id}")
+            checkpointer.put(
+                config,
+                checkpoint_data,
+                {"source": "input", "step": 1, "writes": {}},
+                {},
+            )
+
+        # Get all user threads
+        threads = checkpointer.get_user_threads("user@example.com")
+
+        assert len(threads) == 3
+        thread_ids = {t["thread_id"] for t in threads}
+        assert "user@example.com_conv1" in thread_ids
+        assert "user@example.com_conv2" in thread_ids
+        assert "user@example.com_conv3" in thread_ids
+
     def test_get_user_threads_empty_for_different_user(self):
         """Test that get_user_threads returns empty for different user."""
-        # Skipped: Implementation relies on internal MemorySaver storage structure
-        # which varies between LangGraph versions
+        checkpointer = QueryableMemorySaver(user_id="user@example.com")
+
+        # Create conversations for user@example.com
+        checkpoint_data = _make_checkpoint_data()
+        config = _make_config("user@example.com_conv1")
+        checkpointer.put(
+            config,
+            checkpoint_data,
+            {"source": "input", "step": 1, "writes": {}},
+            {},
+        )
+
+        # Query for a different user
+        threads = checkpointer.get_user_threads("other@example.com")
+        assert len(threads) == 0
 
 
 # ======================================================================
@@ -310,13 +339,37 @@ class TestMultiTenantIsolation:
         with pytest.raises(PermissionError, match="Access denied"):
             checkpointer2._validate_thread_ownership("user1@example.com_private_conv")
 
-    @pytest.mark.skip(
-        reason="get_user_threads implementation has storage structure dependency issues"
-    )
     def test_each_user_sees_only_their_threads(self):
         """Test that get_user_threads only returns threads for the specified user."""
-        # Skipped: Implementation relies on internal MemorySaver storage structure
-        # which varies between LangGraph versions
+        # Create a shared checkpointer without user_id (simulating database)
+        shared_checkpointer = MemorySaver()
+        checkpoint_data = _make_checkpoint_data()
+
+        # Add threads for multiple users
+        users = ["user1@example.com", "user2@example.com", "user3@example.com"]
+        for user in users:
+            for i in range(3):
+                config = _make_config(f"{user}_conv{i}")
+                shared_checkpointer.put(
+                    config,
+                    checkpoint_data,
+                    {"source": "input", "step": 1, "writes": {}},
+                    {},
+                )
+
+        # Create user-specific queryable checkpointer
+        user1_checkpointer = QueryableMemorySaver(user_id="user1@example.com")
+        # Copy data from shared checkpointer (simulating shared DB)
+        user1_checkpointer.storage = shared_checkpointer.storage
+
+        # User1 should only see their own threads
+        user1_threads = user1_checkpointer.get_user_threads("user1@example.com")
+        thread_ids = {t["thread_id"] for t in user1_threads}
+
+        # Should only see user1's threads
+        assert len(user1_threads) == 3
+        for thread_id in thread_ids:
+            assert thread_id.startswith("user1@example.com")
 
 
 # ======================================================================
