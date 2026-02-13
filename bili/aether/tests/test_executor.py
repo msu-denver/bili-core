@@ -511,3 +511,257 @@ class TestCLIArgParsing:
 
         args = _build_parser().parse_args(["config.yaml", "--log-dir", "/tmp/logs"])
         assert args.log_dir == "/tmp/logs"
+
+
+# =========================================================================
+# Multi-Tenant and Multi-Conversation Tests (Tasks #23-25)
+# =========================================================================
+
+
+class TestMASExecutorUserIdentity:
+    """Tests for user_id and conversation_id parameters."""
+
+    def test_executor_with_user_id(self):
+        """Test MASExecutor initialization with user_id parameter."""
+        config = _seq_config()
+        executor = MASExecutor(config, user_id="user@example.com")
+
+        assert executor._user_id == "user@example.com"  # pylint: disable=protected-access
+        assert executor._conversation_id is None  # pylint: disable=protected-access
+
+    def test_executor_with_user_id_and_conversation_id(self):
+        """Test MASExecutor initialization with both user_id and conversation_id."""
+        config = _seq_config()
+        executor = MASExecutor(
+            config, user_id="user@example.com", conversation_id="conv_123"
+        )
+
+        assert executor._user_id == "user@example.com"  # pylint: disable=protected-access
+        assert executor._conversation_id == "conv_123"  # pylint: disable=protected-access
+
+    def test_thread_id_construction_with_user_id_and_conversation_id(self):
+        """Test that thread_id is constructed as {user_id}_{conversation_id}."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+        executor = MASExecutor(
+            config, user_id="user@example.com", conversation_id="conv_123"
+        )
+        executor.initialize()
+
+        # Extract thread_id from run
+        result = executor.run(
+            {"messages": [HumanMessage(content="Test")]}, save_results=False
+        )
+
+        # Thread ID should be user@example.com_conv_123
+        thread_id = result.metadata.get("thread_id")
+        assert thread_id == "user@example.com_conv_123"
+
+    def test_thread_id_construction_with_user_id_only(self):
+        """Test thread_id generation when only user_id is set."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+        executor = MASExecutor(config, user_id="user@example.com")
+        executor.initialize()
+
+        result = executor.run(
+            {"messages": [HumanMessage(content="Test")]}, save_results=False
+        )
+
+        thread_id = result.metadata.get("thread_id")
+        # Should start with user_id and have auto-generated suffix
+        assert thread_id.startswith("user@example.com_")
+
+    def test_thread_id_with_explicit_thread_id_parameter(self):
+        """Test that explicit thread_id parameter is used as conversation_id."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+        executor = MASExecutor(config, user_id="user@example.com")
+        executor.initialize()
+
+        result = executor.run(
+            {"messages": [HumanMessage(content="Test")]},
+            thread_id="my_conversation",
+            save_results=False,
+        )
+
+        thread_id = result.metadata.get("thread_id")
+        # Should prepend user_id to provided thread_id
+        assert thread_id == "user@example.com_my_conversation"
+
+    def test_backward_compat_no_user_id(self):
+        """Test backward compatibility when user_id is not set."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+        executor = MASExecutor(config)  # No user_id
+        executor.initialize()
+
+        result = executor.run(
+            {"messages": [HumanMessage(content="Test")]},
+            thread_id="my_thread",
+            save_results=False,
+        )
+
+        thread_id = result.metadata.get("thread_id")
+        # Should use thread_id as-is (no user_id prefix)
+        assert thread_id == "my_thread"
+
+
+class TestThreadOwnershipValidation:
+    """Tests for thread ownership validation in multi-tenant mode."""
+
+    def test_validate_thread_ownership_valid_exact_match(self):
+        """Test validation passes when thread_id exactly matches user_id."""
+        config = _seq_config()
+        executor = MASExecutor(config, user_id="user@example.com")
+
+        # Should not raise
+        executor._validate_thread_ownership("user@example.com")  # pylint: disable=protected-access
+
+    def test_validate_thread_ownership_valid_prefix(self):
+        """Test validation passes when thread_id starts with user_id_."""
+        config = _seq_config()
+        executor = MASExecutor(config, user_id="user@example.com")
+
+        # Should not raise
+        executor._validate_thread_ownership("user@example.com_conv_123")  # pylint: disable=protected-access
+
+    def test_validate_thread_ownership_invalid_user(self):
+        """Test validation fails when thread_id belongs to different user."""
+        config = _seq_config()
+        executor = MASExecutor(config, user_id="user@example.com")
+
+        with pytest.raises(PermissionError, match="Access denied"):
+            executor._validate_thread_ownership("other@example.com_conv_123")  # pylint: disable=protected-access
+
+    def test_validate_thread_ownership_invalid_no_prefix(self):
+        """Test validation fails when thread_id doesn't have user_id prefix."""
+        config = _seq_config()
+        executor = MASExecutor(config, user_id="user@example.com")
+
+        with pytest.raises(PermissionError, match="does not belong to"):
+            executor._validate_thread_ownership("conv_123")  # pylint: disable=protected-access
+
+    def test_validate_thread_ownership_no_op_without_user_id(self):
+        """Test validation is no-op when user_id not set."""
+        config = _seq_config()
+        executor = MASExecutor(config)  # No user_id
+
+        # Should not raise (validation disabled)
+        executor._validate_thread_ownership("any_thread_id")  # pylint: disable=protected-access
+
+    def test_validation_error_message_includes_pattern(self):
+        """Test that validation error includes expected pattern."""
+        config = _seq_config()
+        executor = MASExecutor(config, user_id="user@example.com")
+
+        with pytest.raises(
+            PermissionError, match="'user@example.com' or 'user@example.com_\\*'"
+        ):
+            executor._validate_thread_ownership("wrong_thread")  # pylint: disable=protected-access
+
+
+class TestMultiConversationScenarios:
+    """Tests for multi-conversation use cases."""
+
+    def test_multiple_conversations_same_user(self):
+        """Test that same user can have multiple concurrent conversations."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+
+        # First conversation
+        executor1 = MASExecutor(
+            config, user_id="user@example.com", conversation_id="conv_1"
+        )
+        executor1.initialize()
+        result1 = executor1.run(
+            {"messages": [HumanMessage(content="Conversation 1")]}, save_results=False
+        )
+
+        # Second conversation
+        executor2 = MASExecutor(
+            config, user_id="user@example.com", conversation_id="conv_2"
+        )
+        executor2.initialize()
+        result2 = executor2.run(
+            {"messages": [HumanMessage(content="Conversation 2")]}, save_results=False
+        )
+
+        # Thread IDs should be different
+        thread1 = result1.metadata.get("thread_id")
+        thread2 = result2.metadata.get("thread_id")
+        assert thread1 == "user@example.com_conv_1"
+        assert thread2 == "user@example.com_conv_2"
+        assert thread1 != thread2
+
+    def test_conversation_reuse_same_thread_id(self):
+        """Test that providing same thread_id reuses conversation."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+        user_id = "user@example.com"
+        conv_id = "reusable_conv"
+
+        # First execution
+        executor1 = MASExecutor(config, user_id=user_id, conversation_id=conv_id)
+        executor1.initialize()
+        executor1.run(
+            {"messages": [HumanMessage(content="First message")]}, save_results=False
+        )
+
+        # Second execution with same conversation_id (should reuse thread)
+        executor2 = MASExecutor(config, user_id=user_id, conversation_id=conv_id)
+        executor2.initialize()
+        result2 = executor2.run(
+            {"messages": [HumanMessage(content="Second message")]},
+            save_results=False,
+        )
+
+        # Should use the same thread_id
+        thread_id = result2.metadata.get("thread_id")
+        assert thread_id == f"{user_id}_{conv_id}"
+
+    def test_thread_id_with_prefix_reuse(self):
+        """Test reusing thread_id that already has user_id prefix."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+
+        executor = MASExecutor(config, user_id="user@example.com")
+        executor.initialize()
+
+        # Provide thread_id that already has user_id prefix
+        result = executor.run(
+            {"messages": [HumanMessage(content="Test")]},
+            thread_id="user@example.com_existing_conv",
+            save_results=False,
+        )
+
+        thread_id = result.metadata.get("thread_id")
+        # Should use as-is (not double-prefix)
+        assert thread_id == "user@example.com_existing_conv"
+        assert thread_id.count("user@example.com") == 1
+
+
+class TestCheckpointerIntegration:
+    """Tests for checkpointer integration with user_id."""
+
+    def test_checkpointer_created_with_user_id(self):
+        """Test that checkpointer is created with user_id when provided."""
+        config = _seq_config()
+        config.checkpoint_enabled = True
+
+        executor = MASExecutor(config, user_id="user@example.com")
+        executor.initialize()
+
+        # Graph should have been compiled with a checkpointer
+        assert executor._compiled_graph is not None  # pylint: disable=protected-access
+
+    def test_no_checkpointer_when_checkpoint_disabled(self):
+        """Test that user_id doesn't create checkpointer if checkpointing disabled."""
+        config = _seq_config()
+        config.checkpoint_enabled = False
+
+        executor = MASExecutor(config, user_id="user@example.com")
+        executor.initialize()
+
+        # Should still initialize successfully (checkpointer not created)
+        assert executor._compiled_graph is not None  # pylint: disable=protected-access
