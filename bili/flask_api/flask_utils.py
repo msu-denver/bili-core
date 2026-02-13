@@ -65,8 +65,8 @@ if __name__ == '__main__':
     app.run()
 """
 
-from functools import wraps
 from dataclasses import replace
+from functools import wraps
 
 from flask import g, jsonify, make_response, request
 from langchain_core.messages import HumanMessage
@@ -74,8 +74,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from bili.auth.auth_manager import AuthManager
 from bili.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
-from bili.nodes.per_user_state import per_user_state_node
 from bili.nodes.add_persona_and_summary import persona_and_summary_node
+from bili.nodes.per_user_state import per_user_state_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -355,14 +355,20 @@ def per_user_agent(
             if per_user_state_node not in graph_definition:
 
                 # Create modified copies with updated edges
-                persona_node_modified = replace(persona_and_summary_node, edges=["per_user_state"])
-                per_user_state_modified = replace(per_user_state_node, edges=["inject_current_datetime"])
+                persona_node_modified = replace(
+                    persona_and_summary_node, edges=["per_user_state"]
+                )
+                per_user_state_modified = replace(
+                    per_user_state_node, edges=["inject_current_datetime"]
+                )
 
                 # Rebuild graph definition: persona → per_user_state → rest
                 graph_definition = [
                     persona_node_modified,
                     per_user_state_modified,
-                ] + graph_definition[1:]  # Skip original persona_and_summary_node
+                ] + graph_definition[
+                    1:
+                ]  # Skip original persona_and_summary_node
 
             # Build the agent graph using the provided parameters
             agent_graph = build_agent_graph(

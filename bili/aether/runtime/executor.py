@@ -62,7 +62,6 @@ class MASExecutor:
         self._validate_config = validate_config
         self._compiled_mas = None
         self._compiled_graph = None
-        self._channel_manager = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -97,7 +96,6 @@ class MASExecutor:
 
         self._compiled_mas = compile_mas(self._config)
         self._compiled_graph = self._compiled_mas.compile_graph()
-        self._channel_manager = self._compiled_mas.channel_manager
 
         LOGGER.info(
             "MASExecutor initialized for '%s' (%d agents, %s workflow)",
@@ -179,14 +177,8 @@ class MASExecutor:
         )
 
         checkpoint_saved = self._config.checkpoint_enabled
-        comm_log_path = self._get_communication_log_path()
-
-        # Close channel manager
-        if self._channel_manager is not None:
-            try:
-                self._channel_manager.close()
-            except Exception:  # pylint: disable=broad-exception-caught
-                LOGGER.debug("Error closing channel manager", exc_info=True)
+        # JSONL logging deprecated - communication now persists in checkpointer state
+        comm_log_path = None
 
         result = MASExecutionResult(
             mas_id=self._config.mas_id,
@@ -457,12 +449,14 @@ class MASExecutor:
         return total, by_channel
 
     def _get_communication_log_path(self) -> Optional[str]:
-        """Return the JSONL log path from the channel manager."""
-        if self._channel_manager is None:
-            return None
-        logger = getattr(self._channel_manager, "_logger", None)
-        if logger is not None:
-            return getattr(logger, "log_path", None)
+        """DEPRECATED: JSONL communication logging is deprecated.
+
+        Communication now persists in LangGraph state via checkpointers,
+        making it cloud-ready (survives pod restarts, works in K8s).
+
+        Returns:
+            Always returns None. Communication log is in state["communication_log"].
+        """
         return None
 
     @staticmethod

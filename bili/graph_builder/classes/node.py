@@ -1,10 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
 from bili.graph_builder.classes.conditional_edge import ConditionalEdge
+
 
 @dataclass(eq=False)
 class Node:
     """Defines a graph node."""
+
     name: str
     function: Callable  # The actual node function (not a builder)
 
@@ -20,7 +23,7 @@ class Node:
     # Optional features
     cache_policy: Optional[Dict[str, Any]] = None  # ttl, key_func
     return_type_annotation: Optional[str] = None  # For Command routing
-    
+
     def __eq__(self, name):
         if isinstance(name, str):
             return name == self.name
@@ -30,6 +33,6 @@ class Node:
             raise ValueError(
                 "Must compare to string or Node type. Please ensure the comparsion is of these types."
             )
-    
+
     def __call__(self, **kwargs):
         return self.function(**kwargs)
