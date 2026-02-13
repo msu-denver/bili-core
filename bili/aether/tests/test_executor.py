@@ -526,7 +526,9 @@ class TestMASExecutorUserIdentity:
         config = _seq_config()
         executor = MASExecutor(config, user_id="user@example.com")
 
-        assert executor._user_id == "user@example.com"  # pylint: disable=protected-access
+        assert (
+            executor._user_id == "user@example.com"
+        )  # pylint: disable=protected-access
         assert executor._conversation_id is None  # pylint: disable=protected-access
 
     def test_executor_with_user_id_and_conversation_id(self):
@@ -536,8 +538,12 @@ class TestMASExecutorUserIdentity:
             config, user_id="user@example.com", conversation_id="conv_123"
         )
 
-        assert executor._user_id == "user@example.com"  # pylint: disable=protected-access
-        assert executor._conversation_id == "conv_123"  # pylint: disable=protected-access
+        assert (
+            executor._user_id == "user@example.com"
+        )  # pylint: disable=protected-access
+        assert (
+            executor._conversation_id == "conv_123"
+        )  # pylint: disable=protected-access
 
     def test_thread_id_construction_with_user_id_and_conversation_id(self):
         """Test that thread_id is constructed as {user_id}_{conversation_id}."""
@@ -616,7 +622,9 @@ class TestThreadOwnershipValidation:
         executor = MASExecutor(config, user_id="user@example.com")
 
         # Should not raise
-        executor._validate_thread_ownership("user@example.com")  # pylint: disable=protected-access
+        executor._validate_thread_ownership(
+            "user@example.com"
+        )  # pylint: disable=protected-access
 
     def test_validate_thread_ownership_valid_prefix(self):
         """Test validation passes when thread_id starts with user_id_."""
@@ -624,7 +632,9 @@ class TestThreadOwnershipValidation:
         executor = MASExecutor(config, user_id="user@example.com")
 
         # Should not raise
-        executor._validate_thread_ownership("user@example.com_conv_123")  # pylint: disable=protected-access
+        executor._validate_thread_ownership(
+            "user@example.com_conv_123"
+        )  # pylint: disable=protected-access
 
     def test_validate_thread_ownership_invalid_user(self):
         """Test validation fails when thread_id belongs to different user."""
@@ -632,7 +642,9 @@ class TestThreadOwnershipValidation:
         executor = MASExecutor(config, user_id="user@example.com")
 
         with pytest.raises(PermissionError, match="Access denied"):
-            executor._validate_thread_ownership("other@example.com_conv_123")  # pylint: disable=protected-access
+            executor._validate_thread_ownership(
+                "other@example.com_conv_123"
+            )  # pylint: disable=protected-access
 
     def test_validate_thread_ownership_invalid_no_prefix(self):
         """Test validation fails when thread_id doesn't have user_id prefix."""
@@ -640,7 +652,9 @@ class TestThreadOwnershipValidation:
         executor = MASExecutor(config, user_id="user@example.com")
 
         with pytest.raises(PermissionError, match="does not belong to"):
-            executor._validate_thread_ownership("conv_123")  # pylint: disable=protected-access
+            executor._validate_thread_ownership(
+                "conv_123"
+            )  # pylint: disable=protected-access
 
     def test_validate_thread_ownership_no_op_without_user_id(self):
         """Test validation is no-op when user_id not set."""
@@ -648,7 +662,9 @@ class TestThreadOwnershipValidation:
         executor = MASExecutor(config)  # No user_id
 
         # Should not raise (validation disabled)
-        executor._validate_thread_ownership("any_thread_id")  # pylint: disable=protected-access
+        executor._validate_thread_ownership(
+            "any_thread_id"
+        )  # pylint: disable=protected-access
 
     def test_validation_error_message_includes_pattern(self):
         """Test that validation error includes expected pattern."""
@@ -658,7 +674,9 @@ class TestThreadOwnershipValidation:
         with pytest.raises(
             PermissionError, match="'user@example.com' or 'user@example.com_\\*'"
         ):
-            executor._validate_thread_ownership("wrong_thread")  # pylint: disable=protected-access
+            executor._validate_thread_ownership(
+                "wrong_thread"
+            )  # pylint: disable=protected-access
 
 
 class TestMultiConversationScenarios:
