@@ -22,13 +22,14 @@ from bili.aether.runtime.executor import MASExecutor
 from bili.aether.schema import AgentSpec, MASConfig, WorkflowType
 from bili.aether.schema.mas_config import Channel, CommunicationProtocol
 
-
 # ======================================================================
 # Helpers
 # ======================================================================
 
 
-def _make_test_config(workflow_type: WorkflowType, with_channels: bool = True) -> MASConfig:
+def _make_test_config(
+    workflow_type: WorkflowType, with_channels: bool = True
+) -> MASConfig:
     """Create a test MASConfig with 3 agents and optional communication channels."""
     agents = [
         AgentSpec(

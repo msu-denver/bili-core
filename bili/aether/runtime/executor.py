@@ -46,6 +46,8 @@ class MASExecutor:
         config: MASConfig,
         log_dir: Optional[str] = None,
         validate_config: bool = True,
+        user_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         """Initialize the executor.
 
@@ -56,10 +58,19 @@ class MASExecutor:
             validate_config: Whether ``compile_mas()`` should validate
                 the config (it always does; this flag is reserved for
                 future use).
+            user_id: Optional user identifier for multi-tenant security.
+                If provided, checkpointer will enforce thread ownership
+                validation and thread_ids will follow the pattern
+                ``{user_id}_{conversation_id}``.
+            conversation_id: Optional conversation identifier for
+                multi-conversation support. Used with ``user_id`` to
+                construct unique thread_ids.
         """
         self._config = config
         self._log_dir = log_dir or os.getcwd()
         self._validate_config = validate_config
+        self._user_id = user_id
+        self._conversation_id = conversation_id
         self._compiled_mas = None
         self._compiled_graph = None
 
@@ -87,6 +98,9 @@ class MASExecutor:
         Calls ``compile_mas()`` (which validates the config) and then
         ``compile_graph()`` to produce the executable graph.
 
+        If ``user_id`` was provided to ``__init__()``, creates a checkpointer
+        with multi-tenant security enabled.
+
         Raises:
             ValueError: If config validation fails.
         """
@@ -95,13 +109,22 @@ class MASExecutor:
         )
 
         self._compiled_mas = compile_mas(self._config)
-        self._compiled_graph = self._compiled_mas.compile_graph()
+
+        # Create checkpointer with user_id if multi-tenant mode enabled
+        checkpointer = None
+        if self._user_id and self._config.checkpoint_enabled:
+            checkpointer = self._create_checkpointer_with_user_id()
+
+        self._compiled_graph = self._compiled_mas.compile_graph(
+            checkpointer=checkpointer
+        )
 
         LOGGER.info(
-            "MASExecutor initialized for '%s' (%d agents, %s workflow)",
+            "MASExecutor initialized for '%s' (%d agents, %s workflow%s)",
             self._config.mas_id,
             len(self._config.agents),
             self._config.workflow_type.value,
+            f", user_id={self._user_id}" if self._user_id else "",
         )
 
     # ------------------------------------------------------------------
@@ -121,7 +144,9 @@ class MASExecutor:
                 ``"messages"`` key with LangChain message objects.
             thread_id: Thread ID for checkpointed execution. If
                 ``None`` and checkpointing is enabled, one is
-                auto-generated.
+                auto-generated. When ``user_id`` is set, this is
+                treated as the conversation_id and the effective
+                thread_id becomes ``{user_id}_{conversation_id}``.
             save_results: Whether to persist results as a JSON file
                 in ``log_dir``.
 
@@ -147,7 +172,7 @@ class MASExecutor:
         # Build invoke config
         invoke_config: Dict[str, Any] = {}
         if self._config.checkpoint_enabled:
-            effective_thread_id = thread_id or execution_id
+            effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config = {"configurable": {"thread_id": effective_thread_id}}
 
         try:
@@ -348,6 +373,71 @@ class MASExecutor:
     # ==================================================================
     # Internal helpers
     # ==================================================================
+
+    def _create_checkpointer_with_user_id(self) -> Any:
+        """Create a checkpointer with multi-tenant security enabled.
+
+        Uses the bili-core checkpointer factory with user_id parameter
+        for thread ownership validation and on-demand schema migration.
+
+        Returns:
+            A checkpointer instance with user_id configured.
+        """
+        try:
+            from bili.aether.integration.checkpointer_factory import (  # pylint: disable=import-outside-toplevel
+                create_checkpointer_from_config,
+            )
+
+            # Create checkpointer from config with user_id
+            checkpointer = create_checkpointer_from_config(
+                self._config.checkpoint_config, user_id=self._user_id
+            )
+
+            LOGGER.info(
+                "Created checkpointer with user_id='%s' for multi-tenant security",
+                self._user_id,
+            )
+            return checkpointer
+
+        except ImportError:
+            LOGGER.warning(
+                "Checkpointer factory not available; "
+                "falling back to MemorySaver without user_id support"
+            )
+
+            from langgraph.checkpoint.memory import (  # pylint: disable=import-error,import-outside-toplevel
+                MemorySaver,
+            )
+
+            return MemorySaver()
+
+    def _construct_thread_id(self, thread_id: Optional[str], execution_id: str) -> str:
+        """Construct thread_id for checkpointer, handling multi-tenant pattern.
+
+        When ``user_id`` is set, constructs thread_id in the format
+        ``{user_id}_{conversation_id}`` to ensure thread ownership validation.
+
+        Args:
+            thread_id: Optional explicit thread_id from caller.
+            execution_id: Auto-generated execution_id as fallback.
+
+        Returns:
+            Effective thread_id for this execution.
+        """
+        if self._user_id:
+            # Multi-tenant mode: enforce {user_id}_{conversation_id} pattern
+            if self._conversation_id:
+                # Use provided conversation_id
+                return f"{self._user_id}_{self._conversation_id}"
+            if thread_id:
+                # Use provided thread_id (assume it's conversation_id)
+                return f"{self._user_id}_{thread_id}"
+            # Generate new conversation_id from execution_id
+            conversation_id = execution_id.split("_", 1)[-1]  # Strip mas_id prefix
+            return f"{self._user_id}_{conversation_id}"
+
+        # Non-multi-tenant mode: use thread_id or execution_id as-is
+        return thread_id or execution_id
 
     def _build_initial_state(
         self, input_data: Optional[Dict[str, Any]]
