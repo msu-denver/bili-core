@@ -226,8 +226,14 @@ def nova_pro_global_route():
     a prompt provided in the request body. Generates a response using a globally defined conversational
     agent and returns the AI's reply to the user.
 
+    Multi-conversation support:
+        - Include "conversation_id" in request JSON to maintain separate conversation threads
+        - If omitted, defaults to single conversation per user (backward compatible)
+
     :param prompt: The input text extracted from the client's JSON request body, provided
         under the key "prompt".
+    :param conversation_id: Optional conversation identifier from request body JSON.
+        Enables multi-conversation support when provided.
 
     :raises KeyError: If the provided JSON object does not include a "prompt" key.
     :raises TypeError: If the prompt is not a string.
@@ -237,11 +243,13 @@ def nova_pro_global_route():
         conversational agent execution fails or yields no output.
     :rtype: flask.Response
     """
-    # Get the prompt from the request body JSON data via param "prompt"
-    prompt = request.get_json().get("prompt", "")
+    # Get the prompt and optional conversation_id from the request body JSON data
+    request_data = request.get_json()
+    prompt = request_data.get("prompt", "")
+    conversation_id = request_data.get("conversation_id")
 
-    # Invoke agent with the provided prompt
-    return handle_agent_prompt(g.user, conversation_agent, prompt)
+    # Invoke agent with the provided prompt and optional conversation_id
+    return handle_agent_prompt(g.user, conversation_agent, prompt, conversation_id)
 
 
 @app.route("/nova_per_user", methods=["GET"])
@@ -258,8 +266,14 @@ def nova_pro_per_user_route():
     a prompt provided in the request body. Generates a response using a per user defined conversational
     agent that is aware of the user's profile and returns the AI's reply to the user.
 
+    Multi-conversation support:
+        - Include "conversation_id" in request JSON to maintain separate conversation threads
+        - If omitted, defaults to single conversation per user (backward compatible)
+
     :param prompt: The input text extracted from the client's JSON request body, provided
         under the key "prompt".
+    :param conversation_id: Optional conversation identifier from request body JSON.
+        Enables multi-conversation support when provided.
 
     :raises KeyError: If the provided JSON object does not include a "prompt" key.
     :raises TypeError: If the prompt is not a string.
@@ -269,11 +283,13 @@ def nova_pro_per_user_route():
         conversational agent execution fails or yields no output.
     :rtype: flask.Response
     """
-    # Get the prompt from the request body JSON data via param "prompt"
-    prompt = request.get_json().get("prompt", "")
+    # Get the prompt and optional conversation_id from the request body JSON data
+    request_data = request.get_json()
+    prompt = request_data.get("prompt", "")
+    conversation_id = request_data.get("conversation_id")
 
     # Invoke agent with the provided prompt using the per-user agent stored in g
-    return handle_agent_prompt(g.user, g.agent, prompt)
+    return handle_agent_prompt(g.user, g.agent, prompt, conversation_id)
 
 
 if __name__ == "__main__":
