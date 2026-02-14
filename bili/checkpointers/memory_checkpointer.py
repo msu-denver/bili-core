@@ -71,6 +71,27 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         # Use base class implementation
         return super().put(config, checkpoint, metadata, new_versions)
 
+    def get_tuple(self, config):
+        """
+        Get checkpoint tuple with optional ownership validation.
+
+        Args:
+            config: Runnable configuration with thread_id
+
+        Returns:
+            Checkpoint tuple or None
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to configured user_id
+        """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
+        # Use base class implementation
+        return super().get_tuple(config)
+
     def get_user_threads(
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
