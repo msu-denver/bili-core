@@ -348,6 +348,9 @@ class PruningMongoDBSaver(
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Migrate checkpoint if needed before LangGraph deserializes it
         try:
             LOGGER.debug("Checking if migration needed for thread %s", thread_id)
@@ -711,6 +714,9 @@ class PruningMongoDBSaver(
         message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Get the latest checkpoint for this thread
         latest_checkpoint = self.checkpoint_collection.find_one(
             {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
@@ -763,6 +769,9 @@ class PruningMongoDBSaver(
 
     def delete_thread(self, thread_id: str) -> bool:
         """Delete all checkpoints for a conversation thread."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         result = self.checkpoint_collection.delete_many({"thread_id": thread_id})
         # Also delete writes for this thread
         self.writes_collection.delete_many({"thread_id": thread_id})

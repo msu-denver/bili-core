@@ -212,6 +212,9 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Get the checkpoint queue for this thread
         checkpoint_queue = self.storage.get(thread_id)
 
@@ -269,6 +272,9 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
     def delete_thread(self, thread_id: str) -> bool:
         """Delete all checkpoints for a conversation thread."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # MemorySaver already has delete_thread, but we need to return bool
         # Find all keys for this thread and delete them
         keys_to_delete = [key for key in self.storage.keys() if key[0] == thread_id]

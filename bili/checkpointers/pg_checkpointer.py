@@ -484,6 +484,9 @@ class PruningPostgresSaver(
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Migrate checkpoint if needed before LangGraph deserializes it
         # Note: This is a no-op if no migrations are registered
         try:
@@ -593,8 +596,12 @@ class PruningPostgresSaver(
                 GROUP BY thread_id
                 ORDER BY MAX(checkpoint_id) DESC
             """
+            # Escape special regex characters in user_identifier (e.g., dots in emails)
+            import re
+
+            escaped_user_id = re.escape(user_identifier)
             params = [
-                f"^{user_identifier}(_|$)"
+                f"^{escaped_user_id}(_|$)"
             ]  # Regex: user_identifier or user_identifier_*
 
             if offset > 0:
@@ -758,6 +765,9 @@ class PruningPostgresSaver(
         Returns:
             List of message dictionaries with role, content, and timestamp
         """
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Use LangGraph's get_tuple() to retrieve the fully reconstructed checkpoint
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
         checkpoint_tuple = self.get_tuple(config)
@@ -886,6 +896,9 @@ class PruningPostgresSaver(
 
     def delete_thread(self, thread_id: str) -> bool:
         """Delete all checkpoints for a conversation thread."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         with self._cursor() as cur:
             # Delete checkpoints
             cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
@@ -1394,6 +1407,9 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         """
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
 
         # Migrate checkpoint if needed before LangGraph deserializes it
         # Note: Migration uses sync methods internally
