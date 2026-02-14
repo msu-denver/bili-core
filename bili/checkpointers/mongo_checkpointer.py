@@ -858,13 +858,16 @@ async def get_async_mongo_client():
     return await _async_client_manager.get_client()
 
 
-async def get_async_mongo_checkpointer(keep_last_n: int = 5):
+async def get_async_mongo_checkpointer(
+    keep_last_n: int = 5, user_id: Optional[str] = None
+):
     """
     Creates and returns an async-capable MongoDB checkpointer instance for streaming operations.
 
     Note: Uses MongoDBSaver (sync init) with async methods as AsyncMongoDBSaver is deprecated.
 
     :param keep_last_n: Number of checkpoints to keep per thread
+    :param user_id: Optional user identifier for thread ownership validation
     :return: PruningMongoDBSaver instance or None (supports async methods)
     :rtype: PruningMongoDBSaver | None
     """
@@ -872,7 +875,7 @@ async def get_async_mongo_checkpointer(keep_last_n: int = 5):
     mongo_db = get_mongo_client()
     if mongo_db is not None:
         LOGGER.info("Using MongoDBSaver with async method support for checkpointing.")
-        return PruningMongoDBSaver(mongo_db, keep_last_n=keep_last_n)
+        return PruningMongoDBSaver(mongo_db, keep_last_n=keep_last_n, user_id=user_id)
     return None
 
 
@@ -899,6 +902,7 @@ class AsyncPruningMongoDBSaver(
         self,
         *args: Any,
         keep_last_n: int = -1,
+        user_id: Optional[str] = None,
         **kwargs: Any,
     ):
         """
@@ -906,10 +910,14 @@ class AsyncPruningMongoDBSaver(
 
         :param args: Positional arguments for parent class
         :param keep_last_n: Number of checkpoints to keep (-1 for unlimited)
+        :param user_id: Optional user identifier for thread ownership validation.
+            When provided, automatically creates user_id index (on-demand migration)
+            and validates that thread_ids belong to this user.
         :param kwargs: Keyword arguments for parent class
         """
         super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
+        self.user_id = user_id
         # Note: Index creation will be handled lazily on first use
 
     async def _ensure_indexes(self) -> None:
@@ -946,6 +954,35 @@ class AsyncPruningMongoDBSaver(
             name="idx_writes_lookup",
             background=True,
         )
+
+        # On-demand migration: Add user_id index if user_id is configured
+        if self.user_id:
+            LOGGER.info("Creating user_id index (on-demand migration)")
+            await self.checkpoint_collection.create_index(
+                [("user_id", ASCENDING), ("thread_id", ASCENDING)],
+                name="idx_user_thread",
+                background=True,
+            )
+
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """
+        Validate that thread_id belongs to the authenticated user.
+
+        Checks if the thread_id follows the expected pattern for the configured user_id.
+        Thread IDs must either exactly match the user_id or start with "{user_id}_".
+
+        :param thread_id: Thread ID to validate
+        :raises PermissionError: If thread_id doesn't belong to the configured user_id
+        :return: None
+        """
+        if self.user_id is None:
+            return  # Validation disabled (backward compatible)
+
+        if not (thread_id == self.user_id or thread_id.startswith(f"{self.user_id}_")):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self.user_id}'"
+            )
 
     # VersionedCheckpointerMixin implementation for async MongoDB
 
@@ -1060,6 +1097,9 @@ class AsyncPruningMongoDBSaver(
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Migrate checkpoint if needed before LangGraph deserializes it
         # Note: Migration methods are sync since they're infrequent
         try:
@@ -1089,6 +1129,11 @@ class AsyncPruningMongoDBSaver(
         :param new_versions: Channel versions
         :return: Updated configuration
         """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # Ensure indexes exist on first use
         if not hasattr(self, "_indexes_ensured"):
             await self._ensure_indexes()
@@ -1253,6 +1298,9 @@ class AsyncPruningMongoDBSaver(
         message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread (async)."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         latest_checkpoint = await self.checkpoint_collection.find_one(
             {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
         )
@@ -1297,3 +1345,50 @@ class AsyncPruningMongoDBSaver(
             messages = messages[:limit]
 
         return messages
+
+    async def adelete_thread(self, thread_id: str) -> bool:
+        """Delete all checkpoints for a conversation thread (async)."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
+        result = await self.checkpoint_collection.delete_many({"thread_id": thread_id})
+        # Also delete writes for this thread
+        await self.writes_collection.delete_many({"thread_id": thread_id})
+        return result.deleted_count > 0
+
+    async def aget_user_stats(self, user_identifier: str) -> Dict[str, Any]:
+        """Get usage statistics for a user (async)."""
+        threads = await self.aget_user_threads(user_identifier)
+
+        if not threads:
+            return {
+                "total_threads": 0,
+                "total_messages": 0,
+                "total_checkpoints": 0,
+                "oldest_thread": None,
+                "newest_thread": None,
+            }
+
+        total_messages = sum(thread["message_count"] for thread in threads)
+        total_checkpoints = sum(thread["checkpoint_count"] for thread in threads)
+        oldest_thread = min(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
+        newest_thread = max(
+            (t["last_updated"] for t in threads if t["last_updated"]), default=None
+        )
+
+        return {
+            "total_threads": len(threads),
+            "total_messages": total_messages,
+            "total_checkpoints": total_checkpoints,
+            "oldest_thread": oldest_thread,
+            "newest_thread": newest_thread,
+        }
+
+    async def athread_exists(self, thread_id: str) -> bool:
+        """Check if a thread exists in MongoDB (async)."""
+        count = await self.checkpoint_collection.count_documents(
+            {"thread_id": thread_id}, limit=1
+        )
+        return count > 0
