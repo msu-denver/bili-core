@@ -47,28 +47,6 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         super().__init__()
         self.user_id = user_id
 
-    def _validate_thread_ownership(self, thread_id: str) -> None:
-        """
-        Validate that thread_id belongs to the authenticated user.
-
-        Checks if the thread_id follows the expected pattern for the configured user_id.
-        Thread IDs must either exactly match the user_id or start with "{user_id}_".
-
-        Args:
-            thread_id: Thread ID to validate
-
-        Raises:
-            PermissionError: If thread_id doesn't belong to the configured user_id
-        """
-        if self.user_id is None:
-            return  # Validation disabled (backward compatible)
-
-        if not (thread_id == self.user_id or thread_id.startswith(f"{self.user_id}_")):
-            raise PermissionError(
-                f"Access denied: thread_id '{thread_id}' does not belong to "
-                f"user '{self.user_id}'"
-            )
-
     def put(self, config, checkpoint, metadata, new_versions):
         """
         Save checkpoint with optional ownership validation.
