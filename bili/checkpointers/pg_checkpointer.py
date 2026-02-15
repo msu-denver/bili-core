@@ -1176,13 +1176,35 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         # Save the checkpoint using parent's async method
         next_config = await super().aput(config, checkpoint, metadata, new_versions)
 
-        # Update user_id column if configured
+        # Update user_id column if configured (immediately after checkpoint save)
+        # If this fails, cleanup the checkpoint to maintain atomicity
         if self.user_id:
-            async with self._acursor() as cur:
-                await cur.execute(
-                    "UPDATE checkpoints SET user_id = %s WHERE thread_id = %s",
-                    (self.user_id, thread_id),
-                )
+            try:
+                async with self._acursor() as cur:
+                    await cur.execute(
+                        "UPDATE checkpoints SET user_id = %s WHERE thread_id = %s "
+                        "AND checkpoint_id = %s",
+                        (
+                            self.user_id,
+                            thread_id,
+                            next_config["configurable"]["checkpoint_id"],
+                        ),
+                    )
+                    if cur.rowcount == 0:
+                        checkpoint_id = next_config["configurable"]["checkpoint_id"]
+                        raise RuntimeError(
+                            f"Failed to set user_id for checkpoint {checkpoint_id}"
+                        )
+            except Exception as e:
+                # Cleanup: remove checkpoint if user_id update failed
+                async with self._acursor() as cur:
+                    await cur.execute(
+                        "DELETE FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
+                        (thread_id, next_config["configurable"]["checkpoint_id"]),
+                    )
+                raise RuntimeError(
+                    f"Failed to save checkpoint with user_id: {e}"
+                ) from e
 
         # Skip pruning if disabled
         if self.keep_last_n is None or self.keep_last_n < 0:

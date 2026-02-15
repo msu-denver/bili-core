@@ -392,6 +392,9 @@ class PruningMongoDBSaver(
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
+        # Validate thread ownership before reading
+        self._validate_thread_ownership(thread_id)
+
         # Migrate checkpoint if needed before LangGraph deserializes it
         # Note: Migration uses sync methods since it's infrequent
         try:
