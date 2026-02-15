@@ -29,10 +29,9 @@ class Node:
             return name == self.name
         if isinstance(name, type(self)):
             return self.name == name.name
-        else:
-            raise ValueError(
-                "Must compare to string or Node type. Please ensure the comparsion is of these types."
-            )
+        # Return NotImplemented for unsupported types (Python protocol)
+        # This allows Python to try reverse comparison and provides better error messages
+        return NotImplemented
 
     def __call__(self, **kwargs):
         return self.function(**kwargs)
