@@ -82,6 +82,7 @@ channels:
   - channel_id: data_distribution
     protocol: broadcast
     source: coordinator
+    target: all
     description: Coordinator broadcasts dataset to all processors
 
   # PubSub channels: processors publish results, aggregator subscribes

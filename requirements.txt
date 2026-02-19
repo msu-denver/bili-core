@@ -137,3 +137,6 @@ langchain-anthropic~=1.0.0
 # YAML config parsing
 pyyaml~=6.0  # Might already be transitive, but explicit is better
 pylint-pydantic==0.3.2
+
+# AETHER UI
+streamlit-flow-component>=1.3.0

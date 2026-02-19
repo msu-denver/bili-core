@@ -1,0 +1,56 @@
+# AETHER MAS Visualizer
+
+A read-only Streamlit application that visualizes AETHER multi-agent system YAML configurations as interactive node graphs.
+
+## Installation
+
+```bash
+# From the bili-core root directory
+pip install -e .
+pip install streamlit-flow-component
+```
+
+## Usage
+
+```bash
+streamlit run bili/aether/ui/app.py
+```
+
+The app will be available at [http://localhost:8501](http://localhost:8501).
+
+## Features
+
+- **YAML Selection**: Dropdown to browse all example MAS configurations
+- **Interactive Graph**: Pan, zoom, and click nodes to inspect agent properties
+- **Auto-Layout**: Layout algorithm adapts to workflow type:
+  - Sequential: horizontal chain
+  - Hierarchical: multi-tier vertical layout
+  - Supervisor: hub-and-spoke pattern
+  - Consensus: circular arrangement
+  - Parallel: three-row layout (coordinator, workers, aggregator)
+  - Custom/Deliberative: edge-based layered layout
+- **Properties Panel**: Click any node to view agent details (role, objective, model, capabilities, tools, etc.)
+- **Metadata Bar**: Summary metrics for the selected MAS configuration
+- **Color-Coded Nodes**: Nodes are colored by agent role for quick visual identification
+- **Edge Styling**: Solid lines for channels, dashed for workflow edges, animated for conditional edges
+
+## Architecture
+
+```
+bili/aether/ui/
+├── app.py                          # Main Streamlit entry point
+├── .streamlit/config.toml          # Theme configuration
+├── styles/
+│   ├── bili_core_theme.py          # Theme constants and CSS
+│   └── node_styles.py             # Role-to-style mapping
+├── converters/
+│   └── yaml_to_graph.py           # YAML -> streamlit-flow converter
+└── components/
+    └── graph_viewer.py            # Graph rendering + properties panel
+```
+
+## Troubleshooting
+
+- **streamlit-flow-component not found**: Run `pip install streamlit-flow-component`
+- **No YAML files shown**: Ensure example configs exist in `bili/aether/config/examples/`
+- **YAML fails to load**: Check that the YAML is valid against the MASConfig schema
