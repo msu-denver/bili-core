@@ -80,7 +80,7 @@ def _configure_page():
     """Set up Streamlit page config."""
     st.set_page_config(
         page_title="AETHER - MAS Visualizer",
-        page_icon="\U0001f310",
+        page_icon="A",
         layout="wide",
     )
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -150,7 +150,7 @@ def _load_config(yaml_path: Path):
     if config.consensus_threshold is not None:
         st.markdown(f"**Consensus:** {config.consensus_threshold}")
     if config.human_in_loop:
-        st.warning("Human-in-loop enabled", icon="\U0001f464")
+        st.warning("Human-in-loop enabled")
 
 
 def _render_legend():

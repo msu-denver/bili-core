@@ -8,5 +8,6 @@ textColor = "#FFFFFF"
 font = "sans serif"
 
 [server]
+port = 8502
 enableCORS = true
 enableXsrfProtection = true

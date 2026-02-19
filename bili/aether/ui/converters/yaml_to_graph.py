@@ -17,7 +17,7 @@ from bili.aether.ui.styles.bili_core_theme import (
     EDGE_WORKFLOW_COLOR,
     PROTOCOL_COLORS,
 )
-from bili.aether.ui.styles.node_styles import build_node_css, get_node_style
+from bili.aether.ui.styles.node_styles import build_node_css
 
 
 def convert_mas_to_graph(
@@ -285,8 +285,7 @@ def _build_nodes(
     nodes = []
     for agent in config.agents:
         pos = positions.get(agent.agent_id, (0, 0))
-        style_info = get_node_style(agent.role)
-        label = f"{style_info['icon']} {agent.get_display_name()}"
+        label = agent.get_display_name()
 
         node = StreamlitFlowNode(
             id=agent.agent_id,

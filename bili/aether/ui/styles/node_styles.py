@@ -2,63 +2,61 @@
 Agent role -> node style mapping.
 
 Since AETHER roles are free-form strings (not enums), this module uses
-keyword-based matching to assign colors and icons to nodes. The first
-matching rule wins, so more specific keywords should appear before
-more general ones.
+keyword-based matching to assign colors to nodes. The first matching
+rule wins, so more specific keywords should appear before more general ones.
 """
 
 from typing import Dict, List, Tuple
 
-# Priority-ordered list: (keyword_in_role, hex_color, emoji_icon)
+# Priority-ordered list: (keyword_in_role, hex_color)
 # First match wins, so order matters.
-ROLE_STYLE_RULES: List[Tuple[str, str, str]] = [
+ROLE_STYLE_RULES: List[Tuple[str, str]] = [
     # Orchestration / supervision
-    ("supervisor", "#e67e22", "\u2699\ufe0f"),  # gear
-    ("coordinator", "#e67e22", "\u2699\ufe0f"),
-    ("lead", "#e67e22", "\u2699\ufe0f"),
+    ("supervisor", "#e67e22"),
+    ("coordinator", "#e67e22"),
+    ("lead", "#e67e22"),
     # Decision-making
-    ("judge", "#e74c3c", "\u2696\ufe0f"),  # scales
-    ("vote", "#e74c3c", "\u2696\ufe0f"),
-    ("arbiter", "#e74c3c", "\u2696\ufe0f"),
+    ("judge", "#e74c3c"),
+    ("vote", "#e74c3c"),
+    ("arbiter", "#e74c3c"),
     # Adversarial / debate (check before generic advocate)
-    ("block", "#c0392b", "\u274c"),  # red X
-    ("allow", "#27ae60", "\u2714\ufe0f"),  # checkmark
-    ("advocate", "#f39c12", "\U0001f4ac"),  # speech bubble
-    ("debater", "#f39c12", "\U0001f4ac"),
+    ("block", "#c0392b"),
+    ("allow", "#27ae60"),
+    ("advocate", "#f39c12"),
+    ("debater", "#f39c12"),
     # Review
-    ("reviewer", "#3498db", "\U0001f50d"),  # magnifying glass
+    ("reviewer", "#3498db"),
     # Policy / compliance
-    ("policy", "#9b59b6", "\U0001f4dc"),  # scroll
-    ("compliance", "#9b59b6", "\U0001f4dc"),
+    ("policy", "#9b59b6"),
+    ("compliance", "#9b59b6"),
     # Analysis / research
-    ("analyst", "#1abc9c", "\U0001f4ca"),  # bar chart
-    ("researcher", "#1abc9c", "\U0001f50e"),  # magnifying glass tilted
-    ("fact_checker", "#1abc9c", "\u2714\ufe0f"),
+    ("analyst", "#1abc9c"),
+    ("researcher", "#1abc9c"),
+    ("fact_checker", "#1abc9c"),
     # Synthesis / aggregation
-    ("synthesizer", "#2ecc71", "\U0001f4dd"),  # memo
-    ("aggregator", "#2ecc71", "\U0001f4dd"),
-    ("writer", "#2ecc71", "\U0001f4dd"),
+    ("synthesizer", "#2ecc71"),
+    ("aggregator", "#2ecc71"),
+    ("writer", "#2ecc71"),
     # Escalation
-    ("appeals", "#e91e63", "\u26a0\ufe0f"),  # warning
-    ("escalation", "#e91e63", "\u26a0\ufe0f"),
+    ("appeals", "#e91e63"),
+    ("escalation", "#e91e63"),
     # Human-in-loop
-    ("human", "#ff5722", "\U0001f464"),  # bust
-    ("expert", "#ff5722", "\U0001f464"),
+    ("human", "#ff5722"),
+    ("expert", "#ff5722"),
     # Technical
-    ("engineer", "#20c997", "\U0001f527"),  # wrench
-    ("security", "#17a2b8", "\U0001f6e1\ufe0f"),  # shield
-    ("code", "#20c997", "\U0001f4bb"),  # laptop
+    ("engineer", "#20c997"),
+    ("security", "#17a2b8"),
+    ("code", "#20c997"),
     # Support / community
-    ("support", "#6f42c1", "\U0001f4de"),  # telephone
-    ("community", "#fd7e14", "\U0001f465"),  # busts
+    ("support", "#6f42c1"),
+    ("community", "#fd7e14"),
     # Classification
-    ("classifier", "#17a2b8", "\U0001f3f7\ufe0f"),  # label
+    ("classifier", "#17a2b8"),
     # Processing
-    ("processor", "#3498db", "\u2699\ufe0f"),
+    ("processor", "#3498db"),
 ]
 
 DEFAULT_COLOR = "#55bfef"
-DEFAULT_ICON = "\U0001f916"  # robot face
 
 
 def get_node_style(role: str) -> Dict[str, str]:
@@ -67,13 +65,13 @@ def get_node_style(role: str) -> Dict[str, str]:
     Uses keyword matching against the role string (case-insensitive).
 
     Returns:
-        Dict with keys: color, icon, font_color.
+        Dict with keys: color, font_color.
     """
     role_lower = role.lower()
-    for keyword, color, icon in ROLE_STYLE_RULES:
+    for keyword, color in ROLE_STYLE_RULES:
         if keyword in role_lower:
-            return {"color": color, "icon": icon, "font_color": "#ffffff"}
-    return {"color": DEFAULT_COLOR, "icon": DEFAULT_ICON, "font_color": "#ffffff"}
+            return {"color": color, "font_color": "#ffffff"}
+    return {"color": DEFAULT_COLOR, "font_color": "#ffffff"}
 
 
 def build_node_css(role: str) -> Dict[str, str]:
