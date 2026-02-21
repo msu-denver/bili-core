@@ -13,10 +13,12 @@ pip install streamlit-flow-component
 ## Usage
 
 ```bash
-streamlit run bili/aether/ui/app.py
+/app/bili-core/venv/bin/streamlit run bili/aether/ui/app.py
 ```
 
-The app will be available at [http://localhost:8501](http://localhost:8501).
+Note: the command `streamlit` will not work due to an alias that starts BiliCore. This is not important to change because AETHER will become a part of BiliCore, but for dev purposes this is worth noting for now.
+
+The app will be available at [http://localhost:8502](http://localhost:8502).
 
 ## Features
 

@@ -44,13 +44,17 @@ Example:
 """
 
 import atexit
+import contextlib
 import os
+import threading
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 # Import PostgreSQL-specific migrations (none registered yet, for future-proofing)
@@ -216,6 +220,12 @@ class PruningPostgresSaver(
         self.keep_last_n = keep_last_n
         self.user_id = user_id
 
+        # Override parent's Lock with RLock so _cursor can be called reentrantly
+        # from put() -> super().put() -> _cursor() when using shared transactions
+        self.lock = threading.RLock()
+        # Shared connection for atomic put() + user_id UPDATE (None when inactive)
+        self._txn_conn = None
+
         # On-demand migration: Add user_id schema if user_id is provided
         if self.user_id:
             self._ensure_user_id_schema()
@@ -270,6 +280,22 @@ class PruningPostgresSaver(
                     ON checkpoints(user_id, thread_id)
                     """
                 )
+
+    @contextmanager
+    def _cursor(self, *, pipeline: bool = False):
+        """Override parent's _cursor to support shared-connection transactions.
+
+        When self._txn_conn is set (by _put_with_user_id for atomic operations),
+        reuse that connection instead of checking out a new one from the pool.
+        This allows super().put() and the user_id UPDATE to share the same
+        transaction.
+        """
+        if self._txn_conn is not None:
+            with self._txn_conn.cursor(binary=True, row_factory=dict_row) as cur:
+                yield cur
+        else:
+            with super()._cursor(pipeline=pipeline) as cur:
+                yield cur
 
     def ensure_indexes(self) -> None:
         """
@@ -493,9 +519,8 @@ class PruningPostgresSaver(
         of the oldest checkpoints are removed when the specified retention limit
         `keep_last_n` is reached, in order to manage storage usage.
 
-        It uses an SQL-based strategy to delete checkpoint records and associated
-        data from the database. The pruning process only executes when the `keep_last_n`
-        attribute is set to a value greater than or equal to zero.
+        When user_id is configured, the checkpoint save and user_id assignment
+        are performed atomically within a single database transaction.
 
         :param config: The current runnable configuration.
         :param checkpoint: The checkpoint to be saved.
@@ -513,14 +538,61 @@ class PruningPostgresSaver(
         versioned_metadata = dict(metadata) if metadata else {}
         versioned_metadata["format_version"] = self.format_version
 
-        # Save checkpoint using base implementation with versioned metadata
-        next_config = super().put(config, checkpoint, versioned_metadata, new_versions)
-
-        # Update user_id column if configured (immediately after checkpoint save)
-        # If this fails, cleanup the checkpoint to maintain atomicity
         if self.user_id:
+            # Atomic path: checkpoint + user_id in one transaction
+            next_config = self._put_with_user_id(
+                config, checkpoint, versioned_metadata, new_versions, thread_id
+            )
+        else:
+            # Standard path: no user_id needed
+            next_config = super().put(
+                config, checkpoint, versioned_metadata, new_versions
+            )
+
+        # Pruning (separate operation — OK to be non-atomic with the save)
+        if self.keep_last_n is not None and self.keep_last_n >= 0:
+            self._prune_checkpoints(thread_id)
+
+        return next_config
+
+    def _put_with_user_id(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+        thread_id: str,
+    ) -> RunnableConfig:
+        """Save checkpoint and set user_id atomically in a single transaction.
+
+        Gets a connection from the pool, disables autocommit, and stores the
+        connection in self._txn_conn so that the overridden _cursor() reuses it.
+        This ensures super().put() and the user_id UPDATE share the same
+        transaction.
+
+        :param config: The current runnable configuration.
+        :param checkpoint: The checkpoint to be saved.
+        :param metadata: Metadata associated with the checkpoint.
+        :param new_versions: New channel versions corresponding to the checkpoint.
+        :param thread_id: The thread identifier for this checkpoint.
+        :return: Updated runnable configuration.
+        """
+        if isinstance(self.conn, ConnectionPool):
+            conn_ctx = self.conn.connection()
+        else:
+            conn_ctx = contextlib.nullcontext(self.conn)
+
+        with conn_ctx as conn:
+            conn.autocommit = False
             try:
-                with self._cursor() as cur:
+                self._txn_conn = conn
+
+                # super().put() calls self._cursor() which sees _txn_conn
+                # and reuses our connection inside our transaction
+                next_config = super().put(config, checkpoint, metadata, new_versions)
+
+                # UPDATE user_id on the same connection/transaction
+                with conn.cursor(binary=True, row_factory=dict_row) as cur:
                     cur.execute(
                         "UPDATE checkpoints SET user_id = %s WHERE thread_id = %s "
                         "AND checkpoint_id = %s",
@@ -535,23 +607,23 @@ class PruningPostgresSaver(
                         raise RuntimeError(
                             f"Failed to set user_id for checkpoint {checkpoint_id}"
                         )
-            except Exception as e:
-                # Cleanup: remove checkpoint if user_id update failed
-                with self._cursor() as cur:
-                    cur.execute(
-                        "DELETE FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
-                        (thread_id, next_config["configurable"]["checkpoint_id"]),
-                    )
-                raise RuntimeError(
-                    f"Failed to save checkpoint with user_id: {e}"
-                ) from e
 
-        # Skip pruning if disabled
-        if self.keep_last_n is None or self.keep_last_n < 0:
-            return next_config
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                self._txn_conn = None
+                conn.autocommit = True
 
+        return next_config
+
+    def _prune_checkpoints(self, thread_id: str) -> None:
+        """Remove old checkpoints beyond the retention limit.
+
+        :param thread_id: The thread identifier whose checkpoints to prune.
+        """
         with self._cursor() as cur:
-            # Find old checkpoints to prune
             cur.execute(
                 """
                 SELECT checkpoint_id
@@ -573,8 +645,6 @@ class PruningPostgresSaver(
                     "DELETE FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
                     (thread_id, checkpoint_id),
                 )
-
-        return next_config
 
     # QueryableCheckpointerMixin implementation for PostgreSQL
 
@@ -1066,6 +1136,26 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         self.keep_last_n = keep_last_n
         self.user_id = user_id
 
+        # Shared connection for atomic aput() + user_id UPDATE (None when inactive)
+        self._async_txn_conn = None
+
+    @asynccontextmanager
+    async def _acursor(self, *, pipeline: bool = False):
+        """Override parent's _acursor to support shared-connection transactions.
+
+        When self._async_txn_conn is set (by _aput_with_user_id for atomic
+        operations), reuse that connection instead of checking out a new one
+        from the pool.
+        """
+        if self._async_txn_conn is not None:
+            async with self._async_txn_conn.cursor(
+                binary=True, row_factory=dict_row
+            ) as cur:
+                yield cur
+        else:
+            async with super()._acursor(pipeline=pipeline) as cur:
+                yield cur
+
     async def aensure_indexes(self) -> None:
         """
         Ensures that required indexes exist in PostgreSQL tables (async version).
@@ -1162,6 +1252,9 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         """
         Async version of put method with pruning support.
 
+        When user_id is configured, the checkpoint save and user_id assignment
+        are performed atomically within a single database transaction.
+
         :param config: Runnable configuration
         :param checkpoint: Checkpoint to save
         :param metadata: Checkpoint metadata
@@ -1173,14 +1266,62 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         # Validate thread ownership if user_id is configured
         self._validate_thread_ownership(thread_id)
 
-        # Save the checkpoint using parent's async method
-        next_config = await super().aput(config, checkpoint, metadata, new_versions)
+        # Add format version to metadata for future migrations
+        versioned_metadata = dict(metadata) if metadata else {}
+        versioned_metadata["format_version"] = self.format_version
 
-        # Update user_id column if configured (immediately after checkpoint save)
-        # If this fails, cleanup the checkpoint to maintain atomicity
         if self.user_id:
+            # Atomic path: checkpoint + user_id in one transaction
+            next_config = await self._aput_with_user_id(
+                config, checkpoint, versioned_metadata, new_versions, thread_id
+            )
+        else:
+            # Standard path: no user_id needed
+            next_config = await super().aput(
+                config, checkpoint, versioned_metadata, new_versions
+            )
+
+        # Pruning (separate operation — OK to be non-atomic with the save)
+        if self.keep_last_n is not None and self.keep_last_n >= 0:
+            await self._aprune_checkpoints(thread_id)
+
+        return next_config
+
+    async def _aput_with_user_id(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+        thread_id: str,
+    ) -> RunnableConfig:
+        """Async: save checkpoint and set user_id atomically in a single transaction.
+
+        :param config: The current runnable configuration.
+        :param checkpoint: The checkpoint to be saved.
+        :param metadata: Metadata associated with the checkpoint.
+        :param new_versions: New channel versions corresponding to the checkpoint.
+        :param thread_id: The thread identifier for this checkpoint.
+        :return: Updated runnable configuration.
+        """
+        if isinstance(self.conn, AsyncConnectionPool):
+            conn_ctx = self.conn.connection()
+        else:
+            conn_ctx = contextlib.nullcontext(self.conn)
+
+        async with conn_ctx as conn:
+            await conn.set_autocommit(False)
             try:
-                async with self._acursor() as cur:
+                self._async_txn_conn = conn
+
+                # super().aput() calls self._acursor() which sees _async_txn_conn
+                # and reuses our connection inside our transaction
+                next_config = await super().aput(
+                    config, checkpoint, metadata, new_versions
+                )
+
+                # UPDATE user_id on the same connection/transaction
+                async with conn.cursor(binary=True, row_factory=dict_row) as cur:
                     await cur.execute(
                         "UPDATE checkpoints SET user_id = %s WHERE thread_id = %s "
                         "AND checkpoint_id = %s",
@@ -1195,25 +1336,23 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                         raise RuntimeError(
                             f"Failed to set user_id for checkpoint {checkpoint_id}"
                         )
-            except Exception as e:
-                # Cleanup: remove checkpoint if user_id update failed
-                async with self._acursor() as cur:
-                    await cur.execute(
-                        "DELETE FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
-                        (thread_id, next_config["configurable"]["checkpoint_id"]),
-                    )
-                raise RuntimeError(
-                    f"Failed to save checkpoint with user_id: {e}"
-                ) from e
 
-        # Skip pruning if disabled
-        if self.keep_last_n is None or self.keep_last_n < 0:
-            return next_config
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+            finally:
+                self._async_txn_conn = None
+                await conn.set_autocommit(True)
 
-        # Perform async pruning
+        return next_config
 
+    async def _aprune_checkpoints(self, thread_id: str) -> None:
+        """Async: remove old checkpoints beyond the retention limit.
+
+        :param thread_id: The thread identifier whose checkpoints to prune.
+        """
         async with self._acursor() as cur:
-            # Find old checkpoints to prune
             await cur.execute(
                 """
                 SELECT checkpoint_id
@@ -1227,7 +1366,6 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
             rows = await cur.fetchall()
             to_delete = [row["checkpoint_id"] for row in rows]
 
-            # Delete old checkpoints and writes asynchronously
             for checkpoint_id in to_delete:
                 await cur.execute(
                     "DELETE FROM checkpoint_writes WHERE thread_id = %s AND checkpoint_id = %s",
@@ -1237,8 +1375,6 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                     "DELETE FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
                     (thread_id, checkpoint_id),
                 )
-
-        return next_config
 
     # VersionedCheckpointerMixin implementation for async PostgreSQL
 

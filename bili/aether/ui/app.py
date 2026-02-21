@@ -8,19 +8,7 @@ Usage:
     streamlit run bili/aether/ui/app.py
 """
 
-import sys
-import types
 from pathlib import Path
-
-# The AETHER UI only needs bili.aether.* subpackages. Pre-register the
-# bili package in sys.modules to prevent bili/__init__.py from eagerly
-# importing all subpackages (flask_api, loaders, nodes, etc.) which
-# require heavy dependencies (langgraph.prebuilt, etc.) not needed here.
-if "bili" not in sys.modules:
-    _bili_pkg = types.ModuleType("bili")
-    _bili_pkg.__path__ = [str(Path(__file__).resolve().parent.parent.parent)]
-    _bili_pkg.__package__ = "bili"
-    sys.modules["bili"] = _bili_pkg
 
 import streamlit as st
 
