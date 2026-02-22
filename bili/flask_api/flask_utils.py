@@ -20,7 +20,8 @@ Functions:
     A decorator function to enforce authentication and optionally
     validate role-based access control (RBAC) for the decorated Flask route function.
 
-- per_user_agent(checkpoint_saver, graph_definition, node_kwargs, state=State, custom_node_registry=None):
+- per_user_agent(checkpoint_saver, graph_definition, node_kwargs,
+    state=State, custom_node_registry=None):
     Builds a decorator to create a per-user agent graph for a Flask application.
 
 - handle_agent_prompt(user, conversation_agent, prompt):
@@ -37,12 +38,14 @@ Dependencies:
 - langchain_core.messages.HumanMessage: Represents a human message in the conversation.
 - langgraph.checkpoint.base.BaseCheckpointSaver: Base class for checkpoint savers.
 - bili.auth.auth_manager.AuthManager: Manages authentication and authorization.
-- bili.loaders.langchain_loader.build_agent_graph: Builds and compiles a state graph for a LangGraph-based agent.
+- bili.loaders.langchain_loader.build_agent_graph: Builds and compiles
+    a state graph for a LangGraph-based agent.
 - bili.loaders.langchain_loader.GRAPH_NODE_REGISTRY: Default registry for graph nodes.
 
 Usage:
 ------
-To use the utilities provided in this module, import the necessary functions and apply them to your Flask
+To use the utilities provided in this module, import the necessary functions
+and apply them to your Flask
 application as shown in the examples below:
 
 Example:
@@ -139,8 +142,8 @@ def add_unauthorized_handler(auth_manager, app):
                     set_token_cookies(resp, new_id_token, new_refresh_token)
                     return resp
 
-            except Exception as e:
-                LOGGER.error(f"Token refresh failed: {str(e)}")  # Log failure
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                LOGGER.error("Token refresh failed: %s", e)  # Log failure
 
         return response  # If refresh fails, just return the original 401 response
 
@@ -246,8 +249,9 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
             :param args: Positional arguments passed to the wrapped route function.
             :param kwargs: Keyword arguments passed to the wrapped route function.
-            :return: The response from the wrapped route function if authentication and authorization
-                     are successful, otherwise a JSON response with an error message and appropriate
+            :return: The response from the wrapped route function if
+                     authentication and authorization are successful, otherwise
+                     a JSON response with an error message and appropriate
                      HTTP status code.
             :rtype: Response
             """
@@ -296,7 +300,7 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
 def per_user_agent(
     checkpoint_saver: BaseCheckpointSaver,
-    graph_definition: list,
+    graph_definition: list,  # pylint: disable=unused-argument
     node_kwargs: dict,
     state: type = State,
     custom_node_registry: dict = None,
@@ -362,7 +366,10 @@ def per_user_agent(
                     per_user_state_node, edges=["inject_current_datetime"]
                 )
 
-                # Rebuild graph definition: persona → per_user_state → rest
+                # Rebuild graph definition: persona → per_user_state → rest.
+                # This intentionally creates a new local binding, NOT mutating the
+                # outer closure variable — each request gets its own copy, preventing
+                # cross-request graph mutation.
                 graph_definition = [
                     persona_node_modified,
                     per_user_state_modified,
@@ -441,5 +448,4 @@ def handle_agent_prompt(user, conversation_agent, prompt, conversation_id=None):
     if isinstance(result, dict) and "messages" in result:
         final_msg = result["messages"][-1]
         return jsonify({"response": final_msg.content})
-    else:
-        return jsonify({"response": "No response"}), 500
+    return jsonify({"response": "No response"}), 500

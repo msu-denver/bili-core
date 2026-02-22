@@ -56,7 +56,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, MongoClient
 
 # Import MongoDB-specific migrations to register them
-import bili.checkpointers.migrations.mongo  # noqa: F401
+import bili.checkpointers.migrations.mongo  # noqa: F401  # pylint: disable=unused-import
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
 from bili.checkpointers.versioning import (
     CURRENT_FORMAT_VERSION,
@@ -350,7 +350,8 @@ class PruningMongoDBSaver(
         if self._needs_migration(raw_doc):
             LOGGER.error(
                 "Checkpoint for thread %s still needs migration after migration attempt. "
-                "This checkpoint is corrupted and cannot be recovered. Returning None to force fresh start.",
+                "This checkpoint is corrupted and cannot be recovered."
+                " Returning None to force fresh start.",
                 thread_id,
             )
             return None
@@ -410,7 +411,8 @@ class PruningMongoDBSaver(
         if self._needs_migration(raw_doc):
             LOGGER.error(
                 "Checkpoint for thread %s still needs migration after migration attempt. "
-                "This checkpoint is corrupted and cannot be recovered. Returning None to force fresh start.",
+                "This checkpoint is corrupted and cannot be recovered."
+                " Returning None to force fresh start.",
                 thread_id,
             )
             return None
@@ -474,7 +476,9 @@ class PruningMongoDBSaver(
             config, checkpoint, versioned_metadata, new_versions
         )
 
-        # Update user_id field if configured (using sync update_many since it's just metadata)
+        # update_many is intentionally sync: PruningMongoDBSaver inherits from the
+        # synchronous MongoDBSaver (pymongo), so checkpoint_collection is a sync
+        # pymongo Collection. For async MongoDB usage, use AsyncPruningMongoDBSaver.
         if self.user_id:
             self.checkpoint_collection.update_many(
                 {"thread_id": thread_id}, {"$set": {"user_id": self.user_id}}
@@ -564,8 +568,9 @@ class PruningMongoDBSaver(
     # QueryableCheckpointerMixin implementation for MongoDB
 
     def _deserialize_checkpoint_data(self, doc: Dict[str, Any]) -> Dict[str, Any]:
-        """Deserialize a raw checkpoint document, handling both legacy dict and serialized bytes formats.
+        """Deserialize a raw checkpoint document.
 
+        Handles both legacy dict and serialized bytes formats.
         After the v1→v2 migration, checkpoints are stored as serialized bytes (msgpack).
         Legacy checkpoints may still be stored as plain dicts.
 
@@ -590,7 +595,7 @@ class PruningMongoDBSaver(
             {
                 "$match": {
                     "thread_id": {
-                        "$regex": f"^{escaped_id}(_|$)"  # Matches user_identifier or user_identifier_*
+                        "$regex": f"^{escaped_id}(_|$)"  # user_id or user_id_*
                     }
                 }
             },
@@ -901,7 +906,9 @@ class AsyncPruningMongoDBSaver(
         super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
         self.user_id = user_id
-        # Note: Index creation will be handled lazily on first use
+        # Lazy-initialized attributes (set on first use)
+        self._sync_db: Any = None
+        self._indexes_ensured: bool = False
 
     async def _ensure_indexes(self) -> None:
         """
@@ -951,9 +958,9 @@ class AsyncPruningMongoDBSaver(
 
     def _get_sync_db(self):
         """Get a sync MongoDB database for migration operations."""
-        # For migrations, we need a sync client since VersionedCheckpointerMixin expects sync methods
+        # For migrations we need a sync client; VersionedCheckpointerMixin expects sync methods
         # Use the connection string from the async client to create a sync client
-        if not hasattr(self, "_sync_db"):
+        if self._sync_db is None:
             # Get a sync mongo client for migrations
             sync_db = get_mongo_client()
             if sync_db is None:
@@ -1098,7 +1105,7 @@ class AsyncPruningMongoDBSaver(
         self._validate_thread_ownership(thread_id)
 
         # Ensure indexes exist on first use
-        if not hasattr(self, "_indexes_ensured"):
+        if not self._indexes_ensured:
             await self._ensure_indexes()
             self._indexes_ensured = True
 
@@ -1145,7 +1152,9 @@ class AsyncPruningMongoDBSaver(
     # Async query methods for conversation data retrieval
 
     def _deserialize_checkpoint_data(self, doc: Dict[str, Any]) -> Dict[str, Any]:
-        """Deserialize a raw checkpoint document, handling both legacy dict and serialized bytes formats.
+        """Deserialize a raw checkpoint document.
+
+        Handles both legacy dict and serialized bytes formats.
 
         :param doc: Raw MongoDB checkpoint document
         :return: Deserialized checkpoint dict

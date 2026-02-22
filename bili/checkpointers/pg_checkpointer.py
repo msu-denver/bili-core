@@ -50,6 +50,7 @@ import threading
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, List, Optional
 
+import msgpack
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -58,7 +59,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 # Import PostgreSQL-specific migrations (none registered yet, for future-proofing)
-import bili.checkpointers.migrations.pg  # noqa: F401
+import bili.checkpointers.migrations.pg  # noqa: F401  # pylint: disable=unused-import
 from bili.checkpointers.base_checkpointer import QueryableCheckpointerMixin
 from bili.checkpointers.versioning import (
     CURRENT_FORMAT_VERSION,
@@ -319,20 +320,26 @@ class PruningPostgresSaver(
         """
         with self._cursor() as cur:
             # For fetching and pruning from checkpoints table
-            cur.execute("""
+            cur.execute(
+                """
                         CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_id
                             ON checkpoints (thread_id, checkpoint_id DESC)
-                        """)
+                        """
+            )
             # For cleanup of blobs
-            cur.execute("""
+            cur.execute(
+                """
                         CREATE INDEX IF NOT EXISTS idx_blobs_thread_id
                             ON checkpoint_blobs (thread_id, checkpoint_ns)
-                        """)
+                        """
+            )
             # For cleanup of writes
-            cur.execute("""
+            cur.execute(
+                """
                         CREATE INDEX IF NOT EXISTS idx_writes_thread_id
                             ON checkpoint_writes (thread_id, checkpoint_id)
-                        """)
+                        """
+            )
 
     # VersionedCheckpointerMixin implementation for PostgreSQL
     # Note: Currently no migrations are registered for PostgreSQL.
@@ -423,7 +430,8 @@ class PruningPostgresSaver(
 
         with self._cursor() as cur:
             # Create archive table if it doesn't exist
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS checkpoints_archive (
                     id SERIAL PRIMARY KEY,
                     thread_id TEXT NOT NULL,
@@ -434,7 +442,8 @@ class PruningPostgresSaver(
                     migration_error TEXT,
                     archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """)
+                """
+            )
 
             # Insert into archive
             cur.execute(
@@ -656,7 +665,7 @@ class PruningPostgresSaver(
                     MAX(checkpoint_id) as last_checkpoint_id,
                     COUNT(*) as checkpoint_count
                 FROM checkpoints
-                WHERE thread_id = %s OR thread_id LIKE %s
+                WHERE thread_id = %s OR thread_id LIKE %s ESCAPE '\\'
                 GROUP BY thread_id
                 ORDER BY MAX(checkpoint_id) DESC
             """
@@ -731,8 +740,6 @@ class PruningPostgresSaver(
                         tags_row = cur.fetchone()
                         if tags_row and tags_row["blob"]:
                             # Deserialize the value (it's stored as bytes/msgpack)
-                            import msgpack
-
                             tags = msgpack.unpackb(tags_row["blob"], raw=False)
 
                 thread_metadata.append(
@@ -1130,6 +1137,8 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
         # Shared connection for atomic aput() + user_id UPDATE (None when inactive)
         self._async_txn_conn = None
+        # Lazy-initialized sync pool for migration operations
+        self._sync_pool: Optional[ConnectionPool] = None
 
     @asynccontextmanager
     async def _acursor(self, *, pipeline: bool = False):
@@ -1156,20 +1165,26 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
         async with self._acursor() as cur:
             # For fetching and pruning from checkpoints table
-            await cur.execute("""
+            await cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_id
                     ON checkpoints (thread_id, checkpoint_id DESC)
-                """)
+                """
+            )
             # For cleanup of blobs
-            await cur.execute("""
+            await cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_blobs_thread_id
                     ON checkpoint_blobs (thread_id, checkpoint_ns)
-                """)
+                """
+            )
             # For cleanup of writes
-            await cur.execute("""
+            await cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_writes_thread_id
                     ON checkpoint_writes (thread_id, checkpoint_id)
-                """)
+                """
+            )
 
         # On-demand migration: Add user_id schema if user_id is provided
         if self.user_id:
@@ -1348,7 +1363,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
     def _get_sync_pool(self) -> ConnectionPool:
         """Get a sync PostgreSQL connection pool for migration operations."""
         # For migrations, we need a sync pool since VersionedCheckpointerMixin expects sync methods
-        if not hasattr(self, "_sync_pool"):
+        if self._sync_pool is None:
             sync_pool = get_pg_connection_pool()
             if sync_pool is None:
                 LOGGER.error("Failed to get sync PostgreSQL pool for migrations")
@@ -1453,7 +1468,8 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         with sync_pool.connection() as conn:
             with conn.cursor() as cur:
                 # Create archive table if it doesn't exist
-                cur.execute("""
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS checkpoints_archive (
                         id SERIAL PRIMARY KEY,
                         thread_id TEXT NOT NULL,
@@ -1464,7 +1480,8 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                         migration_error TEXT,
                         archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                    """)
+                    """
+                )
 
                 # Insert into archive
                 cur.execute(

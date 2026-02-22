@@ -40,7 +40,7 @@ new_state = add_persona_node(state)
 persona_template = "You are a {role} assistant specialized in {domain}."
 template_data = {"role": "senior", "domain": "data science"}
 add_persona_node = build_add_persona_and_summary_node(
-    persona=persona_template, 
+    persona=persona_template,
     template_dict=template_data
 )
 new_state = add_persona_node(state)
@@ -59,7 +59,7 @@ from bili.utils.logging_utils import get_logger
 LOGGER = get_logger(__name__)
 
 
-def build_add_persona_and_summary_node(persona: str, **kwargs):
+def build_add_persona_and_summary_node(persona: str, **_kwargs):
     """
     Builds a node function to add a persona and conversation summary to the current state.
 
