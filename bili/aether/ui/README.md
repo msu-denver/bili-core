@@ -56,3 +56,8 @@ bili/aether/ui/
 - **streamlit-flow-component not found**: Run `pip install streamlit-flow-component`
 - **No YAML files shown**: Ensure example configs exist in `bili/aether/config/examples/`
 - **YAML fails to load**: Check that the YAML is valid against the MASConfig schema
+
+## Known Issues
+
+- **Browser console "Invalid color" warnings** (`widgetBackgroundColor`, `widgetBorderColor`, `skeletonBackgroundColor`): Harmless. A known Streamlit 1.51.x platform bug where internal theme proto fields default to empty strings; `streamlit-flow-component` exposes this when it propagates the parent theme to its React Flow iframe. No fix available without upgrading Streamlit.
+- **`bootstrap.min.css.map` terminal warning**: Suppressed via logging configuration in `app.py`. Root cause is a source map file absent from the `streamlit-flow-component` package distribution. Source maps are optional browser developer tools with no functional impact.

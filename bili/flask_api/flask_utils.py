@@ -300,7 +300,7 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
 def per_user_agent(
     checkpoint_saver: BaseCheckpointSaver,
-    graph_definition: list,  # pylint: disable=unused-argument
+    graph_definition: list,
     node_kwargs: dict,
     state: type = State,
     custom_node_registry: dict = None,
@@ -346,18 +346,17 @@ def per_user_agent(
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Add current user to node_kwargs. Check for user_profile first, and
-            # use user if it is not available
-            if hasattr(g, "user_profile"):
-                node_kwargs["current_user"] = g.user_profile
-            else:
-                # Use g.user if user_profile is not available
-                node_kwargs["current_user"] = g.user
+            # Build a per-request kwargs dict with current_user injected.
+            # Never mutate the shared node_kwargs closure — that would be a race
+            # condition in multi-threaded Flask deployments.
+            current_user = g.user_profile if hasattr(g, "user_profile") else g.user
+            request_kwargs = {**node_kwargs, "current_user": current_user}
 
-            # Check that the graph definition contains the per_user_state node
-            # If not, insert it between persona_and_summary and inject_current_datetime
-            if per_user_state_node not in graph_definition:
-
+            # Check that the graph definition contains the per_user_state node.
+            # Use a local variable so the outer graph_definition closure is never
+            # rebound, avoiding a Python UnboundLocalError.
+            current_graph = graph_definition
+            if per_user_state_node not in current_graph:
                 # Create modified copies with updated edges
                 persona_node_modified = replace(
                     persona_and_summary_node, edges=["per_user_state"]
@@ -365,15 +364,11 @@ def per_user_agent(
                 per_user_state_modified = replace(
                     per_user_state_node, edges=["inject_current_datetime"]
                 )
-
-                # Rebuild graph definition: persona → per_user_state → rest.
-                # This intentionally creates a new local binding, NOT mutating the
-                # outer closure variable — each request gets its own copy, preventing
-                # cross-request graph mutation.
-                graph_definition = [
+                # Build a per-request graph with per_user_state inserted
+                current_graph = [
                     persona_node_modified,
                     per_user_state_modified,
-                ] + graph_definition[
+                ] + current_graph[
                     1:
                 ]  # Skip original persona_and_summary_node
 
@@ -381,8 +376,8 @@ def per_user_agent(
             agent_graph = build_agent_graph(
                 checkpoint_saver=checkpoint_saver,
                 custom_node_registry=custom_node_registry,
-                graph_definition=graph_definition,
-                node_kwargs=node_kwargs,
+                graph_definition=current_graph,
+                node_kwargs=request_kwargs,
                 state=state,
             )
             g.agent = agent_graph  # Store the agent graph in Flask's global context

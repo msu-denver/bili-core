@@ -8,7 +8,16 @@ Usage:
     streamlit run bili/aether/ui/app.py
 """
 
+import logging
 from pathlib import Path
+
+# Suppress the FileNotFoundError traceback that Streamlit logs when the browser
+# requests bootstrap.min.css.map — a source map file absent from the
+# streamlit-flow-component package distribution. Source maps are optional
+# browser developer tools and the missing file has no functional impact.
+logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
+    logging.ERROR
+)
 
 import streamlit as st
 

@@ -1104,6 +1104,12 @@ class AsyncPruningMongoDBSaver(
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
+        # Note: user_id is not written to checkpoint documents here. This class
+        # is considered deprecated in this codebase — get_async_mongo_checkpointer()
+        # returns a PruningMongoDBSaver (sync init, async methods) which handles
+        # user_id tracking in its aput(). AsyncPruningMongoDBSaver is retained for
+        # completeness but is not used in production.
+
         # Ensure indexes exist on first use
         if not self._indexes_ensured:
             await self._ensure_indexes()
