@@ -131,7 +131,11 @@ def _unwrap_binary_value(value: Any) -> Any:
             # Try to decode as UTF-8 string
             decoded = bytes(value).decode("utf-8")
             # Try to parse as JSON if it looks like JSON
-            if decoded.startswith('"') or decoded.startswith('[') or decoded.startswith('{'):
+            if (
+                decoded.startswith('"')
+                or decoded.startswith("[")
+                or decoded.startswith("{")
+            ):
                 try:
                     return json.loads(decoded)
                 except json.JSONDecodeError:
@@ -218,7 +222,7 @@ def _migrate_blob(doc: Dict[str, Any]) -> Tuple[Optional[str], Optional[Any]]:
         try:
             # 1. Decode MsgPack -> Python Object
             # MongoDB uses 'checkpoint' field, some versions may use 'value'
-            value = doc.get("checkpoint", doc.get("value")) 
+            value = doc.get("checkpoint", doc.get("value"))
 
             # Handle bson.Binary if available
             if BSON_AVAILABLE and isinstance(value, bson.Binary):
@@ -312,7 +316,9 @@ def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
     LOGGER.info("Starting v1 to v2 migration for thread %s", thread_id)
 
     if not _needs_migration(document):
-        LOGGER.debug("Document for thread %s already in v2 format, skipping migration", thread_id)
+        LOGGER.debug(
+            "Document for thread %s already in v2 format, skipping migration", thread_id
+        )
         return document
 
     updates = {}
@@ -332,19 +338,31 @@ def migrate_v1_to_v2(document: Dict[str, Any]) -> Dict[str, Any]:
         if new_type:
             updates["type"] = new_type
             updates[blob_field] = new_value
-            LOGGER.debug("Migrated %s blob from msgpack to json for thread %s", blob_field, thread_id)
+            LOGGER.debug(
+                "Migrated %s blob from msgpack to json for thread %s",
+                blob_field,
+                thread_id,
+            )
         else:
             LOGGER.warning(
                 "Blob migration returned no changes for thread %s (type=%s)",
-                thread_id, document.get("type")
+                thread_id,
+                document.get("type"),
             )
 
     # Apply updates to document
     if updates:
         document.update(updates)
-        LOGGER.info("Migration completed for thread %s, updated fields: %s", thread_id, list(updates.keys()))
+        LOGGER.info(
+            "Migration completed for thread %s, updated fields: %s",
+            thread_id,
+            list(updates.keys()),
+        )
     else:
-        LOGGER.warning("No fields were migrated for thread %s - migration may have failed", thread_id)
+        LOGGER.warning(
+            "No fields were migrated for thread %s - migration may have failed",
+            thread_id,
+        )
 
     return document
 

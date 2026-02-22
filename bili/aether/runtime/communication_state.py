@@ -5,9 +5,12 @@ the communication layer through LangGraph state, without needing a
 direct reference to the ``ChannelManager``.
 
 State fields used:
-    ``channel_messages``  — ``Dict[str, list]``  channel_id -> serialised messages
-    ``pending_messages``  — ``Dict[str, list]``  agent_id  -> serialised messages
+    ``channel_messages``  — ``Dict[str, list]``  channel_id -> list of message dicts
+                            (uses _merge_dicts reducer for parallel execution safety)
+    ``pending_messages``  — ``Dict[str, list]``  agent_id -> list of message dicts
+                            (uses _merge_dicts reducer for parallel execution safety)
     ``communication_log`` — ``list``             flat list of all message dicts
+                            (uses operator.add reducer, preserves order by completion)
 """
 
 import logging

@@ -96,6 +96,9 @@ BiliCore includes **AETHER** (Agent Ecosystems for Testing, Hardening, Evaluatio
 * **bili-core Integration**: Leverage checkpointers, middleware, and role registry from bili-core
 * **Execution & Testing**: Built-in executor with checkpoint persistence and cross-model transfer testing
 * **Comprehensive Validation**: Catches structural issues (circular dependencies, orphaned agents) before execution
+* **Cloud-Ready Architecture**: State-based persistence survives Kubernetes pod restarts and supports multi-instance deployments
+* **Multi-Tenant Security**: Thread ownership validation and user isolation across all checkpointer backends
+* **Multi-Conversation Support**: Users can maintain multiple isolated conversation threads simultaneously
 
 **Example Use Cases:**
 - Research analysis workflows (gather → analyze → synthesize → review)
@@ -114,6 +117,37 @@ config = load_mas_from_yaml("examples/research_analysis.yaml")
 # Compile to LangGraph and execute
 result = execute_mas(config, {"messages": ["Analyze quantum computing trends"]})
 print(result.get_summary())
+```
+
+**Multi-Tenant & Multi-Conversation Example:**
+```python
+from bili.aether.execution.mas_executor import MASExecutor
+from bili.checkpointers.pg_checkpointer import AsyncPostgresSaver
+
+# Initialize checkpointer with user_id for multi-tenant isolation
+checkpointer = AsyncPostgresSaver.from_conn_string(
+    conn_string="postgresql://user:pass@localhost/bili",
+    user_id="user@example.com"  # Enforces thread ownership
+)
+
+# Create executor for user's work conversation
+executor = MASExecutor(
+    mas_config=config,
+    checkpointer=checkpointer,
+    user_id="user@example.com",
+    conversation_id="work"  # Isolated work conversation
+)
+
+# Execute with automatic state persistence
+result = await executor.execute_async({"messages": ["Summarize Q4 results"]})
+
+# Create separate personal conversation (isolated state)
+personal_executor = MASExecutor(
+    mas_config=config,
+    checkpointer=checkpointer,
+    user_id="user@example.com",
+    conversation_id="personal"  # Separate conversation thread
+)
 ```
 
 For complete documentation, examples, and API reference, see [`bili/aether/README.md`](bili/aether/README.md).

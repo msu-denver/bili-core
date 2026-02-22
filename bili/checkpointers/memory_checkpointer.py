@@ -35,17 +35,74 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
     Useful for testing and development without requiring a database.
     """
 
+    def __init__(self, *, user_id: Optional[str] = None):
+        """
+        Initialize memory checkpointer.
+
+        Args:
+            user_id: Optional user identifier for thread ownership validation.
+                    If provided, validates that thread_ids belong to this user.
+                    Used for interface consistency with database checkpointers.
+        """
+        super().__init__()
+        self.user_id = user_id
+
+    def put(self, config, checkpoint, metadata, new_versions):
+        """
+        Save checkpoint with optional ownership validation.
+
+        Args:
+            config: Runnable configuration with thread_id
+            checkpoint: Checkpoint to save
+            metadata: Checkpoint metadata
+            new_versions: Channel versions
+
+        Returns:
+            Updated configuration
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to configured user_id
+        """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
+        # Use base class implementation
+        return super().put(config, checkpoint, metadata, new_versions)
+
+    def get_tuple(self, config):
+        """
+        Get checkpoint tuple with optional ownership validation.
+
+        Args:
+            config: Runnable configuration with thread_id
+
+        Returns:
+            Checkpoint tuple or None
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to configured user_id
+        """
+        thread_id = config["configurable"]["thread_id"]
+
+        # Validate ownership if user_id is configured
+        self._validate_thread_ownership(thread_id)
+
+        # Use base class implementation
+        return super().get_tuple(config)
+
     def get_user_threads(
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get all conversation threads for a user from memory storage."""
-        # MemorySaver stores data in self.storage dict with keys as (thread_id, checkpoint_ns)
+        # MemorySaver stores data in self.storage dict with thread_id as string key
         # We need to filter by thread_id that matches user_identifier pattern
 
         threads_data = {}
 
         # Iterate through storage to find matching threads
-        for (thread_id, checkpoint_ns), checkpoint_tuple in self.storage.items():
+        for thread_id, checkpoint_queue in self.storage.items():
             # Check if thread belongs to user
             if thread_id == user_identifier or thread_id.startswith(
                 f"{user_identifier}_"
@@ -56,16 +113,18 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
                         "last_checkpoint": None,
                     }
 
-                threads_data[thread_id]["checkpoints"].append(checkpoint_tuple)
+                # checkpoint_queue is a deque of (checkpoint, metadata) tuples
+                threads_data[thread_id]["checkpoints"] = list(checkpoint_queue)
 
-                # Track the latest checkpoint (highest checkpoint_id)
-                checkpoint, metadata = checkpoint_tuple[0], checkpoint_tuple[1]
-                if checkpoint:
-                    if (
-                        threads_data[thread_id]["last_checkpoint"] is None
-                        or checkpoint["id"]
-                        > threads_data[thread_id]["last_checkpoint"]["id"]
-                    ):
+                # Track the latest checkpoint (last in queue)
+                if checkpoint_queue and len(checkpoint_queue) > 0:
+                    last_item = checkpoint_queue[-1]
+                    # Handle both tuple (checkpoint, metadata) and single checkpoint
+                    if isinstance(last_item, tuple) and len(last_item) == 2:
+                        checkpoint, metadata = last_item
+                    else:
+                        checkpoint = last_item
+                    if checkpoint:
                         threads_data[thread_id]["last_checkpoint"] = checkpoint
 
         # Build thread list
@@ -152,23 +211,22 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         message_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all messages from a conversation thread."""
-        # Find the latest checkpoint for this thread
-        latest_checkpoint = None
-        latest_checkpoint_id = None
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
 
-        for (tid, checkpoint_ns), checkpoint_tuple in self.storage.items():
-            if tid == thread_id:
-                checkpoint, metadata = checkpoint_tuple[0], checkpoint_tuple[1]
-                if checkpoint:
-                    if (
-                        latest_checkpoint_id is None
-                        or checkpoint["id"] > latest_checkpoint_id
-                    ):
-                        latest_checkpoint = checkpoint
-                        latest_checkpoint_id = checkpoint["id"]
+        # Get the checkpoint queue for this thread
+        checkpoint_queue = self.storage.get(thread_id)
 
-        if not latest_checkpoint:
+        if not checkpoint_queue:
             return []
+
+        # Get the latest checkpoint (last in queue)
+        checkpoint, metadata = checkpoint_queue[-1]
+
+        if not checkpoint:
+            return []
+
+        latest_checkpoint = checkpoint
 
         # Extract messages from checkpoint
         channel_values = latest_checkpoint.get("channel_values", {})
@@ -213,6 +271,9 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
     def delete_thread(self, thread_id: str) -> bool:
         """Delete all checkpoints for a conversation thread."""
+        # Validate thread ownership if user_id is set
+        self._validate_thread_ownership(thread_id)
+
         # MemorySaver already has delete_thread, but we need to return bool
         # Find all keys for this thread and delete them
         keys_to_delete = [key for key in self.storage.keys() if key[0] == thread_id]

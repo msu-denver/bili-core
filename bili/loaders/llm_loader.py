@@ -134,9 +134,7 @@ def load_model(
 
 
 def prepare_runtime_config(
-    model_type: str,
-    thinking_config: dict = None,
-    **kwargs
+    model_type: str, thinking_config: dict = None, **kwargs
 ) -> dict:
     """
     Transform simple thinking configuration dict into provider-specific runtime config.
@@ -213,10 +211,10 @@ def prepare_runtime_config(
             )
     elif model_type != "remote_google_vertex" and thinking_config:
         LOGGER.warning(
-                f"{model_type} thinking configuration is not supported at this time."
-                "Thinking configuration will be ignored."
-            )
-        
+            f"{model_type} thinking configuration is not supported at this time."
+            "Thinking configuration will be ignored."
+        )
+
     # Other providers (OpenAI, Azure, Bedrock, etc.) don't use thinking config
     # They will simply ignore unknown config keys, so we don't need special handling
 

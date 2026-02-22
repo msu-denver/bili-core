@@ -47,11 +47,11 @@ result = agent_node(state)
 from functools import partial
 from typing import Type
 
-from bili.graph_builder.classes.node import Node
+from langchain.agents import AgentState, create_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import Tool
-from langchain.agents import create_agent, AgentState
 
+from bili.graph_builder.classes.node import Node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -145,7 +145,7 @@ def build_react_agent_node(
             messages_to_send = [
                 HumanMessage(content=str(message.content)) for message in messages
             ]
-            
+
             # Load the llm config if one exists, otherwise pass an empty dict
             llm_config = state.get("llm_config", {})
 
@@ -154,5 +154,6 @@ def build_react_agent_node(
 
         agent = call_model
     return agent
+
 
 react_agent_node = partial(Node, "react_agent", build_react_agent_node)

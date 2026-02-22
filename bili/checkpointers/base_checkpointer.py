@@ -165,6 +165,35 @@ class QueryableCheckpointerMixin(ABC):
             f"{user_identifier}_"
         )
 
+    def _validate_thread_ownership(self, thread_id: str) -> None:
+        """
+        Validate that thread_id belongs to the authenticated user.
+
+        Checks if the thread_id follows the expected pattern for the configured user_id.
+        Thread IDs must either exactly match the user_id or start with "{user_id}_".
+
+        This method provides a consistent implementation across all checkpointers
+        that require thread ownership validation. It uses the verify_thread_ownership()
+        method for the actual validation logic, which can be overridden by subclasses
+        for custom validation rules.
+
+        Args:
+            thread_id: Thread ID to validate
+
+        Raises:
+            PermissionError: If thread_id doesn't belong to the configured user_id
+        """
+        # Check if user_id is configured
+        if not hasattr(self, "user_id") or self.user_id is None:
+            return  # Validation disabled (backward compatible)
+
+        # Use verify_thread_ownership for actual validation
+        if not self.verify_thread_ownership(thread_id, self.user_id):
+            raise PermissionError(
+                f"Access denied: thread_id '{thread_id}' does not belong to "
+                f"user '{self.user_id}'"
+            )
+
     def _strip_thinking_blocks(self, content: str) -> str:
         """
         Strip thinking/reasoning tags from message content.

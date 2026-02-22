@@ -229,6 +229,15 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
     return wrapper
 ```
 
+### Pre-Commit Linting (REQUIRED)
+
+**ALWAYS run formatters before committing code.** This is enforced automatically via Claude Code hooks in `.claude/settings.json`, but you should also run them proactively while writing code to catch issues early.
+
+- `./run_python_formatters.sh` - Run all formatters (Black, Autoflake, Isort)
+- `pylint bili/ --fail-under=9` - Check code quality (must score 9+/10)
+
+Do not commit code that has lint errors. The CI pipeline will reject it.
+
 ### Important Notes
 
 - Always run formatters before committing code

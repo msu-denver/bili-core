@@ -469,24 +469,31 @@ def _get_communication_context(state: dict, agent_id: str) -> str:
 def _build_communication_update(
     state: dict, agent_id: str, content: str
 ) -> Dict[str, Any]:
-    """Record agent output in communication_log if communication is active.
+    """Record agent output in communication state if communication is active.
+
+    Uses state-based communication API (send_message_in_state) to properly
+    create messages with full Message structure, timestamps, and IDs.
 
     Returns a dict of state fields to merge (empty if communication is
-    not configured).  Only **new** entries are returned — the state
-    schema uses ``operator.add`` / ``_merge_dicts`` reducers to combine
-    them with existing values, which supports concurrent agent execution.
+    not configured). The state schema uses ``operator.add`` / ``_merge_dicts``
+    reducers to combine updates from concurrent agent execution.
     """
     if "communication_log" not in state:
         return {}
 
-    new_entry = {
-        "sender": agent_id,
-        "receiver": "__all__",
-        "channel": "__agent_output__",
-        "content": content,
-    }
+    # Use state-based communication API for proper message structure
+    # pylint: disable=import-outside-toplevel
+    from bili.aether.runtime.communication_state import send_message_in_state
+    from bili.aether.runtime.messages import MessageType
 
-    return {
-        "communication_log": [new_entry],
-        "pending_messages": {agent_id: []},
-    }
+    # Send agent output as broadcast message on __agent_output__ channel
+    state_update = send_message_in_state(
+        state=state,
+        channel_id="__agent_output__",
+        sender=agent_id,
+        content=content,
+        receiver="__all__",  # Broadcast to all agents
+        message_type=MessageType.BROADCAST,
+    )
+
+    return state_update

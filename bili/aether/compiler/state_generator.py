@@ -77,7 +77,7 @@ def generate_state_schema(config: MASConfig) -> Type:
 
     # Communication fields (present when channels are configured)
     if config.channels:
-        annotations["channel_messages"] = Dict[str, Any]
+        annotations["channel_messages"] = Annotated[Dict[str, list], _merge_dicts]
         annotations["pending_messages"] = Annotated[Dict[str, list], _merge_dicts]
         annotations["communication_log"] = Annotated[list, operator.add]
 

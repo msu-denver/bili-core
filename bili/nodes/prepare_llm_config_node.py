@@ -35,7 +35,6 @@ new_state = prepare_llm_config_node(state)
 """
 
 from functools import partial
-from typing import Any, Dict, Optional
 
 from bili.graph_builder.classes.node import Node
 from bili.loaders.llm_loader import prepare_runtime_config
@@ -85,17 +84,16 @@ def build_prepare_llm_config_node(**kwargs) -> callable:
         """
         # Prepare the runtime config using bili-core helper
         llm_config = prepare_runtime_config(
-            model_type=model_type,
-            thinking_config=thinking_config
+            model_type=model_type, thinking_config=thinking_config
         )
 
         # Return state with llm_config set
-        return {
-            "llm_config": llm_config
-        }
+        return {"llm_config": llm_config}
 
     return prepare_llm_config_node_func
 
 
 # Export as a Node instance for use in graph definitions
-prepare_llm_config_node = partial(Node, "prepare_llm_config", build_prepare_llm_config_node)
+prepare_llm_config_node = partial(
+    Node, "prepare_llm_config", build_prepare_llm_config_node
+)

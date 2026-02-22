@@ -46,12 +46,12 @@ add_persona_node = build_add_persona_and_summary_node(
 new_state = add_persona_node(state)
 """
 
-from functools import partial
 import re
+from functools import partial
 
-from bili.graph_builder.classes.node import Node
 from langchain_core.messages import RemoveMessage, SystemMessage
 
+from bili.graph_builder.classes.node import Node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -171,4 +171,7 @@ def build_add_persona_and_summary_node(persona: str, **kwargs):
 
     return add_persona_and_summary
 
-persona_and_summary_node = partial(Node,"add_persona_and_summary", build_add_persona_and_summary_node)
+
+persona_and_summary_node = partial(
+    Node, "add_persona_and_summary", build_add_persona_and_summary_node
+)

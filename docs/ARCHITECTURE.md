@@ -104,6 +104,85 @@ Available implementations:
 - **MongoDBSaver**: Document-based storage
 - **MemorySaver**: In-memory for testing
 
+#### Multi-Tenant Security
+
+All checkpointers support multi-tenant isolation via the `user_id` parameter:
+
+```python
+from bili.checkpointers.pg_checkpointer import AsyncPostgresSaver
+
+# Initialize checkpointer with user_id for multi-tenant isolation
+checkpointer = AsyncPostgresSaver.from_conn_string(
+    conn_string="postgresql://...",
+    user_id="user@example.com"  # Enforces thread ownership validation
+)
+```
+
+**Thread Ownership Validation:**
+- Thread IDs must follow pattern: `{user_id}` or `{user_id}_{conversation_id}`
+- Checkpointer validates ownership on all operations (get, put, delete)
+- Raises `PermissionError` if thread doesn't belong to authenticated user
+- Validation disabled when `user_id=None` (backward compatible)
+
+**On-Demand Schema Migration:**
+- Database schema changes occur only when `user_id` first provided
+- PostgreSQL: Adds `user_id` column with index on first use
+- MongoDB: Adds `user_id` field to documents on first use
+- Zero downtime - migrations run automatically during checkpointer initialization
+
+#### Multi-Conversation Support
+
+Users can maintain multiple isolated conversation threads via `conversation_id`:
+
+```python
+# Default conversation (backward compatible)
+config = {"configurable": {"thread_id": "user@example.com"}}
+
+# Named conversations
+config_work = {"configurable": {"thread_id": "user@example.com_work"}}
+config_personal = {"configurable": {"thread_id": "user@example.com_personal"}}
+```
+
+**Thread ID Pattern:**
+- Single conversation: `{user_id}` (e.g., `user@example.com`)
+- Multi-conversation: `{user_id}_{conversation_id}` (e.g., `user@example.com_work`)
+- Conversations are isolated - separate state, messages, and checkpoints
+
+**Flask API Integration:**
+```python
+# Flask route with multi-conversation support
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json()
+    conversation_id = data.get("conversation_id")  # Optional
+    return handle_agent_prompt(g.user, agent, data["prompt"], conversation_id)
+```
+
+#### Cloud-Ready State Management
+
+Checkpointers provide cloud-native state persistence replacing file-based storage:
+
+**Before (File-Based):**
+- State stored in JSONL files on disk
+- Lost when Kubernetes pods restart
+- Not suitable for multi-instance deployments
+
+**After (State-Based):**
+- State persisted in PostgreSQL/MongoDB
+- Survives pod restarts and scaling events
+- Multi-instance safe with shared database backend
+- Automatic state recovery on agent initialization
+
+**Defense-in-Depth Security:**
+- **Layer 1**: MASExecutor validates `user_id` and `conversation_id`
+- **Layer 2**: Checkpointer validates thread ownership on every operation
+- **Layer 3**: Database-level user isolation via indexed `user_id` column
+
+**Backward Compatibility:**
+- All security features are opt-in via `user_id` parameter
+- Existing code without `user_id` continues to work unchanged
+- No breaking changes to public APIs
+
 ### 3. LLM Configuration (`bili/config/`)
 
 Configurations for 60+ LLMs across providers:
@@ -268,6 +347,7 @@ Key configuration via environment:
 
 ## See Also
 
+- [SECURITY.md](./SECURITY.md) - Multi-tenant security and cloud-ready features
 - [LANGGRAPH.md](./LANGGRAPH.md) - LangGraph workflow documentation
 - [TOOLS.md](./TOOLS.md) - Tools framework documentation
 - [STREAMLIT.md](./STREAMLIT.md) - Streamlit UI documentation

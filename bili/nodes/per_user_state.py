@@ -35,12 +35,12 @@ per_user_node = buld_per_user_state_node(current_user={"uid": "user123", "name":
 new_state = per_user_node(state)
 """
 
-from functools import partial
 import json
+from functools import partial
 
-from bili.graph_builder.classes.node import Node
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 
+from bili.graph_builder.classes.node import Node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -138,5 +138,6 @@ def buld_per_user_state_node(current_user: dict = None, **kwargs):
         return {"messages": all_messages}
 
     return add_user_info
+
 
 per_user_state_node = partial(Node, "per_user_state", buld_per_user_state_node)
