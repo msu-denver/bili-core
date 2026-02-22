@@ -17,8 +17,9 @@ Functions:
     - load_llamacpp_model(model_name, max_tokens, temperature, top_p=1.0, top_k=50, seed=None):
       Loads a compatible model using the LlamaCpp library with specified configuration options.
     - load_remote_gcp_vertex_model(model_name, max_tokens, temperature,
-            top_p=None, top_k=None, seed=None):
+            top_p=None, top_k=None, seed=None, additional_headers=None):
       Loads a remote GCP Vertex AI model with the specified configuration parameters.
+      Supports additional_headers for Priority PayGo and Provisioned Throughput.
     - load_remote_bedrock_model(model_name, max_tokens, temperature, top_p=None,
             top_k=None, seed=None):
       Initializes and loads a remote bedrock model from AWS Bedrock service.
