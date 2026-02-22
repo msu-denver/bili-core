@@ -70,11 +70,17 @@ from langchain_community.document_loaders import (
     UnstructuredWordDocumentLoader,
     UnstructuredXMLLoader,
 )
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from bili.utils.logging_utils import get_logger
 
 # Initialize logger for this module
 LOGGER = get_logger(__name__)
+
+# Default chunk parameters for text splitting
+DEFAULT_CHUNK_SIZE = 1000
+DEFAULT_CHUNK_OVERLAP = 200
 
 
 def load_from_json(file_path, parameter=None):
@@ -406,3 +412,98 @@ def process_unstructured_data(file_path, _):
     """
     loader = UnstructuredFileLoader(file_path, mode="single")
     return loader.load()
+
+
+def process_text(
+    text,
+    metadata=None,
+    chunk_size=DEFAULT_CHUNK_SIZE,
+    chunk_overlap=DEFAULT_CHUNK_OVERLAP,
+):
+    """
+    Process in-memory text into chunked LangChain Document objects.
+
+    Unlike the file-based ``process_*`` functions above, this accepts raw text
+    strings directly — useful for scraped web content, API responses, or any
+    text that doesn't originate from a file on disk.
+
+    The text is split into overlapping chunks using
+    ``RecursiveCharacterTextSplitter`` so that each chunk is a reasonable size
+    for embedding.  Each resulting ``Document`` carries the provided metadata
+    (if any) plus a ``chunk_index`` field.
+
+    :param text: The raw text content to process.
+    :type text: str
+    :param metadata: Optional metadata dict attached to every Document.
+        Common keys include ``source``, ``name``, ``url``.
+    :type metadata: dict or None
+    :param chunk_size: Maximum characters per chunk.  Defaults to 1000.
+    :type chunk_size: int
+    :param chunk_overlap: Overlap between consecutive chunks.  Defaults to 200.
+    :type chunk_overlap: int
+    :return: A list of Document objects, one per chunk.  Returns an empty list
+        if the input text is empty or too short to chunk.
+    :rtype: list[Document]
+    """
+    if not text or not text.strip():
+        return []
+
+    base_metadata = metadata or {}
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+
+    chunks = splitter.split_text(text)
+
+    documents = []
+    for i, chunk in enumerate(chunks):
+        doc_metadata = {**base_metadata, "chunk_index": i, "total_chunks": len(chunks)}
+        documents.append(Document(page_content=chunk, metadata=doc_metadata))
+
+    LOGGER.debug(
+        "Split text into %d chunks (chunk_size=%d)", len(documents), chunk_size
+    )
+    return documents
+
+
+def chunk_documents(
+    documents, chunk_size=DEFAULT_CHUNK_SIZE, chunk_overlap=DEFAULT_CHUNK_OVERLAP
+):
+    """
+    Split existing Document objects into smaller chunks.
+
+    This can be applied after any of the ``process_*`` functions to further
+    subdivide documents that are too large for effective embedding.  Each
+    resulting chunk preserves the original document's metadata and adds a
+    ``chunk_index`` field.
+
+    :param documents: A list of LangChain Document objects to split.
+    :type documents: list[Document]
+    :param chunk_size: Maximum characters per chunk.  Defaults to 1000.
+    :type chunk_size: int
+    :param chunk_overlap: Overlap between consecutive chunks.  Defaults to 200.
+    :type chunk_overlap: int
+    :return: A flat list of chunked Document objects.
+    :rtype: list[Document]
+    """
+    if not documents:
+        return []
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+
+    chunked = splitter.split_documents(documents)
+
+    LOGGER.debug(
+        "Split %d documents into %d chunks (chunk_size=%d)",
+        len(documents),
+        len(chunked),
+        chunk_size,
+    )
+    return chunked
