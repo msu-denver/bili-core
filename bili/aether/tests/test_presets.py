@@ -79,11 +79,14 @@ def test_create_agent_unknown_preset():
 
 def test_register_preset():
     """Test registering a custom preset."""
-    register_preset("my_custom_preset", {
-        "role": "custom_role",
-        "capabilities": ["custom_cap"],
-        "temperature": 0.4,
-    })
+    register_preset(
+        "my_custom_preset",
+        {
+            "role": "custom_role",
+            "capabilities": ["custom_cap"],
+            "temperature": 0.4,
+        },
+    )
 
     assert "my_custom_preset" in list_presets()
     preset = get_preset("my_custom_preset")
@@ -93,11 +96,14 @@ def test_register_preset():
 def test_create_agent_from_custom_preset():
     """Test creating agent from a registered custom preset."""
     # Register first
-    register_preset("test_custom", {
-        "role": "test_role",
-        "capabilities": ["test_cap"],
-        "temperature": 0.5,
-    })
+    register_preset(
+        "test_custom",
+        {
+            "role": "test_role",
+            "capabilities": ["test_cap"],
+            "temperature": 0.5,
+        },
+    )
 
     # Create agent
     agent = create_agent_from_preset(

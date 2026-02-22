@@ -230,23 +230,13 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
             len(self._agent_nodes),
         )
 
-        # 6. Initialise ChannelManager if channels are configured
-        channel_manager = None
-        if self._config.channels:
-            from bili.aether.runtime.channel_manager import (  # pylint: disable=import-outside-toplevel
-                ChannelManager,
-            )
-
-            channel_manager = ChannelManager.initialize_from_config(self._config)
-
-        # 7. Return CompiledMAS
+        # 6. Return CompiledMAS (ChannelManager removed - using state-based communication)
         return CompiledMAS(
             config=self._config,
             graph=self._graph,
             state_schema=self._state_schema,
             agent_nodes=dict(self._agent_nodes),
             checkpoint_config=self._config.checkpoint_config,
-            channel_manager=channel_manager,
         )
 
     # ------------------------------------------------------------------

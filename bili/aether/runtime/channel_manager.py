@@ -1,5 +1,17 @@
 """Channel manager — creates and routes messages across all channels in a MAS.
 
+DEPRECATION NOTICE:
+    ChannelManager's JSONL logging is deprecated. AETHER now uses state-based
+    communication where messages are persisted in LangGraph state via checkpointers.
+    This makes communication cloud-ready (survives pod restarts, works in K8s).
+
+    The state-based approach uses:
+    - bili.aether.runtime.communication_state.send_message_in_state()
+    - bili.aether.runtime.communication_state.get_pending_messages()
+
+    JSONL logging (enable_logging=True) is kept for backward compatibility but
+    should not be used in production (files are ephemeral in cloud deployments).
+
 Provides a single entry point for agent nodes to send and receive
 messages without knowing the underlying channel topology.
 """
@@ -7,6 +19,7 @@ messages without knowing the underlying channel topology.
 import logging
 import os
 import uuid
+import warnings
 from typing import Any, Dict, List, Optional
 
 from bili.aether.runtime.channels import CommunicationChannel, create_channel
@@ -19,18 +32,42 @@ LOGGER = logging.getLogger(__name__)
 class ChannelManager:
     """Manages all communication channels for a compiled MAS.
 
+    DEPRECATION NOTICE:
+        ChannelManager is being transitioned to a state-based communication model.
+        Agent nodes should use ``communication_state.send_message_in_state()``
+        and ``communication_state.get_pending_messages()`` directly instead of
+        ChannelManager. This makes communication cloud-ready by persisting
+        messages in LangGraph state via checkpointers.
+
     Responsibilities:
         * Create channel instances from ``MASConfig.channels``.
         * Route ``send_message`` calls to the correct channel.
         * Aggregate pending messages for an agent across all channels.
-        * Log every message via ``CommunicationLogger``.
+        * ~~Log every message via ``CommunicationLogger`` (DEPRECATED)~~
 
-    Usage::
+    Legacy Usage::
 
         mgr = ChannelManager.initialize_from_config(mas_config)
         mgr.send_message("reviewer_to_judge", "reviewer", "Looks good.")
         pending = mgr.get_messages_for_agent("judge")
         mgr.close()
+
+    Recommended (State-Based) Usage::
+
+        # In agent node:
+        from bili.aether.runtime.communication_state import (
+            send_message_in_state,
+            get_pending_messages
+        )
+
+        # Send message
+        state_update = send_message_in_state(
+            state, "channel_id", "sender", "content", receiver="agent_id"
+        )
+        # Agent returns state_update to merge into graph state
+
+        # Receive messages
+        pending = get_pending_messages(state, agent_id)
     """
 
     def __init__(
@@ -60,12 +97,18 @@ class ChannelManager:
         Args:
             config: A validated ``MASConfig`` instance.
             log_dir: Directory for the JSONL log file. Defaults to cwd.
-            enable_logging: Whether to create a JSONL communication log.
-                Defaults to ``False`` to avoid file pollution during tests
-                and repeated executions.
+            enable_logging: **DEPRECATED**. Whether to create a JSONL communication log.
+                Defaults to ``False``. JSONL logging is deprecated in favor of
+                state-based communication (messages persist in checkpointer).
+                JSONL files are ephemeral in cloud deployments and should not be
+                used for production communication.
 
         Returns:
             A fully initialised ``ChannelManager``.
+
+        Warnings:
+            DeprecationWarning: When enable_logging=True, warns that JSONL logging
+                is deprecated and not suitable for production cloud deployments.
         """
         agent_ids = [a.agent_id for a in config.agents]
         channels: Dict[str, CommunicationChannel] = {}
@@ -76,19 +119,31 @@ class ChannelManager:
         # Set up logger only if explicitly enabled
         logger = None
         if enable_logging:
+            warnings.warn(
+                "JSONL logging (enable_logging=True) is deprecated. "
+                "AETHER now uses state-based communication where messages are "
+                "persisted in LangGraph state via checkpointers. This makes "
+                "communication cloud-ready (survives pod restarts, works in K8s). "
+                "JSONL files are ephemeral in cloud deployments and should not be "
+                "used for production. See bili.aether.runtime.communication_state "
+                "for the state-based API.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             log_dir = log_dir or os.getcwd()
             log_filename = f"communication_{config.mas_id}_{uuid.uuid4().hex[:8]}.jsonl"
             log_path = os.path.join(log_dir, log_filename)
             logger = CommunicationLogger(log_path)
-            LOGGER.info(
-                "ChannelManager initialised for '%s' with %d channels, logging to %s",
+            LOGGER.warning(
+                "ChannelManager initialised for '%s' with %d channels, logging to %s "
+                "(DEPRECATED: use state-based communication instead)",
                 config.mas_id,
                 len(channels),
                 log_path,
             )
         else:
             LOGGER.info(
-                "ChannelManager initialised for '%s' with %d channels (logging disabled)",
+                "ChannelManager initialised for '%s' with %d channels (state-based communication recommended)",
                 config.mas_id,
                 len(channels),
             )

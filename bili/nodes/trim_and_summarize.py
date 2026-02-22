@@ -43,7 +43,7 @@ new_state = trim_node(state)
 """
 
 from functools import partial
-from bili.graph_builder.classes.node import Node
+
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -52,6 +52,7 @@ from langchain_core.messages import (
     trim_messages,
 )
 
+from bili.graph_builder.classes.node import Node
 from bili.utils.langgraph_utils import State, format_message_with_citations
 from bili.utils.logging_utils import get_logger
 
@@ -234,7 +235,7 @@ def build_trim_and_summarize_node(
         new_summary = existing_summary_content = (
             state["summary"] if "summary" in state else ""
         )
-        
+
         if memory_strategy == "summarize":
             if len(removed_messages) > 0:
                 # Merge old summary + newly removed text
@@ -272,5 +273,6 @@ def build_trim_and_summarize_node(
         return {"messages": messages_to_remove, "summary": new_summary}
 
     return trim_and_summarize_state
+
 
 trim_summarize_node = partial(Node, "trim_summarize", build_trim_and_summarize_node)

@@ -26,7 +26,6 @@ class CompiledMAS:
     state_schema: Type
     agent_nodes: Dict[str, Callable]
     checkpoint_config: Dict[str, Any] = field(default_factory=dict)
-    channel_manager: Any = field(default=None)  # Optional ChannelManager
 
     def compile_graph(self, checkpointer=None):
         """Compile the StateGraph into an executable CompiledStateGraph.
@@ -74,5 +73,5 @@ class CompiledMAS:
         return (
             f"CompiledMAS({self.config.mas_id}, "
             f"{len(self.agent_nodes)} agents, "
-            f"workflow={self.config.workflow_type.value})"
+            f"workflow={self.config.workflow_type.value})"  # pylint: disable=no-member
         )
