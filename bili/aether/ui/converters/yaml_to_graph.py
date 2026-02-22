@@ -232,6 +232,7 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
 
     queue = list(roots)
     visited = set()
+    queued = set(roots)
 
     while queue:
         current = queue.pop(0)
@@ -240,7 +241,8 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
         visited.add(current)
         for neighbor in adj.get(current, []):
             depth[neighbor] = max(depth[neighbor], depth[current] + 1)
-            if neighbor not in visited:
+            if neighbor not in visited and neighbor not in queued:
+                queued.add(neighbor)
                 queue.append(neighbor)
 
     # Place any unvisited agents at depth 0

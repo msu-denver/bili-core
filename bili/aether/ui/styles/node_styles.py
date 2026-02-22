@@ -93,5 +93,5 @@ def build_node_css(role: str) -> Dict[str, str]:
         "fontSize": "12px",
         "width": "160px",
         "textAlign": "center",
-        "boxShadow": f"0 2px 8px rgba(0,0,0,0.3)",
+        "boxShadow": "0 2px 8px rgba(0,0,0,0.3)",
     }

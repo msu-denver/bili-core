@@ -70,6 +70,25 @@ from bili.utils.logging_utils import get_logger
 # Initialize logger for this module
 LOGGER = get_logger(__name__)
 
+# SQL constants shared by sync and async user_id schema migration methods
+_SQL_CHECK_USER_ID_COLUMN = """
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'checkpoints'
+    AND column_name = 'user_id'
+"""
+_SQL_ADD_USER_ID_COLUMN = "ALTER TABLE checkpoints ADD COLUMN user_id TEXT"
+_SQL_CHECK_USER_ID_INDEX = """
+    SELECT indexname
+    FROM pg_indexes
+    WHERE tablename = 'checkpoints'
+    AND indexname = 'idx_checkpoints_user_thread'
+"""
+_SQL_CREATE_USER_ID_INDEX = """
+    CREATE INDEX idx_checkpoints_user_thread
+    ON checkpoints(user_id, thread_id)
+"""
+
 
 @conditional_cache_resource()
 def get_pg_connection_pool():
@@ -245,41 +264,22 @@ class PruningPostgresSaver(
         """
         with self._cursor() as cur:
             # Check if user_id column exists
-            cur.execute(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name = 'checkpoints'
-                AND column_name = 'user_id'
-                """
-            )
+            cur.execute(_SQL_CHECK_USER_ID_COLUMN)
             column_exists = cur.fetchone() is not None
 
             if not column_exists:
                 LOGGER.info(
                     "Adding user_id column to checkpoints table (on-demand migration)"
                 )
-                cur.execute("ALTER TABLE checkpoints ADD COLUMN user_id TEXT")
+                cur.execute(_SQL_ADD_USER_ID_COLUMN)
 
             # Check if index exists
-            cur.execute(
-                """
-                SELECT indexname
-                FROM pg_indexes
-                WHERE tablename = 'checkpoints'
-                AND indexname = 'idx_checkpoints_user_thread'
-                """
-            )
+            cur.execute(_SQL_CHECK_USER_ID_INDEX)
             index_exists = cur.fetchone() is not None
 
             if not index_exists:
                 LOGGER.info("Creating user_id index on checkpoints table")
-                cur.execute(
-                    """
-                    CREATE INDEX idx_checkpoints_user_thread
-                    ON checkpoints(user_id, thread_id)
-                    """
-                )
+                cur.execute(_SQL_CREATE_USER_ID_INDEX)
 
     @contextmanager
     def _cursor(self, *, pipeline: bool = False):
@@ -319,26 +319,20 @@ class PruningPostgresSaver(
         """
         with self._cursor() as cur:
             # For fetching and pruning from checkpoints table
-            cur.execute(
-                """
+            cur.execute("""
                         CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_id
                             ON checkpoints (thread_id, checkpoint_id DESC)
-                        """
-            )
+                        """)
             # For cleanup of blobs
-            cur.execute(
-                """
+            cur.execute("""
                         CREATE INDEX IF NOT EXISTS idx_blobs_thread_id
                             ON checkpoint_blobs (thread_id, checkpoint_ns)
-                        """
-            )
+                        """)
             # For cleanup of writes
-            cur.execute(
-                """
+            cur.execute("""
                         CREATE INDEX IF NOT EXISTS idx_writes_thread_id
                             ON checkpoint_writes (thread_id, checkpoint_id)
-                        """
-            )
+                        """)
 
     # VersionedCheckpointerMixin implementation for PostgreSQL
     # Note: Currently no migrations are registered for PostgreSQL.
@@ -429,8 +423,7 @@ class PruningPostgresSaver(
 
         with self._cursor() as cur:
             # Create archive table if it doesn't exist
-            cur.execute(
-                """
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS checkpoints_archive (
                     id SERIAL PRIMARY KEY,
                     thread_id TEXT NOT NULL,
@@ -441,8 +434,7 @@ class PruningPostgresSaver(
                     migration_error TEXT,
                     archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
 
             # Insert into archive
             cur.execute(
@@ -664,17 +656,17 @@ class PruningPostgresSaver(
                     MAX(checkpoint_id) as last_checkpoint_id,
                     COUNT(*) as checkpoint_count
                 FROM checkpoints
-                WHERE thread_id ~ %s
+                WHERE thread_id = %s OR thread_id LIKE %s
                 GROUP BY thread_id
                 ORDER BY MAX(checkpoint_id) DESC
             """
-            # Escape special regex characters in user_identifier (e.g., dots in emails)
-            import re
-
-            escaped_user_id = re.escape(user_identifier)
-            params = [
-                f"^{escaped_user_id}(_|$)"
-            ]  # Regex: user_identifier or user_identifier_*
+            # Escape LIKE special characters so user_identifier is treated literally
+            like_user_id = (
+                user_identifier.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            params = [user_identifier, f"{like_user_id}_%"]
 
             if offset > 0:
                 query += " OFFSET %s"
@@ -1164,26 +1156,20 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
         async with self._acursor() as cur:
             # For fetching and pruning from checkpoints table
-            await cur.execute(
-                """
+            await cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_id
                     ON checkpoints (thread_id, checkpoint_id DESC)
-                """
-            )
+                """)
             # For cleanup of blobs
-            await cur.execute(
-                """
+            await cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_blobs_thread_id
                     ON checkpoint_blobs (thread_id, checkpoint_ns)
-                """
-            )
+                """)
             # For cleanup of writes
-            await cur.execute(
-                """
+            await cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_writes_thread_id
                     ON checkpoint_writes (thread_id, checkpoint_id)
-                """
-            )
+                """)
 
         # On-demand migration: Add user_id schema if user_id is provided
         if self.user_id:
@@ -1204,14 +1190,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         """
         async with self._acursor() as cur:
             # Check if user_id column exists
-            await cur.execute(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name = 'checkpoints'
-                AND column_name = 'user_id'
-                """
-            )
+            await cur.execute(_SQL_CHECK_USER_ID_COLUMN)
             row = await cur.fetchone()
             column_exists = row is not None
 
@@ -1219,28 +1198,16 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                 LOGGER.info(
                     "Adding user_id column to checkpoints table (async on-demand migration)"
                 )
-                await cur.execute("ALTER TABLE checkpoints ADD COLUMN user_id TEXT")
+                await cur.execute(_SQL_ADD_USER_ID_COLUMN)
 
             # Check if index exists
-            await cur.execute(
-                """
-                SELECT indexname
-                FROM pg_indexes
-                WHERE tablename = 'checkpoints'
-                AND indexname = 'idx_checkpoints_user_thread'
-                """
-            )
+            await cur.execute(_SQL_CHECK_USER_ID_INDEX)
             row = await cur.fetchone()
             index_exists = row is not None
 
             if not index_exists:
                 LOGGER.info("Creating user_id index on checkpoints table (async)")
-                await cur.execute(
-                    """
-                    CREATE INDEX idx_checkpoints_user_thread
-                    ON checkpoints(user_id, thread_id)
-                    """
-                )
+                await cur.execute(_SQL_CREATE_USER_ID_INDEX)
 
     async def aput(
         self,
@@ -1486,8 +1453,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         with sync_pool.connection() as conn:
             with conn.cursor() as cur:
                 # Create archive table if it doesn't exist
-                cur.execute(
-                    """
+                cur.execute("""
                     CREATE TABLE IF NOT EXISTS checkpoints_archive (
                         id SERIAL PRIMARY KEY,
                         thread_id TEXT NOT NULL,
@@ -1498,8 +1464,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                         migration_error TEXT,
                         archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                    """
-                )
+                    """)
 
                 # Insert into archive
                 cur.execute(

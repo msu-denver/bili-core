@@ -148,7 +148,9 @@ def _render_edge_properties(edge: StreamlitFlowEdge, config: MASConfig) -> None:
 
     # Try to find matching channel for more details
     for ch in config.channels:
-        if ch.source == edge.source and ch.target == edge.target:
+        if ch.source == edge.source and (
+            ch.target == edge.target or ch.target == "all"
+        ):
             st.markdown(f"**Protocol:** {ch.protocol.value}")
             if ch.description:
                 st.markdown(f"**Description:** {ch.description}")

@@ -65,7 +65,7 @@ def create_checkpointer_from_config(
 
 
 def _create_memory_checkpointer(
-    _config: Dict[str, Any] = None,  # pylint: disable=unused-argument
+    _config: Optional[Dict[str, Any]] = None,  # pylint: disable=unused-argument
     user_id: Optional[str] = None,
 ) -> Any:
     """Create a QueryableMemorySaver, falling back to plain MemorySaver."""
