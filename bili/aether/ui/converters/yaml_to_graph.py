@@ -6,6 +6,7 @@ agents in a topology matching the workflow pattern.
 """
 
 import math
+from collections import deque
 from typing import Dict, List, Tuple
 
 from streamlit_flow.elements import StreamlitFlowEdge, StreamlitFlowNode
@@ -230,12 +231,12 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     if not roots:
         roots = [agent_ids[0]]
 
-    queue = list(roots)
+    queue = deque(roots)
     visited = set()
     queued = set(roots)
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in visited:
             continue
         visited.add(current)
@@ -326,7 +327,7 @@ def _build_edges(config: MASConfig) -> List[StreamlitFlowEdge]:
                 if aid != source:
                     edges.append(
                         _make_channel_edge(
-                            f"ch_{channel.channel_id}_{aid}",
+                            f"ch_{channel.channel_id}::bcast::{aid}",
                             source,
                             aid,
                             channel,
@@ -353,6 +354,28 @@ def _build_edges(config: MASConfig) -> List[StreamlitFlowEdge]:
                         is_reverse=True,
                     )
                 )
+
+    # For sequential workflows with no explicit channels or workflow_edges,
+    # synthesize A → B → C arrows so nodes are never disconnected.
+    if (
+        config.workflow_type == WorkflowType.SEQUENTIAL
+        and not config.channels
+        and not config.workflow_edges
+    ):
+        for i in range(len(config.agents) - 1):
+            src = config.agents[i].agent_id
+            tgt = config.agents[i + 1].agent_id
+            edges.append(
+                StreamlitFlowEdge(
+                    id=f"seq_{src}_{tgt}",
+                    source=src,
+                    target=tgt,
+                    edge_type="smoothstep",
+                    animated=False,
+                    style={"stroke": EDGE_WORKFLOW_COLOR, "strokeWidth": 2},
+                    marker_end={"type": "arrowclosed"},
+                )
+            )
 
     # Workflow edges: dashed lines
     for we in config.workflow_edges:

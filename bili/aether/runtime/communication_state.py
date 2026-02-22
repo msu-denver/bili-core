@@ -101,7 +101,7 @@ def _update_pending_messages(
 
 
 def get_pending_messages(state: dict, agent_id: str) -> List[Dict[str, Any]]:
-    """Return pending message dicts for *agent_id* and clear them from state.
+    """Return pending message dicts for *agent_id* without modifying state.
 
     Returns:
         A list of message dicts (may be empty).

@@ -149,6 +149,9 @@ def _load_config(yaml_path: Path):
     if config.human_in_loop:
         st.warning("Human-in-loop enabled")
 
+    st.markdown("---")
+    st.link_button("Deploy", "#", use_container_width=True)
+
 
 def _render_legend():
     """Render a color legend for node and edge types."""
