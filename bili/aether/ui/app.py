@@ -44,7 +44,7 @@ EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
 
 
-def main():
+def main() -> None:
     """Main entry point for the AETHER visualization app."""
     _configure_page()
 
@@ -73,7 +73,7 @@ def main():
     _render_legend()
 
 
-def _configure_page():
+def _configure_page() -> None:
     """Set up Streamlit page config."""
     st.set_page_config(
         page_title="AETHER - MAS Visualizer",
@@ -83,7 +83,7 @@ def _configure_page():
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
-def _render_sidebar():
+def _render_sidebar() -> None:
     """Render the sidebar with YAML selector and MAS info."""
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
@@ -150,7 +150,7 @@ def _load_config(yaml_path: Path):
         st.warning("Human-in-loop enabled")
 
 
-def _render_legend():
+def _render_legend() -> None:
     """Render a color legend for node and edge types."""
     with st.expander("Legend", expanded=False):
         col1, col2 = st.columns(2)

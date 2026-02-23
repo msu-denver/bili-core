@@ -1141,8 +1141,8 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         self._sync_pool: Optional[ConnectionPool] = None
 
     @asynccontextmanager
-    async def _acursor(self, *, pipeline: bool = False):
-        """Override parent's _acursor to support shared-connection transactions.
+    async def _cursor(self, *, pipeline: bool = False):
+        """Override parent's _cursor to support shared-connection transactions.
 
         When self._async_txn_conn is set (by _aput_with_user_id for atomic
         operations), reuse that connection instead of checking out a new one
@@ -1154,7 +1154,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
             ) as cur:
                 yield cur
         else:
-            async with super()._acursor(pipeline=pipeline) as cur:
+            async with super()._cursor(pipeline=pipeline) as cur:
                 yield cur
 
     async def aensure_indexes(self) -> None:
@@ -1163,7 +1163,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         """
         LOGGER.info("Ensuring indexes exist in async PostgreSQL checkpointer tables.")
 
-        async with self._acursor() as cur:
+        async with self._cursor() as cur:
             # For fetching and pruning from checkpoints table
             await cur.execute(
                 """
@@ -1203,7 +1203,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
         :return: None
         """
-        async with self._acursor() as cur:
+        async with self._cursor() as cur:
             # Check if user_id column exists
             await cur.execute(_SQL_CHECK_USER_ID_COLUMN)
             row = await cur.fetchone()
@@ -1296,7 +1296,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
             try:
                 self._async_txn_conn = conn
 
-                # super().aput() calls self._acursor() which sees _async_txn_conn
+                # super().aput() calls self._cursor() which sees _async_txn_conn
                 # and reuses our connection inside our transaction
                 next_config = await super().aput(
                     config, checkpoint, metadata, new_versions
@@ -1334,7 +1334,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
         :param thread_id: The thread identifier whose checkpoints to prune.
         """
-        async with self._acursor() as cur:
+        async with self._cursor() as cur:
             await cur.execute(
                 """
                 SELECT checkpoint_id

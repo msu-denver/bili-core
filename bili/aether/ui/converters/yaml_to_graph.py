@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 from streamlit_flow.elements import StreamlitFlowEdge, StreamlitFlowNode
 
 from bili.aether.schema.enums import WorkflowType
-from bili.aether.schema.mas_config import MASConfig
+from bili.aether.schema.mas_config import Channel, MASConfig
 from bili.aether.ui.styles.bili_core_theme import (
     EDGE_CONDITIONAL_COLOR,
     EDGE_WORKFLOW_COLOR,
@@ -392,7 +392,7 @@ def _make_channel_edge(
     edge_id: str,
     source: str,
     target: str,
-    channel,
+    channel: Channel,
     is_reverse: bool = False,
 ) -> StreamlitFlowEdge:
     """Create a StreamlitFlowEdge for a communication channel."""

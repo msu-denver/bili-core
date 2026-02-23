@@ -13,7 +13,7 @@ PRIMARY = "#55bfef"
 BACKGROUND = "#2a2a2a"
 SECONDARY_BG = "#3b3b3b"
 TEXT_COLOR = "#FFFFFF"
-FONT = "sans serif"
+FONT = "sans-serif"
 
 # =============================================================================
 # GRAPH-SPECIFIC COLORS
