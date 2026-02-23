@@ -5,12 +5,12 @@ dependencies (psycopg, pymongo, etc.).
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 LOGGER = logging.getLogger(__name__)
 
 # Supported type aliases → canonical names
-_TYPE_ALIASES: Dict[str, str] = {
+_TYPE_ALIASES: dict[str, str] = {
     "memory": "memory",
     "postgres": "postgres",
     "pg": "postgres",
@@ -21,7 +21,7 @@ _TYPE_ALIASES: Dict[str, str] = {
 
 
 def create_checkpointer_from_config(
-    config: Dict[str, Any], user_id: Optional[str] = None
+    config: dict[str, Any], user_id: str | None = None
 ) -> Any:
     """Create a checkpointer instance from a checkpoint_config dict.
 
@@ -65,8 +65,8 @@ def create_checkpointer_from_config(
 
 
 def _create_memory_checkpointer(
-    _config: Dict[str, Any] = None,  # pylint: disable=unused-argument
-    user_id: Optional[str] = None,
+    _config: dict[str, Any] | None = None,  # pylint: disable=unused-argument
+    user_id: str | None = None,
 ) -> Any:
     """Create a QueryableMemorySaver, falling back to plain MemorySaver."""
     try:
@@ -86,14 +86,12 @@ def _create_memory_checkpointer(
         MemorySaver,
     )
 
-    LOGGER.info(
-        "Created MemorySaver checkpointer " "(QueryableMemorySaver unavailable)"
-    )
+    LOGGER.info("Created MemorySaver checkpointer (QueryableMemorySaver unavailable)")
     return MemorySaver()
 
 
 def _create_postgres_checkpointer(
-    config: Dict[str, Any], user_id: Optional[str] = None
+    config: dict[str, Any], user_id: str | None = None
 ) -> Any:
     """Create a PostgreSQL checkpointer via bili-core."""
     keep_last_n = config.get("keep_last_n", 5)
@@ -124,7 +122,7 @@ def _create_postgres_checkpointer(
 
 
 def _create_mongo_checkpointer(
-    config: Dict[str, Any], user_id: Optional[str] = None
+    config: dict[str, Any], user_id: str | None = None
 ) -> Any:
     """Create a MongoDB checkpointer via bili-core."""
     keep_last_n = config.get("keep_last_n", 5)
@@ -155,7 +153,7 @@ def _create_mongo_checkpointer(
 
 
 def _create_auto_checkpointer(
-    config: Dict[str, Any] = None, user_id: Optional[str] = None
+    config: dict[str, Any] = None, user_id: str | None = None
 ) -> Any:
     """Auto-detect checkpointer using bili-core's ``get_checkpointer()``.
 
@@ -171,7 +169,9 @@ def _create_auto_checkpointer(
 
         # Try passing both keep_last_n and user_id if supported
         try:
-            checkpointer = get_checkpointer(keep_last_n=keep_last_n, user_id=user_id)
+            checkpointer = get_checkpointer(
+                keep_last_n=keep_last_n, user_id=user_id
+            )  # pylint: disable=unexpected-keyword-arg
             LOGGER.info(
                 "Auto-detected checkpointer: %s (keep_last_n=%d%s)",
                 type(checkpointer).__name__,
@@ -181,7 +181,9 @@ def _create_auto_checkpointer(
         except TypeError:
             # Fall back to keep_last_n only if user_id not supported
             try:
-                checkpointer = get_checkpointer(keep_last_n=keep_last_n)
+                checkpointer = get_checkpointer(
+                    keep_last_n=keep_last_n
+                )  # pylint: disable=unexpected-keyword-arg
                 LOGGER.info(
                     "Auto-detected checkpointer: %s (keep_last_n=%d, user_id not supported)",
                     type(checkpointer).__name__,

@@ -1,0 +1,16 @@
+[client]
+toolbarMode = "minimal"
+
+[theme]
+# Matches bili-core's main Streamlit theme
+base="dark"
+primaryColor = "#55bfef"
+backgroundColor = "#2a2a2a"
+secondaryBackgroundColor = "#3b3b3b"
+textColor = "#FFFFFF"
+font = "sans serif"
+
+[server]
+port = 8502
+enableCORS = true
+enableXsrfProtection = true

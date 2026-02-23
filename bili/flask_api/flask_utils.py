@@ -20,7 +20,8 @@ Functions:
     A decorator function to enforce authentication and optionally
     validate role-based access control (RBAC) for the decorated Flask route function.
 
-- per_user_agent(checkpoint_saver, graph_definition, node_kwargs, state=State, custom_node_registry=None):
+- per_user_agent(checkpoint_saver, graph_definition, node_kwargs,
+    state=State, custom_node_registry=None):
     Builds a decorator to create a per-user agent graph for a Flask application.
 
 - handle_agent_prompt(user, conversation_agent, prompt):
@@ -37,12 +38,14 @@ Dependencies:
 - langchain_core.messages.HumanMessage: Represents a human message in the conversation.
 - langgraph.checkpoint.base.BaseCheckpointSaver: Base class for checkpoint savers.
 - bili.auth.auth_manager.AuthManager: Manages authentication and authorization.
-- bili.loaders.langchain_loader.build_agent_graph: Builds and compiles a state graph for a LangGraph-based agent.
+- bili.loaders.langchain_loader.build_agent_graph: Builds and compiles
+    a state graph for a LangGraph-based agent.
 - bili.loaders.langchain_loader.GRAPH_NODE_REGISTRY: Default registry for graph nodes.
 
 Usage:
 ------
-To use the utilities provided in this module, import the necessary functions and apply them to your Flask
+To use the utilities provided in this module, import the necessary functions
+and apply them to your Flask
 application as shown in the examples below:
 
 Example:
@@ -139,8 +142,8 @@ def add_unauthorized_handler(auth_manager, app):
                     set_token_cookies(resp, new_id_token, new_refresh_token)
                     return resp
 
-            except Exception as e:
-                LOGGER.error(f"Token refresh failed: {str(e)}")  # Log failure
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                LOGGER.error("Token refresh failed: %s", e)  # Log failure
 
         return response  # If refresh fails, just return the original 401 response
 
@@ -246,8 +249,9 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
 
             :param args: Positional arguments passed to the wrapped route function.
             :param kwargs: Keyword arguments passed to the wrapped route function.
-            :return: The response from the wrapped route function if authentication and authorization
-                     are successful, otherwise a JSON response with an error message and appropriate
+            :return: The response from the wrapped route function if
+                     authentication and authorization are successful, otherwise
+                     a JSON response with an error message and appropriate
                      HTTP status code.
             :rtype: Response
             """
@@ -277,9 +281,12 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
                         403,
                     )
 
-                user_profile = auth_manager.profile_provider.get_user_profile(
-                    g.user["uid"], token
-                )
+                try:
+                    user_profile = auth_manager.profile_provider.get_user_profile(
+                        g.user["uid"], token
+                    )
+                except Exception:  # pylint: disable=broad-exception-caught
+                    return jsonify({"error": "Failed to retrieve user profile"}), 401
                 g.user_profile = (
                     user_profile  # Store user profile in Flask's global context
                 )
@@ -342,18 +349,17 @@ def per_user_agent(
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Add current user to node_kwargs. Check for user_profile first, and
-            # use user if it is not available
-            if hasattr(g, "user_profile"):
-                node_kwargs["current_user"] = g.user_profile
-            else:
-                # Use g.user if user_profile is not available
-                node_kwargs["current_user"] = g.user
+            # Build a per-request kwargs dict with current_user injected.
+            # Never mutate the shared node_kwargs closure — that would be a race
+            # condition in multi-threaded Flask deployments.
+            current_user = g.user_profile if hasattr(g, "user_profile") else g.user
+            request_kwargs = {**node_kwargs, "current_user": current_user}
 
-            # Check that the graph definition contains the per_user_state node
-            # If not, insert it between persona_and_summary and inject_current_datetime
-            if per_user_state_node not in graph_definition:
-
+            # Check that the graph definition contains the per_user_state node.
+            # Use a local variable so the outer graph_definition closure is never
+            # rebound, avoiding a Python UnboundLocalError.
+            current_graph = graph_definition
+            if per_user_state_node not in current_graph:
                 # Create modified copies with updated edges
                 persona_node_modified = replace(
                     persona_and_summary_node, edges=["per_user_state"]
@@ -361,12 +367,11 @@ def per_user_agent(
                 per_user_state_modified = replace(
                     per_user_state_node, edges=["inject_current_datetime"]
                 )
-
-                # Rebuild graph definition: persona → per_user_state → rest
-                graph_definition = [
+                # Build a per-request graph with per_user_state inserted
+                current_graph = [
                     persona_node_modified,
                     per_user_state_modified,
-                ] + graph_definition[
+                ] + current_graph[
                     1:
                 ]  # Skip original persona_and_summary_node
 
@@ -374,8 +379,8 @@ def per_user_agent(
             agent_graph = build_agent_graph(
                 checkpoint_saver=checkpoint_saver,
                 custom_node_registry=custom_node_registry,
-                graph_definition=graph_definition,
-                node_kwargs=node_kwargs,
+                graph_definition=current_graph,
+                node_kwargs=request_kwargs,
                 state=state,
             )
             g.agent = agent_graph  # Store the agent graph in Flask's global context
@@ -413,8 +418,11 @@ def handle_agent_prompt(user, conversation_agent, prompt, conversation_id=None):
         agent if successful or an error message otherwise.
     :rtype: flask.Response
     """
-    # Associate the correct thread id based on the authenticated user
-    email = user["email"]
+    # Associate the correct thread id based on the authenticated user.
+    # Fall back to uid for auth providers that omit email.
+    email = user.get("email") or user.get("uid")
+    if not email:
+        return jsonify({"error": "User identifier not found"}), 400
 
     # Construct thread_id with multi-conversation support
     if conversation_id:
@@ -441,5 +449,4 @@ def handle_agent_prompt(user, conversation_agent, prompt, conversation_id=None):
     if isinstance(result, dict) and "messages" in result:
         final_msg = result["messages"][-1]
         return jsonify({"response": final_msg.content})
-    else:
-        return jsonify({"response": "No response"}), 500
+    return jsonify({"response": "No response"}), 500

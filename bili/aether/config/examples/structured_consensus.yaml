@@ -115,21 +115,25 @@ channels:
   - channel_id: methodology_discussion
     protocol: consensus
     source: methodology_reviewer
+    target: all
     description: Share methodology reviews for consensus
 
   - channel_id: results_discussion
     protocol: consensus
     source: results_reviewer
+    target: all
     description: Share results reviews for consensus
 
   - channel_id: writing_discussion
     protocol: consensus
     source: writing_reviewer
+    target: all
     description: Share writing reviews for consensus
 
   - channel_id: ethics_discussion
     protocol: consensus
     source: ethics_reviewer
+    target: all
     description: Share ethics reviews for consensus
 
 # Example execution:

@@ -19,9 +19,9 @@ Functions:
     in the "tool_calls" field.
     - Also removes any empty AI messages to prevent and invalid message
     from existing. In vertex if an AI message is empty it will cause a
-    ```InvalidArgument: 400 Unable to submit request because it must include 
-    at least one parts field, which describes the prompt input.``` 
-    
+    ```InvalidArgument: 400 Unable to submit request because it must include
+    at least one parts field, which describes the prompt input.```
+
 Dependencies:
 -------------
 - bili.utils.logging_utils.get_logger: Initializes a logger for tracing and debugging.
@@ -50,7 +50,7 @@ from bili.utils.logging_utils import get_logger
 LOGGER = get_logger(__name__)
 
 
-def build_normalize_state_node(**kwargs):
+def build_normalize_state_node(**_kwargs):
     """
     Creates a LangGraph node that normalizes tool function calls in the conversation state.
 
@@ -122,8 +122,7 @@ def build_normalize_state_node(**kwargs):
         # Returning empty list would clear all messages from state
         if messages_to_remove:
             return {"messages": messages_to_remove}
-        else:
-            return {}  # No state changes
+        return {}  # No state changes
 
     return normalize_state
 
