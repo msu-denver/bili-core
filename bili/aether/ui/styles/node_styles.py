@@ -88,7 +88,7 @@ def build_node_css(role: str) -> dict[str, str]:
         "border": f"2px solid {style_info['color']}",
         "borderRadius": "8px",
         "padding": "10px",
-        "fontSize": "12px",
+        "fontSize": "1 rem",
         "width": "160px",
         "textAlign": "center",
         "boxShadow": "0 2px 8px rgba(0,0,0,0.3)",

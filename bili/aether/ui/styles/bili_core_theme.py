@@ -43,13 +43,13 @@ CUSTOM_CSS = """
 <style>
     .properties-header {
         color: #55bfef;
-        font-size: 1.1em;
+        font-size: 1.5rem;
         font-weight: 600;
         margin-bottom: 8px;
     }
     .prop-label {
         color: #aaaaaa;
-        font-size: 0.85em;
+        font-size: 1rem;
         margin-bottom: 2px;
     }
     .prop-value {
