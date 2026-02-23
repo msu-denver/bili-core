@@ -8,6 +8,7 @@ Usage:
     streamlit run bili/aether/ui/app.py
 """
 
+# pylint: disable=import-error
 import logging
 from pathlib import Path
 
@@ -150,7 +151,7 @@ def _load_config(yaml_path: Path):
         st.warning("Human-in-loop enabled")
 
     st.markdown("---")
-    st.link_button("Deploy", "#", use_container_width=True)
+    st.button("Deploy", disabled=True, use_container_width=True)
 
 
 def _render_legend():

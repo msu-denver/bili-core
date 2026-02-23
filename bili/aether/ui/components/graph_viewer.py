@@ -5,7 +5,8 @@ The graph is read-only -- nodes cannot be dragged, connected, or deleted.
 Clicking a node shows its agent properties in a side panel.
 """
 
-from typing import List, Optional
+# pylint: disable=import-error
+from typing import Optional
 
 import streamlit as st
 from streamlit_flow import streamlit_flow
@@ -18,8 +19,8 @@ from bili.aether.schema.mas_config import MASConfig
 
 def render_graph_viewer(
     config: MASConfig,
-    nodes: List[StreamlitFlowNode],
-    edges: List[StreamlitFlowEdge],
+    nodes: list[StreamlitFlowNode],
+    edges: list[StreamlitFlowEdge],
 ) -> None:
     """Render the interactive graph with a properties panel.
 
@@ -66,7 +67,7 @@ def render_graph_viewer(
 def _render_properties_panel(
     config: MASConfig,
     selected_id: Optional[str],
-    edges: List[StreamlitFlowEdge],
+    edges: list[StreamlitFlowEdge],
 ) -> None:
     """Render the right-side properties panel for a clicked node or edge."""
     st.markdown("#### Properties")
