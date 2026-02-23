@@ -5,8 +5,9 @@ Each workflow type gets a specialized layout algorithm that positions
 agents in a topology matching the workflow pattern.
 """
 
+# pylint: disable=import-error
 import math
-from typing import Dict, List, Tuple
+from collections import deque
 
 from streamlit_flow.elements import StreamlitFlowEdge, StreamlitFlowNode
 
@@ -22,7 +23,7 @@ from bili.aether.ui.styles.node_styles import build_node_css
 
 def convert_mas_to_graph(
     config: MASConfig,
-) -> Tuple[List[StreamlitFlowNode], List[StreamlitFlowEdge]]:
+) -> tuple[list[StreamlitFlowNode], list[StreamlitFlowEdge]]:
     """Convert a MASConfig to streamlit-flow nodes and edges.
 
     Dispatches to the appropriate layout function based on workflow_type,
@@ -46,7 +47,7 @@ def convert_mas_to_graph(
 # =============================================================================
 
 
-def _calculate_layout(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _calculate_layout(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Dispatch to layout calculator based on workflow_type."""
     layout_map = {
         WorkflowType.SEQUENTIAL: _layout_sequential,
@@ -63,7 +64,7 @@ def _calculate_layout(config: MASConfig) -> Dict[str, Tuple[float, float]]:
 
 def _get_handle_positions(
     workflow_type: WorkflowType,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Return (source_position, target_position) for a workflow type."""
     vertical_types = {
         WorkflowType.HIERARCHICAL,
@@ -79,7 +80,7 @@ def _get_handle_positions(
 # =============================================================================
 
 
-def _layout_sequential(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _layout_sequential(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Horizontal chain: A -> B -> C, left to right."""
     spacing = 250
     y = 200
@@ -87,10 +88,10 @@ def _layout_sequential(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     return {a.agent_id: (start_x + i * spacing, y) for i, a in enumerate(config.agents)}
 
 
-def _layout_hierarchical(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _layout_hierarchical(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Multi-tier vertical layout. Tier 1 at top, higher tier numbers below."""
-    positions: Dict[str, Tuple[float, float]] = {}
-    tiers: Dict[int, list] = {}
+    positions: dict[str, tuple[float, float]] = {}
+    tiers: dict[int, list] = {}
     for agent in config.agents:
         t = agent.tier if agent.tier is not None else 1
         tiers.setdefault(t, []).append(agent)
@@ -111,9 +112,9 @@ def _layout_hierarchical(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     return positions
 
 
-def _layout_supervisor(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _layout_supervisor(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Hub-and-spoke. Supervisor at center, workers in a circle."""
-    positions: Dict[str, Tuple[float, float]] = {}
+    positions: dict[str, tuple[float, float]] = {}
     supervisor = None
     workers = []
 
@@ -145,9 +146,9 @@ def _layout_supervisor(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     return positions
 
 
-def _layout_consensus(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _layout_consensus(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Circular arrangement. All agents evenly spaced in a ring."""
-    positions: Dict[str, Tuple[float, float]] = {}
+    positions: dict[str, tuple[float, float]] = {}
     center = (400, 300)
     radius = 200
     n = len(config.agents)
@@ -159,9 +160,9 @@ def _layout_consensus(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     return positions
 
 
-def _layout_parallel(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _layout_parallel(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Three rows: coordinator top, workers middle, aggregator bottom."""
-    positions: Dict[str, Tuple[float, float]] = {}
+    positions: dict[str, tuple[float, float]] = {}
     agent_ids = [a.agent_id for a in config.agents]
 
     coordinator_id = None
@@ -208,7 +209,7 @@ def _layout_parallel(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     return positions
 
 
-def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
+def _layout_edge_based(config: MASConfig) -> dict[str, tuple[float, float]]:
     """Layered layout based on workflow_edges (for DELIBERATIVE and CUSTOM)."""
     if not config.workflow_edges:
         return _layout_sequential(config)
@@ -216,8 +217,8 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
     agent_ids = [a.agent_id for a in config.agents]
 
     # Build adjacency and in-degree
-    adj: Dict[str, List[str]] = {aid: [] for aid in agent_ids}
-    in_degree: Dict[str, int] = {aid: 0 for aid in agent_ids}
+    adj: dict[str, list[str]] = {aid: [] for aid in agent_ids}
+    in_degree: dict[str, int] = {aid: 0 for aid in agent_ids}
 
     for edge in config.workflow_edges:
         if edge.from_agent in adj and edge.to_agent in agent_ids:
@@ -225,17 +226,17 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
             in_degree[edge.to_agent] += 1
 
     # BFS to assign max depth from roots
-    depth: Dict[str, int] = {aid: 0 for aid in agent_ids}
+    depth: dict[str, int] = {aid: 0 for aid in agent_ids}
     roots = [aid for aid in agent_ids if in_degree[aid] == 0]
     if not roots:
         roots = [agent_ids[0]]
 
-    queue = list(roots)
+    queue = deque(roots)
     visited = set()
     queued = set(roots)
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in visited:
             continue
         visited.add(current)
@@ -251,11 +252,11 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
             depth[aid] = 0
 
     # Group by depth and position
-    layers: Dict[int, List[str]] = {}
+    layers: dict[int, list[str]] = {}
     for aid, d in depth.items():
         layers.setdefault(d, []).append(aid)
 
-    positions: Dict[str, Tuple[float, float]] = {}
+    positions: dict[str, tuple[float, float]] = {}
     x_spacing = 250
     y_spacing = 150
     y_center = 250
@@ -279,10 +280,10 @@ def _layout_edge_based(config: MASConfig) -> Dict[str, Tuple[float, float]]:
 
 def _build_nodes(
     config: MASConfig,
-    positions: Dict[str, Tuple[float, float]],
+    positions: dict[str, tuple[float, float]],
     source_position: str,
     target_position: str,
-) -> List[StreamlitFlowNode]:
+) -> list[StreamlitFlowNode]:
     """Build StreamlitFlowNode objects from agents and positions."""
     nodes = []
     for agent in config.agents:
@@ -310,9 +311,9 @@ def _build_nodes(
 # =============================================================================
 
 
-def _build_edges(config: MASConfig) -> List[StreamlitFlowEdge]:
+def _build_edges(config: MASConfig) -> list[StreamlitFlowEdge]:
     """Build edges from both channels and workflow_edges."""
-    edges: List[StreamlitFlowEdge] = []
+    edges: list[StreamlitFlowEdge] = []
     agent_ids = {a.agent_id for a in config.agents}
 
     # Channel edges: solid lines, colored by protocol
@@ -326,7 +327,7 @@ def _build_edges(config: MASConfig) -> List[StreamlitFlowEdge]:
                 if aid != source:
                     edges.append(
                         _make_channel_edge(
-                            f"ch_{channel.channel_id}_{aid}",
+                            f"ch_{channel.channel_id}::bcast::{aid}",
                             source,
                             aid,
                             channel,
@@ -353,6 +354,28 @@ def _build_edges(config: MASConfig) -> List[StreamlitFlowEdge]:
                         is_reverse=True,
                     )
                 )
+
+    # For sequential workflows with no explicit channels or workflow_edges,
+    # synthesize A → B → C arrows so nodes are never disconnected.
+    if (
+        config.workflow_type == WorkflowType.SEQUENTIAL
+        and not config.channels
+        and not config.workflow_edges
+    ):
+        for i in range(len(config.agents) - 1):
+            src = config.agents[i].agent_id
+            tgt = config.agents[i + 1].agent_id
+            edges.append(
+                StreamlitFlowEdge(
+                    id=f"seq_{src}_{tgt}",
+                    source=src,
+                    target=tgt,
+                    edge_type="smoothstep",
+                    animated=False,
+                    style={"stroke": EDGE_WORKFLOW_COLOR, "strokeWidth": 2},
+                    marker_end={"type": "arrowclosed"},
+                )
+            )
 
     # Workflow edges: dashed lines
     for we in config.workflow_edges:

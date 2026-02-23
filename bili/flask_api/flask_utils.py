@@ -281,9 +281,12 @@ def auth_required(auth_manager: AuthManager, required_roles=None):
                         403,
                     )
 
-                user_profile = auth_manager.profile_provider.get_user_profile(
-                    g.user["uid"], token
-                )
+                try:
+                    user_profile = auth_manager.profile_provider.get_user_profile(
+                        g.user["uid"], token
+                    )
+                except Exception:  # pylint: disable=broad-exception-caught
+                    return jsonify({"error": "Failed to retrieve user profile"}), 401
                 g.user_profile = (
                     user_profile  # Store user profile in Flask's global context
                 )
@@ -415,8 +418,11 @@ def handle_agent_prompt(user, conversation_agent, prompt, conversation_id=None):
         agent if successful or an error message otherwise.
     :rtype: flask.Response
     """
-    # Associate the correct thread id based on the authenticated user
-    email = user["email"]
+    # Associate the correct thread id based on the authenticated user.
+    # Fall back to uid for auth providers that omit email.
+    email = user.get("email") or user.get("uid")
+    if not email:
+        return jsonify({"error": "User identifier not found"}), 400
 
     # Construct thread_id with multi-conversation support
     if conversation_id:

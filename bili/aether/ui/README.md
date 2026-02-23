@@ -6,8 +6,8 @@ A read-only Streamlit application that visualizes AETHER multi-agent system YAML
 
 ```bash
 # From the bili-core root directory
-pip install -e .
-pip install streamlit-flow-component
+pip install --upgrade --force-reinstall "langgraph~=1.0.2"
+pip install streamlit-flow-component --ignore-installed blinker
 ```
 
 ## Usage

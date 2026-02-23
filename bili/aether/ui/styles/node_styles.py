@@ -6,11 +6,9 @@ keyword-based matching to assign colors to nodes. The first matching
 rule wins, so more specific keywords should appear before more general ones.
 """
 
-from typing import Dict, List, Tuple
-
 # Priority-ordered list: (keyword_in_role, hex_color)
 # First match wins, so order matters.
-ROLE_STYLE_RULES: List[Tuple[str, str]] = [
+ROLE_STYLE_RULES: list[tuple[str, str]] = [
     # Orchestration / supervision
     ("supervisor", "#e67e22"),
     ("coordinator", "#e67e22"),
@@ -59,7 +57,7 @@ ROLE_STYLE_RULES: List[Tuple[str, str]] = [
 DEFAULT_COLOR = "#55bfef"
 
 
-def get_node_style(role: str) -> Dict[str, str]:
+def get_node_style(role: str) -> dict[str, str]:
     """Return style info for an agent role.
 
     Uses keyword matching against the role string (case-insensitive).
@@ -74,7 +72,7 @@ def get_node_style(role: str) -> Dict[str, str]:
     return {"color": DEFAULT_COLOR, "font_color": "#ffffff"}
 
 
-def build_node_css(role: str) -> Dict[str, str]:
+def build_node_css(role: str) -> dict[str, str]:
     """Build a CSS-style dict for StreamlitFlowNode.style.
 
     Args:
@@ -90,7 +88,7 @@ def build_node_css(role: str) -> Dict[str, str]:
         "border": f"2px solid {style_info['color']}",
         "borderRadius": "8px",
         "padding": "10px",
-        "fontSize": "12px",
+        "fontSize": "1rem",
         "width": "160px",
         "textAlign": "center",
         "boxShadow": "0 2px 8px rgba(0,0,0,0.3)",

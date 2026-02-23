@@ -276,7 +276,7 @@ class MASConfig(BaseModel):
         agent_ids = [a.agent_id for a in self.agents]
 
         for edge in self.workflow_edges:
-            if edge.from_agent not in agent_ids:
+            if edge.from_agent not in agent_ids and edge.from_agent != "START":
                 raise ValueError(
                     f"Workflow edge from_agent '{edge.from_agent}' not found in agents"
                 )

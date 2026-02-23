@@ -245,6 +245,8 @@ def nova_pro_global_route():
     """
     # Get the prompt and optional conversation_id from the request body JSON data
     request_data = request.get_json()
+    if not request_data:
+        return jsonify({"error": "Request body is required"}), 400
     prompt = request_data.get("prompt", "")
     conversation_id = request_data.get("conversation_id")
 
@@ -285,6 +287,8 @@ def nova_pro_per_user_route():
     """
     # Get the prompt and optional conversation_id from the request body JSON data
     request_data = request.get_json()
+    if not request_data:
+        return jsonify({"error": "Request body is required"}), 400
     prompt = request_data.get("prompt", "")
     conversation_id = request_data.get("conversation_id")
 

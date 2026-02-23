@@ -46,7 +46,7 @@ Example:
 import atexit
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
@@ -78,7 +78,7 @@ def get_mongo_client():
 
     :return: A MongoDB Database object if the `MONGO_CONNECTION_STRING` is set,
              otherwise None.
-    :rtype: Optional[Database]
+    :rtype: Database | None
     """
     mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING", None)
 
@@ -109,7 +109,7 @@ def close_mongo_client(client):
         LOGGER.info("Shared MongoDB client closed.")
 
 
-def get_mongo_checkpointer(keep_last_n: int = 5, user_id: Optional[str] = None):
+def get_mongo_checkpointer(keep_last_n: int = 5, user_id: str | None = None):
     """
     Creates and returns a MongoDB checkpointer instance if a MongoDB database
     can be successfully initialized.
@@ -160,7 +160,7 @@ class PruningMongoDBSaver(
         self,
         *args: Any,
         keep_last_n: int = -1,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         **kwargs: Any,
     ):
         """
@@ -177,7 +177,7 @@ class PruningMongoDBSaver(
         :param user_id: Optional user identifier for thread ownership validation.
             When provided, automatically creates user_id index (on-demand migration)
             and validates that thread_ids belong to this user.
-        :type user_id: Optional[str]
+        :type user_id: str | None
         :param kwargs: Keyword arguments passed to the parent class.
         :type kwargs: Any
         """
@@ -241,7 +241,7 @@ class PruningMongoDBSaver(
 
     def _get_raw_checkpoint(
         self, thread_id: str, checkpoint_ns: str = ""
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get raw checkpoint document directly from MongoDB.
 
@@ -261,7 +261,7 @@ class PruningMongoDBSaver(
         )
 
     def _replace_raw_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+        self, thread_id: str, document: dict[str, Any], checkpoint_ns: str = ""
     ) -> bool:
         """
         Replace raw checkpoint document in MongoDB.
@@ -283,7 +283,7 @@ class PruningMongoDBSaver(
         return result.matched_count > 0
 
     def _archive_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], error: Exception
+        self, thread_id: str, document: dict[str, Any], error: Exception
     ) -> None:
         """
         Archive a checkpoint that failed migration.
@@ -567,7 +567,7 @@ class PruningMongoDBSaver(
 
     # QueryableCheckpointerMixin implementation for MongoDB
 
-    def _deserialize_checkpoint_data(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _deserialize_checkpoint_data(self, doc: dict[str, Any]) -> dict[str, Any]:
         """Deserialize a raw checkpoint document.
 
         Handles both legacy dict and serialized bytes formats.
@@ -587,8 +587,8 @@ class PruningMongoDBSaver(
         return checkpoint_data
 
     def get_user_threads(
-        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        self, user_identifier: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         """Get all conversation threads for a user from MongoDB."""
         escaped_id = re.escape(user_identifier)
         pipeline = [
@@ -697,10 +697,10 @@ class PruningMongoDBSaver(
     def get_thread_messages(
         self,
         thread_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-        message_types: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        message_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Get all messages from a conversation thread."""
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
@@ -765,7 +765,7 @@ class PruningMongoDBSaver(
         self.writes_collection.delete_many({"thread_id": thread_id})
         return result.deleted_count > 0
 
-    def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:
+    def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user."""
         threads = self.get_user_threads(user_identifier)
 
@@ -847,7 +847,7 @@ async def get_async_mongo_client():
 
 
 async def get_async_mongo_checkpointer(
-    keep_last_n: int = 5, user_id: Optional[str] = None
+    keep_last_n: int = 5, user_id: str | None = None
 ):
     """
     Creates and returns an async-capable MongoDB checkpointer instance for streaming operations.
@@ -890,7 +890,7 @@ class AsyncPruningMongoDBSaver(
         self,
         *args: Any,
         keep_last_n: int = -1,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         **kwargs: Any,
     ):
         """
@@ -971,7 +971,7 @@ class AsyncPruningMongoDBSaver(
 
     def _get_raw_checkpoint(
         self, thread_id: str, checkpoint_ns: str = ""
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get raw checkpoint document directly from MongoDB (sync method for migration).
 
@@ -994,7 +994,7 @@ class AsyncPruningMongoDBSaver(
         return sync_collection.find_one(query, sort=[("checkpoint_id", DESCENDING)])
 
     def _replace_raw_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+        self, thread_id: str, document: dict[str, Any], checkpoint_ns: str = ""
     ) -> bool:
         """
         Replace raw checkpoint document in MongoDB (sync method for migration).
@@ -1019,7 +1019,7 @@ class AsyncPruningMongoDBSaver(
         return result.matched_count > 0
 
     def _archive_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], error: Exception
+        self, thread_id: str, document: dict[str, Any], error: Exception
     ) -> None:
         """
         Archive a checkpoint that failed migration.
@@ -1157,7 +1157,7 @@ class AsyncPruningMongoDBSaver(
 
     # Async query methods for conversation data retrieval
 
-    def _deserialize_checkpoint_data(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _deserialize_checkpoint_data(self, doc: dict[str, Any]) -> dict[str, Any]:
         """Deserialize a raw checkpoint document.
 
         Handles both legacy dict and serialized bytes formats.
@@ -1174,8 +1174,8 @@ class AsyncPruningMongoDBSaver(
         return checkpoint_data
 
     async def aget_user_threads(
-        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        self, user_identifier: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         """Get all conversation threads for a user from MongoDB (async)."""
         escaped_id = re.escape(user_identifier)
         pipeline = [
@@ -1271,10 +1271,10 @@ class AsyncPruningMongoDBSaver(
     async def aget_thread_messages(
         self,
         thread_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-        message_types: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        message_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Get all messages from a conversation thread (async)."""
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
@@ -1334,7 +1334,7 @@ class AsyncPruningMongoDBSaver(
         await self.writes_collection.delete_many({"thread_id": thread_id})
         return result.deleted_count > 0
 
-    async def aget_user_stats(self, user_identifier: str) -> Dict[str, Any]:
+    async def aget_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user (async)."""
         threads = await self.aget_user_threads(user_identifier)
 

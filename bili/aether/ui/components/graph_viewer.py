@@ -5,8 +5,7 @@ The graph is read-only -- nodes cannot be dragged, connected, or deleted.
 Clicking a node shows its agent properties in a side panel.
 """
 
-from typing import List, Optional
-
+# pylint: disable=import-error
 import streamlit as st
 from streamlit_flow import streamlit_flow
 from streamlit_flow.elements import StreamlitFlowEdge, StreamlitFlowNode
@@ -18,8 +17,8 @@ from bili.aether.schema.mas_config import MASConfig
 
 def render_graph_viewer(
     config: MASConfig,
-    nodes: List[StreamlitFlowNode],
-    edges: List[StreamlitFlowEdge],
+    nodes: list[StreamlitFlowNode],
+    edges: list[StreamlitFlowEdge],
 ) -> None:
     """Render the interactive graph with a properties panel.
 
@@ -65,8 +64,8 @@ def render_graph_viewer(
 
 def _render_properties_panel(
     config: MASConfig,
-    selected_id: Optional[str],
-    edges: List[StreamlitFlowEdge],
+    selected_id: str | None,
+    edges: list[StreamlitFlowEdge],
 ) -> None:
     """Render the right-side properties panel for a clicked node or edge."""
     st.markdown("#### Properties")
@@ -90,6 +89,13 @@ def _render_properties_panel(
     st.caption(f"No details for: {selected_id}")
 
 
+def _render_list_section(title: str, items: list) -> None:
+    """Render a bold title followed by a backtick-formatted bullet list."""
+    st.markdown(f"**{title}:**")
+    for item in items:
+        st.markdown(f"- `{item}`")
+
+
 def _render_agent_properties(agent: AgentSpec) -> None:
     """Render detailed agent properties."""
     st.markdown(f"**{agent.get_display_name()}**")
@@ -107,14 +113,10 @@ def _render_agent_properties(agent: AgentSpec) -> None:
         st.markdown(f"**Max Tokens:** {agent.max_tokens}")
 
     if agent.capabilities:
-        st.markdown("**Capabilities:**")
-        for cap in agent.capabilities:
-            st.markdown(f"- `{cap}`")
+        _render_list_section("Capabilities", agent.capabilities)
 
     if agent.tools:
-        st.markdown("**Tools:**")
-        for tool in agent.tools:
-            st.markdown(f"- `{tool}`")
+        _render_list_section("Tools", agent.tools)
 
     st.markdown(f"**Output:** {agent.output_format.value}")
 
@@ -129,9 +131,7 @@ def _render_agent_properties(agent: AgentSpec) -> None:
         st.markdown(f"**Voting Weight:** {agent.voting_weight}")
 
     if agent.middleware:
-        st.markdown("**Middleware:**")
-        for mw in agent.middleware:
-            st.markdown(f"- `{mw}`")
+        _render_list_section("Middleware", agent.middleware)
 
     if agent.inherit_from_bili_core:
         st.markdown(
@@ -148,9 +148,7 @@ def _render_edge_properties(edge: StreamlitFlowEdge, config: MASConfig) -> None:
 
     # Try to find matching channel for more details
     for ch in config.channels:
-        if ch.source == edge.source and (
-            ch.target == edge.target or ch.target == "all"
-        ):
+        if ch.source == edge.source and ch.target in (edge.target, "all"):
             st.markdown(f"**Protocol:** {ch.protocol.value}")
             if ch.description:
                 st.markdown(f"**Description:** {ch.description}")

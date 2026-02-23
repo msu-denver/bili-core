@@ -25,7 +25,7 @@ workflow_type: deliberative
 
 # Human-in-loop configuration
 human_in_loop: true
-human_in_loop_condition: "state.get('escalate_to_human', False)"
+human_escalation_condition: "state.get('escalate_to_human', False)"
 
 agents:
   - agent_id: classifier
@@ -103,30 +103,30 @@ channels:
 
 # Workflow edges define the deliberative flow
 workflow_edges:
-  - source: START
-    target: classifier
+  - from_agent: START
+    to_agent: classifier
     description: Begin with classification
 
-  - source: classifier
-    target: resolver
+  - from_agent: classifier
+    to_agent: resolver
     condition: "True"  # Always proceed to resolver
 
-  - source: resolver
-    target: reviewer
+  - from_agent: resolver
+    to_agent: reviewer
     condition: "True"  # Always get review
 
-  - source: reviewer
-    target: END
+  - from_agent: reviewer
+    to_agent: END
     condition: "state.get('confidence', 0) > 0.6 and not state.get('escalate_to_human', False)"
     description: Auto-close if confident and no escalation needed
 
-  - source: reviewer
-    target: human_agent
+  - from_agent: reviewer
+    to_agent: human_agent
     condition: "state.get('escalate_to_human', False)"
     description: Escalate to human if flagged
 
-  - source: human_agent
-    target: END
+  - from_agent: human_agent
+    to_agent: END
     condition: "True"  # Human decision is final
 
 # Example execution:

@@ -43,13 +43,13 @@ CUSTOM_CSS = """
 <style>
     .properties-header {
         color: #55bfef;
-        font-size: 1.1em;
+        font-size: 1.5rem;
         font-weight: 600;
         margin-bottom: 8px;
     }
     .prop-label {
         color: #aaaaaa;
-        font-size: 0.85em;
+        font-size: 1rem;
         margin-bottom: 2px;
     }
     .prop-value {
@@ -63,7 +63,7 @@ CUSTOM_CSS = """
         border-radius: 12px;
         padding: 2px 8px;
         margin: 2px;
-        font-size: 0.8em;
+        font-size: 0.8rem;
         color: #55bfef;
     }
     .inheritance-badge {
@@ -72,7 +72,7 @@ CUSTOM_CSS = """
         border: 1px solid #55bfef;
         border-radius: 4px;
         padding: 2px 8px;
-        font-size: 0.8em;
+        font-size: 0.8rem;
         color: #55bfef;
     }
     .supervisor-badge {
@@ -81,7 +81,7 @@ CUSTOM_CSS = """
         border: 1px solid #e67e22;
         border-radius: 4px;
         padding: 2px 8px;
-        font-size: 0.8em;
+        font-size: 0.8rem;
         color: #e67e22;
     }
 </style>
