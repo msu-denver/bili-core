@@ -48,7 +48,7 @@ import contextlib
 import os
 import threading
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import msgpack
 from langchain_core.runnables import RunnableConfig
@@ -104,7 +104,7 @@ def get_pg_connection_pool():
 
     :return: A configured PostgreSQL connection pool instance if the `POSTGRES_CONNECTION_STRING`
              is set, otherwise None.
-    :rtype: Optional[ConnectionPool]
+    :rtype: ConnectionPool | None
     """
     postgres_connection_string = os.getenv("POSTGRES_CONNECTION_STRING", None)
     postgres_connection_pool_min_size = int(
@@ -160,8 +160,8 @@ def close_pg_connection_pool():
 
 
 def get_pg_checkpointer(
-    keep_last_n: int = 5, user_id: Optional[str] = None
-) -> Optional[PostgresSaver]:
+    keep_last_n: int = 5, user_id: str | None = None
+) -> PostgresSaver | None:
     """
     Retrieves a PostgreSQL checkpointer.
 
@@ -220,7 +220,7 @@ class PruningPostgresSaver(
         self,
         *args: Any,
         keep_last_n: int = -1,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -347,7 +347,7 @@ class PruningPostgresSaver(
 
     def _get_raw_checkpoint(
         self, thread_id: str, checkpoint_ns: str = ""
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get raw checkpoint data directly from PostgreSQL.
 
@@ -381,7 +381,7 @@ class PruningPostgresSaver(
         return None
 
     def _replace_raw_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+        self, thread_id: str, document: dict[str, Any], checkpoint_ns: str = ""
     ) -> bool:
         """
         Replace raw checkpoint data in PostgreSQL.
@@ -416,7 +416,7 @@ class PruningPostgresSaver(
             return cur.rowcount > 0
 
     def _archive_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], error: Exception
+        self, thread_id: str, document: dict[str, Any], error: Exception
     ) -> None:
         """
         Archive a checkpoint that failed migration.
@@ -650,8 +650,8 @@ class PruningPostgresSaver(
     # QueryableCheckpointerMixin implementation for PostgreSQL
 
     def get_user_threads(
-        self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        self, user_identifier: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         """Get all conversation threads for a user from PostgreSQL."""
         # First, collect all thread metadata using a single cursor
         # We avoid calling get_tuple() inside the cursor block to prevent connection pool deadlock
@@ -818,10 +818,10 @@ class PruningPostgresSaver(
     def get_thread_messages(
         self,
         thread_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-        message_types: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        message_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Get all messages from a conversation thread.
 
@@ -982,7 +982,7 @@ class PruningPostgresSaver(
 
             return deleted_count > 0
 
-    def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:
+    def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user."""
         threads = self.get_user_threads(user_identifier)
 
@@ -1074,9 +1074,7 @@ async def get_async_pg_connection_pool():
     return await _async_pool_manager.get_pool()
 
 
-async def get_async_pg_checkpointer(
-    keep_last_n: int = 5, user_id: Optional[str] = None
-):
+async def get_async_pg_checkpointer(keep_last_n: int = 5, user_id: str | None = None):
     """
     Creates and returns an async PostgreSQL checkpointer instance for streaming operations.
 
@@ -1118,7 +1116,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         self,
         *args: Any,
         keep_last_n: int = -1,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         **kwargs: Any,
     ):
         """
@@ -1138,7 +1136,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         # Shared connection for atomic aput() + user_id UPDATE (None when inactive)
         self._async_txn_conn = None
         # Lazy-initialized sync pool for migration operations
-        self._sync_pool: Optional[ConnectionPool] = None
+        self._sync_pool: ConnectionPool | None = None
 
     @asynccontextmanager
     async def _acursor(self, *, pipeline: bool = False):
@@ -1373,7 +1371,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
     def _get_raw_checkpoint(
         self, thread_id: str, checkpoint_ns: str = ""
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get raw checkpoint data directly from PostgreSQL (sync method for migration).
 
@@ -1411,7 +1409,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         return None
 
     def _replace_raw_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], checkpoint_ns: str = ""
+        self, thread_id: str, document: dict[str, Any], checkpoint_ns: str = ""
     ) -> bool:
         """
         Replace raw checkpoint data in PostgreSQL (sync method for migration).
@@ -1451,7 +1449,7 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
                 return cur.rowcount > 0
 
     def _archive_checkpoint(
-        self, thread_id: str, document: Dict[str, Any], error: Exception
+        self, thread_id: str, document: dict[str, Any], error: Exception
     ) -> None:
         """
         Archive a checkpoint that failed migration.
