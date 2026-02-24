@@ -128,11 +128,13 @@ def _load_config(yaml_path: Path):
             config = load_mas_from_yaml(yaml_path)
             st.session_state.mas_config = config
             st.session_state.current_yaml_path = str(yaml_path)
-            # Clear any previous flow state and model overrides so graph re-renders
+            # Clear any previous flow state, model overrides, and widget state
             keys_to_clear = [
                 k
                 for k in st.session_state
-                if k.startswith("flow_state_") or k.startswith("model_overrides_")
+                if k.startswith("flow_state_")
+                or k.startswith("model_overrides_")
+                or k.startswith("model_select_")
             ]
             for k in keys_to_clear:
                 del st.session_state[k]

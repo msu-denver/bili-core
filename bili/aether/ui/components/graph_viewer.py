@@ -21,7 +21,13 @@ def _overrides_key(mas_id: str) -> str:
 
 @st.cache_data
 def _build_model_options() -> tuple[list[str], dict[str, str]]:
-    """Return (display_list, display_to_model_name) from LLM_MODELS."""
+    """Return (display_list, display_to_model_name) from LLM_MODELS.
+
+    The ``display_to_model_name`` dict maps each display string back to the
+    LLM_MODELS ``model_name`` field. It is consumed by the Deploy/Run task
+    to resolve UI selections back to ``AgentSpec.model_name`` values before
+    patching the config and calling ``MASExecutor``.
+    """
     from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
         LLM_MODELS,
     )
@@ -37,6 +43,7 @@ def _build_model_options() -> tuple[list[str], dict[str, str]]:
     return options, name_to_model
 
 
+@st.cache_data
 def _find_model_display(model_name: str | None) -> str | None:
     """Resolve a raw model_name (display string or model_id) to its selectbox display string."""
     from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
