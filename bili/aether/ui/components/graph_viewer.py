@@ -15,6 +15,46 @@ from bili.aether.schema.agent_spec import AgentSpec
 from bili.aether.schema.mas_config import MASConfig
 
 
+def _overrides_key(mas_id: str) -> str:
+    return f"model_overrides_{mas_id}"
+
+
+@st.cache_data
+def _build_model_options() -> tuple[list[str], dict[str, str]]:
+    """Return (display_list, display_to_model_name) from LLM_MODELS."""
+    from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
+        LLM_MODELS,
+    )
+
+    options: list[str] = []
+    name_to_model: dict[str, str] = {}
+    for provider_info in LLM_MODELS.values():
+        provider_label = provider_info["name"]
+        for entry in provider_info["models"]:
+            display = f"[{provider_label}] {entry['model_name']}"
+            options.append(display)
+            name_to_model[display] = entry["model_name"]
+    return options, name_to_model
+
+
+def _find_model_display(model_name: str | None) -> str | None:
+    """Resolve a raw model_name (display string or model_id) to its selectbox display string."""
+    from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
+        LLM_MODELS,
+    )
+
+    if not model_name:
+        return None
+    lookup: dict[str, str] = {}
+    for provider_info in LLM_MODELS.values():
+        provider_label = provider_info["name"]
+        for entry in provider_info["models"]:
+            display = f"[{provider_label}] {entry['model_name']}"
+            lookup[entry["model_id"]] = display
+            lookup[entry["model_name"]] = display
+    return lookup.get(model_name)
+
+
 def render_graph_viewer(
     config: MASConfig,
     nodes: list[StreamlitFlowNode],
@@ -58,14 +98,20 @@ def render_graph_viewer(
 
         selected_id = st.session_state[state_key].selected_id
 
+    # Initialize model override dict for this MAS
+    overrides_key = _overrides_key(config.mas_id)
+    if overrides_key not in st.session_state:
+        st.session_state[overrides_key] = {}
+
     with props_col:
-        _render_properties_panel(config, selected_id, edges)
+        _render_properties_panel(config, selected_id, edges, config.mas_id)
 
 
 def _render_properties_panel(
     config: MASConfig,
     selected_id: str | None,
     edges: list[StreamlitFlowEdge],
+    mas_id: str,
 ) -> None:
     """Render the right-side properties panel for a clicked node or edge."""
     st.markdown("#### Properties")
@@ -77,7 +123,7 @@ def _render_properties_panel(
     # Check if it's a node (agent_id)
     agent = config.get_agent(selected_id)
     if agent:
-        _render_agent_properties(agent)
+        _render_agent_properties(agent, mas_id)
         return
 
     # Check if it's an edge
@@ -96,7 +142,36 @@ def _render_list_section(title: str, items: list) -> None:
         st.markdown(f"- `{item}`")
 
 
-def _render_agent_properties(agent: AgentSpec) -> None:
+def _render_model_selector(agent: AgentSpec, mas_id: str) -> None:
+    """Render the model override selectbox and persist the selection to session state."""
+    _keep = "(keep from YAML)"
+    options, _ = _build_model_options()
+    overrides = st.session_state[_overrides_key(mas_id)]
+
+    current_override = overrides.get(agent.agent_id)
+    if current_override and current_override in options:
+        start_index = options.index(current_override) + 1  # +1 for sentinel
+    else:
+        yaml_display = _find_model_display(agent.model_name)
+        start_index = (
+            (options.index(yaml_display) + 1) if yaml_display in options else 0
+        )
+
+    selected = st.selectbox(
+        "Model",
+        [_keep] + options,
+        index=start_index,
+        key=f"model_select_{mas_id}_{agent.agent_id}",
+        help="Override the LLM for this agent. '(keep from YAML)' uses the configured model.",
+    )
+
+    if selected == _keep:
+        overrides.pop(agent.agent_id, None)
+    else:
+        overrides[agent.agent_id] = selected
+
+
+def _render_agent_properties(agent: AgentSpec, mas_id: str) -> None:
     """Render detailed agent properties."""
     st.markdown(f"**{agent.get_display_name()}**")
     st.caption(f"`{agent.agent_id}`")
@@ -104,9 +179,8 @@ def _render_agent_properties(agent: AgentSpec) -> None:
     st.markdown("---")
     st.markdown(f"**Role:** {agent.role}")
     st.markdown(f"**Objective:** {agent.objective}")
+    _render_model_selector(agent, mas_id)
 
-    if agent.model_name:
-        st.markdown(f"**Model:** `{agent.model_name}`")
     if agent.temperature is not None:
         st.markdown(f"**Temperature:** {agent.temperature}")
     if agent.max_tokens:
