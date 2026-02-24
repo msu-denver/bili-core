@@ -164,12 +164,14 @@ def _render_model_selector(agent: AgentSpec, mas_id: str) -> None:
             (options.index(yaml_display) + 1) if yaml_display in options else 0
         )
 
+    st.markdown("**Model**")
     selected = st.selectbox(
         "Model",
         [_keep] + options,
         index=start_index,
         key=f"model_select_{mas_id}_{agent.agent_id}",
         help="Override the LLM for this agent. '(keep from YAML)' uses the configured model.",
+        label_visibility="collapsed",
     )
 
     if selected == _keep:
