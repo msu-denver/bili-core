@@ -58,10 +58,17 @@ _LAZY_IMPORTS = {
     "MASValidator": (".validation", "MASValidator"),
     "ValidationResult": (".validation", "ValidationResult"),
     "validate_mas": (".validation", "validate_mas"),
+    # Attack Injection Framework
+    "AttackInjector": (".attacks", "AttackInjector"),
+    "AttackResult": (".attacks", "AttackResult"),
+    "AttackType": (".attacks", "AttackType"),
+    "InjectionPhase": (".attacks", "InjectionPhase"),
+    "AgentObservation": (".attacks", "AgentObservation"),
 }
 
 # Submodule names that can be accessed as attributes
 _LAZY_SUBMODULES = {
+    "attacks",
     "compiler",
     "config",
     "integration",
@@ -134,4 +141,10 @@ __all__ = [
     "MASExecutionResult",
     "MASExecutor",
     "execute_mas",
+    # Attack Injection Framework
+    "AttackInjector",
+    "AttackResult",
+    "AttackType",
+    "InjectionPhase",
+    "AgentObservation",
 ]
