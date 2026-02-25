@@ -10,6 +10,7 @@ Follows the ``@dataclass`` pattern established by
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -81,6 +82,7 @@ class MASExecutionResult:  # pylint: disable=too-many-instance-attributes
 
     mas_id: str
     execution_id: str
+    run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     start_time: str = ""
     end_time: str = ""
     total_execution_time_ms: float = 0.0
@@ -104,6 +106,7 @@ class MASExecutionResult:  # pylint: disable=too-many-instance-attributes
         return {
             "mas_id": self.mas_id,
             "execution_id": self.execution_id,
+            "run_id": self.run_id,
             "start_time": self.start_time,
             "end_time": self.end_time,
             "total_execution_time_ms": self.total_execution_time_ms,

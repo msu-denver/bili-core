@@ -64,6 +64,11 @@ _LAZY_IMPORTS = {
     "AttackType": (".attacks", "AttackType"),
     "InjectionPhase": (".attacks", "InjectionPhase"),
     "AgentObservation": (".attacks", "AgentObservation"),
+    # Security Event Detection & Logging
+    "SecurityEvent": (".security", "SecurityEvent"),
+    "SecurityEventType": (".security", "SecurityEventType"),
+    "SecurityEventDetector": (".security", "SecurityEventDetector"),
+    "SecurityEventLogger": (".security", "SecurityEventLogger"),
 }
 
 # Submodule names that can be accessed as attributes
@@ -74,6 +79,7 @@ _LAZY_SUBMODULES = {
     "integration",
     "runtime",
     "schema",
+    "security",
     "ui",
     "validation",
 }
@@ -147,4 +153,9 @@ __all__ = [
     "AttackType",
     "InjectionPhase",
     "AgentObservation",
+    # Security Event Detection & Logging
+    "SecurityEvent",
+    "SecurityEventType",
+    "SecurityEventDetector",
+    "SecurityEventLogger",
 ]
