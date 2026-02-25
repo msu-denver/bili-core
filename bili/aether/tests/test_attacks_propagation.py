@@ -46,9 +46,8 @@ def test_payload_present_empty_text():
 
 
 def test_payload_present_short_payload():
-    """Short payloads still match when present in the text."""
-    # Short payloads still match (we test the full string)
-    assert _payload_present(_PAYLOAD_SHORT, f"some {_PAYLOAD_SHORT} here") is True
+    """Short payloads below _MIN_MATCH_LEN return False to avoid false positives."""
+    assert _payload_present(_PAYLOAD_SHORT, f"some {_PAYLOAD_SHORT} here") is False
 
 
 # =========================================================================

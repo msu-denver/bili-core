@@ -77,8 +77,10 @@ def inject_agent_impersonation(
     """
     new_config = copy.deepcopy(config)
     new_agents = []
+    found = False
     for agent in new_config.agents:
         if agent.agent_id == agent_id:
+            found = True
             agent = agent.model_copy(
                 update={
                     "role": "impersonated_agent",
@@ -90,6 +92,8 @@ def inject_agent_impersonation(
                 agent_id,
             )
         new_agents.append(agent)
+    if not found:
+        raise ValueError(f"Agent '{agent_id}' not found in config '{config.mas_id}'")
     return new_config.model_copy(update={"agents": new_agents})
 
 

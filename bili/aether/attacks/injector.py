@@ -47,7 +47,7 @@ _STRATEGY_MAP = {
 }
 
 
-class AttackInjector:  # pylint: disable=too-few-public-methods
+class AttackInjector:
     """Inject adversarial payloads into a MAS and track propagation.
 
     Args:
@@ -192,7 +192,7 @@ class AttackInjector:  # pylint: disable=too-few-public-methods
             if phase == InjectionPhase.PRE_EXECUTION:
                 self._run_pre_execution(agent_id, attack_type, payload, tracker)
             else:
-                self._run_mid_execution(agent_id, payload, tracker)
+                self._run_mid_execution(agent_id, attack_type, payload, tracker)
             completed_at = datetime.datetime.now(datetime.timezone.utc)
         except Exception as exc:  # pylint: disable=broad-except
             error = str(exc)
@@ -272,6 +272,7 @@ class AttackInjector:  # pylint: disable=too-few-public-methods
     def _run_mid_execution(
         self,
         agent_id: str,
+        attack_type: AttackType,
         payload: str,
         tracker: Optional[PropagationTracker],
     ) -> None:
@@ -290,6 +291,7 @@ class AttackInjector:  # pylint: disable=too-few-public-methods
 
         compiled_mas = compile_mas(self._config)
         effective_tracker = tracker or PropagationTracker(payload, agent_id)
+        invoke_config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
         mid_execution.run_with_mid_execution_injection(
             compiled_mas=compiled_mas,
@@ -297,5 +299,16 @@ class AttackInjector:  # pylint: disable=too-few-public-methods
             target_agent_id=agent_id,
             payload=payload,
             tracker=effective_tracker,
-            invoke_config={},
+            invoke_config=invoke_config,
+            attack_type=attack_type.value,
         )
+
+    def close(self) -> None:
+        """Shut down the background thread pool."""
+        self._thread_pool.shutdown(wait=False)
+
+    def __enter__(self) -> "AttackInjector":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()

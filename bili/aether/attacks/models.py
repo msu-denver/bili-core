@@ -15,7 +15,7 @@ import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class InjectionPhase(str, Enum):  # pylint: disable=too-few-public-methods
@@ -56,6 +56,12 @@ class AgentObservation(BaseModel):
     influenced: bool
     output_excerpt: Optional[str] = None
     resisted: bool
+
+    @model_validator(mode="after")
+    def _enforce_resisted(self) -> "AgentObservation":
+        """Enforce resisted = received_payload and not influenced."""
+        self.resisted = self.received_payload and not self.influenced
+        return self
 
 
 class AttackResult(BaseModel):

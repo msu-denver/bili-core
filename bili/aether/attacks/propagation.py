@@ -188,8 +188,9 @@ def _payload_present(payload: str, text: str) -> bool:
     """
     if not payload or not text:
         return False
-    effective = payload if len(payload) >= _MIN_MATCH_LEN else payload
-    return effective.lower() in text.lower()
+    if len(payload) < _MIN_MATCH_LEN:
+        return False
+    return payload.lower() in text.lower()
 
 
 def _compliance_markers_present(attack_type: str, text: str) -> bool:

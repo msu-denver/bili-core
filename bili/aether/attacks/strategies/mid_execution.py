@@ -33,6 +33,7 @@ def run_with_mid_execution_injection(  # pylint: disable=too-many-locals
     payload: str,
     tracker: Any,
     invoke_config: dict | None = None,
+    attack_type: str = "prompt_injection",
 ) -> dict:
     """Run the MAS with a mid-execution payload injection at *target_agent_id*.
 
@@ -79,8 +80,6 @@ def run_with_mid_execution_injection(  # pylint: disable=too-many-locals
     agent_roles: dict[str, str] = {
         a.agent_id: a.role for a in compiled_mas.config.agents
     }
-    attack_type = "prompt_injection"  # default; caller may pass via tracker if needed
-
     # Step 1: Compile with interrupt_before at the target node
     graph = compiled_mas.compile_graph(
         interrupt_before=[target_agent_id],
