@@ -254,7 +254,10 @@ class PruningMongoDBSaver(
                     time.sleep(attempt + 1)
                     continue
                 # Code 85: "Index already exists with different options"
-                if exc.code == 85:
+                # Code 86: "IndexKeySpecsConflict" — same name but
+                #   different specs (e.g., unique added to existing
+                #   non-unique index)
+                if exc.code in (85, 86):
                     LOGGER.warning(
                         "Index conflict on %s for '%s': %s. "
                         "Dropping conflicting index and retrying.",
@@ -262,6 +265,14 @@ class PruningMongoDBSaver(
                         name,
                         exc,
                     )
+                    # Code 86 means the same-named index exists with
+                    # different options. _drop_conflicting_indexes
+                    # skips same-name indexes, so drop by name first.
+                    if exc.code == 86:
+                        try:
+                            collection.drop_index(name)
+                        except OperationFailure:
+                            pass
                     PruningMongoDBSaver._drop_conflicting_indexes(
                         collection, keys, name
                     )
