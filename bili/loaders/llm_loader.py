@@ -462,6 +462,7 @@ def load_remote_gcp_vertex_model(
     response_schema=None,
     response_mime_type=None,
     additional_headers=None,
+    max_retries=3,
 ):
     """
     Loads a remote GCP Vertex AI model with the specified configuration parameters.
@@ -470,6 +471,11 @@ def load_remote_gcp_vertex_model(
     initializes a ChatVertexAI instance with it. Optional parameters such as
     top_p, top_k, and seed can be added to further customize the model setup.
     A debug log of the initialized model is generated before returning the model.
+
+    When max_retries > 0, the model is wrapped with exponential backoff retry
+    logic to handle transient errors like 429 (rate limit) and 503 (service
+    unavailable). This follows Google's recommended approach for handling
+    Vertex AI quota errors.
 
     :param model_name: The name of the model to be loaded.
     :type model_name: str
@@ -488,8 +494,11 @@ def load_remote_gcp_vertex_model(
         Use for Priority PayGo: {"X-Vertex-AI-LLM-Shared-Request-Type": "priority"}
         Use for Provisioned Throughput: {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
     :type additional_headers: dict, optional
+    :param max_retries: Maximum number of retries for transient errors (429, 503).
+        Set to 0 to disable retry logic. Default is 3.
+    :type max_retries: int, optional
     :return: An instance of the ChatVertexAI model initialized with the
-             specified configuration.
+             specified configuration, optionally wrapped with retry logic.
     :rtype: ChatVertexAI
     """
 
@@ -517,6 +526,19 @@ def load_remote_gcp_vertex_model(
 
     # Print the model for debugging purposes
     LOGGER.debug(llm)
+
+    # Apply retry wrapper for transient errors (429, 503)
+    # Uses exponential backoff as recommended by Google for Vertex AI
+    if max_retries and max_retries > 0:
+        from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+
+        llm = llm.with_retry(
+            stop_after_attempt=max_retries,
+            retry_if_exception_type=(ResourceExhausted, ServiceUnavailable),
+        )
+        LOGGER.info(
+            "Vertex AI model wrapped with retry logic (max_retries=%d)", max_retries
+        )
 
     return llm
 
