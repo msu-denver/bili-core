@@ -415,6 +415,7 @@ def test_all_example_yamls_pass_validation():
         "supervisor_moderation.yaml",
         "consensus_network.yaml",
         "custom_escalation.yaml",
+        "pipeline_agents.yaml",
     ]
 
     for fname in example_files:
