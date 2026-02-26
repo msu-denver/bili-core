@@ -311,3 +311,27 @@ def test_inject_attack_always_logs_result(tmp_path):
     assert log_path.exists()
     lines = log_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
+
+
+# =========================================================================
+# Context manager / lifecycle
+# =========================================================================
+
+
+def test_close_shuts_down_thread_pool():
+    """close() shuts down the internal ThreadPoolExecutor."""
+    config = _seq_config()
+    injector = _make_injector(config)
+    assert not injector._thread_pool._shutdown  # pool is live before close
+    injector.close()
+    assert injector._thread_pool._shutdown  # pool is shut down after close
+
+
+def test_context_manager_calls_close_on_exit():
+    """Using AttackInjector as a context manager calls close() on __exit__."""
+    config = _seq_config()
+    injector = _make_injector(config)
+    with patch.object(injector, "close") as mock_close:
+        with injector:
+            pass
+    mock_close.assert_called_once()

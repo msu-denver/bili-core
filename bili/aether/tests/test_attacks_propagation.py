@@ -3,6 +3,7 @@
 from bili.aether.attacks.propagation import (
     PropagationTracker,
     _compliance_markers_present,
+    _extract_excerpt,
     _payload_present,
 )
 
@@ -221,3 +222,42 @@ def test_observations_list_returned_in_order():
     tracker.observe("y", "ry", {}, {})
     obs = tracker.observations
     assert [o.agent_id for o in obs] == ["x", "y"]
+
+
+# =========================================================================
+# _extract_excerpt helper
+# =========================================================================
+
+
+def test_extract_excerpt_returns_message_key_first():
+    """message key is preferred over all other keys."""
+    result = _extract_excerpt({"message": "from message", "content": "from content"})
+    assert result == "from message"
+
+
+def test_extract_excerpt_falls_back_through_keys():
+    """Keys are tried in order: message → content → output → text → response."""
+    assert _extract_excerpt({"content": "c"}) == "c"
+    assert _extract_excerpt({"output": "o"}) == "o"
+    assert _extract_excerpt({"text": "t"}) == "t"
+    assert _extract_excerpt({"response": "r"}) == "r"
+
+
+def test_extract_excerpt_truncates_at_500_chars():
+    """Values longer than 500 chars are truncated to exactly 500."""
+    long_val = "x" * 600
+    result = _extract_excerpt({"message": long_val})
+    assert result == "x" * 500
+
+
+def test_extract_excerpt_falls_back_to_json_serialization():
+    """Unknown keys cause fallback to JSON serialisation of the whole dict."""
+    result = _extract_excerpt({"unknown_key": "value"})
+    assert result is not None
+    assert "unknown_key" in result
+
+
+def test_extract_excerpt_skips_empty_string_values():
+    """Empty (or whitespace-only) string values for known keys are skipped."""
+    result = _extract_excerpt({"message": "   ", "content": "non-empty"})
+    assert result == "non-empty"

@@ -2,6 +2,7 @@
 
 # pylint: disable=duplicate-code
 
+import concurrent.futures
 import datetime
 import json
 
@@ -130,3 +131,75 @@ def test_attack_type_logged_as_string(tmp_path):
     )
     parsed = json.loads(log_file.read_text(encoding="utf-8").strip())
     assert parsed["attack_type"] == "memory_poisoning"
+
+
+# =========================================================================
+# Thread safety
+# =========================================================================
+
+_CONCURRENT_N = 50
+_CONCURRENT_WORKERS = 10
+
+
+def test_concurrent_writes_no_lines_lost(tmp_path):
+    """N concurrent log() calls on the same instance produce exactly N lines.
+
+    This mirrors the AttackInjector blocking=False path where a
+    ThreadPoolExecutor drives multiple log() calls on a shared AttackLogger.
+    """
+    log_file = tmp_path / "attack_log.ndjson"
+    logger = AttackLogger(log_path=log_file)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_CONCURRENT_WORKERS) as pool:
+        futures = [
+            pool.submit(logger.log, _result(attack_id=f"uuid-{i}"))
+            for i in range(_CONCURRENT_N)
+        ]
+        concurrent.futures.wait(futures)
+
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == _CONCURRENT_N
+
+
+def test_concurrent_writes_each_line_is_valid_json(tmp_path):
+    """Every line written under concurrent load is independently parseable JSON.
+
+    Verifies that the per-instance lock prevents partial writes from
+    interleaving across threads.
+    """
+    log_file = tmp_path / "attack_log.ndjson"
+    logger = AttackLogger(log_path=log_file)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_CONCURRENT_WORKERS) as pool:
+        futures = [
+            pool.submit(logger.log, _result(attack_id=f"uuid-{i}"))
+            for i in range(_CONCURRENT_N)
+        ]
+        concurrent.futures.wait(futures)
+
+    for line in log_file.read_text(encoding="utf-8").strip().splitlines():
+        parsed = json.loads(line)
+        assert "attack_id" in parsed
+
+
+def test_concurrent_writes_all_attack_ids_present_exactly_once(tmp_path):
+    """Each attack_id written concurrently appears exactly once in the log.
+
+    Catches both dropped writes (count < N) and duplicated writes (count > 1
+    for any ID) that would indicate a race condition.
+    """
+    log_file = tmp_path / "attack_log.ndjson"
+    logger = AttackLogger(log_path=log_file)
+    expected_ids = {f"uuid-{i}" for i in range(_CONCURRENT_N)}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_CONCURRENT_WORKERS) as pool:
+        futures = [
+            pool.submit(logger.log, _result(attack_id=f"uuid-{i}"))
+            for i in range(_CONCURRENT_N)
+        ]
+        concurrent.futures.wait(futures)
+
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+    written_ids = [json.loads(line)["attack_id"] for line in lines]
+    assert set(written_ids) == expected_ids
+    assert len(written_ids) == len(expected_ids)  # no duplicates
