@@ -1,12 +1,15 @@
 """Graph builder — converts a validated MASConfig into a LangGraph StateGraph.
 
 Supports all seven ``WorkflowType`` values defined in the AETHER schema.
+Supports agent pipeline sub-graphs (PipelineSpec) compiled as inner
+StateGraphs and embedded as single nodes in the parent MAS graph.
 """
 
 import ast
 import logging
 import operator
 import re
+import time
 from collections import Counter, defaultdict
 from typing import Any, Callable, Dict, List, Set
 
@@ -14,7 +17,7 @@ from bili.aether.schema import MASConfig, WorkflowType
 
 from .agent_generator import generate_agent_node, wrap_agent_node
 from .compiled_mas import CompiledMAS
-from .state_generator import generate_state_schema
+from .state_generator import _merge_dicts, generate_state_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -208,7 +211,10 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 
         # 2. Generate agent node callables
         for agent in self._config.agents:
-            node_fn = generate_agent_node(agent)
+            if agent.pipeline:
+                node_fn = self._compile_pipeline_node(agent)
+            else:
+                node_fn = generate_agent_node(agent)
             wrapped = wrap_agent_node(node_fn, agent.agent_id)
             self._agent_nodes[agent.agent_id] = wrapped
 
@@ -269,6 +275,357 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         enriched = apply_inheritance_to_all(self._config.agents, self._config)
         self._config.agents = enriched
         LOGGER.info("Applied bili-core inheritance to agents")
+
+    # ------------------------------------------------------------------
+    # Pipeline sub-graph compilation
+    # ------------------------------------------------------------------
+
+    def _compile_pipeline_node(self, agent) -> Callable[[dict], dict]:
+        """Compile an agent's pipeline into a sub-graph node callable.
+
+        When an ``AgentSpec`` has a ``pipeline``, its internal nodes/edges
+        are compiled into a LangGraph ``CompiledStateGraph`` and wrapped
+        in a state adapter that maps between the outer MAS state and
+        the inner pipeline state.
+
+        The sub-graph is compiled with ``checkpointer=None`` to avoid
+        the checkpointer propagation bug (LangGraph issue #5639) where
+        ``compile_graph()`` auto-attaches a checkpointer to sub-graphs.
+
+        Args:
+            agent: An ``AgentSpec`` whose ``pipeline`` is not ``None``.
+
+        Returns:
+            A callable ``(state: dict) -> dict`` suitable for
+            ``StateGraph.add_node``.
+        """
+        from langgraph.constants import (  # pylint: disable=import-error,import-outside-toplevel
+            END,
+            START,
+        )
+        from langgraph.graph import (  # pylint: disable=import-error,import-outside-toplevel
+            StateGraph,
+            add_messages,
+        )
+        from typing_extensions import (  # pylint: disable=import-error,import-outside-toplevel
+            Annotated,
+            TypedDict,
+        )
+
+        pipeline = agent.pipeline
+
+        # 1. Build inner state schema (minimal — messages + pipeline-local tracking)
+        inner_annotations: Dict[str, Any] = {
+            "messages": Annotated[list, add_messages],
+            "current_agent": Annotated[str, lambda _old, new: new],
+            "agent_outputs": Annotated[Dict[str, Any], _merge_dicts],
+        }
+        safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", agent.agent_id)
+        inner_state_cls: type = TypedDict(
+            f"{safe_name}_pipeline_State", inner_annotations
+        )  # type: ignore[call-overload]
+
+        # 2. Resolve inner node callables
+        inner_nodes: Dict[str, Callable] = {}
+        for node_spec in pipeline.nodes:
+            inner_nodes[node_spec.node_id] = self._resolve_pipeline_node(
+                node_spec, agent
+            )
+
+        # 3. Build inner StateGraph
+        inner_graph = StateGraph(inner_state_cls)
+        for node_id, node_fn in inner_nodes.items():
+            inner_graph.add_node(node_id, node_fn)
+
+        # 4. Wire edges
+        entry = pipeline.get_entry_node()
+        inner_graph.add_edge(START, entry)
+
+        # Group edges by source for conditional edge handling
+        edges_by_source: Dict[str, list] = defaultdict(list)
+        for edge in pipeline.edges:
+            edges_by_source[edge.from_node].append(edge)
+
+        for from_node, edges in edges_by_source.items():
+            conditional = [e for e in edges if e.condition]
+            unconditional = [e for e in edges if not e.condition]
+
+            if conditional:
+                self._add_pipeline_conditional_edges(
+                    inner_graph, from_node, conditional, unconditional, END
+                )
+            else:
+                for edge in unconditional:
+                    target = END if edge.to_node == "END" else edge.to_node
+                    inner_graph.add_edge(from_node, target)
+
+        # 5. Compile with checkpointer=None (Monica's catch — LangGraph #5639)
+        compiled_subgraph = inner_graph.compile(checkpointer=None)
+
+        LOGGER.info(
+            "Compiled pipeline sub-graph for agent '%s' with %d nodes",
+            agent.agent_id,
+            len(pipeline.nodes),
+        )
+
+        # 6. Wrap in state adapter
+        return self._wrap_pipeline_as_agent_node(compiled_subgraph, agent)
+
+    def _resolve_pipeline_node(self, node_spec, parent_agent) -> Callable[[dict], dict]:
+        """Resolve a pipeline node spec to a callable.
+
+        - ``node_type="agent"``: generates a node from the inline agent spec.
+        - Other values: looks up from bili-core's ``GRAPH_NODE_REGISTRY``.
+        """
+        if node_spec.node_type == "agent":
+            from bili.aether.schema import (  # pylint: disable=import-outside-toplevel
+                AgentSpec,
+            )
+
+            inner_agent = AgentSpec(**node_spec.agent_spec)
+            return generate_agent_node(inner_agent)
+
+        return self._resolve_registry_node(node_spec, parent_agent)
+
+    def _resolve_registry_node(self, node_spec, parent_agent) -> Callable[[dict], dict]:
+        """Resolve a registry-based pipeline node.
+
+        Looks up the node builder from bili-core's ``GRAPH_NODE_REGISTRY``,
+        instantiates it via the ``functools.partial(Node, name, builder)``
+        pattern, and calls ``node_instance.function(**kwargs)`` to obtain
+        the actual executor function.
+
+        Args:
+            node_spec: The ``PipelineNodeSpec`` to resolve.
+            parent_agent: The parent ``AgentSpec`` (provides fallback config).
+
+        Returns:
+            A callable ``(state: dict) -> dict``.
+        """
+        try:
+            from bili.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
+                GRAPH_NODE_REGISTRY,
+            )
+        except ImportError as exc:
+            raise ValueError(
+                f"Pipeline node '{node_spec.node_id}' references registry "
+                f"type '{node_spec.node_type}' but "
+                "bili.loaders.langchain_loader is not available."
+            ) from exc
+
+        from bili.graph_builder.classes.node import (  # pylint: disable=import-outside-toplevel
+            Node,
+        )
+
+        factory = GRAPH_NODE_REGISTRY.get(node_spec.node_type)
+        if factory is None:
+            raise ValueError(
+                f"Pipeline node '{node_spec.node_id}' references unknown "
+                f"registry type '{node_spec.node_type}'. "
+                f"Available: {sorted(GRAPH_NODE_REGISTRY.keys())}"
+            )
+
+        # Call partial to get Node instance, then call builder with kwargs
+        if callable(factory) and not isinstance(factory, Node):
+            node_instance = factory()
+        else:
+            node_instance = factory
+
+        # Build kwargs from parent agent context + node-specific config
+        kwargs = self._build_registry_node_kwargs(parent_agent, node_spec)
+
+        return node_instance.function(**kwargs)
+
+    def _build_registry_node_kwargs(self, parent_agent, node_spec) -> Dict[str, Any]:
+        """Build kwargs for a registry node builder function.
+
+        Merges configuration from the parent agent (LLM, tools, persona)
+        with node-specific config overrides from the ``PipelineNodeSpec``.
+        """
+        kwargs: Dict[str, Any] = {}
+
+        # Resolve LLM from parent agent if available
+        if parent_agent.model_name:
+            try:
+                from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+                    create_llm,
+                    resolve_tools,
+                )
+
+                kwargs["llm_model"] = create_llm(parent_agent)
+
+                # Also resolve tools if the parent agent has them
+                if parent_agent.tools:
+                    kwargs["tools"] = resolve_tools(parent_agent)
+            except Exception:  # pylint: disable=broad-exception-caught
+                LOGGER.debug(
+                    "Could not resolve LLM/tools for pipeline node '%s'",
+                    node_spec.node_id,
+                    exc_info=True,
+                )
+
+        # Use agent objective as fallback persona
+        if parent_agent.system_prompt:
+            kwargs["persona"] = parent_agent.system_prompt
+        elif parent_agent.objective:
+            kwargs["persona"] = parent_agent.objective
+
+        # Merge node-specific config (overrides parent-level kwargs)
+        kwargs.update(node_spec.config)
+
+        return kwargs
+
+    @staticmethod
+    def _add_pipeline_conditional_edges(
+        graph, from_node: str, conditional: list, unconditional: list, end_node
+    ) -> None:
+        """Add conditional edges within a pipeline sub-graph.
+
+        Uses the same ``safe_eval_condition`` mechanism as the parent
+        MAS graph for consistent condition evaluation.
+        """
+        path_map: Dict[str, Any] = {}
+        all_edges = conditional + unconditional
+
+        for edge in all_edges:
+            target = end_node if edge.to_node == "END" else edge.to_node
+            key = edge.label or edge.to_node
+            path_map[key] = target
+
+        captured_edges = list(all_edges)
+
+        def _make_router(edges_list: list) -> Callable:
+            def router(state: dict) -> str:
+                for e in edges_list:
+                    if e.condition:
+                        try:
+                            if safe_eval_condition(
+                                e.condition,
+                                {"state": _StateProxy(state)},
+                            ):
+                                return e.label or e.to_node
+                        except ValueError as exc:
+                            LOGGER.warning(
+                                "Pipeline condition evaluation failed for "
+                                "edge to %s: %s",
+                                e.to_node,
+                                exc,
+                            )
+                            continue
+                # Fallback: first unconditional edge
+                for e in edges_list:
+                    if not e.condition:
+                        return e.label or e.to_node
+                return edges_list[-1].label or edges_list[-1].to_node
+
+            return router
+
+        graph.add_conditional_edges(
+            from_node,
+            _make_router(captured_edges),
+            path_map,
+        )
+
+    @staticmethod
+    def _wrap_pipeline_as_agent_node(
+        compiled_subgraph, agent
+    ) -> Callable[[dict], dict]:
+        """Wrap a compiled sub-graph as an agent node callable.
+
+        Creates a function that:
+
+        1. Maps outer MAS state → inner pipeline state (messages only)
+        2. Invokes the compiled sub-graph
+        3. Maps inner result → outer state update (explicit output mapping:
+           only ``messages`` and ``agent_outputs`` flow back)
+        4. Handles errors with attribution (``agent_id: pipeline error``)
+
+        This explicit output mapping prevents the "blind merge" danger
+        that Monica identified — inner pipeline state does NOT overwrite
+        arbitrary outer MAS state fields.
+        """
+        agent_id = agent.agent_id
+        agent_role = agent.role
+        pipeline_node_count = len(agent.pipeline.nodes)
+
+        def _pipeline_node(state: dict) -> dict:
+            start = time.time()
+
+            from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
+                AIMessage,
+            )
+
+            # Input mapping: outer → inner (only messages flow in)
+            inner_state: Dict[str, Any] = {
+                "messages": list(state.get("messages", [])),
+                "current_agent": agent_id,
+                "agent_outputs": {},
+            }
+
+            try:
+                result = compiled_subgraph.invoke(inner_state)
+            except Exception as exc:
+                # Error attribution: clearly identify which agent's pipeline failed
+                error_msg = f"[{agent_id}] Pipeline error: {exc}"
+                LOGGER.error(
+                    "Pipeline execution failed for agent '%s': %s",
+                    agent_id,
+                    exc,
+                    exc_info=True,
+                )
+
+                agent_outputs = dict(state.get("agent_outputs") or {})
+                agent_outputs[agent_id] = {
+                    "agent_id": agent_id,
+                    "role": agent_role,
+                    "status": "error",
+                    "message": error_msg,
+                }
+                return {
+                    "messages": [AIMessage(content=error_msg, name=agent_id)],
+                    "current_agent": agent_id,
+                    "agent_outputs": agent_outputs,
+                }
+
+            # Output mapping: inner → outer (explicit — only messages + agent_outputs)
+            inner_messages = result.get("messages", [])
+            inner_outputs = result.get("agent_outputs", {})
+
+            # Extract final content from the last message in the pipeline
+            final_content = f"[{agent_id}] Pipeline completed."
+            for msg in reversed(inner_messages):
+                if hasattr(msg, "content") and msg.content:
+                    final_content = msg.content
+                    break
+
+            # Build agent output entry
+            agent_outputs = dict(state.get("agent_outputs") or {})
+            agent_outputs[agent_id] = {
+                "agent_id": agent_id,
+                "role": agent_role,
+                "status": "completed",
+                "message": final_content,
+                "pipeline_outputs": inner_outputs,
+            }
+
+            execution_ms = (time.time() - start) * 1000
+            LOGGER.info(
+                "Agent node '%s' executed in %.2f ms (pipeline, %d inner nodes)",
+                agent_id,
+                execution_ms,
+                pipeline_node_count,
+            )
+
+            return {
+                "messages": [AIMessage(content=final_content, name=agent_id)],
+                "current_agent": agent_id,
+                "agent_outputs": agent_outputs,
+            }
+
+        _pipeline_node.__name__ = f"pipeline_{agent_id}"
+        _pipeline_node.__qualname__ = f"pipeline_{agent_id}"
+
+        return _pipeline_node
 
     # ------------------------------------------------------------------
     # Workflow dispatch
