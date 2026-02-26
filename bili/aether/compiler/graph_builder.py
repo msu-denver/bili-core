@@ -458,7 +458,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
                 if parent_agent.tools:
                     kwargs["tools"] = resolve_tools(parent_agent)
             except Exception:  # pylint: disable=broad-exception-caught
-                LOGGER.debug(
+                LOGGER.warning(
                     "Could not resolve LLM/tools for pipeline node '%s'",
                     node_spec.node_id,
                     exc_info=True,
@@ -544,16 +544,16 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         that Monica identified — inner pipeline state does NOT overwrite
         arbitrary outer MAS state fields.
         """
+        from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
+            AIMessage,
+        )
+
         agent_id = agent.agent_id
         agent_role = agent.role
         pipeline_node_count = len(agent.pipeline.nodes)
 
         def _pipeline_node(state: dict) -> dict:
             start = time.time()
-
-            from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
-                AIMessage,
-            )
 
             # Input mapping: outer → inner (only messages flow in)
             inner_state: Dict[str, Any] = {

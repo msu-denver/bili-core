@@ -12,11 +12,12 @@ Design Principles:
 - LangGraph sub-graph compilation handles the rest
 """
 
+import ast
 import logging
 import warnings
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -139,6 +140,19 @@ class PipelineEdgeSpec(BaseModel):
     )
 
     label: str = Field("", description="Edge label for visualization")
+
+    @field_validator("condition")
+    @classmethod
+    def validate_condition_syntax(cls, v):
+        """Validate that condition is a parseable Python expression."""
+        if v is not None:
+            try:
+                ast.parse(v, mode="eval")
+            except SyntaxError as exc:
+                raise ValueError(
+                    f"Invalid condition expression: {v!r} — {exc.msg}"
+                ) from exc
+        return v
 
 
 class PipelineSpec(BaseModel):

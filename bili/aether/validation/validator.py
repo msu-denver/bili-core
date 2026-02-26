@@ -4,6 +4,7 @@ Performs deep structural and cross-field validation on a ``MASConfig``
 instance that has already passed Pydantic's basic field validation.
 """
 
+from collections import deque
 from typing import Dict, List, Set
 
 from bili.aether.schema import MASConfig, WorkflowType
@@ -208,10 +209,10 @@ class MASValidator:
 
         entry = self._config.entry_point or self._config.agents[0].agent_id
         reachable: Set[str] = {entry}
-        queue = [entry]
+        queue = deque([entry])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for neighbor in self._edge_graph.get(current, []):
                 if neighbor != "END" and neighbor not in reachable:
                     reachable.add(neighbor)
@@ -235,12 +236,12 @@ class MASValidator:
 
         entry = self._config.entry_point or self._config.agents[0].agent_id
         visited: Set[str] = {entry}
-        queue = [entry]
+        queue = deque([entry])
         found_end = False
 
         # BFS to find if END is reachable from entry
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for neighbor in self._edge_graph.get(current, []):
                 if neighbor == "END":
                     found_end = True
@@ -395,10 +396,10 @@ class MASValidator:
 
         entry = pipeline.get_entry_node()
         reachable: Set[str] = {entry}
-        queue = [entry]
+        queue = deque([entry])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for neighbor in edge_graph.get(current, []):
                 if neighbor != "END" and neighbor not in reachable:
                     reachable.add(neighbor)

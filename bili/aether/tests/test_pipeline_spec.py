@@ -161,6 +161,27 @@ class TestPipelineEdgeSpec:
         assert edge.condition == "state.score < 0.5"
         assert edge.label == "low confidence"
 
+    def test_invalid_condition_syntax_fails(self):
+        """Condition with invalid Python syntax should fail validation."""
+        with pytest.raises(ValidationError, match="Invalid condition"):
+            PipelineEdgeSpec(
+                from_node="a",
+                to_node="b",
+                condition="import os",
+            )
+
+    def test_valid_condition_expressions_pass(self):
+        """Various valid condition expressions pass validation."""
+        valid_conditions = [
+            "state.score > 0.5",
+            "state.count == 3",
+            "state.flag == True",
+            "state.value >= 10 and state.ready == True",
+        ]
+        for cond in valid_conditions:
+            edge = PipelineEdgeSpec(from_node="a", to_node="b", condition=cond)
+            assert edge.condition == cond
+
 
 # =========================================================================
 # PipelineSpec TESTS
