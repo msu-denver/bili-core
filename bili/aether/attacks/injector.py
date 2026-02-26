@@ -30,12 +30,15 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from bili.aether.attacks.logger import AttackLogger
 from bili.aether.attacks.models import AttackResult, AttackType, InjectionPhase
 from bili.aether.attacks.propagation import PropagationTracker
 from bili.aether.schema import MASConfig
+
+if TYPE_CHECKING:
+    from bili.aether.security.detector import SecurityEventDetector
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,10 +69,12 @@ class AttackInjector:
         executor,
         log_path: Optional[Path] = None,
         max_workers: int = 4,
+        security_detector: Optional["SecurityEventDetector"] = None,
     ) -> None:
         self._config = config
         self._executor = executor
-        self._logger = AttackLogger(log_path)
+        self._attack_logger = AttackLogger(log_path)
+        self._security_detector = security_detector
         self._thread_pool = ThreadPoolExecutor(max_workers=max_workers)
 
     def inject_attack(
@@ -187,10 +192,13 @@ class AttackInjector:
         tracker = PropagationTracker(payload, agent_id) if track_propagation else None
         error: Optional[str] = None
         completed_at: Optional[datetime.datetime] = None
+        run_id: Optional[str] = None
 
         try:
             if phase == InjectionPhase.PRE_EXECUTION:
-                self._run_pre_execution(agent_id, attack_type, payload, tracker)
+                run_id = self._run_pre_execution(
+                    agent_id, attack_type, payload, tracker
+                )
             else:
                 self._run_mid_execution(agent_id, attack_type, payload, tracker)
             completed_at = datetime.datetime.now(datetime.timezone.utc)
@@ -201,6 +209,7 @@ class AttackInjector:
 
         result = AttackResult(
             attack_id=attack_id,
+            run_id=run_id,
             mas_id=self._config.mas_id,
             target_agent_id=agent_id,
             attack_type=attack_type,
@@ -215,7 +224,9 @@ class AttackInjector:
             error=error,
         )
 
-        self._logger.log(result)
+        self._attack_logger.log(result)
+        if self._security_detector is not None:
+            self._security_detector.detect(result)
         return result
 
     def _run_pre_execution(  # pylint: disable=too-many-locals
@@ -224,12 +235,16 @@ class AttackInjector:
         attack_type: AttackType,
         payload: str,
         tracker: Optional[PropagationTracker],
-    ) -> None:
+    ) -> Optional[str]:
         """Apply a pre-execution strategy and run the MAS.
 
         A deep-copied patched config is created and fed to a fresh
         ``MASExecutor``.  ``PropagationTracker.observe()`` is called for each
         agent result after execution completes.
+
+        Returns:
+            The ``run_id`` from the ``MASExecutionResult``, for correlation
+            with security event logs.
         """
         from bili.aether.attacks.strategies import (  # pylint: disable=import-outside-toplevel
             pre_execution,
@@ -244,30 +259,29 @@ class AttackInjector:
 
         attack_executor = MASExecutor(patched_config)
         attack_executor.initialize()
-        result = attack_executor.run()
+        mas_result = attack_executor.run()
 
-        if tracker is None:
-            return
+        if tracker is not None:
+            # Observe each agent using the available result data
+            final_state = mas_result.final_state or {}
+            agent_specs = {a.agent_id: a for a in patched_config.agents}
 
-        # Observe each agent using the available result data
-        final_state = result.final_state or {}
-        agent_specs = {a.agent_id: a for a in patched_config.agents}
+            for agent_result in mas_result.agent_results:
+                spec = agent_specs.get(agent_result.agent_id)
+                role = spec.role if spec else agent_result.role
+                input_state = {
+                    "messages": final_state.get("messages", []),
+                    "objective": spec.objective if spec else "",
+                }
+                tracker.observe(
+                    agent_id=agent_result.agent_id,
+                    role=role,
+                    input_state=input_state,
+                    output_state=agent_result.output,
+                    attack_type=attack_type.value,
+                )
 
-        for agent_result in result.agent_results:
-            spec = agent_specs.get(agent_result.agent_id)
-            role = spec.role if spec else agent_result.role
-            # Approximate input state: messages list + agent's configured objective
-            input_state = {
-                "messages": final_state.get("messages", []),
-                "objective": spec.objective if spec else "",
-            }
-            tracker.observe(
-                agent_id=agent_result.agent_id,
-                role=role,
-                input_state=input_state,
-                output_state=agent_result.output,
-                attack_type=attack_type.value,
-            )
+        return mas_result.run_id
 
     def _run_mid_execution(
         self,

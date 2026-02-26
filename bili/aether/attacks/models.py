@@ -93,6 +93,7 @@ class AttackResult(BaseModel):
     """
 
     attack_id: str = Field(..., description="UUID4 unique attack identifier")
+    run_id: Optional[str] = None
     mas_id: str
     target_agent_id: str
     attack_type: AttackType
