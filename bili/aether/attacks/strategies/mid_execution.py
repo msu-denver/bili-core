@@ -85,27 +85,47 @@ def run_with_mid_execution_injection(  # pylint: disable=too-many-locals
         interrupt_before=[target_agent_id],
     )
 
-    # Step 2: Run until NodeInterrupt
+    # Step 2: Run until the graph pauses before target_agent_id.
+    # LangGraph >= 1.x returns early from invoke() at interrupt_before rather
+    # than raising NodeInterrupt.  Both paths are handled below.
     interrupted_state: dict | None = None
     try:
-        graph.invoke(input_data, config=invoke_config)
-        # If we reach here, NodeInterrupt was never raised
-        raise RuntimeError(
-            f"NodeInterrupt was never raised — target agent '{target_agent_id}' "
-            "was not reached during execution."
+        result = graph.invoke(input_data, config=invoke_config)
+        # LangGraph >= 1.x path: invoke() returned early.  Verify via snapshot.next
+        # that the expected node is pending, then use the checkpoint state.
+        try:
+            snapshot = graph.get_state(invoke_config)
+            pending = snapshot.next if hasattr(snapshot, "next") else ()
+            if target_agent_id in pending:
+                interrupted_state = (
+                    dict(snapshot.values) if hasattr(snapshot, "values") else result
+                )
+            else:
+                raise RuntimeError(
+                    f"NodeInterrupt was never raised — target agent "
+                    f"'{target_agent_id}' was not reached during execution."
+                )
+        except RuntimeError:
+            raise
+        except Exception:  # pylint: disable=broad-except
+            # No checkpointer / get_state unavailable: fall back to returned dict
+            interrupted_state = result if isinstance(result, dict) else {}
+        LOGGER.debug(
+            "run_with_mid_execution_injection: paused before '%s' (early-return path)",
+            target_agent_id,
         )
     except NodeInterrupt as exc:
+        # Older LangGraph path: invoke() raises NodeInterrupt.
         node_name = getattr(exc, "node", None)
         # LangGraph may encode the interrupted node name differently across
         # versions; fall back to checking the exception message.
         if node_name is not None and node_name != target_agent_id:
             raise RuntimeError(
-                f"Expected NodeInterrupt at '{target_agent_id}', " f"got '{node_name}'"
+                f"Expected NodeInterrupt at '{target_agent_id}', got '{node_name}'"
             ) from exc
-        # Retrieve the interrupted graph state
         interrupted_state = _get_interrupt_state(graph, invoke_config)
         LOGGER.debug(
-            "run_with_mid_execution_injection: paused before '%s'",
+            "run_with_mid_execution_injection: paused before '%s' (NodeInterrupt path)",
             target_agent_id,
         )
 

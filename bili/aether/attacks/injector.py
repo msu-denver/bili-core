@@ -69,7 +69,7 @@ class AttackInjector:
     ) -> None:
         self._config = config
         self._executor = executor
-        self._log_path = log_path
+        self._logger = AttackLogger(log_path)
         self._thread_pool = ThreadPoolExecutor(max_workers=max_workers)
 
     def inject_attack(
@@ -215,7 +215,7 @@ class AttackInjector:
             error=error,
         )
 
-        AttackLogger(self._log_path).log(result)
+        self._logger.log(result)
         return result
 
     def _run_pre_execution(  # pylint: disable=too-many-locals
