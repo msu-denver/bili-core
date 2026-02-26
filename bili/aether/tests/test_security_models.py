@@ -5,25 +5,8 @@ import json
 
 import pytest
 
-from bili.aether.security.models import SecurityEvent, SecurityEventType
-
-_MAS_ID = "test_mas"
-
-
-def _event(**kwargs) -> SecurityEvent:
-    """Build a SecurityEvent with sensible defaults."""
-    defaults = {
-        "event_type": SecurityEventType.ATTACK_DETECTED,
-        "severity": "high",
-        "mas_id": _MAS_ID,
-        "attack_id": "attack-uuid-1234",
-        "target_agent_id": "agent_a",
-        "attack_type": "prompt_injection",
-        "success": True,
-    }
-    defaults.update(kwargs)
-    return SecurityEvent(**defaults)
-
+from bili.aether.security.models import SecurityEventType
+from bili.aether.tests.conftest import make_security_event as _event
 
 # =========================================================================
 # SecurityEventType enum tests
@@ -152,7 +135,7 @@ def test_security_event_serializes_to_valid_json():
     line = json.dumps(dumped)
     assert isinstance(line, str)
     parsed = json.loads(line)
-    assert parsed["mas_id"] == _MAS_ID
+    assert parsed["mas_id"] == "test_mas"
     assert parsed["attack_id"] == "attack-uuid-1234"
 
 

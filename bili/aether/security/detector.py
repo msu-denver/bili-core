@@ -201,11 +201,11 @@ def payload_pattern_rule(
 
     count = 0
     for line in raw.splitlines():
-        line = line.strip()
-        if not line:
+        stripped = line.strip()
+        if not stripped:
             continue
         try:
-            entry = json.loads(line)
+            entry = json.loads(stripped)
         except json.JSONDecodeError:
             continue
         if (

@@ -4,28 +4,8 @@ import json
 import threading
 
 from bili.aether.security.logger import SecurityEventLogger
-from bili.aether.security.models import SecurityEvent, SecurityEventType
-
-
-def _event(
-    event_type: SecurityEventType = SecurityEventType.ATTACK_DETECTED,
-    severity: str = "high",
-    mas_id: str = "test_mas",
-    **kwargs,
-) -> SecurityEvent:
-    """Build a minimal SecurityEvent for logging tests."""
-    defaults = {
-        "event_type": event_type,
-        "severity": severity,
-        "mas_id": mas_id,
-        "attack_id": "attack-1234",
-        "target_agent_id": "agent_a",
-        "attack_type": "prompt_injection",
-        "success": True,
-    }
-    defaults.update(kwargs)
-    return SecurityEvent(**defaults)
-
+from bili.aether.security.models import SecurityEventType
+from bili.aether.tests.conftest import make_security_event as _event
 
 # =========================================================================
 # File creation and basic append
@@ -88,7 +68,7 @@ def test_logged_line_is_valid_json(tmp_path):
     line = log_path.read_text(encoding="utf-8").strip()
     parsed = json.loads(line)
     assert parsed["mas_id"] == "test_mas"
-    assert parsed["attack_id"] == "attack-1234"
+    assert parsed["attack_id"] == "attack-uuid-1234"
 
 
 def test_logged_event_id_matches_source_event(tmp_path):

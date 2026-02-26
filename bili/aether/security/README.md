@@ -111,23 +111,58 @@ Rules are pure functions with the signature `rule(result: AttackResult) -> list[
 | `success` | `Optional[bool]` | Whether the underlying attack succeeded |
 | `details` | `dict` | Rule-specific metadata (propagation path, counts, etc.) |
 
-## Cross-Log Correlation via `run_id`
+## Cross-Log Correlation
 
-All three AETHER log files share a `run_id` field so results can be joined across files:
+Two correlation keys link the AETHER log files depending on which join you need:
+
+| Join | Key | Pre-execution | Mid-execution |
+|------|-----|:---:|:---:|
+| attack log ↔ security event log | `attack_id` | ✓ | ✓ |
+| attack log ↔ MAS execution result | `run_id` | ✓ | — (no result produced) |
+
+### `attack_id` — universal two-log join (both injection phases)
+
+`attack_id` is set on every `AttackResult` and propagated to all `SecurityEvent` records
+produced from that attack.  It is the primary key for joining the attack log with the
+security event log, and works for both pre- and mid-execution attacks:
+
+```
+AttackResult.attack_id  ──── same UUID ────  SecurityEvent.attack_id
+```
+
+```python
+# Example: join attack log and security event log on attack_id (works for all attacks)
+import json
+from collections import defaultdict
+
+sec_events = defaultdict(list)
+for line in open("security_events.ndjson"):
+    e = json.loads(line)
+    sec_events[e["attack_id"]].append(e)
+
+for line in open("attack_log.ndjson"):
+    attack = json.loads(line)
+    events = sec_events.get(attack["attack_id"], [])
+    print(attack["attack_type"], "→", [e["event_type"] for e in events])
+```
+
+### `run_id` — three-log join (pre-execution attacks only)
+
+`run_id` is generated automatically by `MASExecutionResult` (UUID4 default) and propagated
+by `AttackInjector._run_pre_execution()` into the `AttackResult` and all its `SecurityEvent`
+records.  Mid-execution attacks bypass `MASExecutor` entirely and produce no
+`MASExecutionResult`, so `run_id` is `None` for that injection phase — use `attack_id`
+instead.
 
 ```
 MASExecutionResult.run_id  ─┐
-                             ├── same UUID → all three files joinable
+                             ├── same UUID → all three files joinable (pre-execution only)
 AttackResult.run_id        ─┤
 SecurityEvent.run_id       ─┘
 ```
 
-`run_id` is generated automatically by `MASExecutionResult` (UUID4 default) and propagated
-by `AttackInjector._run_pre_execution()` into the `AttackResult`.  Mid-execution attacks do
-not produce a `MASExecutionResult`, so `run_id` is `None` in that case.
-
 ```python
-# Example: join attack log and security event log on run_id
+# Example: join attack log and security event log on run_id (pre-execution attacks only)
 import json
 
 attacks = {
