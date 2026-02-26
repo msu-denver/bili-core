@@ -25,6 +25,7 @@ class SecurityEventType(str, Enum):  # pylint: disable=too-few-public-methods
     AGENT_COMPROMISED = "agent_compromised"
     AGENT_RESISTED = "agent_resisted"
     PAYLOAD_PROPAGATED = "payload_propagated"
+    REPEATED_TARGET = "repeated_target"
 
 
 class SecurityEvent(BaseModel):

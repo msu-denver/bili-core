@@ -271,7 +271,7 @@ def test_payload_pattern_rule_emits_at_two_prior_attacks(tmp_path):
     result = _result(mas_id="test_mas", target_agent_id="agent_a")
     events = payload_pattern_rule(result, log_path)
     assert len(events) == 1
-    assert events[0].event_type == SecurityEventType.ATTACK_DETECTED
+    assert events[0].event_type == SecurityEventType.REPEATED_TARGET
     assert events[0].severity == "medium"
 
 
@@ -420,7 +420,7 @@ def test_detector_detect_missing_attack_log_does_not_raise(tmp_path):
 
 
 def test_detector_detect_with_all_event_types(tmp_path):
-    """detect() can emit all four event types from a single AttackResult."""
+    """detect() can emit all five event types from a single AttackResult."""
     attack_log = tmp_path / "attacks.ndjson"
     entry = json.dumps({"mas_id": "test_mas", "target_agent_id": "agent_a"})
     attack_log.write_text(entry + "\n" + entry + "\n", encoding="utf-8")
@@ -440,6 +440,7 @@ def test_detector_detect_with_all_event_types(tmp_path):
     assert SecurityEventType.AGENT_COMPROMISED in event_types
     assert SecurityEventType.AGENT_RESISTED in event_types
     assert SecurityEventType.PAYLOAD_PROPAGATED in event_types
+    assert SecurityEventType.REPEATED_TARGET in event_types
 
 
 @pytest.mark.parametrize(

@@ -82,7 +82,7 @@ Rules are pure functions with the signature `rule(result: AttackResult) -> list[
 | `agent_compromised_rule` | `influenced_agents` is non-empty | One `AGENT_COMPROMISED` per influenced agent |
 | `agent_resisted_rule` | `resistant_agents` is non-empty | One `AGENT_RESISTED` per resistant agent |
 | `payload_propagated_rule` | `len(propagation_path) > 1` | One `PAYLOAD_PROPAGATED` when payload spread |
-| `payload_pattern_rule` | Same `(mas_id, target_agent_id)` pair appears ≥ 2 times in the attack log | One `ATTACK_DETECTED` flagging repeated targeting |
+| `payload_pattern_rule` | Same `(mas_id, target_agent_id)` pair appears ≥ 2 times in the attack log | One `REPEATED_TARGET` flagging repeated targeting |
 
 ### Severity mapping
 
@@ -92,7 +92,7 @@ Rules are pure functions with the signature `rule(result: AttackResult) -> list[
 | `AGENT_COMPROMISED` | always `high` |
 | `AGENT_RESISTED` | always `low` |
 | `PAYLOAD_PROPAGATED` | `high` if payload reached agents beyond the target; `medium` if only the target appears multiple times in the path |
-| Repeated-target (`payload_pattern_rule`) | always `medium` |
+| `REPEATED_TARGET` | always `medium` |
 
 ## SecurityEvent Fields
 
@@ -100,7 +100,7 @@ Rules are pure functions with the signature `rule(result: AttackResult) -> list[
 |-------|------|-------------|
 | `event_id` | `str` | UUID4 auto-generated per event |
 | `run_id` | `Optional[str]` | Links to `MASExecutionResult.run_id` and `AttackResult.run_id` |
-| `event_type` | `SecurityEventType` | One of the four event categories |
+| `event_type` | `SecurityEventType` | One of the five event categories |
 | `severity` | `"low" \| "medium" \| "high"` | Pydantic `Literal` — invalid values are rejected at construction |
 | `detected_at` | `datetime` | UTC timestamp auto-set at construction |
 | `mas_id` | `str` | MAS identifier from the source attack |
@@ -176,10 +176,13 @@ json_str = logger.export_json(path=Path("reports/all_events.json"))
 
 ## Repeated-Target Detection (`payload_pattern_rule`)
 
-The `payload_pattern_rule` reads the attack NDJSON log and counts how many prior
+The `payload_pattern_rule` reads the attack NDJSON log and counts how many
 `AttackResult` entries share both `mas_id` and `target_agent_id` with the current result.
-If the count reaches **2 or more**, a medium-severity `ATTACK_DETECTED` event is emitted
-to flag the repeated targeting pattern.
+Because `AttackLogger.log()` runs *before* `SecurityEventDetector.detect()` inside
+`_run_attack()`, the current attack is already present in the log when the rule runs — the
+count always includes the current attack.  This means the rule fires on the **2nd** attack
+against the same `(mas_id, target_agent_id)` pair (count ≥ 2), emitting a medium-severity
+`REPEATED_TARGET` event.
 
 To enable this rule, pass `attack_log_path` to `SecurityEventDetector`:
 

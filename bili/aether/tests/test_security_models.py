@@ -50,6 +50,11 @@ def test_security_event_type_payload_propagated_value():
     assert SecurityEventType.PAYLOAD_PROPAGATED.value == "payload_propagated"
 
 
+def test_security_event_type_repeated_target_value():
+    """REPEATED_TARGET enum member has the correct string value."""
+    assert SecurityEventType.REPEATED_TARGET.value == "repeated_target"
+
+
 def test_security_event_type_rejects_unknown():
     """SecurityEventType raises ValueError for unknown values."""
     with pytest.raises(ValueError):

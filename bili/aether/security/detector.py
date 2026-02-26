@@ -220,7 +220,7 @@ def payload_pattern_rule(
     return [
         SecurityEvent(
             run_id=result.run_id,
-            event_type=SecurityEventType.ATTACK_DETECTED,
+            event_type=SecurityEventType.REPEATED_TARGET,
             severity="medium",
             mas_id=result.mas_id,
             attack_id=result.attack_id,

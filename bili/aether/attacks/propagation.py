@@ -83,7 +83,9 @@ class PropagationTracker:
         )
 
     Args:
-        payload: The exact adversarial string that was injected.
+        payload: The exact adversarial string that was injected.  Payloads
+            shorter than 20 characters are never matched as "received" by any
+            agent — see module docstring for rationale.
         target_agent_id: The agent that was directly targeted.  This is used
             to anchor the propagation path; all observed agents are tracked
             regardless of whether they were the target.
