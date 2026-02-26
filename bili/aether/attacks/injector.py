@@ -282,7 +282,7 @@ class AttackInjector:
                     attack_type=attack_type.value,
                 )
 
-        return getattr(mas_result, "run_id", None)
+        return mas_result.run_id
 
     def _run_mid_execution(
         self,
