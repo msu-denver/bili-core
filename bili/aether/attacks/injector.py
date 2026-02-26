@@ -30,12 +30,15 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from bili.aether.attacks.logger import AttackLogger
 from bili.aether.attacks.models import AttackResult, AttackType, InjectionPhase
 from bili.aether.attacks.propagation import PropagationTracker
 from bili.aether.schema import MASConfig
+
+if TYPE_CHECKING:
+    from bili.aether.security.detector import SecurityEventDetector
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,11 +69,12 @@ class AttackInjector:
         executor,
         log_path: Optional[Path] = None,
         max_workers: int = 4,
-        security_detector=None,
+        security_detector: Optional["SecurityEventDetector"] = None,
     ) -> None:
         self._config = config
         self._executor = executor
         self._log_path = log_path
+        self._attack_logger = AttackLogger(log_path)
         self._security_detector = security_detector
         self._thread_pool = ThreadPoolExecutor(max_workers=max_workers)
 
@@ -221,7 +225,7 @@ class AttackInjector:
             error=error,
         )
 
-        AttackLogger(self._log_path).log(result)
+        self._attack_logger.log(result)
         if self._security_detector is not None:
             self._security_detector.detect(result)
         return result

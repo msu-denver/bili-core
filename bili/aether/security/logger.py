@@ -85,18 +85,19 @@ class SecurityEventLogger:
             A JSON array string containing all logged security events.
         """
         events = []
-        if self._log_path.exists():
-            for raw_line in self._log_path.read_text(encoding="utf-8").splitlines():
-                stripped = raw_line.strip()
-                if not stripped:
-                    continue
-                try:
-                    events.append(json.loads(stripped))
-                except json.JSONDecodeError as exc:
-                    LOGGER.warning(
-                        "SecurityEventLogger.export_json: skipped malformed line: %s",
-                        exc,
-                    )
+        with self._lock:
+            if self._log_path.exists():
+                for raw_line in self._log_path.read_text(encoding="utf-8").splitlines():
+                    stripped = raw_line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        events.append(json.loads(stripped))
+                    except json.JSONDecodeError as exc:
+                        LOGGER.warning(
+                            "SecurityEventLogger.export_json: skipped malformed line: %s",
+                            exc,
+                        )
 
         result = json.dumps(events, indent=2, default=str)
 

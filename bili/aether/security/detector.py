@@ -27,14 +27,18 @@ Severity Mapping
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from bili.aether.security.models import SecurityEvent, SecurityEventType
+
+if TYPE_CHECKING:
+    from bili.aether.attacks.models import AttackResult
+    from bili.aether.security.logger import SecurityEventLogger
 
 LOGGER = logging.getLogger(__name__)
 
 
-def attack_detected_rule(result) -> list[SecurityEvent]:
+def attack_detected_rule(result: "AttackResult") -> list[SecurityEvent]:
     """Emit one ATTACK_DETECTED event summarising the full AttackResult.
 
     Args:
@@ -52,7 +56,7 @@ def attack_detected_rule(result) -> list[SecurityEvent]:
 
     return [
         SecurityEvent(
-            run_id=getattr(result, "run_id", None),
+            run_id=result.run_id,
             event_type=SecurityEventType.ATTACK_DETECTED,
             severity=severity,
             mas_id=result.mas_id,
@@ -64,13 +68,13 @@ def attack_detected_rule(result) -> list[SecurityEvent]:
                 "injection_phase": result.injection_phase,
                 "propagation_path": result.propagation_path,
                 "influenced_count": len(result.influenced_agents),
-                "resistant_count": len(list(result.resistant_agents)),
+                "resistant_count": len(result.resistant_agents),
             },
         )
     ]
 
 
-def agent_compromised_rule(result) -> list[SecurityEvent]:
+def agent_compromised_rule(result: "AttackResult") -> list[SecurityEvent]:
     """Emit one AGENT_COMPROMISED event per agent in influenced_agents.
 
     Args:
@@ -81,7 +85,7 @@ def agent_compromised_rule(result) -> list[SecurityEvent]:
     """
     return [
         SecurityEvent(
-            run_id=getattr(result, "run_id", None),
+            run_id=result.run_id,
             event_type=SecurityEventType.AGENT_COMPROMISED,
             severity="high",
             mas_id=result.mas_id,
@@ -95,7 +99,7 @@ def agent_compromised_rule(result) -> list[SecurityEvent]:
     ]
 
 
-def agent_resisted_rule(result) -> list[SecurityEvent]:
+def agent_resisted_rule(result: "AttackResult") -> list[SecurityEvent]:
     """Emit one AGENT_RESISTED event per agent in resistant_agents.
 
     Args:
@@ -106,7 +110,7 @@ def agent_resisted_rule(result) -> list[SecurityEvent]:
     """
     return [
         SecurityEvent(
-            run_id=getattr(result, "run_id", None),
+            run_id=result.run_id,
             event_type=SecurityEventType.AGENT_RESISTED,
             severity="low",
             mas_id=result.mas_id,
@@ -120,7 +124,7 @@ def agent_resisted_rule(result) -> list[SecurityEvent]:
     ]
 
 
-def payload_propagated_rule(result) -> list[SecurityEvent]:
+def payload_propagated_rule(result: "AttackResult") -> list[SecurityEvent]:
     """Emit one PAYLOAD_PROPAGATED event when payload spread beyond the target.
 
     Only fires when ``len(propagation_path) > 1``.
@@ -143,7 +147,7 @@ def payload_propagated_rule(result) -> list[SecurityEvent]:
 
     return [
         SecurityEvent(
-            run_id=getattr(result, "run_id", None),
+            run_id=result.run_id,
             event_type=SecurityEventType.PAYLOAD_PROPAGATED,
             severity=severity,
             mas_id=result.mas_id,
@@ -160,7 +164,7 @@ def payload_propagated_rule(result) -> list[SecurityEvent]:
 
 
 def payload_pattern_rule(
-    result, attack_log_path: Optional[Path]
+    result: "AttackResult", attack_log_path: Optional[Path]
 ) -> list[SecurityEvent]:
     """Detect repeated targeting of the same agent across prior attacks.
 
@@ -171,6 +175,11 @@ def payload_pattern_rule(
 
     Returns ``[]`` (never raises) when *attack_log_path* is ``None``,
     missing, or unreadable.
+
+    Note: This rule performs a full O(n) scan of the attack log on every
+    call. This is acceptable for research-scale logs (hundreds of entries)
+    but may become a bottleneck in long-running sessions with thousands of
+    attacks.
 
     Args:
         result: An ``AttackResult`` instance.
@@ -210,7 +219,7 @@ def payload_pattern_rule(
 
     return [
         SecurityEvent(
-            run_id=getattr(result, "run_id", None),
+            run_id=result.run_id,
             event_type=SecurityEventType.ATTACK_DETECTED,
             severity="medium",
             mas_id=result.mas_id,
@@ -239,13 +248,13 @@ class SecurityEventDetector:
 
     def __init__(
         self,
-        logger=None,
+        logger: Optional["SecurityEventLogger"] = None,
         attack_log_path: Optional[Path] = None,
     ) -> None:
         self._logger = logger
         self._attack_log_path = attack_log_path
 
-    def detect(self, result) -> list[SecurityEvent]:
+    def detect(self, result: "AttackResult") -> list[SecurityEvent]:
         """Apply all detection rules to *result* and return detected events.
 
         Each event is also passed to the logger if one was provided.
@@ -270,6 +279,6 @@ class SecurityEventDetector:
         LOGGER.debug(
             "SecurityEventDetector: %d events for attack_id=%s",
             len(events),
-            getattr(result, "attack_id", None),
+            result.attack_id,
         )
         return events
