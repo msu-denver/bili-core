@@ -130,7 +130,7 @@ inject_attack()
     ├── MID_EXECUTION
     │   ├── compile_mas(config) → CompiledMAS
     │   ├── compile_graph(interrupt_before=[agent_id])
-    │   ├── invoke() → NodeInterrupt → inject → Command(resume=...)
+    │   ├── invoke() → early return (LG ≥ 1.x) or NodeInterrupt → inject → Command(resume=...)
     │   └── stream(stream_mode="updates") → PropagationTracker.observe() per node
     └── AttackLogger.log(result)
 ```
@@ -165,6 +165,15 @@ bili/aether/attacks/
 - **Pre-execution objective field**: All pre-execution strategies inject through the
   `AgentSpec.objective` field (the primary LLM prompt surface). `model_copy(update=...)`
   is used to bypass Pydantic's `max_length=1000` validator for research payloads.
+
+- **Mid-execution requires a checkpointer for reliable interrupt verification**: After
+  `invoke()` returns early at `interrupt_before` (LangGraph ≥ 1.x), the framework calls
+  `graph.get_state()` to confirm the target node is pending in `snapshot.next`. This
+  check requires a checkpointer (e.g. `MemorySaver`) to be configured on the compiled
+  graph. Without one, `get_state()` will fail and the framework falls back to the dict
+  returned by `invoke()` — but that dict may be a fully-completed state if the target
+  node was never reached. For research use, always compile the graph with a checkpointer
+  to ensure the interrupt-verification logic is active.
 
 - **Heuristic detection limitations**: See the module docstring in `propagation.py` for
   a full list of known false-positive and false-negative scenarios. The gap between

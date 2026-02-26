@@ -8,6 +8,10 @@ import pytest
 
 from bili.aether.attacks.injector import AttackInjector
 from bili.aether.attacks.models import AttackResult, AttackType, InjectionPhase
+from bili.aether.attacks.propagation import PropagationTracker
+from bili.aether.attacks.strategies.mid_execution import (
+    run_with_mid_execution_injection,
+)
 from bili.aether.runtime.execution_result import (
     AgentExecutionResult,
     MASExecutionResult,
@@ -311,3 +315,107 @@ def test_inject_attack_always_logs_result(tmp_path):
     assert log_path.exists()
     lines = log_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
+
+
+# =========================================================================
+# Context manager / lifecycle
+# =========================================================================
+
+
+def test_close_shuts_down_thread_pool():
+    """close() shuts down the internal ThreadPoolExecutor."""
+    config = _seq_config()
+    injector = _make_injector(config)
+    assert not injector._thread_pool._shutdown  # pool is live before close
+    injector.close()
+    assert injector._thread_pool._shutdown  # pool is shut down after close
+
+
+def test_context_manager_calls_close_on_exit():
+    """Using AttackInjector as a context manager calls close() on __exit__."""
+    config = _seq_config()
+    injector = _make_injector(config)
+    with patch.object(injector, "close") as mock_close:
+        with injector:
+            pass
+    mock_close.assert_called_once()
+
+
+# =========================================================================
+# Mid-execution strategy unit tests (run_with_mid_execution_injection)
+# =========================================================================
+
+
+def _mock_compiled_mas(config: MASConfig) -> tuple:
+    """Return (mock_compiled_mas, mock_graph) with config pre-wired."""
+    mock_compiled = MagicMock()
+    mock_compiled.config = config
+    mock_graph = MagicMock()
+    mock_compiled.compile_graph.return_value = mock_graph
+    return mock_compiled, mock_graph
+
+
+def test_run_with_mid_execution_early_return_succeeds():
+    """run_with_mid_execution_injection handles LangGraph >= 1.x early-return.
+
+    LangGraph 1.x (pinned ~1.0.2) returns early from invoke() at an
+    interrupt_before point rather than raising NodeInterrupt.  The function
+    must inspect snapshot.next to confirm the interrupt, then proceed.
+    """
+    config = _seq_config()
+    mock_compiled, mock_graph = _mock_compiled_mas(config)
+
+    # Simulate LG 1.x: invoke() returns early with pre-interrupt state
+    mock_graph.invoke.return_value = {"messages": []}
+
+    # Snapshot confirms target agent is pending
+    mock_snapshot = MagicMock()
+    mock_snapshot.next = ("agent_a",)
+    mock_snapshot.values = {"messages": []}
+    mock_graph.get_state.return_value = mock_snapshot
+
+    # stream() yields one output chunk from agent_a
+    mock_graph.stream.return_value = [{"agent_a": {"message": "output"}}]
+
+    tracker = PropagationTracker(_PAYLOAD, "agent_a")
+    result = run_with_mid_execution_injection(
+        compiled_mas=mock_compiled,
+        input_data={"messages": []},
+        target_agent_id="agent_a",
+        payload=_PAYLOAD,
+        tracker=tracker,
+        invoke_config={"configurable": {"thread_id": "test-thread"}},
+    )
+
+    assert isinstance(result, dict)
+    mock_graph.invoke.assert_called_once()
+    mock_graph.stream.assert_called_once()
+
+
+def test_run_with_mid_execution_raises_when_target_not_reached():
+    """run_with_mid_execution raises RuntimeError when target node is never reached.
+
+    When invoke() returns normally and snapshot.next is empty, the target agent
+    was never interrupted — this must raise a clear RuntimeError.
+    """
+    config = _seq_config()
+    mock_compiled, mock_graph = _mock_compiled_mas(config)
+
+    # invoke() runs to completion — target node was never hit
+    mock_graph.invoke.return_value = {"messages": []}
+
+    # Snapshot shows no pending nodes (graph completed normally)
+    mock_snapshot = MagicMock()
+    mock_snapshot.next = ()
+    mock_graph.get_state.return_value = mock_snapshot
+
+    tracker = PropagationTracker(_PAYLOAD, "agent_a")
+    with pytest.raises(RuntimeError, match="NodeInterrupt was never raised"):
+        run_with_mid_execution_injection(
+            compiled_mas=mock_compiled,
+            input_data={"messages": []},
+            target_agent_id="agent_a",
+            payload=_PAYLOAD,
+            tracker=tracker,
+            invoke_config={"configurable": {"thread_id": "test-thread"}},
+        )

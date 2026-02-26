@@ -73,7 +73,6 @@ class AttackInjector:
     ) -> None:
         self._config = config
         self._executor = executor
-        self._log_path = log_path
         self._attack_logger = AttackLogger(log_path)
         self._security_detector = security_detector
         self._thread_pool = ThreadPoolExecutor(max_workers=max_workers)
@@ -305,12 +304,17 @@ class AttackInjector:
         )
 
         compiled_mas = compile_mas(self._config)
+        # When track_propagation=False, tracker is None so a throwaway
+        # PropagationTracker is created here to satisfy the required signature
+        # of run_with_mid_execution_injection.  Its observations are discarded
+        # at the _run_attack call site, which checks `tracker` (None), not
+        # `effective_tracker`.  This is intentional.
         effective_tracker = tracker or PropagationTracker(payload, agent_id)
         invoke_config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
         mid_execution.run_with_mid_execution_injection(
             compiled_mas=compiled_mas,
-            input_data={},
+            input_data={"messages": []},
             target_agent_id=agent_id,
             payload=payload,
             tracker=effective_tracker,

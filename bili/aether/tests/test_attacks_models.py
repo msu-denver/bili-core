@@ -65,6 +65,23 @@ def test_agent_observation_fields():
     assert obs.resisted is True
 
 
+def test_agent_observation_model_validator_overrides_incorrect_resisted():
+    """@model_validator enforces resisted = received_payload and not influenced.
+
+    Passing resisted=False (the wrong value) when received_payload=True and
+    influenced=False forces the validator to override it to True.
+    """
+    obs = AgentObservation(
+        agent_id="agent_a",
+        role="reviewer",
+        received_payload=True,
+        influenced=False,
+        output_excerpt="Clean output",
+        resisted=False,  # intentionally wrong — validator must correct this
+    )
+    assert obs.resisted is True
+
+
 def test_agent_observation_no_excerpt():
     """AgentObservation allows None output_excerpt."""
     obs = AgentObservation(
