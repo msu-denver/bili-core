@@ -1,0 +1,422 @@
+{
+  "mas_id": "simple_chain",
+  "execution_id": "simple_chain_86966f6c",
+  "start_time": "2026-02-27T22:26:19.191634+00:00",
+  "end_time": "2026-02-27T22:26:19.196886+00:00",
+  "total_execution_time_ms": 5.253076553344727,
+  "agent_results": [
+    {
+      "agent_id": "community_manager",
+      "role": "community_manager",
+      "output": {
+        "agent_id": "community_manager",
+        "role": "community_manager",
+        "status": "stub",
+        "message": "[STUB] Agent 'community_manager' (community_manager) executed."
+      },
+      "execution_time_ms": 0.0,
+      "error": null,
+      "tools_used": [],
+      "messages_sent": 8,
+      "messages_received": 7
+    },
+    {
+      "agent_id": "content_reviewer",
+      "role": "content_reviewer",
+      "output": {
+        "agent_id": "content_reviewer",
+        "role": "content_reviewer",
+        "status": "stub",
+        "message": "[STUB] Agent 'content_reviewer' (content_reviewer) executed."
+      },
+      "execution_time_ms": 0.0,
+      "error": null,
+      "tools_used": [],
+      "messages_sent": 4,
+      "messages_received": 11
+    },
+    {
+      "agent_id": "policy_expert",
+      "role": "policy_expert",
+      "output": {
+        "agent_id": "policy_expert",
+        "role": "policy_expert",
+        "status": "stub",
+        "message": "[STUB] Agent 'policy_expert' (policy_expert) executed."
+      },
+      "execution_time_ms": 0.0,
+      "error": null,
+      "tools_used": [],
+      "messages_sent": 2,
+      "messages_received": 13
+    },
+    {
+      "agent_id": "judge",
+      "role": "judge",
+      "output": {
+        "agent_id": "judge",
+        "role": "judge",
+        "status": "stub",
+        "message": "[STUB] Agent 'judge' (judge) executed."
+      },
+      "execution_time_ms": 0.0,
+      "error": null,
+      "tools_used": [],
+      "messages_sent": 1,
+      "messages_received": 14
+    }
+  ],
+  "final_state": {
+    "messages": [
+      {
+        "type": "AIMessage",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "name": "community_manager"
+      },
+      {
+        "type": "AIMessage",
+        "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+        "name": "content_reviewer"
+      },
+      {
+        "type": "AIMessage",
+        "content": "[STUB] Agent 'policy_expert' (policy_expert) executed.",
+        "name": "policy_expert"
+      },
+      {
+        "type": "AIMessage",
+        "content": "[STUB] Agent 'judge' (judge) executed.",
+        "name": "judge"
+      }
+    ],
+    "current_agent": "judge",
+    "agent_outputs": {
+      "community_manager": {
+        "agent_id": "community_manager",
+        "role": "community_manager",
+        "status": "stub",
+        "message": "[STUB] Agent 'community_manager' (community_manager) executed."
+      },
+      "content_reviewer": {
+        "agent_id": "content_reviewer",
+        "role": "content_reviewer",
+        "status": "stub",
+        "message": "[STUB] Agent 'content_reviewer' (content_reviewer) executed."
+      },
+      "policy_expert": {
+        "agent_id": "policy_expert",
+        "role": "policy_expert",
+        "status": "stub",
+        "message": "[STUB] Agent 'policy_expert' (policy_expert) executed."
+      },
+      "judge": {
+        "agent_id": "judge",
+        "role": "judge",
+        "status": "stub",
+        "message": "[STUB] Agent 'judge' (judge) executed."
+      }
+    },
+    "mas_id": "simple_chain",
+    "channel_messages": {
+      "__agent_output__": [
+        {
+          "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+          "timestamp": "2026-02-27T22:26:19.195770+00:00",
+          "sender": "community_manager",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        },
+        {
+          "message_id": "1f7c11ec-b662-4f28-885b-78bff83a93ba",
+          "timestamp": "2026-02-27T22:26:19.196154+00:00",
+          "sender": "content_reviewer",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        },
+        {
+          "message_id": "3c0be2ca-952d-4069-bbc9-bd5326932d8d",
+          "timestamp": "2026-02-27T22:26:19.196421+00:00",
+          "sender": "policy_expert",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'policy_expert' (policy_expert) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        },
+        {
+          "message_id": "9b513e7a-b22f-4cf3-9e3c-78a143b541a6",
+          "timestamp": "2026-02-27T22:26:19.196645+00:00",
+          "sender": "judge",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'judge' (judge) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        }
+      ]
+    },
+    "pending_messages": {
+      "community_manager": [
+        {
+          "message_id": "1f7c11ec-b662-4f28-885b-78bff83a93ba",
+          "timestamp": "2026-02-27T22:26:19.196154+00:00",
+          "sender": "content_reviewer",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        },
+        {
+          "message_id": "3c0be2ca-952d-4069-bbc9-bd5326932d8d",
+          "timestamp": "2026-02-27T22:26:19.196421+00:00",
+          "sender": "policy_expert",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'policy_expert' (policy_expert) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        },
+        {
+          "message_id": "9b513e7a-b22f-4cf3-9e3c-78a143b541a6",
+          "timestamp": "2026-02-27T22:26:19.196645+00:00",
+          "sender": "judge",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'judge' (judge) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        }
+      ],
+      "content_reviewer": [
+        {
+          "message_id": "3c0be2ca-952d-4069-bbc9-bd5326932d8d",
+          "timestamp": "2026-02-27T22:26:19.196421+00:00",
+          "sender": "policy_expert",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'policy_expert' (policy_expert) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        },
+        {
+          "message_id": "9b513e7a-b22f-4cf3-9e3c-78a143b541a6",
+          "timestamp": "2026-02-27T22:26:19.196645+00:00",
+          "sender": "judge",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'judge' (judge) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        }
+      ],
+      "policy_expert": [
+        {
+          "message_id": "9b513e7a-b22f-4cf3-9e3c-78a143b541a6",
+          "timestamp": "2026-02-27T22:26:19.196645+00:00",
+          "sender": "judge",
+          "receiver": "__all__",
+          "channel": "__agent_output__",
+          "content": "[STUB] Agent 'judge' (judge) executed.",
+          "message_type": "broadcast",
+          "metadata": {},
+          "in_reply_to": null
+        }
+      ]
+    },
+    "communication_log": [
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "1f7c11ec-b662-4f28-885b-78bff83a93ba",
+        "timestamp": "2026-02-27T22:26:19.196154+00:00",
+        "sender": "content_reviewer",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "1f7c11ec-b662-4f28-885b-78bff83a93ba",
+        "timestamp": "2026-02-27T22:26:19.196154+00:00",
+        "sender": "content_reviewer",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "3c0be2ca-952d-4069-bbc9-bd5326932d8d",
+        "timestamp": "2026-02-27T22:26:19.196421+00:00",
+        "sender": "policy_expert",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'policy_expert' (policy_expert) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "1f7c11ec-b662-4f28-885b-78bff83a93ba",
+        "timestamp": "2026-02-27T22:26:19.196154+00:00",
+        "sender": "content_reviewer",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "5d049063-6cac-4fee-ba49-a28c2a55468a",
+        "timestamp": "2026-02-27T22:26:19.195770+00:00",
+        "sender": "community_manager",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'community_manager' (community_manager) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "1f7c11ec-b662-4f28-885b-78bff83a93ba",
+        "timestamp": "2026-02-27T22:26:19.196154+00:00",
+        "sender": "content_reviewer",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'content_reviewer' (content_reviewer) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "3c0be2ca-952d-4069-bbc9-bd5326932d8d",
+        "timestamp": "2026-02-27T22:26:19.196421+00:00",
+        "sender": "policy_expert",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'policy_expert' (policy_expert) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      },
+      {
+        "message_id": "9b513e7a-b22f-4cf3-9e3c-78a143b541a6",
+        "timestamp": "2026-02-27T22:26:19.196645+00:00",
+        "sender": "judge",
+        "receiver": "__all__",
+        "channel": "__agent_output__",
+        "content": "[STUB] Agent 'judge' (judge) executed.",
+        "message_type": "broadcast",
+        "metadata": {},
+        "in_reply_to": null
+      }
+    ]
+  },
+  "total_messages": 15,
+  "messages_by_channel": {
+    "__agent_output__": 15
+  },
+  "communication_log_path": null,
+  "checkpoint_saved": true,
+  "checkpoint_path": null,
+  "success": true,
+  "error": null,
+  "metadata": {
+    "thread_id": "simple_chain_86966f6c"
+  }
+}
