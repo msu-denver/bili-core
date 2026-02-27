@@ -43,6 +43,7 @@ __all__ = [
 def compile_mas(
     config: MASConfig,
     custom_node_registry: dict | None = None,
+    runtime_context: "Any | None" = None,
 ) -> CompiledMAS:
     """Validate and compile a ``MASConfig`` into a ``CompiledMAS``.
 
@@ -56,6 +57,10 @@ def compile_mas(
             callables.  Checked before the global
             ``GRAPH_NODE_REGISTRY`` when resolving pipeline
             ``node_type`` references.
+        runtime_context: Optional :class:`RuntimeContext` holding named
+            services injected into pipeline node builders as ``**kwargs``
+            (lowest priority — overridden by parent agent config and
+            node-specific config).
 
     Returns:
         A :class:`CompiledMAS` containing the uncompiled ``StateGraph``,
@@ -68,4 +73,8 @@ def compile_mas(
     if not result.valid:
         raise ValueError(f"MAS validation failed:\n{result}")
 
-    return GraphBuilder(config, custom_node_registry=custom_node_registry).build()
+    return GraphBuilder(
+        config,
+        custom_node_registry=custom_node_registry,
+        runtime_context=runtime_context,
+    ).build()

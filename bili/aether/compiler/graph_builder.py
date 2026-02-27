@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Graph builder — converts a validated MASConfig into a LangGraph StateGraph.
 
 Supports all seven ``WorkflowType`` values defined in the AETHER schema.
@@ -168,7 +169,7 @@ def safe_eval_condition(condition: str, context: Dict[str, Any]) -> bool:
     return bool(result)
 
 
-class GraphBuilder:  # pylint: disable=too-few-public-methods
+class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Builds a LangGraph ``StateGraph`` from a validated ``MASConfig``.
 
     Usage::
@@ -181,10 +182,12 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         self,
         config: MASConfig,
         custom_node_registry: Dict[str, Any] | None = None,
+        runtime_context: Any | None = None,
     ) -> None:
         # Make a deep copy to avoid mutating caller's config during compilation
         self._config = config.model_copy(deep=True)
         self._custom_node_registry: Dict[str, Any] = custom_node_registry or {}
+        self._runtime_context = runtime_context
         self._agent_nodes: Dict[str, Callable] = {}
         self._state_schema = None
         self._graph: Any = None
@@ -467,10 +470,16 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
     def _build_registry_node_kwargs(self, parent_agent, node_spec) -> Dict[str, Any]:
         """Build kwargs for a registry node builder function.
 
-        Merges configuration from the parent agent (LLM, tools, persona)
-        with node-specific config overrides from the ``PipelineNodeSpec``.
+        Merges three layers (lowest to highest priority):
+        1. RuntimeContext services (base layer)
+        2. Parent agent config (LLM, tools, persona)
+        3. Node-specific config overrides from ``PipelineNodeSpec``
         """
         kwargs: Dict[str, Any] = {}
+
+        # 1. RuntimeContext services (base layer — lowest priority)
+        if self._runtime_context is not None:
+            kwargs.update(self._runtime_context.as_dict())
 
         # Resolve LLM from parent agent if available
         if parent_agent.model_name:
@@ -824,7 +833,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 
         self._graph.add_node("__round_start__", round_start)
 
-        def consensus_checker(state: dict) -> dict:
+        def consensus_checker(state: dict) -> dict:  # pylint: disable=too-many-locals
             """Check if agents have reached consensus based on their votes.
 
             Extracts votes from agent outputs and checks if the agreement ratio
@@ -875,7 +884,8 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
                 consensus_reached = agreement_ratio >= threshold
 
                 LOGGER.info(
-                    "Consensus check (round %d): %d/%d agents agree on '%s' (%.1f%%, threshold %.1f%%)",
+                    "Consensus check (round %d): %d/%d agents agree "
+                    "on '%s' (%.1f%%, threshold %.1f%%)",
                     current_round,
                     count,
                     len(votes),

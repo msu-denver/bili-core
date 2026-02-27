@@ -33,7 +33,7 @@ from bili.aether.schema import MASConfig, WorkflowType
 LOGGER = logging.getLogger(__name__)
 
 
-class MASExecutor:
+class MASExecutor:  # pylint: disable=too-many-instance-attributes
     """Executes a MAS configuration end-to-end and collects results.
 
     Attributes:
@@ -41,7 +41,7 @@ class MASExecutor:
         log_dir: Directory for logs and result files.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         config: MASConfig,
         log_dir: Optional[str] = None,
@@ -49,6 +49,7 @@ class MASExecutor:
         user_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         custom_node_registry: Optional[Dict[str, Any]] = None,
+        runtime_context: Optional[Any] = None,
     ) -> None:
         """Initialize the executor.
 
@@ -69,6 +70,8 @@ class MASExecutor:
             custom_node_registry: Optional mapping of node names to
                 factory callables for pipeline ``node_type`` resolution.
                 Checked before the global ``GRAPH_NODE_REGISTRY``.
+            runtime_context: Optional :class:`RuntimeContext` holding
+                named services injected into pipeline node builders.
         """
         self._config = config
         self._log_dir = log_dir or os.getcwd()
@@ -76,6 +79,7 @@ class MASExecutor:
         self._user_id = user_id
         self._conversation_id = conversation_id
         self._custom_node_registry = custom_node_registry
+        self._runtime_context = runtime_context
         self._compiled_mas = None
         self._compiled_graph = None
 
@@ -116,6 +120,7 @@ class MASExecutor:
         self._compiled_mas = compile_mas(
             self._config,
             custom_node_registry=self._custom_node_registry,
+            runtime_context=self._runtime_context,
         )
 
         # Create checkpointer with user_id if multi-tenant mode enabled
