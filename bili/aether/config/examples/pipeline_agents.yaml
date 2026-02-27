@@ -17,6 +17,11 @@
 #   - Registry nodes: persona and datetime reference GRAPH_NODE_REGISTRY
 #   - Inline agent nodes: sub_researcher is an embedded AgentSpec
 #
+# Note on conditional edges:
+#   Pipeline conditional expressions can only reference the inner state
+#   fields: messages, current_agent, and agent_outputs. Function calls
+#   (len(), .get(), etc.) are blocked by the safe evaluator.
+#
 # Expected flow:
 #   [input] → researcher (pipeline: persona → datetime → sub_researcher)
 #           → summarizer → [output]

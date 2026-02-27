@@ -136,7 +136,14 @@ class PipelineEdgeSpec(BaseModel):
 
     condition: Optional[str] = Field(
         None,
-        description="Python expression for conditional routing",
+        description=(
+            "Python expression for conditional routing. Evaluated by "
+            "SafeConditionEvaluator with ``state.<field>`` access. "
+            "Pipeline inner state only exposes ``messages``, "
+            "``current_agent``, and ``agent_outputs`` — conditions "
+            "must reference these fields. Function calls (e.g. "
+            "``len()``, ``.get()``) are blocked by the safe evaluator."
+        ),
     )
 
     label: str = Field("", description="Edge label for visualization")
