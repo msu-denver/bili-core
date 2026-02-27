@@ -319,12 +319,19 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 
         pipeline = agent.pipeline
 
-        # 1. Build inner state schema (minimal — messages + pipeline-local tracking)
+        # 1. Build inner state schema (base fields + custom state_fields)
         inner_annotations: Dict[str, Any] = {
             "messages": Annotated[list, add_messages],
             "current_agent": Annotated[str, lambda _old, new: new],
             "agent_outputs": Annotated[Dict[str, Any], _merge_dicts],
         }
+        for field in pipeline.state_fields:
+            type_hint = field.resolve_type()
+            reducer = field.resolve_reducer()
+            if reducer is not None:
+                inner_annotations[field.name] = Annotated[type_hint, reducer]
+            else:
+                inner_annotations[field.name] = type_hint
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", agent.agent_id)
         inner_state_cls: type = TypedDict(
             f"{safe_name}_pipeline_State", inner_annotations
@@ -572,16 +579,23 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         agent_id = agent.agent_id
         agent_role = agent.role
         pipeline_node_count = len(agent.pipeline.nodes)
+        custom_state_fields = agent.pipeline.state_fields
 
         def _pipeline_node(state: dict) -> dict:
             start = time.time()
 
-            # Input mapping: outer → inner (only messages flow in)
+            # Input mapping: outer → inner (messages + custom state fields)
             inner_state: Dict[str, Any] = {
                 "messages": list(state.get("messages", [])),
                 "current_agent": agent_id,
                 "agent_outputs": {},
             }
+            # Carry custom state fields from outer state into inner state
+            for field in custom_state_fields:
+                if field.name in state:
+                    inner_state[field.name] = state[field.name]
+                elif field.default is not None:
+                    inner_state[field.name] = field.default
 
             try:
                 result = compiled_subgraph.invoke(inner_state)
@@ -637,11 +651,16 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
                 pipeline_node_count,
             )
 
-            return {
+            output = {
                 "messages": [AIMessage(content=final_content, name=agent_id)],
                 "current_agent": agent_id,
                 "agent_outputs": agent_outputs,
             }
+            # Propagate custom state fields from inner result back to outer state
+            for field in custom_state_fields:
+                if field.name in result:
+                    output[field.name] = result[field.name]
+            return output
 
         _pipeline_node.__name__ = f"pipeline_{agent_id}"
         _pipeline_node.__qualname__ = f"pipeline_{agent_id}"

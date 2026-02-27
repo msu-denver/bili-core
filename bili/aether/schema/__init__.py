@@ -38,7 +38,12 @@ from .enums import CommunicationProtocol, OutputFormat, WorkflowType
 from .mas_config import Channel, MASConfig, WorkflowEdge
 
 # Pipeline specification
-from .pipeline_spec import PipelineEdgeSpec, PipelineNodeSpec, PipelineSpec
+from .pipeline_spec import (
+    PipelineEdgeSpec,
+    PipelineNodeSpec,
+    PipelineSpec,
+    PipelineStateField,
+)
 
 __all__ = [
     # Structural enums
@@ -61,4 +66,5 @@ __all__ = [
     "PipelineSpec",
     "PipelineNodeSpec",
     "PipelineEdgeSpec",
+    "PipelineStateField",
 ]

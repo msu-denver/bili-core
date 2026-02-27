@@ -91,6 +91,19 @@ def generate_state_schema(config: MASConfig) -> Type:
     except ImportError:
         pass  # integration package not available
 
+    # Pipeline custom state fields (promoted to outer state so the adapter
+    # can carry them between the outer MAS graph and inner sub-graphs).
+    for agent in config.agents:
+        if agent.pipeline and agent.pipeline.state_fields:
+            for field in agent.pipeline.state_fields:
+                if field.name not in annotations:
+                    type_hint = field.resolve_type()
+                    reducer = field.resolve_reducer()
+                    if reducer is not None:
+                        annotations[field.name] = Annotated[type_hint, reducer]
+                    else:
+                        annotations[field.name] = type_hint
+
     # Build a valid Python identifier from the mas_id
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", config.mas_id)
     class_name = f"{safe_name}_State"
