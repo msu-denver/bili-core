@@ -328,6 +328,7 @@ class AgentSpec(BaseModel):
         """Recursively check pipeline nesting depth."""
         from .pipeline_spec import (  # pylint: disable=import-outside-toplevel
             MAX_PIPELINE_DEPTH,
+            PipelineSpec,
         )
 
         if depth > MAX_PIPELINE_DEPTH:
@@ -340,10 +341,6 @@ class AgentSpec(BaseModel):
                 inner_pipeline = node.agent_spec.get("pipeline")
                 if inner_pipeline:
                     # Inner pipeline is still a dict at validation time
-                    from .pipeline_spec import (  # pylint: disable=import-outside-toplevel,redefined-outer-name
-                        PipelineSpec,
-                    )
-
                     inner = PipelineSpec(**inner_pipeline)
                     AgentSpec._check_pipeline_depth(inner, depth + 1)
 

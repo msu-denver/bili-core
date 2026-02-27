@@ -1028,6 +1028,12 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 class _StateProxy:  # pylint: disable=too-few-public-methods
     """Allows ``state.field`` attribute access for condition evaluation.
 
+    Used by both MAS-level and pipeline-level conditional edge routers.
+    Note that the available state fields differ between contexts: outer MAS
+    state includes fields like ``current_agent`` and ``agent_outputs``, while
+    inner pipeline state has a simpler schema (``messages`` and
+    ``agent_outputs`` only).
+
     Raises AttributeError for missing state fields to help catch typos in
     condition expressions rather than silently returning None.
     """

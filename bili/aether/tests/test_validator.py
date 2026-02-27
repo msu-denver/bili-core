@@ -408,7 +408,7 @@ def test_validate_mas_convenience_function():
 
 
 def test_all_example_yamls_pass_validation():
-    """All 5 example YAML configs pass validation with no errors."""
+    """All 6 example YAML configs pass validation with no errors."""
     example_files = [
         "simple_chain.yaml",
         "hierarchical_voting.yaml",
