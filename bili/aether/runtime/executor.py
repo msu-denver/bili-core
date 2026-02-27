@@ -48,6 +48,7 @@ class MASExecutor:
         validate_config: bool = True,
         user_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        custom_node_registry: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize the executor.
 
@@ -65,12 +66,16 @@ class MASExecutor:
             conversation_id: Optional conversation identifier for
                 multi-conversation support. Used with ``user_id`` to
                 construct unique thread_ids.
+            custom_node_registry: Optional mapping of node names to
+                factory callables for pipeline ``node_type`` resolution.
+                Checked before the global ``GRAPH_NODE_REGISTRY``.
         """
         self._config = config
         self._log_dir = log_dir or os.getcwd()
         self._validate_config = validate_config
         self._user_id = user_id
         self._conversation_id = conversation_id
+        self._custom_node_registry = custom_node_registry
         self._compiled_mas = None
         self._compiled_graph = None
 
@@ -108,7 +113,10 @@ class MASExecutor:
             compile_mas,
         )
 
-        self._compiled_mas = compile_mas(self._config)
+        self._compiled_mas = compile_mas(
+            self._config,
+            custom_node_registry=self._custom_node_registry,
+        )
 
         # Create checkpointer with user_id if multi-tenant mode enabled
         checkpointer = None

@@ -177,9 +177,14 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         graph = compiled.compile_graph()
     """
 
-    def __init__(self, config: MASConfig) -> None:
+    def __init__(
+        self,
+        config: MASConfig,
+        custom_node_registry: Dict[str, Any] | None = None,
+    ) -> None:
         # Make a deep copy to avoid mutating caller's config during compilation
         self._config = config.model_copy(deep=True)
+        self._custom_node_registry: Dict[str, Any] = custom_node_registry or {}
         self._agent_nodes: Dict[str, Callable] = {}
         self._state_schema = None
         self._graph: Any = None
@@ -390,9 +395,10 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
     def _resolve_registry_node(self, node_spec, parent_agent) -> Callable[[dict], dict]:
         """Resolve a registry-based pipeline node.
 
-        Looks up the node builder from bili-core's ``GRAPH_NODE_REGISTRY``,
-        instantiates it via the ``functools.partial(Node, name, builder)``
-        pattern, and calls ``node_instance.function(**kwargs)`` to obtain
+        Checks the per-compilation ``custom_node_registry`` first, then
+        falls back to bili-core's global ``GRAPH_NODE_REGISTRY``.
+        Instantiates via the ``functools.partial(Node, name, builder)``
+        pattern and calls ``node_instance.function(**kwargs)`` to obtain
         the actual executor function.
 
         Args:
@@ -402,28 +408,43 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         Returns:
             A callable ``(state: dict) -> dict``.
         """
-        try:
-            from bili.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
-                GRAPH_NODE_REGISTRY,
-            )
-        except ImportError as exc:
+        # 1. Check per-compilation custom registry first
+        factory = self._custom_node_registry.get(node_spec.node_type)
+
+        # 2. Fall back to global bili-core registry
+        if factory is None:
+            try:
+                from bili.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
+                    GRAPH_NODE_REGISTRY,
+                )
+            except ImportError as exc:
+                raise ValueError(
+                    f"Pipeline node '{node_spec.node_id}' references registry "
+                    f"type '{node_spec.node_type}' but "
+                    "bili.loaders.langchain_loader is not available."
+                ) from exc
+            factory = GRAPH_NODE_REGISTRY.get(node_spec.node_type)
+
+        if factory is None:
+            # Build combined list of available node types for the error message
+            available_keys: Set[str] = set(self._custom_node_registry.keys())
+            try:
+                from bili.loaders.langchain_loader import (
+                    GRAPH_NODE_REGISTRY as _global_reg,  # pylint: disable=import-outside-toplevel
+                )
+
+                available_keys |= set(_global_reg.keys())
+            except ImportError:
+                pass
             raise ValueError(
-                f"Pipeline node '{node_spec.node_id}' references registry "
-                f"type '{node_spec.node_type}' but "
-                "bili.loaders.langchain_loader is not available."
-            ) from exc
+                f"Pipeline node '{node_spec.node_id}' references unknown "
+                f"registry type '{node_spec.node_type}'. "
+                f"Available: {sorted(available_keys)}"
+            )
 
         from bili.graph_builder.classes.node import (  # pylint: disable=import-outside-toplevel
             Node,
         )
-
-        factory = GRAPH_NODE_REGISTRY.get(node_spec.node_type)
-        if factory is None:
-            raise ValueError(
-                f"Pipeline node '{node_spec.node_id}' references unknown "
-                f"registry type '{node_spec.node_type}'. "
-                f"Available: {sorted(GRAPH_NODE_REGISTRY.keys())}"
-            )
 
         # Call partial to get Node instance, then call builder with kwargs
         if callable(factory) and not isinstance(factory, Node):

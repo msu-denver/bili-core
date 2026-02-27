@@ -195,6 +195,50 @@ GRAPH_NODE_REGISTRY = {
 }
 
 
+def register_node(name: str, factory: Callable) -> None:
+    """Register a custom node factory in the global node registry.
+
+    External projects can use this to make custom nodes available to
+    both :func:`build_agent_graph` and AETHER ``PipelineSpec`` by
+    ``node_type`` name.
+
+    Args:
+        name: Unique node name.  Must not collide with existing entries
+            (use :func:`unregister_node` first to replace a built-in).
+        factory: A ``functools.partial(Node, name, builder)`` or any
+            callable that returns a ``Node`` instance when called.
+
+    Raises:
+        ValueError: If *name* is already registered.
+    """
+    if name in GRAPH_NODE_REGISTRY:
+        raise ValueError(
+            f"Node '{name}' is already registered. "
+            "Call unregister_node() first to replace it."
+        )
+    GRAPH_NODE_REGISTRY[name] = factory
+
+
+def unregister_node(name: str) -> None:
+    """Remove a node factory from the global registry.
+
+    Primarily useful for test cleanup or intentional replacement of a
+    built-in node.
+
+    Args:
+        name: Node name to remove.
+
+    Raises:
+        KeyError: If *name* is not in the registry.
+    """
+    if name not in GRAPH_NODE_REGISTRY:
+        raise KeyError(
+            f"Node '{name}' is not registered. "
+            f"Available: {sorted(GRAPH_NODE_REGISTRY.keys())}"
+        )
+    del GRAPH_NODE_REGISTRY[name]
+
+
 def wrap_node(node_func: Callable, node_name: str) -> Callable:
     """
     Wraps a node function to log its execution time.
