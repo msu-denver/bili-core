@@ -191,6 +191,24 @@ class TestStreamFilter:
             is False
         )
 
+    def test_include_agents_pass_lifecycle(self):
+        f = StreamFilter(include_agents={"agent_a"})
+        # RUN_START/RUN_END pass through by default (pass_lifecycle=True)
+        assert (
+            f.accepts(StreamEvent(event_type=StreamEventType.RUN_START, agent_id=None))
+            is True
+        )
+        assert (
+            f.accepts(StreamEvent(event_type=StreamEventType.RUN_END, agent_id=None))
+            is True
+        )
+        # Disable pass_lifecycle — lifecycle events are also rejected
+        f2 = StreamFilter(include_agents={"agent_a"}, pass_lifecycle=False)
+        assert (
+            f2.accepts(StreamEvent(event_type=StreamEventType.RUN_START, agent_id=None))
+            is False
+        )
+
     def test_include_nodes(self):
         f = StreamFilter(include_nodes={"node_x"})
         assert (

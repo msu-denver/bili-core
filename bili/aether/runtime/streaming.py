@@ -106,20 +106,26 @@ class StreamFilter:
         exclude_types: If non-empty, exclude events matching these types.
         include_agents: If non-empty, only yield events from these agents.
         include_nodes: If non-empty, only yield events from these nodes.
+        pass_lifecycle: When ``True`` (the default), ``RUN_START`` and
+            ``RUN_END`` events always pass through ``include_agents``
+            and ``include_nodes`` filters even though they carry no
+            agent or node attribution.
     """
 
     include_types: Set[str] = field(default_factory=set)
     exclude_types: Set[str] = field(default_factory=set)
     include_agents: Set[str] = field(default_factory=set)
     include_nodes: Set[str] = field(default_factory=set)
+    pass_lifecycle: bool = True
+
+    _LIFECYCLE_TYPES: Set[str] = field(
+        default_factory=lambda: {StreamEventType.RUN_START, StreamEventType.RUN_END},
+        init=False,
+        repr=False,
+    )
 
     def accepts(self, event: StreamEvent) -> bool:
-        """Return True if the event passes this filter.
-
-        When ``include_agents`` or ``include_nodes`` are set, events
-        without an ``agent_id`` or ``node_name`` (e.g. lifecycle events
-        like ``RUN_START``) are **rejected**.
-        """
+        """Return True if the event passes this filter."""
         # Type filtering
         if self.include_types:
             if event.event_type not in self.include_types:
@@ -128,15 +134,20 @@ class StreamFilter:
             if event.event_type in self.exclude_types:
                 return False
 
+        # Lifecycle events pass through agent/node filters when pass_lifecycle is True
+        is_lifecycle = event.event_type in self._LIFECYCLE_TYPES
+
         # Agent filtering — reject events with no agent_id when filter is active
         if self.include_agents:
             if not event.agent_id or event.agent_id not in self.include_agents:
-                return False
+                if not (self.pass_lifecycle and is_lifecycle):
+                    return False
 
         # Node filtering — reject events with no node_name when filter is active
         if self.include_nodes:
             if not event.node_name or event.node_name not in self.include_nodes:
-                return False
+                if not (self.pass_lifecycle and is_lifecycle):
+                    return False
 
         return True
 

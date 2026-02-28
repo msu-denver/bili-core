@@ -1,8 +1,11 @@
 """Dynamic state schema generation for compiled MAS graphs."""
 
+import logging
 import operator
 import re
 from typing import Any, Dict, List, Type
+
+LOGGER = logging.getLogger(__name__)
 
 from bili.aether.schema import MASConfig, WorkflowType
 
@@ -103,6 +106,13 @@ def generate_state_schema(config: MASConfig) -> Type:
                         annotations[field.name] = Annotated[type_hint, reducer]
                     else:
                         annotations[field.name] = type_hint
+                else:
+                    LOGGER.warning(
+                        "Pipeline state field '%s' from agent '%s' "
+                        "conflicts with an existing field — skipped.",
+                        field.name,
+                        agent.agent_id,
+                    )
 
     # Build a valid Python identifier from the mas_id
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", config.mas_id)

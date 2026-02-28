@@ -18,7 +18,7 @@ from bili.aether.schema import MASConfig, WorkflowType
 
 from .agent_generator import generate_agent_node, wrap_agent_node
 from .compiled_mas import CompiledMAS
-from .state_generator import _merge_dicts, generate_state_schema
+from .state_generator import _merge_dicts, _replace_value, generate_state_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -325,7 +325,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
         # 1. Build inner state schema (base fields + custom state_fields)
         inner_annotations: Dict[str, Any] = {
             "messages": Annotated[list, add_messages],
-            "current_agent": Annotated[str, lambda _old, new: new],
+            "current_agent": Annotated[str, _replace_value],
             "agent_outputs": Annotated[Dict[str, Any], _merge_dicts],
         }
         for field in pipeline.state_fields:
