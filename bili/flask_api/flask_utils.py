@@ -68,10 +68,11 @@ if __name__ == '__main__':
     app.run()
 """
 
+import json
 from dataclasses import replace
 from functools import wraps
 
-from flask import g, jsonify, make_response, request
+from flask import Response, g, jsonify, make_response, request, stream_with_context
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -450,3 +451,99 @@ def handle_agent_prompt(user, conversation_agent, prompt, conversation_id=None):
         final_msg = result["messages"][-1]
         return jsonify({"response": final_msg.content})
     return jsonify({"response": "No response"}), 500
+
+
+def stream_agent_response(conversation_agent, prompt, thread_id):
+    """Generate SSE events from a compiled LangGraph agent.
+
+    Streams token-level output using LangGraph's ``.stream()``
+    with ``stream_mode="messages"`` for message chunk granularity,
+    falling back to ``"updates"`` for non-LLM pipelines.
+
+    Each yielded string is a Server-Sent Events formatted line::
+
+        event: token
+        data: {"content": "Hello"}
+
+        event: done
+        data: {}
+
+    Args:
+        conversation_agent: A compiled LangGraph (``CompiledStateGraph``).
+        prompt: The user prompt string.
+        thread_id: Thread ID for checkpoint continuity.
+
+    Yields:
+        SSE-formatted strings.
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    input_message = HumanMessage(content=prompt)
+    input_state = {"messages": [input_message], "verbose": False}
+
+    try:
+        for chunk in conversation_agent.stream(
+            input_state, config=config, stream_mode="messages"
+        ):
+            # stream_mode="messages" yields (message_chunk, metadata) tuples
+            if isinstance(chunk, tuple) and len(chunk) >= 1:
+                msg_chunk = chunk[0]
+                content = getattr(msg_chunk, "content", "")
+                if content:
+                    yield _sse_event("token", {"content": content})
+            elif hasattr(chunk, "content") and chunk.content:
+                yield _sse_event("token", {"content": chunk.content})
+
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        LOGGER.error("Streaming failed: %s", exc, exc_info=True)
+        yield _sse_event("error", {"error": str(exc)})
+
+    yield _sse_event("done", {})
+
+
+def handle_agent_prompt_stream(user, conversation_agent, prompt, conversation_id=None):
+    """Process a user prompt with SSE streaming response.
+
+    Works identically to ``handle_agent_prompt()`` but returns a
+    streaming ``Response`` with ``text/event-stream`` content type.
+
+    Args:
+        user: Authenticated user dict (must include ``"email"``).
+        conversation_agent: Compiled LangGraph agent.
+        prompt: User prompt string.
+        conversation_id: Optional conversation ID for multi-conversation.
+
+    Returns:
+        A Flask ``Response`` with SSE streaming content.
+    """
+    email = user.get("email") or user.get("uid")
+    if not email:
+        return jsonify({"error": "User identifier not found"}), 400
+
+    if conversation_id:
+        thread_id = f"{email}_{conversation_id}"
+    else:
+        thread_id = email
+
+    return Response(
+        stream_with_context(
+            stream_agent_response(conversation_agent, prompt, thread_id)
+        ),
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _sse_event(event_type, data):
+    """Format a single SSE event.
+
+    Args:
+        event_type: Event name (e.g. ``"token"``, ``"done"``).
+        data: Dict payload to serialize as JSON.
+
+    Returns:
+        SSE-formatted string.
+    """
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
