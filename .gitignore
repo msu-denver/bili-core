@@ -279,3 +279,4 @@ coverage.json
 
 bili/aether/logs/*
 bili/aether/attacks/logs/*
+bili/aether/security/logs/*

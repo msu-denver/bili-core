@@ -24,6 +24,18 @@ Environment variables for persistence (optional):
 
 ---
 
+## Getting Started
+
+Step-by-step quickstart guides — pick the one that matches your setup:
+
+| Guide | What it covers |
+| --- | --- |
+| [quickstart-stub.md](docs/quickstart-stub.md) | Full workflow with stub agents — no API keys or model files required. **Start here.** |
+| [quickstart.md](docs/quickstart.md) | Swap in real LLM calls (OpenAI, AWS Bedrock, Google Vertex) |
+| [quickstart-local.md](docs/quickstart-local.md) | Use local models (LlamaCPP GGUF, HuggingFace) — no API keys |
+
+---
+
 ## End-to-End User Flow
 
 ### 1. Define your agents (YAML or Python)
@@ -104,7 +116,7 @@ Propagation is tracked automatically during injection using heuristic string mat
 ```python
 result.propagation_path    # ['reviewer', 'judge']
 result.influenced_agents   # ['reviewer']
-result.resistant_agents    # {'judge'}
+result.resistant_agents    # ['judge']
 ```
 
 ### 7. Detect Security Events (automatic)
@@ -172,4 +184,4 @@ python bili/aether/tests/run_tests.py -v
 
 ---
 
-**AETHER Version:** 0.1.0 | **bili-core Required:** ≥3.0.0
+**AETHER Version:** 0.0.7 | **bili-core Required:** ≥3.0.0
