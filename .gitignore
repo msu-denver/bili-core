@@ -274,3 +274,8 @@ secrets
 
 
 coverage.json
+
+# Logs
+
+bili/aether/logs/*
+bili/aether/attacks/logs/*
