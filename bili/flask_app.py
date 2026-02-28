@@ -306,14 +306,21 @@ def nova_stream_route():
     Returns a ``text/event-stream`` response that emits token-level
     events as they are produced by the LLM.
 
-    Client usage (JavaScript)::
+    Client usage (JavaScript ``fetch`` with streaming reader)::
 
-        const es = new EventSource("/nova_stream");
-        es.addEventListener("token", (e) => {
-            const {content} = JSON.parse(e.data);
-            document.getElementById("output").textContent += content;
+        const res = await fetch("/nova_stream", {
+            method: "POST",
+            headers: {"Content-Type": "application/json",
+                       "Authorization": "Bearer <token>"},
+            body: JSON.stringify({prompt: "Hello"})
         });
-        es.addEventListener("done", () => es.close());
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            console.log(decoder.decode(value));
+        }
     """
     request_data = request.get_json()
     if not request_data:

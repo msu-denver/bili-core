@@ -28,6 +28,7 @@ from bili.aether.runtime.communication_state import (
     get_pending_messages,
     send_message_in_state,
 )
+from bili.aether.runtime.context import RuntimeContext
 from bili.aether.runtime.execution_result import (
     AgentExecutionResult,
     MASExecutionResult,
@@ -47,6 +48,7 @@ __all__ = [
     "MASExecutionResult",
     "MASExecutor",
     "Message",
+    "RuntimeContext",
     "MessageHistory",
     "MessageType",
     "RequestResponseChannel",

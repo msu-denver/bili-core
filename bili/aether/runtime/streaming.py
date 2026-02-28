@@ -114,7 +114,12 @@ class StreamFilter:
     include_nodes: Set[str] = field(default_factory=set)
 
     def accepts(self, event: StreamEvent) -> bool:
-        """Return True if the event passes this filter."""
+        """Return True if the event passes this filter.
+
+        When ``include_agents`` or ``include_nodes`` are set, events
+        without an ``agent_id`` or ``node_name`` (e.g. lifecycle events
+        like ``RUN_START``) are **rejected**.
+        """
         # Type filtering
         if self.include_types:
             if event.event_type not in self.include_types:
@@ -123,14 +128,14 @@ class StreamFilter:
             if event.event_type in self.exclude_types:
                 return False
 
-        # Agent filtering
-        if self.include_agents and event.agent_id:
-            if event.agent_id not in self.include_agents:
+        # Agent filtering — reject events with no agent_id when filter is active
+        if self.include_agents:
+            if not event.agent_id or event.agent_id not in self.include_agents:
                 return False
 
-        # Node filtering
-        if self.include_nodes and event.node_name:
-            if event.node_name not in self.include_nodes:
+        # Node filtering — reject events with no node_name when filter is active
+        if self.include_nodes:
+            if not event.node_name or event.node_name not in self.include_nodes:
                 return False
 
         return True

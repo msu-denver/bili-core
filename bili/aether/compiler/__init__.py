@@ -17,6 +17,7 @@ Usage::
     graph = compiled.compile_graph()
 """
 
+from bili.aether.runtime.context import RuntimeContext
 from bili.aether.schema import MASConfig
 from bili.aether.validation import validate_mas
 
@@ -43,7 +44,7 @@ __all__ = [
 def compile_mas(
     config: MASConfig,
     custom_node_registry: dict | None = None,
-    runtime_context: "Any | None" = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> CompiledMAS:
     """Validate and compile a ``MASConfig`` into a ``CompiledMAS``.
 

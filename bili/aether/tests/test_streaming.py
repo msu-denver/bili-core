@@ -185,10 +185,10 @@ class TestStreamFilter:
             f.accepts(StreamEvent(event_type=StreamEventType.TOKEN, agent_id="agent_b"))
             is False
         )
-        # No agent_id set — passes (no filtering on None)
+        # No agent_id set — rejected when include_agents is active
         assert (
             f.accepts(StreamEvent(event_type=StreamEventType.TOKEN, agent_id=None))
-            is True
+            is False
         )
 
     def test_include_nodes(self):

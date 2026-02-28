@@ -210,6 +210,11 @@ def register_node(name: str, factory: Callable) -> None:
 
     Raises:
         ValueError: If *name* is already registered.
+
+    Note:
+        Registration should happen at application startup, before
+        serving requests.  The global registry is not thread-safe
+        for concurrent mutation.
     """
     if name in GRAPH_NODE_REGISTRY:
         raise ValueError(
@@ -230,6 +235,11 @@ def unregister_node(name: str) -> None:
 
     Raises:
         KeyError: If *name* is not in the registry.
+
+    Note:
+        Like :func:`register_node`, this should be called at
+        application startup.  The global registry is not thread-safe
+        for concurrent mutation.
     """
     if name not in GRAPH_NODE_REGISTRY:
         raise KeyError(

@@ -23,7 +23,7 @@ Usage::
 import logging
 from typing import Any, AsyncGenerator, Dict, Generator, Optional
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -141,13 +141,17 @@ def invoke_agent(
     config = _build_config(thread_id)
     input_state = _build_input(prompt, input_overrides)
 
-    result = agent.invoke(input_state, config=config)
+    try:
+        result = agent.invoke(input_state, config=config)
 
-    if isinstance(result, dict) and "messages" in result:
-        final_msg = result["messages"][-1]
-        return getattr(final_msg, "content", str(final_msg))
+        if isinstance(result, dict) and "messages" in result:
+            final_msg = result["messages"][-1]
+            return getattr(final_msg, "content", str(final_msg))
 
-    return "No response or invalid format."
+        return "No response or invalid format."
+    except Exception:  # pylint: disable=broad-exception-caught
+        LOGGER.error("invoke_agent failed", exc_info=True)
+        return "[Error: Agent invocation failed.]"
 
 
 # ======================================================================
@@ -182,6 +186,8 @@ def _extract_token(chunk: Any) -> Optional[str]:
     """
     if isinstance(chunk, tuple) and len(chunk) >= 1:
         msg_chunk = chunk[0]
+        if not isinstance(msg_chunk, AIMessageChunk):
+            return None
         content = getattr(msg_chunk, "content", "")
         return content if content else None
 

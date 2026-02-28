@@ -162,7 +162,7 @@ def run_app_page(checkpointer=None):
                     st.session_state["conversation_chain"],
                     user_query,
                 )
-                st.write_stream(token_gen)
+                response = st.write_stream(token_gen)  # noqa: F841
             else:
                 process_query(
                     st.session_state["conversation_chain"],
