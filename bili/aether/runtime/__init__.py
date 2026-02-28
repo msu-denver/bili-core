@@ -35,6 +35,7 @@ from bili.aether.runtime.execution_result import (
 from bili.aether.runtime.executor import MASExecutor, execute_mas
 from bili.aether.runtime.logger import CommunicationLogger
 from bili.aether.runtime.messages import Message, MessageHistory, MessageType
+from bili.aether.runtime.streaming import StreamEvent, StreamEventType, StreamFilter
 
 __all__ = [
     "AgentExecutionResult",
@@ -49,6 +50,9 @@ __all__ = [
     "MessageHistory",
     "MessageType",
     "RequestResponseChannel",
+    "StreamEvent",
+    "StreamEventType",
+    "StreamFilter",
     "create_channel",
     "execute_mas",
     "format_messages_for_context",
