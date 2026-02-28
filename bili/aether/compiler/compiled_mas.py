@@ -27,7 +27,12 @@ class CompiledMAS:
     agent_nodes: Dict[str, Callable]
     checkpoint_config: Dict[str, Any] = field(default_factory=dict)
 
-    def compile_graph(self, checkpointer=None):
+    def compile_graph(
+        self,
+        checkpointer=None,
+        interrupt_before: list[str] | None = None,
+        interrupt_after: list[str] | None = None,
+    ):
         """Compile the StateGraph into an executable CompiledStateGraph.
 
         Args:
@@ -35,6 +40,9 @@ class CompiledMAS:
                 ``config.checkpoint_enabled`` is True, creates a
                 checkpointer from ``config.checkpoint_config`` using
                 the bili-core factory (falls back to MemorySaver).
+            interrupt_before: Node names to pause execution before.
+                Used by ``AttackInjector`` for mid-execution injection.
+            interrupt_after: Node names to pause execution after.
 
         Returns:
             A ``CompiledStateGraph`` ready for ``.invoke()`` or ``.stream()``.
@@ -42,7 +50,11 @@ class CompiledMAS:
         if checkpointer is None and self.config.checkpoint_enabled:
             checkpointer = self._create_checkpointer()
 
-        return self.graph.compile(checkpointer=checkpointer)
+        return self.graph.compile(
+            checkpointer=checkpointer,
+            interrupt_before=interrupt_before or [],
+            interrupt_after=interrupt_after or [],
+        )
 
     def _create_checkpointer(self) -> Any:
         """Create a checkpointer from ``config.checkpoint_config``.
