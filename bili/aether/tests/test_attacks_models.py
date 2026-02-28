@@ -178,5 +178,5 @@ def test_attack_result_empty_propagation_defaults():
     )
     assert result.propagation_path == []
     assert result.influenced_agents == []
-    assert result.resistant_agents == set()
+    assert result.resistant_agents == []
     assert result.error is None

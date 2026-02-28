@@ -54,6 +54,7 @@ cover/
 
 # AETHER test artifacts
 test_seq_*.json
+simple_chain_*.json
 
 # Translations
 *.mo

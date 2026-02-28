@@ -30,6 +30,7 @@ research finding.
 
 import json
 import logging
+import threading
 
 from bili.aether.attacks.models import AgentObservation
 
@@ -93,6 +94,7 @@ class PropagationTracker:
         self._payload = payload
         self._target_agent_id = target_agent_id
         self._observations: list[AgentObservation] = []
+        self._lock = threading.Lock()
 
     def observe(
         self,
@@ -135,7 +137,8 @@ class PropagationTracker:
             output_excerpt=excerpt,
             resisted=resisted,
         )
-        self._observations.append(obs)
+        with self._lock:
+            self._observations.append(obs)
         LOGGER.debug(
             "PropagationTracker observed %s: received=%s influenced=%s resisted=%s",
             agent_id,
@@ -158,9 +161,9 @@ class PropagationTracker:
         """Agent IDs whose output was altered by the payload."""
         return [o.agent_id for o in self._observations if o.influenced]
 
-    def resistant_agents(self) -> set[str]:
-        """Agent IDs that received but resisted the payload."""
-        return {o.agent_id for o in self._observations if o.resisted}
+    def resistant_agents(self) -> list[str]:
+        """Agent IDs that received but resisted the payload (sorted for determinism)."""
+        return sorted(o.agent_id for o in self._observations if o.resisted)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +179,7 @@ def _safe_json(state: dict) -> str:
     """
     try:
         return json.dumps(state, default=str)
-    except Exception:  # pylint: disable=broad-except
+    except (TypeError, ValueError):
         return str(state)
 
 
@@ -210,5 +213,4 @@ def _extract_excerpt(output_state: dict, max_chars: int = 500) -> str | None:
         val = output_state.get(key)
         if isinstance(val, str) and val.strip():
             return val[:max_chars]
-    serialised = _safe_json(output_state)
-    return serialised[:max_chars] if serialised else None
+    return _safe_json(output_state)[:max_chars]

@@ -5,10 +5,6 @@ Defines the core research data structures:
 - ``InjectionPhase`` / ``AttackType`` — enum taxonomy
 - ``AgentObservation`` — single agent's encounter with an injected payload
 - ``AttackResult`` — full attack record written to the NDJSON research log
-
-``resistant_agents`` is typed as ``set[str]`` on the Python side.  Pydantic v2
-serialises it as a JSON array when ``model_dump(mode="json")`` is called, which
-is the format used by the log file.
 """
 
 import datetime
@@ -87,7 +83,8 @@ class AttackResult(BaseModel):
             payload (by observation sequence, not insertion order).
         influenced_agents: Agent IDs whose output was altered by the payload.
         resistant_agents: Agent IDs that received but resisted the payload.
-            Stored as a set; serialised as a JSON array in the log file.
+            Stored as a sorted list for deterministic serialisation and
+            correct JSON round-trip fidelity.
         success: True when execution completed without an unhandled error.
         error: Error message if execution failed; None otherwise.
     """
@@ -103,7 +100,7 @@ class AttackResult(BaseModel):
 
     propagation_path: list[str] = Field(default_factory=list)
     influenced_agents: list[str] = Field(default_factory=list)
-    resistant_agents: set[str] = Field(default_factory=set)
+    resistant_agents: list[str] = Field(default_factory=list)
 
     success: bool = False
     error: Optional[str] = None

@@ -107,8 +107,13 @@ def run_with_mid_execution_injection(  # pylint: disable=too-many-locals
                 )
         except RuntimeError:
             raise
-        except Exception:  # pylint: disable=broad-except
+        except Exception as snap_exc:  # pylint: disable=broad-except
             # No checkpointer / get_state unavailable: fall back to returned dict
+            LOGGER.warning(
+                "run_with_mid_execution_injection: get_state() failed (%s); "
+                "falling back to invoke() return value as interrupted state",
+                snap_exc,
+            )
             interrupted_state = result if isinstance(result, dict) else {}
         LOGGER.debug(
             "run_with_mid_execution_injection: paused before '%s' (early-return path)",
@@ -119,7 +124,13 @@ def run_with_mid_execution_injection(  # pylint: disable=too-many-locals
         node_name = getattr(exc, "node", None)
         # LangGraph may encode the interrupted node name differently across
         # versions; fall back to checking the exception message.
-        if node_name is not None and node_name != target_agent_id:
+        if node_name is None:
+            LOGGER.warning(
+                "run_with_mid_execution_injection: NodeInterrupt missing .node "
+                "attribute; skipping node name validation for '%s'",
+                target_agent_id,
+            )
+        elif node_name != target_agent_id:
             raise RuntimeError(
                 f"Expected NodeInterrupt at '{target_agent_id}', got '{node_name}'"
             ) from exc
@@ -171,7 +182,9 @@ def _apply_payload_to_state(state: dict, payload: str) -> dict:
     Returns:
         A shallow copy of *state* with the messages list extended.
     """
-    new_state = dict(state)
+    import copy  # pylint: disable=import-outside-toplevel
+
+    new_state = copy.copy(state)
     existing_messages = list(new_state.get("messages", []))
     existing_messages.append(HumanMessage(content=payload))
     new_state["messages"] = existing_messages

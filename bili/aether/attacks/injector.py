@@ -28,9 +28,9 @@ Blocking vs. fire-and-forget:
 import datetime
 import logging
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from bili.aether.attacks.logger import AttackLogger
 from bili.aether.attacks.models import AttackResult, AttackType, InjectionPhase
@@ -63,7 +63,7 @@ class AttackInjector:
     def __init__(
         self,
         config: MASConfig,
-        executor,
+        executor: Any,
         log_path: Optional[Path] = None,
         max_workers: int = 4,
     ) -> None:
@@ -142,7 +142,7 @@ class AttackInjector:
         )
 
         if not blocking:
-            self._thread_pool.submit(
+            future: Future = self._thread_pool.submit(
                 self._run_attack,
                 attack_id,
                 agent_id,
@@ -152,6 +152,7 @@ class AttackInjector:
                 now,
                 track_propagation,
             )
+            future.add_done_callback(self._log_future_exception)
             LOGGER.info(
                 "AttackInjector: submitted non-blocking attack %s for agent '%s'",
                 attack_id,
@@ -210,12 +211,19 @@ class AttackInjector:
             completed_at=completed_at,
             propagation_path=tracker.propagation_path() if tracker else [],
             influenced_agents=tracker.influenced_agents() if tracker else [],
-            resistant_agents=tracker.resistant_agents() if tracker else set(),
+            resistant_agents=tracker.resistant_agents() if tracker else [],
             success=error is None,
             error=error,
         )
 
-        self._logger.log(result)
+        try:
+            self._logger.log(result)
+        except Exception as log_exc:  # pylint: disable=broad-except
+            LOGGER.error(
+                "AttackInjector: failed to log result for attack %s: %s",
+                attack_id,
+                log_exc,
+            )
         return result
 
     def _run_pre_execution(  # pylint: disable=too-many-locals
@@ -308,9 +316,15 @@ class AttackInjector:
             attack_type=attack_type.value,
         )
 
+    def _log_future_exception(self, future: Future) -> None:
+        """Done-callback: log any exception raised by a background attack thread."""
+        exc = future.exception()
+        if exc:
+            LOGGER.error("AttackInjector: background attack thread failed: %s", exc)
+
     def close(self) -> None:
-        """Shut down the background thread pool."""
-        self._thread_pool.shutdown(wait=False)
+        """Shut down the background thread pool, waiting for in-flight attacks."""
+        self._thread_pool.shutdown(wait=True)
 
     def __enter__(self) -> "AttackInjector":
         return self

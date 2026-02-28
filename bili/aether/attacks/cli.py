@@ -29,6 +29,7 @@ import os
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 
 def _ensure_bili_stub() -> None:
@@ -144,7 +145,7 @@ def _row(label: str, value: str) -> str:
     return f"  {label:<{_LABEL_WIDTH}}{value}"
 
 
-def _format_attack_result(result, log_path: str) -> str:  # type: ignore[no-untyped-def]
+def _format_attack_result(result: Any, log_path: str) -> str:
     """Format an AttackResult as a human-readable bordered block."""
     status = "SUCCESS" if result.success else "FAILED"
 
@@ -231,6 +232,8 @@ def main() -> None:
         sys.exit(1)
 
     print(_format_attack_result(result, actual_log))
+    if result.completed_at is None and not result.error:
+        sys.exit(0)  # async submission succeeded; result will be logged when complete
     sys.exit(0 if result.success else 1)
 
 
