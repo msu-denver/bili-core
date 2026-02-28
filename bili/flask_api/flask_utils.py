@@ -456,11 +456,8 @@ def handle_agent_prompt(user, conversation_agent, prompt, conversation_id=None):
 def stream_agent_response(conversation_agent, prompt, thread_id):
     """Generate SSE events from a compiled LangGraph agent.
 
-    Streams token-level output using LangGraph's ``.stream()``
-    with ``stream_mode="messages"`` for message chunk granularity,
-    falling back to ``"updates"`` for non-LLM pipelines.
-
-    Each yielded string is a Server-Sent Events formatted line::
+    Wraps :func:`bili.loaders.streaming_utils.stream_agent` and
+    formats each token as a Server-Sent Events message::
 
         event: token
         data: {"content": "Hello"}
@@ -476,26 +473,12 @@ def stream_agent_response(conversation_agent, prompt, thread_id):
     Yields:
         SSE-formatted strings.
     """
-    config = {"configurable": {"thread_id": thread_id}}
-    input_message = HumanMessage(content=prompt)
-    input_state = {"messages": [input_message], "verbose": False}
+    from bili.loaders.streaming_utils import (  # pylint: disable=import-outside-toplevel
+        stream_agent,
+    )
 
-    try:
-        for chunk in conversation_agent.stream(
-            input_state, config=config, stream_mode="messages"
-        ):
-            # stream_mode="messages" yields (message_chunk, metadata) tuples
-            if isinstance(chunk, tuple) and len(chunk) >= 1:
-                msg_chunk = chunk[0]
-                content = getattr(msg_chunk, "content", "")
-                if content:
-                    yield _sse_event("token", {"content": content})
-            elif hasattr(chunk, "content") and chunk.content:
-                yield _sse_event("token", {"content": chunk.content})
-
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        LOGGER.error("Streaming failed: %s", exc, exc_info=True)
-        yield _sse_event("error", {"error": str(exc)})
+    for token in stream_agent(conversation_agent, prompt, thread_id=thread_id):
+        yield _sse_event("token", {"content": token})
 
     yield _sse_event("done", {})
 
