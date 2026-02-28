@@ -182,7 +182,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
         self,
         config: MASConfig,
         custom_node_registry: Dict[str, Any] | None = None,
-        runtime_context: Any | None = None,
+        runtime_context: "RuntimeContext | None" = None,
     ) -> None:
         # Make a deep copy to avoid mutating caller's config during compilation
         self._config = config.model_copy(deep=True)

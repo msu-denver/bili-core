@@ -43,6 +43,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
 
+from bili.aether.runtime.context import RuntimeContext
 from bili.aether.runtime.execution_result import (
     AgentExecutionResult,
     MASExecutionResult,
@@ -69,7 +70,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         user_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         custom_node_registry: Optional[Dict[str, Any]] = None,
-        runtime_context: Optional[Any] = None,
+        runtime_context: Optional[RuntimeContext] = None,
     ) -> None:
         """Initialize the executor.
 
