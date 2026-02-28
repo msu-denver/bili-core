@@ -54,7 +54,6 @@ graph = compiled.compile_graph()     # Returns a CompiledStateGraph ready for .i
 | `state_schema` | `TypedDict` | Generated state class with workflow-specific fields |
 | `agent_nodes` | `Dict[str, Callable]` | Mapping of `agent_id` to its node callable |
 | `checkpoint_config` | `Dict` | Checkpoint backend configuration |
-| `channel_manager` | `ChannelManager` (optional) | Inter-agent channel manager; `None` if no channels |
 
 **Methods:**
 
@@ -165,7 +164,7 @@ Multi-agent systems are characterized by four communication dimensions. AETHER r
 
 When a MAS config includes `channels`, the compiler activates the runtime communication layer:
 
-1. **At compile time** — `GraphBuilder` creates a `ChannelManager` from the `channels` list. Communication state fields (`channel_messages`, `pending_messages`, `communication_log`) are added to the state schema.
+1. **At compile time** — `GraphBuilder` reads the `channels` list and adds communication state fields (`channel_messages`, `pending_messages`, `communication_log`) to the state schema. Channel routing is handled internally through state — there is no separate manager object on `CompiledMAS`.
 
 2. **At execution time** — Before each agent node runs, pending messages addressed to it are retrieved from state and injected into its system prompt:
    ```
@@ -193,14 +192,15 @@ Every message is appended to a JSONL file (`communication_{mas_id}_{hash}.jsonl`
 {"message_id": "a1b2...", "timestamp": "2026-02-04T12:00:00+00:00", "sender": "reviewer", "receiver": "judge", "channel": "reviewer_to_judge", "content": "Content violates policy.", "message_type": "direct", "metadata": {}, "in_reply_to": null}
 ```
 
-**Programmatic usage:**
+**Channel state at runtime:**
+
+Channel messages are accessible through graph state after execution. Inspect `communication_log` in the final state returned by `graph.invoke()`:
 
 ```python
-mgr = compiled.channel_manager
-if mgr:
-    mgr.send_message("reviewer_to_judge", "reviewer", "Looks good.")
-    pending = mgr.get_messages_for_agent("judge")
-    mgr.close()  # Flush and close the JSONL log
+graph = compiled.compile_graph()
+final_state = graph.invoke({"messages": [...]})
+for entry in final_state.get("communication_log", []):
+    print(entry)  # {"sender": "reviewer", "receiver": "judge", "content": "..."}
 ```
 
 ### Collaboration Types
