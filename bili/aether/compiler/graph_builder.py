@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Graph builder — converts a validated MASConfig into a LangGraph StateGraph.
 
 Supports all seven ``WorkflowType`` values defined in the AETHER schema.
@@ -168,7 +169,7 @@ def safe_eval_condition(condition: str, context: Dict[str, Any]) -> bool:
     return bool(result)
 
 
-class GraphBuilder:  # pylint: disable=too-few-public-methods
+class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Builds a LangGraph ``StateGraph`` from a validated ``MASConfig``.
 
     Usage::
@@ -177,9 +178,16 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         graph = compiled.compile_graph()
     """
 
-    def __init__(self, config: MASConfig) -> None:
+    def __init__(
+        self,
+        config: MASConfig,
+        custom_node_registry: Dict[str, Any] | None = None,
+        runtime_context: "RuntimeContext | None" = None,
+    ) -> None:
         # Make a deep copy to avoid mutating caller's config during compilation
         self._config = config.model_copy(deep=True)
+        self._custom_node_registry: Dict[str, Any] = custom_node_registry or {}
+        self._runtime_context = runtime_context
         self._agent_nodes: Dict[str, Callable] = {}
         self._state_schema = None
         self._graph: Any = None
@@ -314,12 +322,19 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 
         pipeline = agent.pipeline
 
-        # 1. Build inner state schema (minimal — messages + pipeline-local tracking)
+        # 1. Build inner state schema (base fields + custom state_fields)
         inner_annotations: Dict[str, Any] = {
             "messages": Annotated[list, add_messages],
             "current_agent": Annotated[str, lambda _old, new: new],
             "agent_outputs": Annotated[Dict[str, Any], _merge_dicts],
         }
+        for field in pipeline.state_fields:
+            type_hint = field.resolve_type()
+            reducer = field.resolve_reducer()
+            if reducer is not None:
+                inner_annotations[field.name] = Annotated[type_hint, reducer]
+            else:
+                inner_annotations[field.name] = type_hint
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", agent.agent_id)
         inner_state_cls: type = TypedDict(
             f"{safe_name}_pipeline_State", inner_annotations
@@ -390,9 +405,10 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
     def _resolve_registry_node(self, node_spec, parent_agent) -> Callable[[dict], dict]:
         """Resolve a registry-based pipeline node.
 
-        Looks up the node builder from bili-core's ``GRAPH_NODE_REGISTRY``,
-        instantiates it via the ``functools.partial(Node, name, builder)``
-        pattern, and calls ``node_instance.function(**kwargs)`` to obtain
+        Checks the per-compilation ``custom_node_registry`` first, then
+        falls back to bili-core's global ``GRAPH_NODE_REGISTRY``.
+        Instantiates via the ``functools.partial(Node, name, builder)``
+        pattern and calls ``node_instance.function(**kwargs)`` to obtain
         the actual executor function.
 
         Args:
@@ -402,28 +418,43 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         Returns:
             A callable ``(state: dict) -> dict``.
         """
-        try:
-            from bili.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
-                GRAPH_NODE_REGISTRY,
-            )
-        except ImportError as exc:
+        # 1. Check per-compilation custom registry first
+        factory = self._custom_node_registry.get(node_spec.node_type)
+
+        # 2. Fall back to global bili-core registry
+        if factory is None:
+            try:
+                from bili.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
+                    GRAPH_NODE_REGISTRY,
+                )
+            except ImportError as exc:
+                raise ValueError(
+                    f"Pipeline node '{node_spec.node_id}' references registry "
+                    f"type '{node_spec.node_type}' but "
+                    "bili.loaders.langchain_loader is not available."
+                ) from exc
+            factory = GRAPH_NODE_REGISTRY.get(node_spec.node_type)
+
+        if factory is None:
+            # Build combined list of available node types for the error message
+            available_keys: Set[str] = set(self._custom_node_registry.keys())
+            try:
+                from bili.loaders.langchain_loader import (
+                    GRAPH_NODE_REGISTRY as _global_reg,  # pylint: disable=import-outside-toplevel
+                )
+
+                available_keys |= set(_global_reg.keys())
+            except ImportError:
+                pass
             raise ValueError(
-                f"Pipeline node '{node_spec.node_id}' references registry "
-                f"type '{node_spec.node_type}' but "
-                "bili.loaders.langchain_loader is not available."
-            ) from exc
+                f"Pipeline node '{node_spec.node_id}' references unknown "
+                f"registry type '{node_spec.node_type}'. "
+                f"Available: {sorted(available_keys)}"
+            )
 
         from bili.graph_builder.classes.node import (  # pylint: disable=import-outside-toplevel
             Node,
         )
-
-        factory = GRAPH_NODE_REGISTRY.get(node_spec.node_type)
-        if factory is None:
-            raise ValueError(
-                f"Pipeline node '{node_spec.node_id}' references unknown "
-                f"registry type '{node_spec.node_type}'. "
-                f"Available: {sorted(GRAPH_NODE_REGISTRY.keys())}"
-            )
 
         # Call partial to get Node instance, then call builder with kwargs
         if callable(factory) and not isinstance(factory, Node):
@@ -439,10 +470,16 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
     def _build_registry_node_kwargs(self, parent_agent, node_spec) -> Dict[str, Any]:
         """Build kwargs for a registry node builder function.
 
-        Merges configuration from the parent agent (LLM, tools, persona)
-        with node-specific config overrides from the ``PipelineNodeSpec``.
+        Merges three layers (lowest to highest priority):
+        1. RuntimeContext services (base layer)
+        2. Parent agent config (LLM, tools, persona)
+        3. Node-specific config overrides from ``PipelineNodeSpec``
         """
         kwargs: Dict[str, Any] = {}
+
+        # 1. RuntimeContext services (base layer — lowest priority)
+        if self._runtime_context is not None:
+            kwargs.update(self._runtime_context.as_dict())
 
         # Resolve LLM from parent agent if available
         if parent_agent.model_name:
@@ -551,16 +588,23 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
         agent_id = agent.agent_id
         agent_role = agent.role
         pipeline_node_count = len(agent.pipeline.nodes)
+        custom_state_fields = agent.pipeline.state_fields
 
         def _pipeline_node(state: dict) -> dict:
             start = time.time()
 
-            # Input mapping: outer → inner (only messages flow in)
+            # Input mapping: outer → inner (messages + custom state fields)
             inner_state: Dict[str, Any] = {
                 "messages": list(state.get("messages", [])),
                 "current_agent": agent_id,
                 "agent_outputs": {},
             }
+            # Carry custom state fields from outer state into inner state
+            for field in custom_state_fields:
+                if field.name in state:
+                    inner_state[field.name] = state[field.name]
+                elif field.default is not None:
+                    inner_state[field.name] = field.default
 
             try:
                 result = compiled_subgraph.invoke(inner_state)
@@ -616,11 +660,16 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
                 pipeline_node_count,
             )
 
-            return {
+            output = {
                 "messages": [AIMessage(content=final_content, name=agent_id)],
                 "current_agent": agent_id,
                 "agent_outputs": agent_outputs,
             }
+            # Propagate custom state fields from inner result back to outer state
+            for field in custom_state_fields:
+                if field.name in result:
+                    output[field.name] = result[field.name]
+            return output
 
         _pipeline_node.__name__ = f"pipeline_{agent_id}"
         _pipeline_node.__qualname__ = f"pipeline_{agent_id}"
@@ -784,7 +833,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
 
         self._graph.add_node("__round_start__", round_start)
 
-        def consensus_checker(state: dict) -> dict:
+        def consensus_checker(state: dict) -> dict:  # pylint: disable=too-many-locals
             """Check if agents have reached consensus based on their votes.
 
             Extracts votes from agent outputs and checks if the agreement ratio
@@ -835,7 +884,8 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods
                 consensus_reached = agreement_ratio >= threshold
 
                 LOGGER.info(
-                    "Consensus check (round %d): %d/%d agents agree on '%s' (%.1f%%, threshold %.1f%%)",
+                    "Consensus check (round %d): %d/%d agents agree "
+                    "on '%s' (%.1f%%, threshold %.1f%%)",
                     current_round,
                     count,
                     len(votes),

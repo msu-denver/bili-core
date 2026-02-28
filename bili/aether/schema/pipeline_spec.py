@@ -24,6 +24,123 @@ LOGGER = logging.getLogger(__name__)
 # Maximum nesting depth for pipelines containing agents with their own pipelines
 MAX_PIPELINE_DEPTH = 3
 
+# Reserved state field names that cannot be used in state_fields
+_RESERVED_STATE_FIELDS = frozenset({"messages", "current_agent", "agent_outputs"})
+
+# Safe type string → actual Python type mapping
+_SAFE_TYPE_MAP: Dict[str, Any] = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
+    "Any": Any,
+    "List[str]": List[str],
+    "List[int]": List[int],
+    "List[float]": List[float],
+    "List[dict]": List[dict],
+    "Dict[str, Any]": Dict[str, Any],
+    "Dict[str, str]": Dict[str, str],
+    "Optional[str]": Optional[str],
+    "Optional[int]": Optional[int],
+    "Optional[float]": Optional[float],
+    "Optional[bool]": Optional[bool],
+}
+
+# Safe reducer strategy name → reducer callable mapping
+_REDUCER_MAP: Dict[str, Any] = {
+    "replace": lambda _old, new: new,
+    "append": lambda old, new: (old or []) + (new if isinstance(new, list) else [new]),
+}
+
+
+class PipelineStateField(BaseModel):
+    """Declares a custom state field for a pipeline's inner state.
+
+    Custom fields are added alongside the three built-in fields
+    (``messages``, ``current_agent``, ``agent_outputs``) and are
+    accessible within pipeline nodes and conditional edge expressions.
+
+    Examples:
+        >>> field = PipelineStateField(
+        ...     name="sentiment_score", type="float", default=0.0, reducer="replace"
+        ... )
+    """
+
+    name: str = Field(
+        ...,
+        description="Field name (must be a valid Python identifier)",
+        min_length=1,
+        max_length=100,
+        pattern="^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+
+    type: str = Field(
+        "Any",
+        description=(
+            "Python type hint as string. Supported: "
+            + ", ".join(sorted(_SAFE_TYPE_MAP.keys()))
+        ),
+    )
+
+    default: Optional[Any] = Field(
+        None,
+        description="Default value for this field when not present in outer state",
+    )
+
+    reducer: Optional[str] = Field(
+        None,
+        description=(
+            "Reducer strategy for concurrent writes: "
+            "'replace' (last-writer-wins), 'append' (list concatenation), "
+            "or None (no reducer — standard assignment)"
+        ),
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_not_reserved(cls, v):
+        """Ensure custom field names don't shadow built-in state fields."""
+        if v in _RESERVED_STATE_FIELDS:
+            raise ValueError(
+                f"Field name '{v}' is reserved. Built-in state fields "
+                f"({', '.join(sorted(_RESERVED_STATE_FIELDS))}) cannot be overridden."
+            )
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def validate_type_string(cls, v):
+        """Ensure the type string maps to a known Python type."""
+        if v not in _SAFE_TYPE_MAP:
+            raise ValueError(
+                f"Unsupported type '{v}'. Supported types: "
+                f"{', '.join(sorted(_SAFE_TYPE_MAP.keys()))}"
+            )
+        return v
+
+    @field_validator("reducer")
+    @classmethod
+    def validate_reducer_string(cls, v):
+        """Ensure the reducer string maps to a known strategy."""
+        if v is not None and v not in _REDUCER_MAP:
+            raise ValueError(
+                f"Unknown reducer '{v}'. Supported: "
+                f"{', '.join(sorted(_REDUCER_MAP.keys()))}"
+            )
+        return v
+
+    def resolve_type(self) -> Any:
+        """Resolve the type string to an actual Python type."""
+        return _SAFE_TYPE_MAP[self.type]
+
+    def resolve_reducer(self) -> Any:
+        """Resolve the reducer string to a callable, or None."""
+        if self.reducer is None:
+            return None
+        return _REDUCER_MAP[self.reducer]
+
 
 class PipelineNodeSpec(BaseModel):
     """
@@ -139,10 +256,11 @@ class PipelineEdgeSpec(BaseModel):
         description=(
             "Python expression for conditional routing. Evaluated by "
             "SafeConditionEvaluator with ``state.<field>`` access. "
-            "Pipeline inner state only exposes ``messages``, "
-            "``current_agent``, and ``agent_outputs`` — conditions "
-            "must reference these fields. Function calls (e.g. "
-            "``len()``, ``.get()``) are blocked by the safe evaluator."
+            "Pipeline inner state exposes ``messages``, "
+            "``current_agent``, ``agent_outputs``, and any custom "
+            "fields declared in ``PipelineSpec.state_fields``. "
+            "Function calls (e.g. ``len()``, ``.get()``) are blocked "
+            "by the safe evaluator."
         ),
     )
 
@@ -198,6 +316,16 @@ class PipelineSpec(BaseModel):
     entry_point: Optional[str] = Field(
         None,
         description="Starting node ID (defaults to first node in the list)",
+    )
+
+    state_fields: List[PipelineStateField] = Field(
+        default_factory=list,
+        description=(
+            "Custom state fields for the pipeline's inner state. "
+            "Added alongside the built-in fields (messages, current_agent, "
+            "agent_outputs). Accessible in pipeline nodes and conditional "
+            "edge expressions via state.<field_name>."
+        ),
     )
 
     @model_validator(mode="after")

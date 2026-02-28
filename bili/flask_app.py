@@ -55,6 +55,7 @@ from bili.flask_api.flask_utils import (
     add_unauthorized_handler,
     auth_required,
     handle_agent_prompt,
+    handle_agent_prompt_stream,
     per_user_agent,
     set_token_cookies,
 )
@@ -294,6 +295,42 @@ def nova_pro_per_user_route():
 
     # Invoke agent with the provided prompt using the per-user agent stored in g
     return handle_agent_prompt(g.user, g.agent, prompt, conversation_id)
+
+
+@app.route("/nova_stream", methods=["POST"])
+@auth_required(AUTH_MANAGER, required_roles=["admin", "researcher"])
+def nova_stream_route():
+    """Stream a response from the global conversation agent via SSE.
+
+    Accepts a JSON body with ``prompt`` and optional ``conversation_id``.
+    Returns a ``text/event-stream`` response that emits token-level
+    events as they are produced by the LLM.
+
+    Client usage (JavaScript ``fetch`` with streaming reader)::
+
+        const res = await fetch("/nova_stream", {
+            method: "POST",
+            headers: {"Content-Type": "application/json",
+                       "Authorization": "Bearer <token>"},
+            body: JSON.stringify({prompt: "Hello"})
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            console.log(decoder.decode(value));
+        }
+    """
+    request_data = request.get_json()
+    if not request_data:
+        return jsonify({"error": "Request body is required"}), 400
+    prompt = request_data.get("prompt", "")
+    conversation_id = request_data.get("conversation_id")
+
+    return handle_agent_prompt_stream(
+        g.user, conversation_agent, prompt, conversation_id
+    )
 
 
 if __name__ == "__main__":
