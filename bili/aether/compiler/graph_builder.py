@@ -465,7 +465,13 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
         # Build kwargs from parent agent context + node-specific config
         kwargs = self._build_registry_node_kwargs(parent_agent, node_spec)
 
-        return node_instance.function(**kwargs)
+        try:
+            return node_instance.function(**kwargs)
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to build pipeline node '{node_spec.node_id}' "
+                f"(type='{node_spec.node_type}'): {exc}"
+            ) from exc
 
     def _build_registry_node_kwargs(self, parent_agent, node_spec) -> Dict[str, Any]:
         """Build kwargs for a registry node builder function.

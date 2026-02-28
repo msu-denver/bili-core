@@ -63,9 +63,9 @@ def stream_agent(
             token = _extract_token(chunk)
             if token:
                 yield token
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         LOGGER.error("stream_agent failed", exc_info=True)
-        yield "\n\n[Error: Streaming response failed.]"
+        yield f"\n\n[Error: Streaming response failed: {type(exc).__name__}]"
 
 
 async def astream_agent(
@@ -107,9 +107,9 @@ async def astream_agent(
                     content = getattr(chunk, "content", "")
                     if content:
                         yield content
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         LOGGER.error("astream_agent failed", exc_info=True)
-        yield "\n\n[Error: Async streaming response failed.]"
+        yield f"\n\n[Error: Async streaming response failed: {type(exc).__name__}]"
 
 
 def invoke_agent(
@@ -149,9 +149,9 @@ def invoke_agent(
             return getattr(final_msg, "content", str(final_msg))
 
         return "No response or invalid format."
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         LOGGER.error("invoke_agent failed", exc_info=True)
-        return "[Error: Agent invocation failed.]"
+        return f"[Error: Agent invocation failed: {type(exc).__name__}]"
 
 
 # ======================================================================
@@ -186,6 +186,7 @@ def _extract_token(chunk: Any) -> Optional[str]:
     """
     if isinstance(chunk, tuple) and len(chunk) >= 1:
         msg_chunk = chunk[0]
+        # Only yield AI text tokens; skip tool call chunks and other types
         if not isinstance(msg_chunk, AIMessageChunk):
             return None
         content = getattr(msg_chunk, "content", "")

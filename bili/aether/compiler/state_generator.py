@@ -108,9 +108,12 @@ def generate_state_schema(config: MASConfig) -> Type:
                         annotations[field.name] = type_hint
                 else:
                     LOGGER.warning(
-                        "Pipeline state field '%s' from agent '%s' "
-                        "conflicts with an existing field — skipped.",
+                        "Pipeline state field '%s' (type=%s, reducer=%s) "
+                        "from agent '%s' conflicts with an existing "
+                        "field — skipped.",
                         field.name,
+                        field.type,
+                        field.reducer,
                         agent.agent_id,
                     )
 
