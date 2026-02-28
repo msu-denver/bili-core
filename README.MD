@@ -87,17 +87,54 @@ All checkpointers implement a unified queryable interface for conversation manag
 
 Both synchronous and asynchronous checkpointer APIs are supported for flexibility across different application architectures.
 
-### 6. Flask REST API for Programmatic Access
+### 6. **Streaming Responses**
+
+BiliCore supports streaming (token-by-token) responses across the entire stack. Both normal bili agents and AETHER multi-agent systems have clean, symmetric APIs for streaming and non-streaming interactions:
+
+**Framework-Agnostic (works anywhere — no Flask/Streamlit required):**
+
+```python
+from bili.loaders.langchain_loader import build_agent_graph
+from bili.loaders.streaming_utils import stream_agent, invoke_agent
+
+agent = build_agent_graph(checkpoint_saver=saver, node_kwargs=kwargs, ...)
+
+# Non-streaming
+response = invoke_agent(agent, "What is the weather?", thread_id="user1")
+
+# Streaming — yields tokens as they arrive
+for token in stream_agent(agent, "What is the weather?", thread_id="user1"):
+    print(token, end="", flush=True)
+```
+
+**AETHER Multi-Agent Streaming:**
+
+```python
+from bili.aether.runtime import MASExecutor, StreamEventType
+
+executor = MASExecutor(config)
+executor.initialize()
+
+for event in executor.stream(input_data):
+    if event.event_type == StreamEventType.TOKEN:
+        print(event.data["content"], end="", flush=True)
+```
+
+- **Flask**: `/nova_stream` SSE endpoint for real-time token streaming
+- **Streamlit**: "Enable streaming responses" toggle for token-by-token display
+- **Async**: `astream_agent()` and `executor.astream()` for async contexts
+
+### 7. Flask REST API for Programmatic Access
 
 BiliCore includes an optional Flask API for applications that require stateless, token-based authentication and API-based access to the benchmarking framework.
 With the Flask integration, you can:
 
 - Authenticate users via JWT-based authentication
 - Secure API routes using role-based access control
-- Access LLMs via RESTful API endpoints
+- Access LLMs via RESTful API endpoints, including **SSE streaming** via `/nova_stream`
 - Use the same authentication providers (Firebase, In-Memory) as the Streamlit UI
 
-### 7. AETHER: Multi-Agent System Framework
+### 8. AETHER: Multi-Agent System Framework
 
 BiliCore includes **AETHER** (Agent Ecosystems for Testing, Hardening, Evaluation, and Research), a domain-agnostic framework for building and testing multi-agent systems (MAS).
 
@@ -105,7 +142,12 @@ BiliCore includes **AETHER** (Agent Ecosystems for Testing, Hardening, Evaluatio
 
 - **Declarative Configuration**: Define multi-agent systems using YAML or Python
 - **7 Workflow Types**: Sequential, hierarchical, supervisor, consensus, parallel, deliberative, and custom
+- **Pipeline Sub-Graphs**: Rich multi-node pipelines within single agents for complex processing flows
 - **Agent Communication**: Built-in channels for direct, broadcast, request-response, pub-sub, competitive, and consensus protocols
+- **Custom Node Registry**: Register custom pipeline nodes via `register_node()` or per-compilation `custom_node_registry`
+- **Custom Pipeline State**: Declare custom state fields with type-safe YAML (`state_fields`) — supports reducers, defaults, and promotion to outer MAS state
+- **Runtime Dependency Injection**: `RuntimeContext` container injects services (Celery, HTTP clients, model singletons) into pipeline node builders
+- **Streaming**: Sync `.stream()` and async `.astream()` on `MASExecutor` with structured `StreamEvent` objects and `StreamFilter`
 - **bili-core Integration**: Leverage checkpointers, middleware, and role registry from bili-core
 - **Execution & Testing**: Built-in executor with checkpoint persistence and cross-model transfer testing
 - **Comprehensive Validation**: Catches structural issues (circular dependencies, orphaned agents) before execution

@@ -1,8 +1,11 @@
 """Dynamic state schema generation for compiled MAS graphs."""
 
+import logging
 import operator
 import re
 from typing import Any, Dict, List, Type
+
+LOGGER = logging.getLogger(__name__)
 
 from bili.aether.schema import MASConfig, WorkflowType
 
@@ -90,6 +93,29 @@ def generate_state_schema(config: MASConfig) -> Type:
         annotations.update(get_inheritance_state_fields(config.agents))
     except ImportError:
         pass  # integration package not available
+
+    # Pipeline custom state fields (promoted to outer state so the adapter
+    # can carry them between the outer MAS graph and inner sub-graphs).
+    for agent in config.agents:
+        if agent.pipeline and agent.pipeline.state_fields:
+            for field in agent.pipeline.state_fields:
+                if field.name not in annotations:
+                    type_hint = field.resolve_type()
+                    reducer = field.resolve_reducer()
+                    if reducer is not None:
+                        annotations[field.name] = Annotated[type_hint, reducer]
+                    else:
+                        annotations[field.name] = type_hint
+                else:
+                    LOGGER.warning(
+                        "Pipeline state field '%s' (type=%s, reducer=%s) "
+                        "from agent '%s' conflicts with an existing "
+                        "field — skipped.",
+                        field.name,
+                        field.type,
+                        field.reducer,
+                        agent.agent_id,
+                    )
 
     # Build a valid Python identifier from the mas_id
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", config.mas_id)

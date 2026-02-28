@@ -5,10 +5,20 @@ This module provides functions to handle user queries within a Streamlit
 application. It processes user queries using a conversation chain and returns
 the AI-generated responses.
 
+Supports two execution modes:
+
+- **Blocking** (``process_query``): Invokes the agent and returns the
+  complete response as a string.
+- **Streaming** (``process_query_streaming``): Returns a generator that
+  yields response tokens incrementally, suitable for use with
+  ``st.write_stream()``.
+
 Functions:
     - process_query(conversation_chain, user_query):
       Processes a user query using the given conversation chain and returns the
       AI agent's response.
+    - process_query_streaming(conversation_chain, user_query):
+      Returns a generator that yields response tokens for streaming display.
 
 Dependencies:
     - langchain_core.messages: Imports HumanMessage for creating user query
@@ -23,9 +33,14 @@ Usage:
 Example:
     from bili.streamlit.query.streamlit_query_handler import process_query
 
-    # Process a user query
+    # Process a user query (blocking)
     response = process_query(conversation_chain, "What is the weather today?")
     print(response)
+
+    # Process a user query (streaming, in Streamlit)
+    import streamlit as st
+    token_gen = process_query_streaming(conversation_chain, "What is the weather?")
+    st.write_stream(token_gen)
 """
 
 from langchain_core.messages import HumanMessage
@@ -62,3 +77,30 @@ def process_query(conversation_chain, user_query):
         return final_msg.pretty_repr()
 
     return "No response or invalid format."
+
+
+def process_query_streaming(conversation_chain, user_query):
+    """Yield response tokens from a conversation chain for streaming display.
+
+    Wraps :func:`bili.loaders.streaming_utils.stream_agent` using the
+    Streamlit session's thread configuration.  Designed for use with
+    ``st.write_stream()``::
+
+        token_gen = process_query_streaming(chain, "Hello")
+        st.write_stream(token_gen)
+
+    :param conversation_chain: A compiled LangGraph agent.
+    :type conversation_chain: CompiledStateGraph
+    :param user_query: The user's input prompt.
+    :type user_query: str
+    :return: A generator yielding token strings.
+    :rtype: Generator[str, None, None]
+    """
+    from bili.loaders.streaming_utils import (  # pylint: disable=import-outside-toplevel
+        stream_agent,
+    )
+
+    config = get_state_config()
+    thread_id = config.get("configurable", {}).get("thread_id")
+
+    yield from stream_agent(conversation_chain, user_query, thread_id=thread_id)

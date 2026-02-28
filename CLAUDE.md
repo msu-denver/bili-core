@@ -229,6 +229,58 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
     return wrapper
 ```
 
+### Streaming Support
+
+Both normal bili and AETHER support streaming and non-streaming agent interactions with clean, symmetric APIs.
+
+#### Normal Bili — Framework-Agnostic Streaming (`bili/loaders/streaming_utils.py`)
+
+```python
+from bili.loaders.langchain_loader import build_agent_graph
+from bili.loaders.streaming_utils import stream_agent, invoke_agent, astream_agent
+
+agent = build_agent_graph(checkpoint_saver=saver, node_kwargs=kwargs, ...)
+
+# Non-streaming — returns the full response string
+response = invoke_agent(agent, "What is the weather?", thread_id="user1")
+
+# Sync streaming — yields tokens as they arrive
+for token in stream_agent(agent, "What is the weather?", thread_id="user1"):
+    print(token, end="", flush=True)
+
+# Async streaming — for async contexts
+async for token in astream_agent(agent, "Hello", thread_id="user1"):
+    print(token, end="", flush=True)
+```
+
+Flask and Streamlit integrations delegate to these utilities:
+- **Flask**: `handle_agent_prompt_stream()` in `flask_utils.py` returns SSE `text/event-stream`
+- **Streamlit**: `process_query_streaming()` in `streamlit_query_handler.py` returns a generator for `st.write_stream()`
+
+#### AETHER — MASExecutor Streaming (`bili/aether/runtime/executor.py`)
+
+```python
+from bili.aether.runtime import MASExecutor, StreamEventType
+
+executor = MASExecutor(config)
+executor.initialize()
+
+# Non-streaming
+result = executor.run(input_data)
+
+# Sync streaming — yields StreamEvent objects
+for event in executor.stream(input_data):
+    if event.event_type == StreamEventType.TOKEN:
+        print(event.data["content"], end="", flush=True)
+
+# Async streaming — token-level via astream_events(v2)
+async for event in executor.astream(input_data):
+    if event.event_type == StreamEventType.TOKEN:
+        print(event.data["content"], end="", flush=True)
+```
+
+AETHER streaming uses structured `StreamEvent` objects with `StreamFilter` for declarative event filtering.
+
 ### Pre-Commit Linting (REQUIRED)
 
 **ALWAYS run formatters before committing code.** This is enforced automatically via Claude Code hooks in `.claude/settings.json`, but you should also run them proactively while writing code to catch issues early.

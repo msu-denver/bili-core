@@ -72,7 +72,10 @@ from bili.loaders.llm_loader import load_model
 from bili.loaders.tools_loader import initialize_tools
 from bili.nodes.per_user_state import per_user_state_node
 from bili.nodes.prepare_llm_config_node import prepare_llm_config_node
-from bili.streamlit_ui.query.streamlit_query_handler import process_query
+from bili.streamlit_ui.query.streamlit_query_handler import (
+    process_query,
+    process_query_streaming,
+)
 from bili.streamlit_ui.ui.auth_ui import display_login_signup, is_authenticated
 from bili.streamlit_ui.ui.configuration_panels import display_configuration_panels
 from bili.streamlit_ui.utils.state_management import (
@@ -152,10 +155,20 @@ def run_app_page(checkpointer=None):
             status_container.markdown(
                 "**Status:** Processing...", unsafe_allow_html=True
             )
-            process_query(
-                st.session_state["conversation_chain"],
-                user_query,
-            )
+
+            # Use streaming display when enabled
+            if st.session_state.get("streaming_enabled", False):
+                token_gen = process_query_streaming(
+                    st.session_state["conversation_chain"],
+                    user_query,
+                )
+                response = st.write_stream(token_gen)  # noqa: F841
+            else:
+                process_query(
+                    st.session_state["conversation_chain"],
+                    user_query,
+                )
+
             enable_form()
             st.rerun()
 
@@ -178,6 +191,16 @@ def display_state_management_management():
         or not initialized in ``st.session_state``.
     :raises ValueError: Raised by Streamlit during value range issues in inputs.
     """
+    # Streaming toggle
+    if "streaming_enabled" not in st.session_state:
+        st.session_state["streaming_enabled"] = False
+    st.session_state["streaming_enabled"] = st.checkbox(
+        "Enable streaming responses",
+        value=st.session_state["streaming_enabled"],
+        help="When enabled, responses are displayed token-by-token as they "
+        "are generated. Provides a more natural chat experience.",
+    )
+
     with st.expander("Chat History Management"):
         # Toggle between message_count vs token_length
         if "memory_limit_type" not in st.session_state:

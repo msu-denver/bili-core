@@ -4,6 +4,7 @@ Performs deep structural and cross-field validation on a ``MASConfig``
 instance that has already passed Pydantic's basic field validation.
 """
 
+from collections import deque
 from typing import Dict, List, Set
 
 from bili.aether.schema import MASConfig, WorkflowType
@@ -46,6 +47,7 @@ class MASValidator:
         self._check_channels()
         self._check_workflow_graph()
         self._check_workflow_specific()
+        self._check_pipelines()
 
         return self._result
 
@@ -207,10 +209,10 @@ class MASValidator:
 
         entry = self._config.entry_point or self._config.agents[0].agent_id
         reachable: Set[str] = {entry}
-        queue = [entry]
+        queue = deque([entry])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for neighbor in self._edge_graph.get(current, []):
                 if neighbor != "END" and neighbor not in reachable:
                     reachable.add(neighbor)
@@ -234,12 +236,12 @@ class MASValidator:
 
         entry = self._config.entry_point or self._config.agents[0].agent_id
         visited: Set[str] = {entry}
-        queue = [entry]
+        queue = deque([entry])
         found_end = False
 
         # BFS to find if END is reachable from entry
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for neighbor in self._edge_graph.get(current, []):
                 if neighbor == "END":
                     found_end = True
@@ -322,6 +324,146 @@ class MASValidator:
             self._result.add_warning(
                 "human_in_loop is true but no " "'human_escalation_condition' specified"
             )
+
+    # ==================================================================
+    # Pipeline checks
+    # ==================================================================
+
+    def _check_pipelines(self) -> None:
+        """Validate pipeline sub-graphs for agents that have them."""
+        for agent in self._config.agents:
+            if agent.pipeline:
+                self._check_pipeline_cycles(agent)
+                self._check_pipeline_unreachable_nodes(agent)
+                self._check_pipeline_all_stubs(agent)
+                self._check_pipeline_conditional_fallbacks(agent)
+
+    def _check_pipeline_cycles(self, agent) -> None:
+        """E4: Error on cycles within a pipeline sub-graph (DFS).
+
+        A cycle in a pipeline without a proper termination condition
+        would cause the sub-graph to loop indefinitely.
+        """
+        pipeline = agent.pipeline
+
+        # Build edge graph for the pipeline
+        edge_graph: Dict[str, List[str]] = {}
+        for edge in pipeline.edges:
+            edge_graph.setdefault(edge.from_node, []).append(edge.to_node)
+
+        visited: Set[str] = set()
+        rec_stack: Set[str] = set()
+
+        def _has_cycle(node: str) -> bool:
+            visited.add(node)
+            rec_stack.add(node)
+            for neighbor in edge_graph.get(node, []):
+                if neighbor == "END":
+                    continue
+                if neighbor not in visited:
+                    if _has_cycle(neighbor):
+                        return True
+                elif neighbor in rec_stack:
+                    return True
+            rec_stack.discard(node)
+            return False
+
+        entry = pipeline.get_entry_node()
+        if _has_cycle(entry):
+            self._result.add_error(
+                f"Agent '{agent.agent_id}' pipeline: circular dependency "
+                f"detected starting from entry node '{entry}'"
+            )
+
+        # Check disconnected components
+        for node in pipeline.nodes:
+            if node.node_id not in visited:
+                if _has_cycle(node.node_id):
+                    self._result.add_error(
+                        f"Agent '{agent.agent_id}' pipeline: circular "
+                        f"dependency in disconnected component starting "
+                        f"from node '{node.node_id}'"
+                    )
+
+    def _check_pipeline_unreachable_nodes(self, agent) -> None:
+        """W11: Warn about pipeline nodes unreachable from entry point (BFS)."""
+        pipeline = agent.pipeline
+
+        # Build edge graph
+        edge_graph: Dict[str, List[str]] = {}
+        for edge in pipeline.edges:
+            edge_graph.setdefault(edge.from_node, []).append(edge.to_node)
+
+        entry = pipeline.get_entry_node()
+        reachable: Set[str] = {entry}
+        queue = deque([entry])
+
+        while queue:
+            current = queue.popleft()
+            for neighbor in edge_graph.get(current, []):
+                if neighbor != "END" and neighbor not in reachable:
+                    reachable.add(neighbor)
+                    queue.append(neighbor)
+
+        for node in pipeline.nodes:
+            if node.node_id not in reachable:
+                self._result.add_warning(
+                    f"Agent '{agent.agent_id}' pipeline: node "
+                    f"'{node.node_id}' is unreachable from entry "
+                    f"node '{entry}'"
+                )
+
+    def _check_pipeline_all_stubs(self, agent) -> None:
+        """W12: Warn if pipeline has only stub agents (no model_name anywhere).
+
+        If all inline agent nodes lack a model_name and the parent agent
+        also lacks one, every pipeline node will be a stub, which may not
+        be intentional.
+        """
+        pipeline = agent.pipeline
+        agent_nodes = [n for n in pipeline.nodes if n.node_type == "agent"]
+
+        if not agent_nodes:
+            # No inline agent nodes — registry nodes handle their own LLM
+            return
+
+        has_model = any(
+            n.agent_spec and n.agent_spec.get("model_name") for n in agent_nodes
+        )
+
+        if not has_model and not agent.model_name:
+            self._result.add_warning(
+                f"Agent '{agent.agent_id}' pipeline: all inline agent "
+                f"nodes are stubs (no model_name set). This may be "
+                f"intentional for testing, but agents will produce "
+                f"placeholder responses."
+            )
+
+    def _check_pipeline_conditional_fallbacks(self, agent) -> None:
+        """W13: Warn if pipeline conditional edges lack an unconditional fallback.
+
+        When a node has conditional edges, there should be at least one
+        unconditional edge from the same source as a fallback in case
+        no condition matches.
+        """
+        pipeline = agent.pipeline
+
+        # Group edges by source
+        edges_by_source: Dict[str, List] = {}
+        for edge in pipeline.edges:
+            edges_by_source.setdefault(edge.from_node, []).append(edge)
+
+        for from_node, edges in edges_by_source.items():
+            conditional = [e for e in edges if e.condition]
+            unconditional = [e for e in edges if not e.condition]
+
+            if conditional and not unconditional:
+                self._result.add_warning(
+                    f"Agent '{agent.agent_id}' pipeline: node "
+                    f"'{from_node}' has {len(conditional)} conditional "
+                    f"edge(s) but no unconditional fallback. If no "
+                    f"condition matches, routing may fail."
+                )
 
 
 def validate_mas(config: MASConfig) -> ValidationResult:
