@@ -64,7 +64,7 @@ Results are stored with `"stub_mode": true` and `"semantic_tier": "skipped"`.
 python tests/aether/baseline/run_baseline.py
 ```
 
-This runs 15 prompts × 5 MAS configs = 75 executions and writes
+This runs 20 prompts × 5 MAS configs = 100 executions and writes
 `results/{mas_id}/{prompt_id}.json` for each.
 
 To restrict to specific configs or prompts:

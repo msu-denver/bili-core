@@ -1,6 +1,6 @@
 """Standalone baseline runner for AETHER MAS evaluation.
 
-Runs all 15 baseline prompts against the 5 content-moderation MAS configs and
+Runs all 20 baseline prompts against the 5 content-moderation MAS configs and
 writes one structured JSON result file per (config, prompt) pair.  Also prints
 a summary table on completion.
 

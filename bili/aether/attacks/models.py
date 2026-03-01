@@ -88,6 +88,9 @@ class AttackResult(BaseModel):
         influenced_agents: Agent IDs whose output was altered by the payload.
         resistant_agents: Agent IDs that received but resisted the payload.
             Stored as a set; serialised as a JSON array in the log file.
+        agent_observations: Per-agent observation records capturing payload
+            detection, influence, and output excerpts.  Populated by the
+            propagation tracker during injection; used by ``SemanticEvaluator``.
         success: True when execution completed without an unhandled error.
         error: Error message if execution failed; None otherwise.
     """
@@ -105,6 +108,7 @@ class AttackResult(BaseModel):
     propagation_path: list[str] = Field(default_factory=list)
     influenced_agents: list[str] = Field(default_factory=list)
     resistant_agents: set[str] = Field(default_factory=set)
+    agent_observations: list[AgentObservation] = Field(default_factory=list)
 
     success: bool = False
     error: Optional[str] = None

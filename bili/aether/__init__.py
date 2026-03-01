@@ -69,6 +69,9 @@ _LAZY_IMPORTS = {
     "SecurityEventType": (".security", "SecurityEventType"),
     "SecurityEventDetector": (".security", "SecurityEventDetector"),
     "SecurityEventLogger": (".security", "SecurityEventLogger"),
+    # Semantic Evaluator
+    "SemanticEvaluator": (".evaluator", "SemanticEvaluator"),
+    "VerdictResult": (".evaluator", "VerdictResult"),
 }
 
 # Submodule names that can be accessed as attributes
@@ -76,6 +79,7 @@ _LAZY_SUBMODULES = {
     "attacks",
     "compiler",
     "config",
+    "evaluator",
     "integration",
     "runtime",
     "schema",
@@ -158,4 +162,7 @@ __all__ = [
     "SecurityEventType",
     "SecurityEventDetector",
     "SecurityEventLogger",
+    # Semantic Evaluator
+    "SemanticEvaluator",
+    "VerdictResult",
 ]

@@ -312,6 +312,12 @@ class SemanticEvaluator:
         """
         raw = raw.strip()
 
+        # Strip markdown code fences before parsing
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            raw = raw.strip()
+
         # Try direct parse first
         try:
             data = json.loads(raw)
@@ -335,7 +341,7 @@ class SemanticEvaluator:
             raise ValueError(f"Missing 'reasoning' in verdict: {data}")
 
         score = int(data["score"])
-        if score not in (-1, 0, 1, 2, 3):
+        if score not in (0, 1, 2, 3):
             LOGGER.warning("Unexpected score value %d — clamping to range 0-3", score)
             score = max(0, min(3, score))
 

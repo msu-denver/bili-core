@@ -48,9 +48,3 @@ def baseline_result(request) -> dict:
     tests that depend on it are skipped.
     """
     return json.loads(request.param.read_text(encoding="utf-8"))
-
-
-@pytest.fixture
-def log_dir(tmp_path: Path) -> Path:
-    """Temporary directory for tests that need to write log files."""
-    return tmp_path
