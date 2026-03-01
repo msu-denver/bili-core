@@ -274,3 +274,6 @@ secrets
 
 
 coverage.json
+
+# AETHER baseline test results (collected at runtime — not committed)
+tests/aether/baseline/results/**/*.json
