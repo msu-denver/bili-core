@@ -43,7 +43,7 @@ ValueError: Validation failed: ...
 python bili/aether/compiler/cli.py
 ```
 
-Compiles 7 bundled example configs. **Expected output (one line per file):**
+Compiles the 7 core example configs (the 5 newer examples documented in `docs/examples.md` are not included in the CLI's default list). **Expected output (one line per file):**
 ```
 OK    simple_chain.yaml  ->  CompiledMAS(simple_chain, 4 agents, workflow=sequential)
 OK    hierarchical_voting.yaml  ->  CompiledMAS(hierarchical_voting, 5 agents, workflow=hierarchical)

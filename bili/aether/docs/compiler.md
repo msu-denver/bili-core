@@ -437,14 +437,14 @@ result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
 |-------|------|-------------|
 | `mas_id` | `str` | MAS identifier |
 | `execution_id` | `str` | Unique execution run ID |
-| `run_id` | `str` | Alias for `execution_id` used in cross-log correlation |
+| `run_id` | `str` | Auto-generated UUID4; links this result to attack log and security event log entries |
 | `start_time` / `end_time` | `str` | ISO-8601 UTC timestamps |
 | `total_execution_time_ms` | `float` | Total wall-clock time |
 | `agent_results` | `List[AgentExecutionResult]` | Per-agent outputs and statistics |
 | `total_messages` | `int` | Total inter-agent messages |
 | `messages_by_channel` | `Dict[str, int]` | Message counts by channel |
 | `checkpoint_saved` | `bool` | Whether checkpoint was persisted |
-| `success` | `bool` | Whether execution succeeded |
+| `success` | `bool` (property) | `True` if `error is None`; computed — cannot be set directly |
 | `error` | `str` (optional) | Error message on failure |
 
 **Methods:** `to_dict()`, `save_to_file(path)`, `get_summary()`, `get_formatted_output()`

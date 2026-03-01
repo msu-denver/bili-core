@@ -44,6 +44,7 @@ Example:
 """
 
 import atexit
+import datetime
 import os
 import re
 import time
@@ -415,7 +416,7 @@ class PruningMongoDBSaver(
         archived_doc = {
             **document,
             "_migration_error": str(error),
-            "_migration_timestamp": __import__("datetime").datetime.utcnow(),
+            "_migration_timestamp": datetime.datetime.now(datetime.timezone.utc),
             "_original_thread_id": thread_id,
         }
 
@@ -1249,7 +1250,7 @@ class AsyncPruningMongoDBSaver(
         archived_doc = {
             **document,
             "_migration_error": str(error),
-            "_migration_timestamp": __import__("datetime").datetime.utcnow(),
+            "_migration_timestamp": datetime.datetime.now(datetime.timezone.utc),
             "_original_thread_id": thread_id,
         }
 
