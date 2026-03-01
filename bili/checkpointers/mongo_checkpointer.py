@@ -46,6 +46,7 @@ Example:
 import atexit
 import os
 import re
+import time
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -54,6 +55,7 @@ from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, MongoClient
+from pymongo.errors import OperationFailure
 
 # Import MongoDB-specific migrations to register them
 import bili.checkpointers.migrations.mongo  # noqa: F401  # pylint: disable=unused-import
@@ -186,54 +188,167 @@ class PruningMongoDBSaver(
         self.user_id = user_id
         self._ensure_indexes()
 
+    @staticmethod
+    def _drop_conflicting_indexes(collection, desired_keys, desired_name):
+        """
+        Drop any existing index on the same key pattern that has a different
+        name or options. This resolves conflicts between the parent
+        MongoDBSaver's auto-named indexes and our custom-named indexes,
+        which is required for DocumentDB compatibility.
+
+        :param collection: The MongoDB collection to check.
+        :param desired_keys: The key pattern as a list of (field, direction) tuples.
+        :param desired_name: The name we want to give our index.
+        """
+        desired_key_tuple = tuple(desired_keys)
+        try:
+            existing = collection.index_information()
+            for idx_name, idx_info in existing.items():
+                if idx_name == "_id_" or idx_name == desired_name:
+                    continue
+                existing_key_tuple = tuple((k, d) for k, d in idx_info["key"])
+                if existing_key_tuple == desired_key_tuple:
+                    LOGGER.info(
+                        "Dropping conflicting index '%s' on %s "
+                        "(same keys as '%s' but different options)",
+                        idx_name,
+                        collection.name,
+                        desired_name,
+                    )
+                    collection.drop_index(idx_name)
+        except OperationFailure as exc:
+            LOGGER.warning(
+                "Could not check/drop conflicting indexes on %s: %s",
+                collection.name,
+                exc,
+            )
+
+    @staticmethod
+    def _create_index_safe(collection, keys, name, **kwargs):
+        """
+        Create an index, handling DocumentDB limitations gracefully.
+
+        DocumentDB only allows one index build per collection at a time.
+        If another worker is already building an index, retry after a
+        short delay. If the index already exists with identical options,
+        this is a no-op.
+
+        :param collection: The MongoDB collection.
+        :param keys: The index key pattern.
+        :param name: The index name.
+        :param kwargs: Additional index options (unique, background, etc.).
+        """
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                collection.create_index(keys, name=name, **kwargs)
+                return
+            except OperationFailure as exc:
+                # Code 40333: "Existing index build in progress"
+                if exc.code == 40333 and attempt < max_retries - 1:
+                    LOGGER.info(
+                        "Index build in progress on %s, retrying in %ds...",
+                        collection.name,
+                        attempt + 1,
+                    )
+                    time.sleep(attempt + 1)
+                    continue
+                # Code 85: "Index already exists with different options"
+                # Code 86: "IndexKeySpecsConflict" — same name but
+                #   different specs (e.g., unique added to existing
+                #   non-unique index)
+                if exc.code in (85, 86):
+                    LOGGER.warning(
+                        "Index conflict on %s for '%s': %s. "
+                        "Dropping conflicting index and retrying.",
+                        collection.name,
+                        name,
+                        exc,
+                    )
+                    # Code 86 means the same-named index exists with
+                    # different options. _drop_conflicting_indexes
+                    # skips same-name indexes, so drop by name first.
+                    if exc.code == 86:
+                        try:
+                            collection.drop_index(name)
+                        except OperationFailure:
+                            pass
+                    PruningMongoDBSaver._drop_conflicting_indexes(
+                        collection, keys, name
+                    )
+                    if attempt < max_retries - 1:
+                        time.sleep(1)
+                        continue
+                raise
+
     def _ensure_indexes(self) -> None:
         """
-        Ensures that the required indexes exist in the MongoDB collections. These indexes are used
-        to optimize query performance and enforce index-specific constraints in the checkpoint
-        and writes collections.
+        Ensures that the required indexes exist in the MongoDB collections.
 
-        Raises:
-            Any exception that occurs during index creation will not be explicitly captured.
-
-        :param self: The instance of the object containing the MongoDB collections.
-
-        :return: None
+        Handles conflicts with the parent MongoDBSaver's auto-created indexes
+        by dropping any existing index on the same key pattern that has a
+        different name or options before creating our custom-named indexes.
+        Also handles DocumentDB's single-concurrent-index-build limitation
+        by retrying on transient failures.
         """
         LOGGER.info("Ensuring indexes exist in MongoDB checkpointer collections.")
-        self.checkpoint_collection.create_index(
-            [
-                ("thread_id", ASCENDING),
-                ("checkpoint_ns", ASCENDING),
-                ("checkpoint_id", DESCENDING),
-            ],
-            name="idx_thread_ns_id",
+
+        # Checkpoint index: thread_id + checkpoint_ns + checkpoint_id (desc)
+        cp_keys = [
+            ("thread_id", ASCENDING),
+            ("checkpoint_ns", ASCENDING),
+            ("checkpoint_id", DESCENDING),
+        ]
+        self._drop_conflicting_indexes(
+            self.checkpoint_collection, cp_keys, "idx_thread_ns_id"
+        )
+        self._create_index_safe(
+            self.checkpoint_collection,
+            cp_keys,
+            "idx_thread_ns_id",
+            unique=True,
             background=True,
         )
-        self.checkpoint_collection.create_index(
-            [
-                ("thread_id", ASCENDING),
-                ("checkpoint_ns", ASCENDING),
-                ("checkpoint_id", ASCENDING),
-            ],
-            name="idx_thread_ns_exact",
+
+        # Checkpoint exact-match index (ascending checkpoint_id)
+        cp_exact_keys = [
+            ("thread_id", ASCENDING),
+            ("checkpoint_ns", ASCENDING),
+            ("checkpoint_id", ASCENDING),
+        ]
+        self._drop_conflicting_indexes(
+            self.checkpoint_collection, cp_exact_keys, "idx_thread_ns_exact"
+        )
+        self._create_index_safe(
+            self.checkpoint_collection,
+            cp_exact_keys,
+            "idx_thread_ns_exact",
             background=True,
         )
-        self.writes_collection.create_index(
-            [
-                ("thread_id", ASCENDING),
-                ("checkpoint_ns", ASCENDING),
-                ("checkpoint_id", ASCENDING),
-            ],
-            name="idx_writes_lookup",
+
+        # Writes lookup index
+        writes_keys = [
+            ("thread_id", ASCENDING),
+            ("checkpoint_ns", ASCENDING),
+            ("checkpoint_id", ASCENDING),
+        ]
+        self._drop_conflicting_indexes(
+            self.writes_collection, writes_keys, "idx_writes_lookup"
+        )
+        self._create_index_safe(
+            self.writes_collection,
+            writes_keys,
+            "idx_writes_lookup",
             background=True,
         )
 
         # On-demand migration: Add user_id index if user_id is configured
         if self.user_id:
             LOGGER.info("Creating user_id index (on-demand migration)")
-            self.checkpoint_collection.create_index(
+            self._create_index_safe(
+                self.checkpoint_collection,
                 [("user_id", ASCENDING), ("thread_id", ASCENDING)],
-                name="idx_user_thread",
+                "idx_user_thread",
                 background=True,
             )
 
@@ -910,47 +1025,144 @@ class AsyncPruningMongoDBSaver(
         self._sync_db: Any = None
         self._indexes_ensured: bool = False
 
+    @staticmethod
+    async def _async_drop_conflicting_indexes(collection, desired_keys, desired_name):
+        """
+        Async version of _drop_conflicting_indexes. Drop any existing index
+        on the same key pattern that has a different name or options.
+
+        :param collection: The async MongoDB collection.
+        :param desired_keys: The key pattern as a list of (field, direction) tuples.
+        :param desired_name: The name we want to give our index.
+        """
+        desired_key_tuple = tuple(desired_keys)
+        try:
+            existing = await collection.index_information()
+            for idx_name, idx_info in existing.items():
+                if idx_name == "_id_" or idx_name == desired_name:
+                    continue
+                existing_key_tuple = tuple((k, d) for k, d in idx_info["key"])
+                if existing_key_tuple == desired_key_tuple:
+                    LOGGER.info(
+                        "Dropping conflicting index '%s' on %s "
+                        "(same keys as '%s' but different options)",
+                        idx_name,
+                        collection.name,
+                        desired_name,
+                    )
+                    await collection.drop_index(idx_name)
+        except OperationFailure as exc:
+            LOGGER.warning(
+                "Could not check/drop conflicting indexes on %s: %s",
+                collection.name,
+                exc,
+            )
+
+    @staticmethod
+    async def _async_create_index_safe(collection, keys, name, **kwargs):
+        """
+        Async version of _create_index_safe. Create an index, handling
+        DocumentDB limitations gracefully.
+
+        :param collection: The async MongoDB collection.
+        :param keys: The index key pattern.
+        :param name: The index name.
+        :param kwargs: Additional index options.
+        """
+        import asyncio
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await collection.create_index(keys, name=name, **kwargs)
+                return
+            except OperationFailure as exc:
+                if exc.code == 40333 and attempt < max_retries - 1:
+                    LOGGER.info(
+                        "Index build in progress on %s, retrying in %ds...",
+                        collection.name,
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(attempt + 1)
+                    continue
+                if exc.code == 85:
+                    LOGGER.warning(
+                        "Index conflict on %s for '%s': %s. "
+                        "Dropping conflicting index and retrying.",
+                        collection.name,
+                        name,
+                        exc,
+                    )
+                    await AsyncPruningMongoDBSaver._async_drop_conflicting_indexes(
+                        collection, keys, name
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1)
+                        continue
+                raise
+
     async def _ensure_indexes(self) -> None:
         """
         Ensures that required indexes exist in MongoDB collections (async version).
+
+        Handles conflicts with the parent AsyncMongoDBSaver's auto-created
+        indexes and DocumentDB's single-concurrent-index-build limitation.
         """
         LOGGER.info("Ensuring indexes exist in async MongoDB checkpointer collections.")
 
-        # Create indexes asynchronously
-        await self.checkpoint_collection.create_index(
-            [
-                ("thread_id", ASCENDING),
-                ("checkpoint_ns", ASCENDING),
-                ("checkpoint_id", DESCENDING),
-            ],
-            name="idx_thread_ns_id",
+        cp_keys = [
+            ("thread_id", ASCENDING),
+            ("checkpoint_ns", ASCENDING),
+            ("checkpoint_id", DESCENDING),
+        ]
+        await self._async_drop_conflicting_indexes(
+            self.checkpoint_collection, cp_keys, "idx_thread_ns_id"
+        )
+        await self._async_create_index_safe(
+            self.checkpoint_collection,
+            cp_keys,
+            "idx_thread_ns_id",
+            unique=True,
             background=True,
         )
-        await self.checkpoint_collection.create_index(
-            [
-                ("thread_id", ASCENDING),
-                ("checkpoint_ns", ASCENDING),
-                ("checkpoint_id", ASCENDING),
-            ],
-            name="idx_thread_ns_exact",
+
+        cp_exact_keys = [
+            ("thread_id", ASCENDING),
+            ("checkpoint_ns", ASCENDING),
+            ("checkpoint_id", ASCENDING),
+        ]
+        await self._async_drop_conflicting_indexes(
+            self.checkpoint_collection, cp_exact_keys, "idx_thread_ns_exact"
+        )
+        await self._async_create_index_safe(
+            self.checkpoint_collection,
+            cp_exact_keys,
+            "idx_thread_ns_exact",
             background=True,
         )
-        await self.writes_collection.create_index(
-            [
-                ("thread_id", ASCENDING),
-                ("checkpoint_ns", ASCENDING),
-                ("checkpoint_id", ASCENDING),
-            ],
-            name="idx_writes_lookup",
+
+        writes_keys = [
+            ("thread_id", ASCENDING),
+            ("checkpoint_ns", ASCENDING),
+            ("checkpoint_id", ASCENDING),
+        ]
+        await self._async_drop_conflicting_indexes(
+            self.writes_collection, writes_keys, "idx_writes_lookup"
+        )
+        await self._async_create_index_safe(
+            self.writes_collection,
+            writes_keys,
+            "idx_writes_lookup",
             background=True,
         )
 
         # On-demand migration: Add user_id index if user_id is configured
         if self.user_id:
             LOGGER.info("Creating user_id index (on-demand migration)")
-            await self.checkpoint_collection.create_index(
+            await self._async_create_index_safe(
+                self.checkpoint_collection,
                 [("user_id", ASCENDING), ("thread_id", ASCENDING)],
-                name="idx_user_thread",
+                "idx_user_thread",
                 background=True,
             )
 
