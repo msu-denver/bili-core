@@ -119,6 +119,8 @@ result.influenced_agents   # ['reviewer']
 result.resistant_agents    # ['judge']
 ```
 
+See [docs/attack-framework.md](docs/attack-framework.md) for the full `AttackResult` and `AgentObservation` field reference.
+
 ### 7. Detect Security Events (automatic)
 
 When a `SecurityEventDetector` is passed to `AttackInjector`, five detection rules fire automatically after each injection — `ATTACK_DETECTED`, `AGENT_COMPROMISED`, `AGENT_RESISTED`, `PAYLOAD_PROPAGATED`, `REPEATED_TARGET`. See [docs/security-logging.md](docs/security-logging.md).
