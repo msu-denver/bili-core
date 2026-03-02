@@ -13,7 +13,6 @@ AETHER_STUB_MODE=0             — marks the session as real-LLM mode.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -23,13 +22,22 @@ import pytest
 # Ensure repo root is importable regardless of invocation directory
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).parents[4]
+
+def _find_repo_root() -> Path:
+    """Walk up from this file until a .git directory is found."""
+    p = Path(__file__).resolve().parent
+    while p != p.parent:
+        if (p / ".git").is_dir():
+            return p
+        p = p.parent
+    raise RuntimeError("Could not locate repo root (.git directory not found)")
+
+
+_REPO_ROOT = _find_repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _RESULTS_DIR = Path(__file__).parent / "results"
-
-STUB_MODE: bool = os.getenv("AETHER_STUB_MODE", "1") == "1"
 
 
 def _collect_result_files() -> list[Path]:

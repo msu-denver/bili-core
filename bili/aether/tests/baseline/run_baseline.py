@@ -34,7 +34,18 @@ from pathlib import Path
 # Path setup — ensure repo root is on sys.path regardless of cwd
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).parents[4]
+
+def _find_repo_root() -> Path:
+    """Walk up from this file until a .git directory is found."""
+    p = Path(__file__).resolve().parent
+    while p != p.parent:
+        if (p / ".git").is_dir():
+            return p
+        p = p.parent
+    raise RuntimeError("Could not locate repo root (.git directory not found)")
+
+
+_REPO_ROOT = _find_repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -242,6 +253,9 @@ def main() -> None:
             continue
 
         config = load_mas_from_yaml(str(full_path))
+        if args.stub:
+            for agent in config.agents:
+                agent.model_name = None
         config_ids.append(config.mas_id)
         print(f"\n[{config.mas_id}] Running {len(prompts)} prompts...")
 

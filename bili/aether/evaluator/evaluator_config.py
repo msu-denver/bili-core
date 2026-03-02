@@ -42,6 +42,10 @@ PROVIDER_FAMILY_PREFIXES: list[tuple[str, str]] = [
     ("claude-", "anthropic_direct"),
     ("gemini-", "google_vertex"),
     ("gpt-", "openai"),
+    # NOTE: "o1", "o3", "o4" match any model ID starting with these strings,
+    # including bare model IDs (e.g. "o1", "o3") and hyphenated variants
+    # (e.g. "o1-mini", "o3-mini"). This is intentional — no other provider
+    # uses these prefixes, so false positives are not a concern in practice.
     ("o1", "openai"),
     ("o3", "openai"),
     ("o4", "openai"),
