@@ -9,6 +9,13 @@ The ``log_dir`` fixture derives the per-config log directory from the
 ``mas_id`` field in the loaded result dict.  Log files (``attack_log.ndjson``
 and ``security_events.ndjson``) are written there by the runner.
 
+Note on ``_find_repo_root``
+---------------------------
+The helper is inlined here rather than imported from
+``bili.aether.tests._helpers`` because this file must bootstrap ``sys.path``
+before any ``bili.*`` import is possible — the shared module cannot be
+imported until after ``sys.path`` contains the repo root.
+
 Environment variables
 ---------------------
 AETHER_STUB_MODE=1  (default) — marks the session as stub mode.
@@ -33,7 +40,21 @@ import pytest
 # Ensure repo root is importable regardless of invocation directory
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+# Bootstrap: resolve repo root before any bili.* imports are possible.
+# _find_repo_root is inlined here to avoid a circular dependency during
+# pytest collection (bili.aether.tests._helpers requires sys.path to be
+# set up first).
+def _find_repo_root() -> Path:
+    p = Path(__file__).resolve().parent
+    while p != p.parent:
+        if (p / ".git").is_dir():
+            return p
+        p = p.parent
+    raise RuntimeError("Could not locate repo root (.git directory not found)")
+
+
+_REPO_ROOT = _find_repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 

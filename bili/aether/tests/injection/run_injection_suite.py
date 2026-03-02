@@ -47,15 +47,16 @@ is documented in ``propagation.py`` and surfaced here for the thesis.
 import argparse
 import csv
 import datetime
-import hashlib
 import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Path setup — importable regardless of cwd
+# Bootstrap: _find_repo_root is inlined to set up sys.path before any
+# bili.* import.  The shared version in bili.aether.tests._helpers is used
+# for all subsequent calls once the package is importable.
 # ---------------------------------------------------------------------------
 
 
@@ -94,6 +95,9 @@ from bili.aether.security.detector import (  # noqa: E402  pylint: disable=wrong
 from bili.aether.security.logger import (  # noqa: E402  pylint: disable=wrong-import-position
     SecurityEventLogger,
 )
+from bili.aether.tests._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
+    config_fingerprint as _config_fingerprint_helper,
+)
 from bili.aether.tests.injection.payloads.prompt_injection_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
     INJECTION_PAYLOADS,
     InjectionPayload,
@@ -123,6 +127,9 @@ _ALL_PHASES: list[str] = [
 
 _CSV_COLUMNS: list[str] = [
     "payload_id",
+    "injection_type",
+    "severity",
+    "stub_mode",
     "mas_id",
     "phase",
     "tier1_pass",
@@ -138,31 +145,9 @@ _CSV_COLUMNS: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def _yaml_hash(path: str) -> str:
-    """Return a 12-char SHA-256 hex digest of the YAML file content."""
-    return hashlib.sha256((_REPO_ROOT / path).read_bytes()).hexdigest()[:12]
-
-
 def _config_fingerprint(config, yaml_path: str) -> dict:
-    """Reproducibility anchor embedded in every result file.
-
-    Includes ``config_path`` and ``config_name`` for MAS visualiser
-    cross-reference (Task 15.7 / 15.8).
-    """
-    model_names = sorted(
-        {a.model_name if a.model_name else "stub" for a in config.agents}
-    )
-    temps = {
-        a.agent_id: a.temperature if a.temperature is not None else 0.0
-        for a in config.agents
-    }
-    return {
-        "yaml_hash": _yaml_hash(yaml_path),
-        "config_path": yaml_path,
-        "config_name": config.mas_id,
-        "model_name": ",".join(model_names),
-        "temperature": temps,
-    }
+    """Thin wrapper that forwards to the shared helper with the module _REPO_ROOT."""
+    return _config_fingerprint_helper(config, yaml_path, _REPO_ROOT)
 
 
 def _target_agent_id(config) -> str:
@@ -170,7 +155,15 @@ def _target_agent_id(config) -> str:
 
     Uses ``config.entry_point`` when set (e.g. supervisor workflows); falls
     back to the first agent in the config's agent list.
+
+    Raises:
+        ValueError: If the config has no agents defined.
     """
+    if not config.agents:
+        raise ValueError(
+            f"MAS config '{config.mas_id}' has no agents defined — "
+            "cannot determine injection target"
+        )
     if config.entry_point:
         return config.entry_point
     return config.agents[0].agent_id
@@ -183,7 +176,7 @@ def _build_result_dict(
     phase: str,
     attack_result,
     stub_mode: bool,
-    tier3_rows: Optional[list],
+    tier3_rows: list | None,
 ) -> dict:
     """Assemble the full result JSON dict for one test case."""
     # Tier 3: aggregate score across agents (max score = most influenced)
@@ -242,16 +235,16 @@ def _write_result(result_dict: dict) -> Path:
     return out_path
 
 
-def _write_csv(rows: list[dict], stub_mode: bool) -> Path:
-    """Write the results matrix CSV to results/injection_results_matrix.csv."""
+def _write_csv(rows: list[dict]) -> Path:
+    """Write the results matrix CSV to results/injection_results_matrix.csv.
+
+    The CSV is fully RFC 4180-compliant — no comment lines are prepended.
+    Stub mode is encoded as the ``stub_mode`` column value instead.
+    """
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _RESULTS_DIR / "injection_results_matrix.csv"
 
-    tier3_note = "# tier3: skipped (stub mode)\n" if stub_mode else ""
-
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
-        if tier3_note:
-            fh.write(tier3_note)
         writer = csv.DictWriter(fh, fieldnames=_CSV_COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
@@ -285,7 +278,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
     phases: list[str],
     stub_mode: bool,
     semantic_evaluator,
-    baseline_results_dir: Optional[Path],
+    baseline_results_dir: Path | None,
 ) -> list[dict]:
     """Run all payloads × phases for one MAS config.
 
@@ -317,12 +310,19 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
         attack_log_path=attack_log_path,
     )
 
-    executor = MASExecutor(config)
-    executor.initialize()
+    # Only initialise the outer MASExecutor when mid_execution is requested.
+    # For pre_execution-only runs, AttackInjector creates its own fresh
+    # executor internally — this outer instance would never be used.
+    needs_executor = InjectionPhase.MID_EXECUTION.value in phases
+    executor = None
+    if needs_executor:
+        executor = MASExecutor(config)
+        executor.initialize()
 
     matrix_rows: list[dict] = []
     print(
-        f"\n[{mas_id}] target_agent={target_id!r}  ({len(payloads)} payloads × {len(phases)} phases)"
+        f"\n[{mas_id}] target_agent={target_id!r}  "
+        f"({len(payloads)} payloads × {len(phases)} phases)"
     )
 
     with AttackInjector(
@@ -357,6 +357,9 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
                     matrix_rows.append(
                         {
                             "payload_id": ip.payload_id,
+                            "injection_type": ip.injection_type,
+                            "severity": ip.severity,
+                            "stub_mode": stub_mode,
                             "mas_id": mas_id,
                             "phase": phase,
                             "tier1_pass": False,
@@ -372,9 +375,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
                 # Tier 3 — semantic evaluation (skipped in stub mode)
                 tier3_rows = None
                 if not stub_mode and semantic_evaluator is not None:
-                    baseline_dict = _load_baseline(
-                        baseline_results_dir, mas_id, ip.payload_id
-                    )
+                    baseline_dict = _load_baseline(baseline_results_dir, mas_id)
                     if baseline_dict is not None:
                         try:
                             tier3_rows = semantic_evaluator.evaluate(
@@ -412,6 +413,9 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
                 matrix_rows.append(
                     {
                         "payload_id": ip.payload_id,
+                        "injection_type": ip.injection_type,
+                        "severity": ip.severity,
+                        "stub_mode": stub_mode,
                         "mas_id": mas_id,
                         "phase": phase,
                         "tier1_pass": attack_result.success,
@@ -431,17 +435,24 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
 
 
 def _load_baseline(
-    baseline_results_dir: Optional[Path],
+    baseline_results_dir: Path | None,
     mas_id: str,
-    payload_id: str,
-) -> Optional[dict]:
-    """Try to load a matching baseline result for Tier 3 comparison.
+) -> dict | None:
+    """Try to load a baseline result for Tier 3 comparison.
 
     Baseline results live at ``baseline_results_dir/{mas_id}/*.json``.
-    We pick any available result for this config (injection tests do not
-    have a 1:1 payload-to-baseline-prompt mapping).  If no baseline file
-    exists, returns ``None`` — the evaluator will still score using the
-    injected output alone.
+    Injection payloads have no 1:1 mapping to baseline prompts; the first
+    available baseline result for this config (alphabetically) is used as
+    the comparison reference.  If no baseline file exists, returns ``None``
+    — the evaluator will still score using the injected output alone with
+    lower confidence.
+
+    Args:
+        baseline_results_dir: Path to the baseline results root, or ``None``.
+        mas_id:               MAS identifier to look up.
+
+    Returns:
+        Parsed baseline result dict, or ``None`` if unavailable.
     """
     if baseline_results_dir is None:
         return None
@@ -451,7 +462,6 @@ def _load_baseline(
     result_files = sorted(config_baseline_dir.glob("*.json"))
     if not result_files:
         return None
-    # Use the first available baseline result as the reference
     try:
         return json.loads(result_files[0].read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -531,7 +541,7 @@ def main() -> None:
             sys.exit(1)
 
     # Baseline dir for Tier 3
-    baseline_results_dir: Optional[Path] = None
+    baseline_results_dir: Path | None = None
     if args.baseline_results:
         baseline_results_dir = _REPO_ROOT / args.baseline_results
         if not baseline_results_dir.exists():
@@ -550,7 +560,7 @@ def main() -> None:
             )
 
             semantic_evaluator = SemanticEvaluator()
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except (ImportError, RuntimeError) as exc:
             LOGGER.warning("Could not initialise SemanticEvaluator: %s", exc)
 
     # Run all configs
@@ -568,7 +578,7 @@ def main() -> None:
 
     # Write CSV
     if all_matrix_rows:
-        csv_path = _write_csv(all_matrix_rows, stub_mode=args.stub)
+        csv_path = _write_csv(all_matrix_rows)
         _print_summary(all_matrix_rows)
         print(f"Results matrix written to: {csv_path}")
 

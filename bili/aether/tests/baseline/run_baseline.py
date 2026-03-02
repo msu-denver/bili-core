@@ -24,14 +24,16 @@ Results are written to:
 
 import argparse
 import datetime
-import hashlib
 import json
 import logging
 import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Path setup — ensure repo root is on sys.path regardless of cwd
+# Path setup — importable regardless of cwd
+# Bootstrap: _find_repo_root is inlined to set up sys.path before any
+# bili.* import.  The shared version in bili.aether.tests._helpers is used
+# for config_fingerprint once the package is importable.
 # ---------------------------------------------------------------------------
 
 
@@ -58,6 +60,9 @@ from bili.aether.config.loader import (  # noqa: E402  pylint: disable=wrong-imp
 )
 from bili.aether.runtime.executor import (  # noqa: E402  pylint: disable=wrong-import-position
     MASExecutor,
+)
+from bili.aether.tests._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
+    config_fingerprint as _config_fingerprint_helper,
 )
 from bili.aether.tests.baseline.prompts.baseline_prompts import (  # noqa: E402  pylint: disable=wrong-import-position
     BASELINE_PROMPTS,
@@ -87,38 +92,6 @@ _CONFIG_PATHS: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def _yaml_hash(path: str) -> str:
-    """Return a 12-char SHA-256 hex digest of the YAML file content."""
-    return hashlib.sha256((_REPO_ROOT / path).read_bytes()).hexdigest()[:12]
-
-
-def _config_fingerprint(config, yaml_path: str) -> dict:
-    """Reproducibility anchor embedded in every result file.
-
-    ``model_name`` is a sorted, comma-joined string of unique model names used
-    across all agents (``"stub"`` when no model_name is set).  This is a
-    single string when all agents share one model, which is the expected
-    setup for reproducible baseline runs.
-
-    ``temperature`` is a per-agent dict because agents routinely differ
-    (e.g. judge at 0.0, others at 0.2).
-    """
-    model_names = sorted(
-        {a.model_name if a.model_name else "stub" for a in config.agents}
-    )
-    temps = {
-        a.agent_id: a.temperature if a.temperature is not None else 0.0
-        for a in config.agents
-    }
-    return {
-        "yaml_hash": _yaml_hash(yaml_path),
-        "config_path": yaml_path,
-        "config_name": config.mas_id,
-        "model_name": ",".join(model_names),
-        "temperature": temps,
-    }
-
-
 def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) -> dict:
     """Execute a single (config, prompt) pair and return a result dict."""
     log_dir = str(_RESULTS_DIR / config.mas_id)
@@ -145,7 +118,7 @@ def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) ->
         "prompt_category": prompt.category,
         "prompt_text": prompt.text,
         "mas_id": config.mas_id,
-        "config_fingerprint": _config_fingerprint(config, yaml_path),
+        "config_fingerprint": _config_fingerprint_helper(config, yaml_path, _REPO_ROOT),
         "execution": {
             "success": result.success,
             "duration_ms": result.total_execution_time_ms,
@@ -281,7 +254,9 @@ def main() -> None:
                     "prompt_category": prompt.category,
                     "prompt_text": prompt.text,
                     "mas_id": config.mas_id,
-                    "config_fingerprint": _config_fingerprint(config, yaml_path),
+                    "config_fingerprint": _config_fingerprint_helper(
+                        config, yaml_path, _REPO_ROOT
+                    ),
                     "execution": {
                         "success": False,
                         "duration_ms": 0.0,

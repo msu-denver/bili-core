@@ -259,7 +259,7 @@ class AttackInjector:
 
         attack_executor = MASExecutor(patched_config)
         attack_executor.initialize()
-        mas_result = attack_executor.run()
+        mas_result = attack_executor.run(save_results=False)
 
         if tracker is not None:
             # Observe each agent using the available result data

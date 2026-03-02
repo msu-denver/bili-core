@@ -282,3 +282,10 @@ bili/aether/tests/baseline/results/**/*.json
 bili/aether/tests/injection/results/**/*.json
 bili/aether/tests/injection/results/**/*.csv
 bili/aether/tests/injection/results/**/*.ndjson
+
+# Stray MASExecutor result files (root-level, from runs with save_results=True and no log_dir)
+simple_chain_*.json
+hierarchical_voting_*.json
+supervisor_moderation_*.json
+consensus_network_*.json
+custom_escalation_*.json
