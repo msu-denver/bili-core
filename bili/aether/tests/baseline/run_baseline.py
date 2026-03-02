@@ -71,6 +71,12 @@ from bili.aether.tests.baseline.prompts.baseline_prompts import (  # noqa: E402 
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _config_fingerprint(config, yaml_path: str) -> dict:
+    """Thin wrapper that forwards to the shared helper with the module _REPO_ROOT."""
+    return _config_fingerprint_helper(config, yaml_path, _REPO_ROOT)
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -118,7 +124,7 @@ def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) ->
         "prompt_category": prompt.category,
         "prompt_text": prompt.text,
         "mas_id": config.mas_id,
-        "config_fingerprint": _config_fingerprint_helper(config, yaml_path, _REPO_ROOT),
+        "config_fingerprint": _config_fingerprint(config, yaml_path),
         "execution": {
             "success": result.success,
             "duration_ms": result.total_execution_time_ms,
@@ -254,9 +260,7 @@ def main() -> None:
                     "prompt_category": prompt.category,
                     "prompt_text": prompt.text,
                     "mas_id": config.mas_id,
-                    "config_fingerprint": _config_fingerprint_helper(
-                        config, yaml_path, _REPO_ROOT
-                    ),
+                    "config_fingerprint": _config_fingerprint(config, yaml_path),
                     "execution": {
                         "success": False,
                         "duration_ms": 0.0,
