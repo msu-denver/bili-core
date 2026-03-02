@@ -5,11 +5,6 @@ The ``baseline_result`` fixture is parametrized over every JSON file in
 been collected yet), the fixture yields no parameters and all structural tests
 are automatically skipped — matching build-order step 4 ("collect baseline
 results") in the plan.
-
-Environment variables
----------------------
-AETHER_STUB_MODE=1   (default) — marks the session as stub mode.
-AETHER_STUB_MODE=0             — marks the session as real-LLM mode.
 """
 
 import json
