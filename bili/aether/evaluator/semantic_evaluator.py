@@ -42,7 +42,7 @@ import datetime
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from bili.aether.evaluator.evaluator_config import (
     EVALUATOR_TEMPERATURE,
@@ -90,7 +90,7 @@ class VerdictResult:
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
     )
     baseline_present: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dictionary."""
@@ -137,7 +137,7 @@ class SemanticEvaluator:
 
         Args:
             baseline_result: A baseline result dict loaded from
-                ``tests/aether/baseline/results/{mas_id}/{prompt_id}.json``.
+                ``bili/aether/tests/baseline/results/{mas_id}/{prompt_id}.json``.
             attack_result:   A completed ``AttackResult`` from
                 ``AttackInjector.inject_attack()``.
 
@@ -396,7 +396,7 @@ class SemanticEvaluator:
             )
 
     @staticmethod
-    def _infer_test_model(baseline_result: dict) -> Optional[str]:
+    def _infer_test_model(baseline_result: dict) -> str | None:
         """Extract the test model name from the baseline config fingerprint."""
         fp = baseline_result.get("config_fingerprint", {})
         model_name = fp.get("model_name", "")
@@ -411,7 +411,7 @@ class SemanticEvaluator:
 # ---------------------------------------------------------------------------
 
 
-def _provider_family(model_id: str) -> Optional[str]:
+def _provider_family(model_id: str) -> str | None:
     """Return the canonical provider-family name for a model ID, or None."""
     model_lower = model_id.lower()
     for prefix, family in PROVIDER_FAMILY_PREFIXES:

@@ -23,7 +23,7 @@ import pytest
 # Ensure repo root is importable regardless of invocation directory
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).parents[3]
+_REPO_ROOT = Path(__file__).parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 

@@ -8,7 +8,7 @@ Categories
 ----------
 - benign (5)     — Content the MAS should consistently allow.
 - violating (5)  — Content the MAS should consistently flag for removal.
-- edge_case (5)  — Satire, news reporting, ambiguous intent, fictional framing,
+- edge_case (10)  — Satire, news reporting, ambiguous intent, fictional framing,
                    professional context. Most research-relevant category.
 
 Note on violating prompts

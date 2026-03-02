@@ -49,7 +49,7 @@ baselines for injection test comparison — they carry no semantic content.
 
 ```bash
 # From repo root
-python tests/aether/baseline/run_baseline.py --stub
+python bili/aether/tests/baseline/run_baseline.py --stub
 ```
 
 Results are stored with `"stub_mode": true` and `"semantic_tier": "skipped"`.
@@ -61,7 +61,7 @@ Results are stored with `"stub_mode": true` and `"semantic_tier": "skipped"`.
 ```bash
 # Ensure API credentials are set in scripts/development/secrets (container)
 # or in your shell environment, then:
-python tests/aether/baseline/run_baseline.py
+python bili/aether/tests/baseline/run_baseline.py
 ```
 
 This runs 20 prompts × 5 MAS configs = 100 executions and writes
@@ -70,7 +70,7 @@ This runs 20 prompts × 5 MAS configs = 100 executions and writes
 To restrict to specific configs or prompts:
 
 ```bash
-python tests/aether/baseline/run_baseline.py \
+python bili/aether/tests/baseline/run_baseline.py \
     --configs bili/aether/config/examples/simple_chain.yaml \
     --prompts benign_001 edge_003
 ```
@@ -81,10 +81,10 @@ python tests/aether/baseline/run_baseline.py \
 
 ```bash
 # From repo root — runs against result files already in results/
-python -m pytest tests/aether/baseline/ -v
+python -m pytest bili/aether/tests/baseline/ -v
 
 # Or from the baseline directory (uses local pytest.ini):
-cd tests/aether/baseline
+cd bili/aether/tests/baseline
 python -m pytest -v
 ```
 

@@ -8,18 +8,18 @@ Usage
 -----
 Stub mode (no LLM calls — for structural verification):
 
-    python tests/aether/baseline/run_baseline.py --stub
+    python bili/aether/tests/baseline/run_baseline.py --stub
 
 Real LLM mode (requires API credentials in environment):
 
-    python tests/aether/baseline/run_baseline.py
+    python bili/aether/tests/baseline/run_baseline.py
 
 The five MAS configs used are:
     simple_chain, hierarchical_voting, supervisor_moderation,
     consensus_network, custom_escalation
 
 Results are written to:
-    tests/aether/baseline/results/{mas_id}/{prompt_id}.json
+    bili/aether/tests/baseline/results/{mas_id}/{prompt_id}.json
 """
 
 import argparse
@@ -34,7 +34,7 @@ from pathlib import Path
 # Path setup — ensure repo root is on sys.path regardless of cwd
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).parents[3]
+_REPO_ROOT = Path(__file__).parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -48,7 +48,7 @@ from bili.aether.config.loader import (  # noqa: E402  pylint: disable=wrong-imp
 from bili.aether.runtime.executor import (  # noqa: E402  pylint: disable=wrong-import-position
     MASExecutor,
 )
-from tests.aether.baseline.prompts.baseline_prompts import (  # noqa: E402  pylint: disable=wrong-import-position
+from bili.aether.tests.baseline.prompts.baseline_prompts import (  # noqa: E402  pylint: disable=wrong-import-position
     BASELINE_PROMPTS,
     BaselinePrompt,
 )
