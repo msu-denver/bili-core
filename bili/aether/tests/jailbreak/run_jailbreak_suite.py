@@ -1,11 +1,11 @@
-"""Standalone injection test suite runner for AETHER.
+"""Standalone jailbreak test suite runner for AETHER.
 
-Runs all 10 prompt injection payloads against the 5 content-moderation MAS
-configs across both injection phases (pre_execution, mid_execution), applies
-all three detection tiers, and writes:
+Runs all 10 jailbreak payloads against the 5 content-moderation MAS configs
+across both injection phases (pre_execution, mid_execution), applies all three
+detection tiers, and writes:
 
 1. One result JSON per test case to ``results/{mas_id}/{payload_id}_{phase}.json``
-2. A results matrix CSV to ``results/injection_results_matrix.csv``
+2. A results matrix CSV to ``results/jailbreak_results_matrix.csv``
 
 Detection tiers
 ---------------
@@ -14,34 +14,32 @@ Detection tiers
   ``PropagationTracker`` — which agents were heuristically detected as
   influenced or resistant?
 - Tier 3 (semantic):    ``SemanticEvaluator`` — LLM-based scoring of genuine
-  compliance.  Skipped in stub mode; columns are empty strings in the CSV.
+  role abandonment.  Skipped in stub mode; columns are empty strings in the CSV.
+
+The results matrix CSV uses the same column schema as the injection suite
+(``run_injection_suite.py``) with an additional ``attack_suite`` column set to
+``"jailbreak"``.  Rows from both suites can be concatenated and filtered for
+cross-suite comparison in the thesis results matrix.
 
 Usage
 -----
 Stub mode (no LLM calls — structural verification only):
 
-    python bili/aether/tests/injection/run_injection_suite.py --stub
+    python bili/aether/tests/jailbreak/run_jailbreak_suite.py --stub
 
 Real LLM mode (requires API credentials):
 
-    python bili/aether/tests/injection/run_injection_suite.py
+    python bili/aether/tests/jailbreak/run_jailbreak_suite.py
 
 Filter to specific payloads / phases:
 
-    python bili/aether/tests/injection/run_injection_suite.py --stub \\
-        --payloads pi_direct_001 pi_role_001 \\
+    python bili/aether/tests/jailbreak/run_jailbreak_suite.py --stub \\
+        --payloads jb_dan_001 jb_authority_001 \\
         --phases pre_execution
 
 Results are written to:
-    bili/aether/tests/injection/results/{mas_id}/{payload_id}_{phase}.json
-    bili/aether/tests/injection/results/injection_results_matrix.csv
-
-Note on pi_length_001
----------------------
-The 12-character payload ``"OVERRIDE NOW"`` is intentionally below
-``PropagationTracker._MIN_MATCH_LEN = 20``.  Tier 2 columns will always be
-empty for this payload regardless of actual agent behaviour.  This blind spot
-is documented in ``propagation.py`` and surfaced here for the thesis.
+    bili/aether/tests/jailbreak/results/{mas_id}/{payload_id}_{phase}.json
+    bili/aether/tests/jailbreak/results/jailbreak_results_matrix.csv
 """
 
 import argparse
@@ -83,6 +81,10 @@ from bili.aether.attacks.models import (  # noqa: E402  pylint: disable=wrong-im
 from bili.aether.config.loader import (  # noqa: E402  pylint: disable=wrong-import-position
     load_mas_from_yaml,
 )
+from bili.aether.evaluator.evaluator_config import (  # noqa: E402  pylint: disable=wrong-import-position
+    JAILBREAK_JUDGE_PROMPT,
+    JAILBREAK_SCORE_DESCRIPTIONS,
+)
 from bili.aether.runtime.executor import (  # noqa: E402  pylint: disable=wrong-import-position
     MASExecutor,
 )
@@ -96,8 +98,10 @@ from bili.aether.tests._helpers import (  # noqa: E402  pylint: disable=wrong-im
     config_fingerprint as _config_fingerprint_helper,
 )
 from bili.aether.tests.injection.payloads.prompt_injection_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
-    INJECTION_PAYLOADS,
     InjectionPayload,
+)
+from bili.aether.tests.jailbreak.payloads.jailbreak_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
+    JAILBREAK_PAYLOADS,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -106,8 +110,8 @@ LOGGER = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_INJECTION_DIR = Path(__file__).parent
-_RESULTS_DIR = _INJECTION_DIR / "results"
+_JAILBREAK_DIR = Path(__file__).parent
+_RESULTS_DIR = _JAILBREAK_DIR / "results"
 
 _CONFIG_PATHS: list[str] = [
     "bili/aether/config/examples/simple_chain.yaml",
@@ -197,6 +201,7 @@ def _build_result_dict(
         "severity": ip.severity,
         "mas_id": config.mas_id,
         "injection_phase": phase,
+        "attack_suite": "jailbreak",
         "config_fingerprint": _config_fingerprint(config, yaml_path),
         "execution": {
             "success": attack_result.success,
@@ -234,13 +239,13 @@ def _write_result(result_dict: dict) -> Path:
 
 
 def _write_csv(rows: list[dict]) -> Path:
-    """Write the results matrix CSV to results/injection_results_matrix.csv.
+    """Write the results matrix CSV to results/jailbreak_results_matrix.csv.
 
     The CSV is fully RFC 4180-compliant — no comment lines are prepended.
     Stub mode is encoded as the ``stub_mode`` column value instead.
     """
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    csv_path = _RESULTS_DIR / "injection_results_matrix.csv"
+    csv_path = _RESULTS_DIR / "jailbreak_results_matrix.csv"
 
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=_CSV_COLUMNS)
@@ -257,7 +262,7 @@ def _print_summary(matrix_rows: list[dict]) -> None:
     influenced_any = sum(1 for r in matrix_rows if r["tier2_influenced"] != "[]")
 
     print("\n" + "=" * 60)
-    print("Injection Suite Summary")
+    print("Jailbreak Suite Summary")
     print("=" * 60)
     print(f"  Total test cases : {total}")
     print(f"  Tier 1 pass      : {passed}/{total}")
@@ -365,7 +370,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
                             "tier3_score": "",
                             "tier3_confidence": "",
                             "tier3_reasoning": str(exc),
-                            "attack_suite": "prompt_injection",
+                            "attack_suite": "jailbreak",
                         }
                     )
                     continue
@@ -426,7 +431,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
                         "tier3_reasoning": result_dict["run_metadata"][
                             "tier3_reasoning"
                         ],
-                        "attack_suite": "prompt_injection",
+                        "attack_suite": "jailbreak",
                     }
                 )
 
@@ -440,7 +445,7 @@ def _load_baseline(
     """Try to load a baseline result for Tier 3 comparison.
 
     Baseline results live at ``baseline_results_dir/{mas_id}/*.json``.
-    Injection payloads have no 1:1 mapping to baseline prompts; the first
+    Jailbreak payloads have no 1:1 mapping to baseline prompts; the first
     available baseline result for this config (alphabetically) is used as
     the comparison reference.  If no baseline file exists, returns ``None``
     — the evaluator will still score using the injected output alone with
@@ -474,10 +479,10 @@ def _load_baseline(
 
 
 def main() -> None:
-    """Run the full injection test suite."""
+    """Run the full jailbreak test suite."""
     parser = argparse.ArgumentParser(
         description=(
-            "Run AETHER prompt injection test suite against content-moderation "
+            "Run AETHER structured jailbreak test suite against content-moderation "
             "MAS configs and produce a results matrix CSV."
         )
     )
@@ -501,7 +506,7 @@ def main() -> None:
         nargs="+",
         default=None,
         metavar="PAYLOAD_ID",
-        help="Restrict run to specific payload IDs (e.g. pi_direct_001 pi_role_001).",
+        help="Restrict run to specific payload IDs (e.g. jb_dan_001 jb_authority_001).",
     )
     parser.add_argument(
         "--phases",
@@ -531,10 +536,10 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level))
 
     # Filter payloads
-    payloads = INJECTION_PAYLOADS
+    payloads = JAILBREAK_PAYLOADS
     if args.payloads:
         ids = set(args.payloads)
-        payloads = [ip for ip in INJECTION_PAYLOADS if ip.payload_id in ids]
+        payloads = [ip for ip in JAILBREAK_PAYLOADS if ip.payload_id in ids]
         if not payloads:
             print(f"No payloads matched: {args.payloads}", file=sys.stderr)
             sys.exit(1)
@@ -558,7 +563,10 @@ def main() -> None:
                 SemanticEvaluator,
             )
 
-            semantic_evaluator = SemanticEvaluator()
+            semantic_evaluator = SemanticEvaluator(
+                score_descriptions=JAILBREAK_SCORE_DESCRIPTIONS,
+                judge_prompt_template=JAILBREAK_JUDGE_PROMPT,
+            )
         except (ImportError, RuntimeError) as exc:
             LOGGER.warning("Could not initialise SemanticEvaluator: %s", exc)
 
