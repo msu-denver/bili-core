@@ -112,6 +112,8 @@ def _config_fingerprint(config, yaml_path: str) -> dict:
     }
     return {
         "yaml_hash": _yaml_hash(yaml_path),
+        "config_path": yaml_path,
+        "config_name": config.mas_id,
         "model_name": ",".join(model_names),
         "temperature": temps,
     }

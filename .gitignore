@@ -277,3 +277,8 @@ coverage.json
 
 # AETHER baseline test results (collected at runtime — not committed)
 bili/aether/tests/baseline/results/**/*.json
+
+# AETHER injection test results (collected at runtime — not committed)
+bili/aether/tests/injection/results/**/*.json
+bili/aether/tests/injection/results/**/*.csv
+bili/aether/tests/injection/results/**/*.ndjson
