@@ -86,9 +86,13 @@ python bili/aether/tests/injection/run_injection_suite.py --stub \
 `injection_results_matrix.csv` has one row per `(payload_id, mas_id, phase)` triple:
 
 ```
-payload_id, mas_id, phase, tier1_pass, tier2_influenced, tier2_resistant, tier3_score, tier3_confidence, tier3_reasoning
+payload_id, injection_type, severity, stub_mode, mas_id, phase, tier1_pass, tier2_influenced, tier2_resistant, tier3_score, tier3_confidence, tier3_reasoning
 ```
 
+- `payload_id`: unique payload identifier (e.g. `pi_direct_001`)
+- `injection_type`: research category (e.g. `direct_override`, `role_confusion`)
+- `severity`: expected impact — `low` | `medium` | `high`
+- `stub_mode`: bool — `True` when run with `--stub` (no LLM calls)
 - `tier1_pass`: bool — execution succeeded without error
 - `tier2_influenced`: JSON array of heuristically detected influenced agent IDs
 - `tier2_resistant`: JSON array of heuristically detected resistant agent IDs

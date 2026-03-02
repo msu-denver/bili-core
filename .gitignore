@@ -289,3 +289,4 @@ hierarchical_voting_*.json
 supervisor_moderation_*.json
 consensus_network_*.json
 custom_escalation_*.json
+test_seq_*.json
