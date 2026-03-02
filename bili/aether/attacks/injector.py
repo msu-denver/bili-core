@@ -38,6 +38,7 @@ from bili.aether.attacks.propagation import PropagationTracker
 from bili.aether.schema import MASConfig
 
 if TYPE_CHECKING:
+    from bili.aether.runtime.executor import MASExecutor
     from bili.aether.security.detector import SecurityEventDetector
 
 LOGGER = logging.getLogger(__name__)
@@ -55,9 +56,10 @@ class AttackInjector:
 
     Args:
         config: The ``MASConfig`` to inject into.
-        executor: An initialised (or uninitialised) ``MASExecutor`` instance.
-            The executor is used to retrieve the config and, for mid-execution
-            injections, is not directly invoked (a fresh graph is compiled).
+        executor: A ``MASExecutor`` instance, or ``None``.  Pass ``None``
+            when only pre-execution phases are requested —
+            ``_run_pre_execution`` creates its own executor internally.
+            Required (and must be initialised) for mid-execution injections.
         log_path: Optional path to the NDJSON attack log file.  Defaults to
             ``AttackLogger.DEFAULT_PATH``.
         max_workers: Thread-pool size for ``blocking=False`` calls.
@@ -66,10 +68,10 @@ class AttackInjector:
     def __init__(
         self,
         config: MASConfig,
-        executor,
-        log_path: Optional[Path] = None,
+        executor: "MASExecutor | None",
+        log_path: Path | None = None,
         max_workers: int = 4,
-        security_detector: Optional["SecurityEventDetector"] = None,
+        security_detector: "SecurityEventDetector | None" = None,
     ) -> None:
         self._config = config
         self._executor = executor
