@@ -77,9 +77,6 @@ if str(_REPO_ROOT) not in sys.path:
 from bili.aether.attacks.injector import (  # noqa: E402  pylint: disable=wrong-import-position
     AttackInjector,
 )
-from bili.aether.attacks.logger import (  # noqa: E402  pylint: disable=wrong-import-position
-    AttackLogger,
-)
 from bili.aether.attacks.models import (  # noqa: E402  pylint: disable=wrong-import-position
     InjectionPhase,
 )
@@ -303,7 +300,6 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments
     attack_log_path = config_results_dir / "attack_log.ndjson"
     sec_log_path = config_results_dir / "security_events.ndjson"
 
-    attack_logger = AttackLogger(log_path=attack_log_path)
     sec_logger = SecurityEventLogger(log_path=sec_log_path)
     detector = SecurityEventDetector(
         logger=sec_logger,
