@@ -153,9 +153,14 @@ def build_add_persona_and_summary_node(persona: str, **_kwargs):
             # Use ** to unpack the dictionary for .format()
             message_content = safe_format(message_content, **template_dict)
 
+        # Inject historical context (previous session summaries) if present.
+        # This is kept separate from the rolling summary to prevent recursive nesting.
+        if "historical_context" in state and state["historical_context"]:
+            message_content += f"\n\n{state['historical_context']}"
+
         if "summary" in state and state["summary"]:
             message_content += (
-                f"\n\nSummary of the conversation so far:\n{state['summary']}"
+                f"\n\nSummary of the current conversation:\n{state['summary']}"
             )
         system_message = SystemMessage(content=message_content)
 
