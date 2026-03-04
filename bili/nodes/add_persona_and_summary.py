@@ -111,7 +111,9 @@ def build_add_persona_and_summary_node(persona: str, **_kwargs):
 
         :param state: The current state of the conversation represented as a dictionary.
             It must include a "messages" key containing a list of message objects, and
-            optionally, a "summary" key with the current summary of the conversation.
+            optionally, a "summary" key with the rolling summary of the current conversation,
+            and a "historical_context" key with previous session summaries (injected into
+            the system prompt but never modified by trim_summarize).
         :return: An updated state dictionary with modified messages reflecting the addition
             of the persona and conversation summary.
         :rtype: dict
