@@ -151,4 +151,4 @@ result = execute_mas(config, {"messages": [HumanMessage(content="Analyze this po
 print(result.get_summary())
 ```
 
-See [compiler.md](compiler.md) for `MASExecutor` options and [configuration.md](configuration.md) for field references.
+See [compiler.md](compiler.md) for the `MASExecutor` execution API and [configuration.md](configuration.md) for field references.

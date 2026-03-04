@@ -143,7 +143,8 @@ Now inject an adversarial payload, track how it propagates through the agent cha
 
 The script below is ready to run as-is. It targets `content_reviewer` with a prompt injection using `PRE_EXECUTION` phase, meaning the payload is baked into the config before compilation — the cleanest and most reproducible injection mode.
 
-Save this file to your working directory:
+Save this file to your working directory (or create `run_attack.py` in any text
+editor and paste the contents directly):
 
 ```bash
 cat > run_attack.py << 'EOF'

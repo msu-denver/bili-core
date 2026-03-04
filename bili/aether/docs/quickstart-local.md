@@ -155,7 +155,9 @@ Duration will be higher than cloud API runs — local inference adds latency at 
 
 ## 6. Run the security test
 
-Save the script below. It is the same as `run_attack_llm.py` from the cloud quickstart, pointing at the local config:
+Save the script below (or create `run_attack_local.py` in any text editor and
+paste the contents directly). It is the same as `run_attack_llm.py` from the
+cloud quickstart, pointing at the local config:
 
 ```bash
 cat > run_attack_local.py << 'EOF'

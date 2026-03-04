@@ -158,7 +158,9 @@ Notice that duration is now measured in seconds rather than milliseconds — rea
 
 ## 5. Run the security test
 
-Save the attack script below. It is identical to the stub version except it points at `simple_chain_llm.yaml`:
+Save the attack script below (or create `run_attack_llm.py` in any text editor
+and paste the contents directly). It is identical to the stub version except it
+points at `simple_chain_llm.yaml`:
 
 ```bash
 cat > run_attack_llm.py << 'EOF'
