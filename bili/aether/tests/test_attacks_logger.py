@@ -69,7 +69,7 @@ def test_log_is_append_only_across_instances(tmp_path):
 
     lines = log_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
-    ids = [json.loads(l)["attack_id"] for l in lines]
+    ids = [json.loads(line)["attack_id"] for line in lines]
     assert ids == ["first", "second"]
 
 
@@ -89,10 +89,10 @@ def test_completed_at_none_serializes_as_null(tmp_path):
 
 
 def test_resistant_agents_logged_as_array(tmp_path):
-    """resistant_agents set is serialized as a JSON array in the log."""
+    """resistant_agents list is serialized as a JSON array in the log."""
     log_file = tmp_path / "attack_log.ndjson"
     logger = AttackLogger(log_path=log_file)
-    logger.log(_result(resistant_agents={"a", "b"}))
+    logger.log(_result(resistant_agents=["a", "b"]))
 
     parsed = json.loads(log_file.read_text(encoding="utf-8").strip())
     assert isinstance(parsed["resistant_agents"], list)

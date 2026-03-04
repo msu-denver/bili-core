@@ -32,7 +32,7 @@ result = injector.inject_attack(
 
 print(result.propagation_path)    # ['reviewer', 'policy_checker', 'output_formatter']
 print(result.influenced_agents)   # ['reviewer', 'output_formatter']
-print(result.resistant_agents)    # {'policy_checker'}
+print(result.resistant_agents)    # ['policy_checker']
 ```
 
 ## Attack Types
@@ -115,8 +115,8 @@ tail -n 20 bili/aether/attacks/logs/attack_log.ndjson | python -m json.tool
 grep '"prompt_injection"' bili/aether/attacks/logs/attack_log.ndjson | python -m json.tool
 ```
 
-Note: `resistant_agents` is stored as a Python `set` but serialised as a JSON array in
-the log file (standard Pydantic v2 behaviour for set fields).
+Note: `resistant_agents` is a `list[str]` stored in insertion order for deterministic
+serialisation. `model_dump(mode="json")` produces a JSON array.
 
 ## Architecture
 

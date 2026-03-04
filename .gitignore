@@ -54,6 +54,7 @@ cover/
 
 # AETHER test artifacts
 test_seq_*.json
+simple_chain_*.json
 
 # Translations
 *.mo
@@ -286,3 +287,8 @@ bili/aether/tests/injection/results/**/*.ndjson
 # Stray MASExecutor result files (root-level, from runs with save_results=True and no log_dir)
 # Pattern matches {mas_id}_{8-hex-chars}.json produced by MASExecutor's default naming.
 *_????????.json
+
+# Logs
+
+bili/aether/logs/*
+bili/aether/attacks/logs/*
