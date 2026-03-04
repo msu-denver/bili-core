@@ -38,7 +38,7 @@ def make_attack_result(**kwargs) -> AttackResult:
         "completed_at": _NOW,
         "propagation_path": [],
         "influenced_agents": [],
-        "resistant_agents": set(),
+        "resistant_agents": [],
         "success": True,
         "error": None,
     }

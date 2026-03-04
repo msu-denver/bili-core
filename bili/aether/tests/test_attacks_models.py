@@ -113,13 +113,11 @@ def test_attack_result_serializes_to_valid_json():
     assert parsed["mas_id"] == "test_mas"
 
 
-def test_attack_result_resistant_agents_serializes_as_list():
-    """Pydantic serialises set[str] resistant_agents as a JSON list."""
-    result = _result(resistant_agents={"agent_b", "agent_c"})
+def test_attack_result_resistant_agents_preserves_order():
+    """resistant_agents list preserves insertion order through serialisation."""
+    result = _result(resistant_agents=["agent_b", "agent_c"])
     dumped = result.model_dump(mode="json")
-    # Pydantic v2 serialises sets as lists
-    assert isinstance(dumped["resistant_agents"], list)
-    assert set(dumped["resistant_agents"]) == {"agent_b", "agent_c"}
+    assert dumped["resistant_agents"] == ["agent_b", "agent_c"]
 
 
 def test_attack_result_completed_at_none_serializes_as_null():
