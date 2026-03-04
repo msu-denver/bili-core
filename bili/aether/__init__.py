@@ -25,7 +25,7 @@ Author: MSU Denver Cybersecurity Research
 License: MIT
 """
 
-__version__ = "0.0.7"
+__version__ = "1.0.0"
 __author__ = "MSU Denver Cybersecurity Research, MonRos3"
 
 # Lazy attribute mapping: name -> (relative_module, attribute_name)

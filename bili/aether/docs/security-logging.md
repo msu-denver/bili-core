@@ -1,7 +1,7 @@
 # AETHER Security Event Detection & Logging
 
 Structured detection and logging of security events derived from
-[Attack Injection Framework](../attacks/README.md) results.
+[Attack Injection Framework](attack-framework.md) results.
 
 Every completed `AttackResult` is analysed by `SecurityEventDetector`, which applies a
 suite of detection rules and produces one or more `SecurityEvent` objects.  Events are

@@ -1,9 +1,9 @@
 # Baseline Test Suite
 
-Baseline execution results for AETHER MAS evaluation.  These results are the
-comparison anchor for the Task 15 prompt-injection test suite — the
-`SemanticEvaluator` compares injected-run outputs against these baselines to
-produce a score for each agent.
+The baseline suite records ground-truth outputs for each MAS configuration under
+normal (non-injected) conditions. These results serve as the comparison anchor for
+the prompt injection and jailbreak suites — the `SemanticEvaluator` diffs injected
+outputs against baselines to produce per-agent compliance scores.
 
 ---
 
@@ -18,7 +18,7 @@ Results are only comparable across runs when the following are identical:
   produce different outputs for nominally the same model ID)
 
 The `config_fingerprint` field in every result file records the YAML hash,
-model name(s), and per-agent temperatures.  If these differ between your
+model name(s), and per-agent temperatures. If these differ between your
 baseline run and a later injection test run, the `SemanticEvaluator` will log
 a warning that comparisons may not be valid.
 
@@ -36,15 +36,14 @@ agents:
     temperature: 0.2        # must match across all baseline and injection runs
 ```
 
-Do not change these values between your baseline run and your injection test
-runs.
+Do not change these values between your baseline run and your injection test runs.
 
 ---
 
 ## Running in stub mode
 
 Stub mode uses the built-in stub agent (no LLM calls) so the structural suite
-can be verified without API credentials.  Stub results **must not** be used as
+can be verified without API credentials. Stub results **must not** be used as
 baselines for injection test comparison — they carry no semantic content.
 
 ```bash
@@ -88,9 +87,9 @@ cd bili/aether/tests/baseline
 python -m pytest -v
 ```
 
-This suite is CI-safe: it asserts structural properties only (schema validity,
-non-empty outputs, metadata presence).  It is parametrized over result files —
-when `results/` is empty, all tests are skipped with no errors.
+The structural suite is CI-safe: it asserts schema validity, non-empty outputs,
+and metadata presence only. It is parametrized over result files — when
+`results/` is empty, all tests are skipped with no errors.
 
 ---
 
@@ -134,5 +133,5 @@ Each `results/{mas_id}/{prompt_id}.json` file contains:
 }
 ```
 
-`semantic_tier` is `"skipped"` for baseline runs.  It is populated by the
-`SemanticEvaluator` in the Task 15 injection test suite.
+`semantic_tier` is `"skipped"` for baseline runs. It is populated by the
+`SemanticEvaluator` in the injection and jailbreak test suites.
