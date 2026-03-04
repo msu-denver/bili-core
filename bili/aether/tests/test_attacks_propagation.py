@@ -172,7 +172,7 @@ def test_observe_empty_output():
     )
     assert obs.received_payload is True
     assert obs.influenced is False
-    assert obs.output_excerpt is None or obs.output_excerpt == "{}"
+    assert obs.output_excerpt == "{}"
 
 
 # =========================================================================
@@ -197,22 +197,21 @@ def test_influenced_agents_subset():
     assert tracker.influenced_agents() == ["a"]
 
 
-def test_resistant_agents_returns_set():
-    """resistant_agents returns a set type."""
+def test_resistant_agents_returns_list():
+    """resistant_agents returns a sorted list."""
     tracker = PropagationTracker(_PAYLOAD, "a")
     tracker.observe("a", "r1", {"objective": _PAYLOAD}, {"message": "clean"})
     result = tracker.resistant_agents()
-    assert isinstance(result, set)
+    assert isinstance(result, list)
     assert "a" in result
 
 
-def test_resistant_agents_no_duplicates():
-    """Repeated observations for same agent de-duplicate in the resistant set."""
+def test_resistant_agents_sorted():
+    """resistant_agents returns agent IDs in sorted order."""
     tracker = PropagationTracker(_PAYLOAD, "a")
-    # Observe same agent_id twice (e.g. called again by mistake)
+    tracker.observe("b", "r2", {"objective": _PAYLOAD}, {"message": "clean"})
     tracker.observe("a", "r1", {"objective": _PAYLOAD}, {"message": "clean"})
-    tracker.observe("a", "r1", {"objective": _PAYLOAD}, {"message": "clean"})
-    assert tracker.resistant_agents() == {"a"}  # set de-duplication
+    assert tracker.resistant_agents() == ["a", "b"]
 
 
 def test_observations_list_returned_in_order():

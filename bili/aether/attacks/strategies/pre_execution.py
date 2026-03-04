@@ -13,6 +13,7 @@ for research payloads that may exceed the normal limit.
 
 import copy
 import logging
+from typing import Callable
 
 from bili.aether.schema import MASConfig
 
@@ -35,7 +36,7 @@ def inject_prompt_injection(
     Returns:
         Deep-copied MASConfig with the target agent's objective modified.
     """
-    return _patch_agent_objective(config, agent_id, f"{payload}\n\n{{}}")
+    return _patch_agent_objective(config, agent_id, lambda obj: f"{payload}\n\n{obj}")
 
 
 def inject_memory_poisoning(
@@ -54,8 +55,11 @@ def inject_memory_poisoning(
     Returns:
         Deep-copied MASConfig with the target agent's objective modified.
     """
-    poisoned = f"[Context from prior session: {payload}]\n\n{{}}"
-    return _patch_agent_objective(config, agent_id, poisoned)
+    return _patch_agent_objective(
+        config,
+        agent_id,
+        lambda obj: f"[Context from prior session: {payload}]\n\n{obj}",
+    )
 
 
 def inject_agent_impersonation(
@@ -115,7 +119,7 @@ def inject_bias_inheritance(
         Deep-copied MASConfig with the target agent's objective modified.
     """
     return _patch_agent_objective(
-        config, agent_id, f"{{}}\n\n[Guiding principle: {payload}]"
+        config, agent_id, lambda obj: f"{obj}\n\n[Guiding principle: {payload}]"
     )
 
 
@@ -125,15 +129,17 @@ def inject_bias_inheritance(
 
 
 def _patch_agent_objective(
-    config: MASConfig, agent_id: str, template: str
+    config: MASConfig, agent_id: str, make_objective: Callable[[str], str]
 ) -> MASConfig:
     """Return a deep copy of *config* with the target agent's objective patched.
 
     Args:
         config: Original MASConfig.
         agent_id: Target agent identifier.
-        template: Format string with a single ``{}`` placeholder that is
-            replaced with the agent's original objective.
+        make_objective: Callable that receives the agent's original objective
+            and returns the new objective string.  Using a callable (rather
+            than a format-string template) prevents format-injection crashes
+            when the payload contains ``{`` or ``}`` characters.
 
     Raises:
         ValueError: If *agent_id* is not found in *config.agents*.
@@ -144,7 +150,7 @@ def _patch_agent_objective(
     for agent in new_config.agents:
         if agent.agent_id == agent_id:
             found = True
-            new_objective = template.format(agent.objective)
+            new_objective = make_objective(agent.objective)
             agent = agent.model_copy(update={"objective": new_objective})
             LOGGER.debug("_patch_agent_objective: patched objective for %s", agent_id)
         new_agents.append(agent)

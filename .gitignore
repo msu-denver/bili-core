@@ -54,6 +54,7 @@ cover/
 
 # AETHER test artifacts
 test_seq_*.json
+simple_chain_*.json
 
 # Translations
 *.mo
@@ -277,3 +278,8 @@ coverage.json
 
 # AETHER baseline test results (collected at runtime — not committed)
 bili/aether/tests/baseline/results/**/*.json
+
+# Logs
+
+bili/aether/logs/*
+bili/aether/attacks/logs/*
