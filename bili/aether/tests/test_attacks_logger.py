@@ -69,7 +69,7 @@ def test_log_is_append_only_across_instances(tmp_path):
 
     lines = log_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
-    ids = [json.loads(l)["attack_id"] for l in lines]
+    ids = [json.loads(line)["attack_id"] for line in lines]
     assert ids == ["first", "second"]
 
 

@@ -54,6 +54,7 @@ cover/
 
 # AETHER test artifacts
 test_seq_*.json
+simple_chain_*.json
 
 # Translations
 *.mo
@@ -274,3 +275,8 @@ secrets
 
 
 coverage.json
+
+# Logs
+
+bili/aether/logs/*
+bili/aether/attacks/logs/*

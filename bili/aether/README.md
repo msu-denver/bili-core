@@ -1293,6 +1293,6 @@ MIT License - See LICENSE file in the repository root.
 
 ---
 
-**AETHER Version:** 0.1.0
+**AETHER Version:** 0.0.7
 **Last Updated:** February 5, 2026
 **bili-core Version Required:** ≥3.0.0
