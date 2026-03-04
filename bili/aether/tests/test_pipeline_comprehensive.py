@@ -260,7 +260,7 @@ class TestCrossModelCompatibility:
         assert updated.model_name == "gpt-3.5-turbo"
 
         # Pipeline inner agent specs are NOT affected (they're dicts, not AgentSpec)
-        inner_a = updated.pipeline.nodes[0].agent_spec
+        inner_a = updated.pipeline.nodes[0].agent_spec  # pylint: disable=no-member
         assert inner_a is not None
         # Inner agents don't have model_name set (stubs)
         assert inner_a.get("model_name") is None
@@ -293,7 +293,7 @@ class TestCrossModelCompatibility:
         updated = agent.model_copy(update={"model_name": "gpt-3.5-turbo"})
 
         # Inner model is unchanged
-        inner = updated.pipeline.nodes[0].agent_spec
+        inner = updated.pipeline.nodes[0].agent_spec  # pylint: disable=no-member
         assert inner["model_name"] == "claude-3-opus"
 
 

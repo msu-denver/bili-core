@@ -342,7 +342,7 @@ class TestAgentSpecPipelineIntegration:
         """AgentSpec with pipeline field set."""
         agent = _simple_agent(pipeline=_simple_pipeline())
         assert agent.pipeline is not None
-        assert len(agent.pipeline.nodes) == 2
+        assert len(agent.pipeline.nodes) == 2  # pylint: disable=no-member
 
     def test_model_name_pipeline_coexistence_warns(self):
         """Setting both model_name and pipeline should issue a warning."""
@@ -488,8 +488,13 @@ class TestPipelineSerialization:
         data = agent.model_dump()
         restored = AgentSpec(**data)
         assert restored.pipeline is not None
-        assert len(restored.pipeline.nodes) == len(agent.pipeline.nodes)
-        assert restored.pipeline.get_entry_node() == agent.pipeline.get_entry_node()
+        assert len(restored.pipeline.nodes) == len(  # pylint: disable=no-member
+            agent.pipeline.nodes
+        )
+        assert (
+            restored.pipeline.get_entry_node()  # pylint: disable=no-member
+            == agent.pipeline.get_entry_node()
+        )
 
     def test_agent_without_pipeline_round_trip(self):
         """AgentSpec without pipeline survives dict round-trip."""
