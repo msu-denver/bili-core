@@ -119,7 +119,7 @@ Expected output:
 * Status:        SUCCESS                                   *
 * Duration:      12.45 ms                                 *
 * Agents:        4                                         *
-* Messages:      3                                         *
+* Messages:      0                                         *
 *                                                          *
 * Agent Outputs:                                           *
 *   community_manager (community_manager):                *
