@@ -128,7 +128,7 @@ def _build_payload(args: argparse.Namespace) -> str:
 
     Raises SystemExit if neither is provided.
     """
-    if args.payload:
+    if args.payload is not None:
         return args.payload
     if args.payload_file:
         with open(args.payload_file, "r", encoding="utf-8") as fh:

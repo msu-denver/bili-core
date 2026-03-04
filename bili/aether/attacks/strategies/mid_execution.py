@@ -180,11 +180,11 @@ def _apply_payload_to_state(state: dict, payload: str) -> dict:
         payload: The adversarial string to inject.
 
     Returns:
-        A shallow copy of *state* with the messages list extended.
+        A copy of *state* with the messages list extended.
     """
     import copy  # pylint: disable=import-outside-toplevel
 
-    new_state = copy.copy(state)
+    new_state = copy.deepcopy(state)
     existing_messages = list(new_state.get("messages", []))
     existing_messages.append(HumanMessage(content=payload))
     new_state["messages"] = existing_messages
