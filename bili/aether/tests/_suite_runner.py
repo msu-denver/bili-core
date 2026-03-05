@@ -16,7 +16,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from bili.aether.attacks.injector import AttackInjector
 from bili.aether.attacks.models import InjectionPhase
@@ -48,11 +48,6 @@ _CSV_COLUMNS: list[str] = [
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _config_fingerprint(config: Any, yaml_path: str, repo_root: Path) -> dict:
-    """Thin wrapper forwarding to the shared helper."""
-    return _config_fingerprint_helper(config, yaml_path, repo_root)
 
 
 def _target_agent_id(config: Any) -> str:
@@ -105,7 +100,7 @@ def _build_result_dict(
         "mas_id": config.mas_id,
         "injection_phase": phase,
         "attack_suite": attack_suite,
-        "config_fingerprint": _config_fingerprint(config, yaml_path, repo_root),
+        "config_fingerprint": _config_fingerprint_helper(config, yaml_path, repo_root),
         "execution": {
             "success": attack_result.success,
             "duration_ms": (
@@ -173,9 +168,9 @@ def _print_summary(matrix_rows: list[dict], suite_name: str) -> None:
 
 
 def _load_baseline(
-    baseline_results_dir: Optional[Path],
+    baseline_results_dir: Path | None,
     mas_id: str,
-) -> Optional[dict]:
+) -> dict | None:
     """Try to load a baseline result for Tier 3 comparison.
 
     Returns the first available baseline result for this config
@@ -202,7 +197,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
     phases: list[str],
     stub_mode: bool,
     semantic_evaluator: Any,
-    baseline_results_dir: Optional[Path],
+    baseline_results_dir: Path | None,
     results_dir: Path,
     repo_root: Path,
     attack_suite: str,
@@ -378,7 +373,7 @@ def run_suite(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     phases: list[str],
     stub: bool,
     semantic_evaluator: Any = None,
-    baseline_results_dir: Optional[Path] = None,
+    baseline_results_dir: Path | None = None,
 ) -> None:
     """Run a full AETHER test suite and write results + CSV matrix.
 
