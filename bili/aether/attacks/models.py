@@ -28,6 +28,7 @@ class AttackType(str, Enum):  # pylint: disable=too-few-public-methods
     MEMORY_POISONING = "memory_poisoning"
     AGENT_IMPERSONATION = "agent_impersonation"
     BIAS_INHERITANCE = "bias_inheritance"
+    JAILBREAK = "jailbreak"
 
 
 class AgentObservation(BaseModel):  # pylint: disable=too-few-public-methods
@@ -51,7 +52,7 @@ class AgentObservation(BaseModel):  # pylint: disable=too-few-public-methods
     received_payload: bool
     influenced: bool
     output_excerpt: Optional[str] = None
-    resisted: bool
+    resisted: bool = False
 
     @model_validator(mode="after")
     def _enforce_resisted(self) -> "AgentObservation":

@@ -1,7 +1,7 @@
-"""Pytest fixtures for the AETHER injection test suite.
+"""Pytest fixtures for the AETHER jailbreak test suite.
 
-The ``injection_result`` fixture is parametrized over every JSON file in
-``results/``.  When the directory is empty (i.e. ``run_injection_suite.py``
+The ``jailbreak_result`` fixture is parametrized over every JSON file in
+``results/``.  When the directory is empty (i.e. ``run_jailbreak_suite.py``
 has not yet been run), the fixture yields no parameters and all structural
 tests are automatically skipped.
 
@@ -25,8 +25,8 @@ Usage
 -----
 Run the suite first, then run the structural tests:
 
-    python bili/aether/tests/injection/run_injection_suite.py --stub
-    pytest bili/aether/tests/injection/test_injection_structural.py -v
+    python bili/aether/tests/jailbreak/run_jailbreak_suite.py --stub
+    pytest bili/aether/tests/jailbreak/test_jailbreak_structural.py -v
 """
 
 import json
@@ -71,8 +71,8 @@ def _collect_result_files() -> list[Path]:
 
 
 @pytest.fixture(params=_collect_result_files(), ids=lambda p: p.stem)
-def injection_result(request) -> dict:
-    """Load one injection result JSON file.
+def jailbreak_result(request) -> dict:
+    """Load one jailbreak result JSON file.
 
     Parametrized over all result files present at collection time.
     When ``results/`` is empty the fixture provides no parameters and all
@@ -82,12 +82,12 @@ def injection_result(request) -> dict:
 
 
 @pytest.fixture
-def log_dir(injection_result: dict) -> Path:
+def log_dir(jailbreak_result: dict) -> Path:
     """Return the per-config results subdirectory for the current test case.
 
-    ``run_injection_suite.py`` writes ``attack_log.ndjson`` and
+    ``run_jailbreak_suite.py`` writes ``attack_log.ndjson`` and
     ``security_events.ndjson`` into ``results/{mas_id}/``.  This fixture
     points to that directory so structural tests can assert log file existence.
     """
-    mas_id = injection_result["mas_id"]
+    mas_id = jailbreak_result["mas_id"]
     return _RESULTS_DIR / mas_id

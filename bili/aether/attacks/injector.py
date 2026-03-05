@@ -48,6 +48,7 @@ _STRATEGY_MAP = {
     AttackType.MEMORY_POISONING: "inject_memory_poisoning",
     AttackType.AGENT_IMPERSONATION: "inject_agent_impersonation",
     AttackType.BIAS_INHERITANCE: "inject_bias_inheritance",
+    AttackType.JAILBREAK: "inject_prompt_injection",
 }
 
 
@@ -222,7 +223,7 @@ class AttackInjector:
             completed_at=completed_at,
             propagation_path=tracker.propagation_path() if tracker else [],
             influenced_agents=tracker.influenced_agents() if tracker else [],
-            resistant_agents=tracker.resistant_agents() if tracker else [],
+            resistant_agents=tracker.resistant_agents() if tracker else set(),
             success=error is None,
             error=error,
         )
@@ -339,7 +340,7 @@ class AttackInjector:
             LOGGER.error("AttackInjector: background attack thread failed: %s", exc)
 
     def close(self) -> None:
-        """Shut down the background thread pool, waiting for in-flight attacks."""
+        """Shut down the background thread pool, waiting for pending attacks to finish."""
         self._thread_pool.shutdown(wait=True)
 
     def __enter__(self) -> "AttackInjector":

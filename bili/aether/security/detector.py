@@ -170,7 +170,7 @@ def payload_pattern_rule(
 
     Reads *attack_log_path* (NDJSON) and counts entries that share both
     ``result.mas_id`` and ``result.target_agent_id``.  If the count is
-    **≥ 2**, emits one ``ATTACK_DETECTED`` event at severity ``"medium"``
+    **≥ 2**, emits one ``REPEATED_TARGET`` event at severity ``"medium"``
     to flag the repeated-targeting pattern.
 
     Returns ``[]`` (never raises) when *attack_log_path* is ``None``,
