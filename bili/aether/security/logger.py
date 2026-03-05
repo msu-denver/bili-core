@@ -87,7 +87,15 @@ class SecurityEventLogger:
         events = []
         with self._lock:
             if self._log_path.exists():
-                for raw_line in self._log_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    raw_text = self._log_path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    LOGGER.warning(
+                        "SecurityEventLogger.export_json: could not read log file: %s",
+                        exc,
+                    )
+                    raw_text = ""
+                for raw_line in raw_text.splitlines():
                     stripped = raw_line.strip()
                     if not stripped:
                         continue

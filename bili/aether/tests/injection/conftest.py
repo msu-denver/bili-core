@@ -30,7 +30,6 @@ Run the suite first, then run the structural tests:
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -59,8 +58,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _RESULTS_DIR = Path(__file__).parent / "results"
-
-STUB_MODE: bool = os.getenv("AETHER_STUB_MODE", "1") == "1"
 
 
 def _collect_result_files() -> list[Path]:

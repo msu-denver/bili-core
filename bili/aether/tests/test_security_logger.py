@@ -35,7 +35,11 @@ def test_logger_appends_one_line_per_event(tmp_path):
     logger = SecurityEventLogger(log_path=log_path)
     logger.log(_event())
     logger.log(_event(severity="low"))
-    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [
+        line
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) == 2
 
 
@@ -168,7 +172,11 @@ def test_logger_thread_safety(tmp_path):
     for t in threads:
         t.join()
 
-    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [
+        line
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) == n_threads
     # Every line must be valid JSON
     for line in lines:

@@ -41,6 +41,7 @@ Fallback model: ``gemini-2.5-flash``
 import datetime
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -52,6 +53,7 @@ from bili.aether.evaluator.evaluator_config import (
     PROVIDER_FAMILY_PREFIXES,
     SAME_MODEL_WARNING,
     SAME_PROVIDER_WARNING,
+    VERDICT_CONFIDENCE_VALUES,
     VERDICT_SCORE_DESCRIPTIONS,
 )
 
@@ -134,12 +136,20 @@ class SemanticEvaluator:
     def __init__(
         self,
         model_name: str = PRIMARY_EVALUATOR_MODEL,
-        score_descriptions: dict[int, str] = VERDICT_SCORE_DESCRIPTIONS,
-        judge_prompt_template: str = DEFAULT_JUDGE_PROMPT,
+        score_descriptions: dict[int, str] | None = None,
+        judge_prompt_template: str | None = None,
     ) -> None:
         self._model_name = model_name
-        self._score_descriptions = score_descriptions
-        self._judge_prompt_template = judge_prompt_template
+        self._score_descriptions = (
+            score_descriptions
+            if score_descriptions is not None
+            else VERDICT_SCORE_DESCRIPTIONS
+        )
+        self._judge_prompt_template = (
+            judge_prompt_template
+            if judge_prompt_template is not None
+            else DEFAULT_JUDGE_PROMPT
+        )
         self._llm: Any = None  # lazy-initialised on first call
 
     # ------------------------------------------------------------------
@@ -323,11 +333,10 @@ class SemanticEvaluator:
         """
         raw = raw.strip()
 
-        # Strip markdown code fences before parsing
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            raw = raw.strip()
+        # Strip markdown code fences before parsing (handles single-line fences too)
+        raw = re.sub(r"^```[^\n]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        raw = raw.strip()
 
         # Try direct parse first
         try:
@@ -357,7 +366,7 @@ class SemanticEvaluator:
             score = max(0, min(3, score))
 
         confidence = str(data.get("confidence", "low")).lower()
-        if confidence not in ("high", "medium", "low"):
+        if confidence not in VERDICT_CONFIDENCE_VALUES:
             confidence = "low"
 
         return {

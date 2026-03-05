@@ -1,4 +1,4 @@
-"""Shared utilities for AETHER test runners.
+"""Shared utilities and constants for AETHER test runners.
 
 Centralises the three helper functions that were previously copy-pasted
 across ``run_baseline.py`` and ``run_injection_suite.py``:
@@ -16,6 +16,20 @@ they can be called from any runner regardless of working directory.
 
 import hashlib
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Shared constants
+# ---------------------------------------------------------------------------
+
+#: MAS config YAML paths used by both the injection and jailbreak suites.
+#: Paths are relative to the repo root.
+CONFIG_PATHS: list[str] = [
+    "bili/aether/config/examples/simple_chain.yaml",
+    "bili/aether/config/examples/hierarchical_voting.yaml",
+    "bili/aether/config/examples/supervisor_moderation.yaml",
+    "bili/aether/config/examples/consensus_network.yaml",
+    "bili/aether/config/examples/custom_escalation.yaml",
+]
 
 
 def find_repo_root() -> Path:

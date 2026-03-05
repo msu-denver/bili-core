@@ -35,7 +35,7 @@ def inject_prompt_injection(
     Returns:
         Deep-copied MASConfig with the target agent's objective modified.
     """
-    return _patch_agent_objective(config, agent_id, f"{payload}\n\n{{}}")
+    return _patch_agent_objective(config, agent_id, prefix=f"{payload}\n\n")
 
 
 def inject_memory_poisoning(
@@ -54,8 +54,9 @@ def inject_memory_poisoning(
     Returns:
         Deep-copied MASConfig with the target agent's objective modified.
     """
-    poisoned = f"[Context from prior session: {payload}]\n\n{{}}"
-    return _patch_agent_objective(config, agent_id, poisoned)
+    return _patch_agent_objective(
+        config, agent_id, prefix=f"[Context from prior session: {payload}]\n\n"
+    )
 
 
 def inject_agent_impersonation(
@@ -115,7 +116,7 @@ def inject_bias_inheritance(
         Deep-copied MASConfig with the target agent's objective modified.
     """
     return _patch_agent_objective(
-        config, agent_id, f"{{}}\n\n[Guiding principle: {payload}]"
+        config, agent_id, suffix=f"\n\n[Guiding principle: {payload}]"
     )
 
 
@@ -125,15 +126,20 @@ def inject_bias_inheritance(
 
 
 def _patch_agent_objective(
-    config: MASConfig, agent_id: str, template: str
+    config: MASConfig, agent_id: str, prefix: str = "", suffix: str = ""
 ) -> MASConfig:
     """Return a deep copy of *config* with the target agent's objective patched.
+
+    The new objective is constructed as ``prefix + original_objective + suffix``.
+    Using explicit concatenation instead of ``str.format()`` ensures payloads
+    containing ``{`` or ``}`` characters (e.g. JSON, Python code) do not
+    cause ``KeyError`` or ``ValueError``.
 
     Args:
         config: Original MASConfig.
         agent_id: Target agent identifier.
-        template: Format string with a single ``{}`` placeholder that is
-            replaced with the agent's original objective.
+        prefix: String prepended to the agent's original objective.
+        suffix: String appended to the agent's original objective.
 
     Raises:
         ValueError: If *agent_id* is not found in *config.agents*.
@@ -144,7 +150,7 @@ def _patch_agent_objective(
     for agent in new_config.agents:
         if agent.agent_id == agent_id:
             found = True
-            new_objective = template.format(agent.objective)
+            new_objective = prefix + agent.objective + suffix
             agent = agent.model_copy(update={"objective": new_objective})
             LOGGER.debug("_patch_agent_objective: patched objective for %s", agent_id)
         new_agents.append(agent)
