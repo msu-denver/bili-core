@@ -111,7 +111,9 @@ def build_add_persona_and_summary_node(persona: str, **_kwargs):
 
         :param state: The current state of the conversation represented as a dictionary.
             It must include a "messages" key containing a list of message objects, and
-            optionally, a "summary" key with the current summary of the conversation.
+            optionally, a "summary" key with the rolling summary of the current conversation,
+            and a "historical_context" key with previous session summaries (injected into
+            the system prompt but never modified by trim_summarize).
         :return: An updated state dictionary with modified messages reflecting the addition
             of the persona and conversation summary.
         :rtype: dict
@@ -153,9 +155,16 @@ def build_add_persona_and_summary_node(persona: str, **_kwargs):
             # Use ** to unpack the dictionary for .format()
             message_content = safe_format(message_content, **template_dict)
 
+        # Inject historical context (previous session summaries) if present.
+        # This is kept separate from the rolling summary to prevent recursive nesting.
+        if "historical_context" in state and state["historical_context"]:
+            message_content += (
+                f"\n\nPrevious session context:\n{state['historical_context']}"
+            )
+
         if "summary" in state and state["summary"]:
             message_content += (
-                f"\n\nSummary of the conversation so far:\n{state['summary']}"
+                f"\n\nSummary of the current conversation:\n{state['summary']}"
             )
         system_message = SystemMessage(content=message_content)
 

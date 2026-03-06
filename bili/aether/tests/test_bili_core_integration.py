@@ -132,7 +132,7 @@ class TestInheritance:
         agent = _make_agent(system_prompt=None)
         result = apply_inheritance(agent)
         assert result.system_prompt is not None
-        assert "research" in result.system_prompt.lower()
+        assert "research" in result.system_prompt.lower()  # pylint: disable=no-member
 
     def test_system_prompt_not_overridden(self):
         agent = _make_agent(system_prompt="My custom prompt")
@@ -148,12 +148,16 @@ class TestInheritance:
     def test_tools_deduplicated(self):
         agent = _make_agent(tools=["serp_api_tool"])
         result = apply_inheritance(agent)
-        assert result.tools.count("serp_api_tool") == 1
+        assert result.tools.count("serp_api_tool") == 1  # pylint: disable=no-member
 
     def test_tools_registry_first(self):
         agent = _make_agent(tools=["mock_tool"])
         result = apply_inheritance(agent)
-        assert result.tools.index("serp_api_tool") < result.tools.index("mock_tool")
+        assert result.tools.index(
+            "serp_api_tool"
+        ) < result.tools.index(  # pylint: disable=no-member
+            "mock_tool"
+        )
 
     def test_temperature_inherited_when_default(self):
         agent = _make_agent(temperature=None)
