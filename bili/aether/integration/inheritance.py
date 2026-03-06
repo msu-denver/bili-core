@@ -8,15 +8,18 @@ take priority over inherited defaults.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from bili.aether.schema import AgentSpec, MASConfig
 
 LOGGER = logging.getLogger(__name__)
 
 
 def apply_inheritance(
-    agent: Any,
-    mas_config: Optional[Any] = None,
-) -> Any:
+    agent: "AgentSpec",
+    mas_config: Optional["MASConfig"] = None,
+) -> "AgentSpec":
     """Apply bili-core inheritance to a single agent.
 
     If ``agent.inherit_from_bili_core`` is ``False``, returns the agent
@@ -83,9 +86,9 @@ def apply_inheritance(
 
 
 def apply_inheritance_to_all(
-    agents: List[Any],
-    mas_config: Optional[Any] = None,
-) -> List[Any]:
+    agents: List["AgentSpec"],
+    mas_config: Optional["MASConfig"] = None,
+) -> List["AgentSpec"]:
     """Apply inheritance to a list of agents.
 
     Returns:

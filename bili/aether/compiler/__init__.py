@@ -17,6 +17,7 @@ Usage::
     graph = compiled.compile_graph()
 """
 
+from bili.aether.runtime.context import RuntimeContext
 from bili.aether.schema import MASConfig
 from bili.aether.validation import validate_mas
 
@@ -40,7 +41,11 @@ __all__ = [
 ]
 
 
-def compile_mas(config: MASConfig) -> CompiledMAS:
+def compile_mas(
+    config: MASConfig,
+    custom_node_registry: dict | None = None,
+    runtime_context: RuntimeContext | None = None,
+) -> CompiledMAS:
     """Validate and compile a ``MASConfig`` into a ``CompiledMAS``.
 
     Runs the static validation engine first.  If validation produces
@@ -49,6 +54,14 @@ def compile_mas(config: MASConfig) -> CompiledMAS:
 
     Args:
         config: A ``MASConfig`` instance.
+        custom_node_registry: Optional mapping of node names to factory
+            callables.  Checked before the global
+            ``GRAPH_NODE_REGISTRY`` when resolving pipeline
+            ``node_type`` references.
+        runtime_context: Optional :class:`RuntimeContext` holding named
+            services injected into pipeline node builders as ``**kwargs``
+            (lowest priority — overridden by parent agent config and
+            node-specific config).
 
     Returns:
         A :class:`CompiledMAS` containing the uncompiled ``StateGraph``,
@@ -61,4 +74,8 @@ def compile_mas(config: MASConfig) -> CompiledMAS:
     if not result.valid:
         raise ValueError(f"MAS validation failed:\n{result}")
 
-    return GraphBuilder(config).build()
+    return GraphBuilder(
+        config,
+        custom_node_registry=custom_node_registry,
+        runtime_context=runtime_context,
+    ).build()

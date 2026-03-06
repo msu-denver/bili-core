@@ -408,13 +408,14 @@ def test_validate_mas_convenience_function():
 
 
 def test_all_example_yamls_pass_validation():
-    """All 5 example YAML configs pass validation with no errors."""
+    """All 6 example YAML configs pass validation with no errors."""
     example_files = [
         "simple_chain.yaml",
         "hierarchical_voting.yaml",
         "supervisor_moderation.yaml",
         "consensus_network.yaml",
         "custom_escalation.yaml",
+        "pipeline_agents.yaml",
     ]
 
     for fname in example_files:
@@ -423,3 +424,429 @@ def test_all_example_yamls_pass_validation():
         result = validate_mas(config)
 
         assert result.valid is True, f"{fname} failed validation: {result.errors}"
+
+
+# =========================================================================
+# PIPELINE VALIDATION TESTS
+# =========================================================================
+
+
+def _simple_pipeline():
+    """Create a minimal valid pipeline for testing."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    return PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="step_a",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_a",
+                    "role": "step_a",
+                    "objective": "First step in pipeline processing",
+                },
+            ),
+            PipelineNodeSpec(
+                node_id="step_b",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_b",
+                    "role": "step_b",
+                    "objective": "Second step in pipeline processing",
+                },
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(from_node="step_a", to_node="step_b"),
+            PipelineEdgeSpec(from_node="step_b", to_node="END"),
+        ],
+    )
+
+
+def test_pipeline_valid_no_errors():
+    """A well-formed pipeline agent produces no pipeline errors."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("a", pipeline=_simple_pipeline())],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
+    # Should not have pipeline-specific errors
+    assert not any("pipeline" in e.lower() for e in result.errors)
+
+
+def test_pipeline_cycle_detection_error():
+    """E4: Cycle within pipeline edges triggers an error."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    pipeline = PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="a",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_a",
+                    "role": "looper",
+                    "objective": "First node in a cycle for testing",
+                },
+            ),
+            PipelineNodeSpec(
+                node_id="b",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_b",
+                    "role": "looper",
+                    "objective": "Second node in a cycle for testing",
+                },
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(from_node="a", to_node="b"),
+            PipelineEdgeSpec(from_node="b", to_node="a"),
+            # Still has END edge to pass Pydantic validation
+            PipelineEdgeSpec(from_node="b", to_node="END"),
+        ],
+    )
+
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("cyclic_agent", pipeline=pipeline)],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is False
+    assert any(
+        "circular" in e.lower() and "pipeline" in e.lower() for e in result.errors
+    )
+
+
+def test_pipeline_no_cycle_passes():
+    """E4 inverse: Linear pipeline has no cycle error."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("linear_agent", pipeline=_simple_pipeline())],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("circular" in e.lower() for e in result.errors)
+
+
+def test_pipeline_unreachable_node_warning():
+    """W11: Unreachable pipeline node triggers a warning."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    pipeline = PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="main",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "main_inner",
+                    "role": "main",
+                    "objective": "Main pipeline node that goes to END",
+                },
+            ),
+            PipelineNodeSpec(
+                node_id="island",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "island_inner",
+                    "role": "island",
+                    "objective": "Unreachable pipeline node for testing",
+                },
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(from_node="main", to_node="END"),
+            # island → END exists but island is never reached from entry
+            PipelineEdgeSpec(from_node="island", to_node="END"),
+        ],
+    )
+
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("agent_with_island", pipeline=pipeline)],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
+    assert any("island" in w and "unreachable" in w.lower() for w in result.warnings)
+
+
+def test_pipeline_all_nodes_reachable_no_warning():
+    """W11 inverse: All-reachable pipeline has no unreachable warning."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("reachable_agent", pipeline=_simple_pipeline())],
+    )
+
+    result = validate_mas(config)
+
+    assert not any(
+        "unreachable" in w.lower() and "pipeline" in w.lower() for w in result.warnings
+    )
+
+
+def test_pipeline_all_stubs_warning():
+    """W12: Pipeline with only stub agents (no model_name) triggers warning."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("stubs_only", pipeline=_simple_pipeline())],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
+    assert any("stub" in w.lower() for w in result.warnings)
+
+
+def test_pipeline_with_model_no_stubs_warning():
+    """W12 inverse: Pipeline agent with model_name on inner node has no stub warning."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    pipeline = PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="llm_node",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_llm",
+                    "role": "processor",
+                    "objective": "Process data with an actual LLM call",
+                    "model_name": "gpt-4",
+                },
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(from_node="llm_node", to_node="END"),
+        ],
+    )
+
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("has_model", pipeline=pipeline)],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("stub" in w.lower() for w in result.warnings)
+
+
+def test_pipeline_registry_nodes_no_stub_warning():
+    """W12: Pipeline with only registry nodes (no agent type) skips stub check."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    pipeline = PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="persona",
+                node_type="add_persona_and_summary",
+            ),
+            PipelineNodeSpec(
+                node_id="react",
+                node_type="react_agent",
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(from_node="persona", to_node="react"),
+            PipelineEdgeSpec(from_node="react", to_node="END"),
+        ],
+    )
+
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("registry_only", pipeline=pipeline)],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("stub" in w.lower() for w in result.warnings)
+
+
+def test_pipeline_conditional_without_fallback_warning():
+    """W13: Conditional edges without unconditional fallback triggers warning."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    pipeline = PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="decision",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "decider",
+                    "role": "decider",
+                    "objective": "Make a routing decision based on context",
+                },
+            ),
+            PipelineNodeSpec(
+                node_id="path_a",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "handler_a",
+                    "role": "handler",
+                    "objective": "Handle the positive case for testing",
+                },
+            ),
+        ],
+        edges=[
+            # Only conditional, no unconditional fallback from 'decision'
+            PipelineEdgeSpec(
+                from_node="decision",
+                to_node="path_a",
+                condition="state.score > 0.5",
+            ),
+            PipelineEdgeSpec(from_node="path_a", to_node="END"),
+            # decision also needs an END path to pass Pydantic
+            PipelineEdgeSpec(
+                from_node="decision",
+                to_node="END",
+                condition="state.score <= 0.5",
+            ),
+        ],
+    )
+
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("conditional_agent", pipeline=pipeline)],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
+    assert any(
+        "conditional" in w.lower() and "fallback" in w.lower() for w in result.warnings
+    )
+
+
+def test_pipeline_conditional_with_fallback_no_warning():
+    """W13 inverse: Conditional edges with unconditional fallback has no warning."""
+    from bili.aether.schema.pipeline_spec import (
+        PipelineEdgeSpec,
+        PipelineNodeSpec,
+        PipelineSpec,
+    )
+
+    pipeline = PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="decision",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "decider",
+                    "role": "decider",
+                    "objective": "Make a routing decision for testing",
+                },
+            ),
+            PipelineNodeSpec(
+                node_id="path_a",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "handler_a",
+                    "role": "handler",
+                    "objective": "Handle the positive path in pipeline",
+                },
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(
+                from_node="decision",
+                to_node="path_a",
+                condition="state.score > 0.5",
+            ),
+            # Unconditional fallback
+            PipelineEdgeSpec(from_node="decision", to_node="END"),
+            PipelineEdgeSpec(from_node="path_a", to_node="END"),
+        ],
+    )
+
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("safe_agent", pipeline=pipeline)],
+    )
+
+    result = validate_mas(config)
+
+    assert not any(
+        "conditional" in w.lower() and "fallback" in w.lower() for w in result.warnings
+    )
+
+
+def test_pipeline_agent_without_pipeline_no_pipeline_checks():
+    """Agents without pipelines should not trigger any pipeline warnings."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("normal_agent")],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("pipeline" in w.lower() for w in result.warnings)
+    assert not any("pipeline" in e.lower() for e in result.errors)
+
+
+def test_mixed_pipeline_and_non_pipeline_validation():
+    """MAS with both pipeline and non-pipeline agents validates correctly."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[
+            _agent("pipeline_agent", pipeline=_simple_pipeline()),
+            _agent("normal_agent"),
+        ],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
