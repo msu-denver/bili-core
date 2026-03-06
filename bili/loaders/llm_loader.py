@@ -462,6 +462,7 @@ def load_remote_gcp_vertex_model(
     response_schema=None,
     response_mime_type=None,
     additional_headers=None,
+    location=None,
 ):
     """
     Loads a remote GCP Vertex AI model with the specified configuration parameters.
@@ -488,6 +489,10 @@ def load_remote_gcp_vertex_model(
         Use for Priority PayGo: {"X-Vertex-AI-LLM-Shared-Request-Type": "priority"}
         Use for Provisioned Throughput: {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
     :type additional_headers: dict, optional
+    :param location: Optional. GCP region for the Vertex AI endpoint.
+        Defaults to us-central1. Use "global" for models that require it
+        (e.g., gemini-3-flash-preview).
+    :type location: str, optional
     :return: An instance of the ChatVertexAI model initialized with the
              specified configuration.
     :rtype: ChatVertexAI
@@ -512,6 +517,8 @@ def load_remote_gcp_vertex_model(
         llm_config["response_schema"] = response_schema
     if additional_headers:
         llm_config["additional_headers"] = additional_headers
+    if location:
+        llm_config["location"] = location
 
     llm = ChatVertexAI(**llm_config)
 
