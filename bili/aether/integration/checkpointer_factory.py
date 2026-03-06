@@ -155,48 +155,44 @@ def _create_mongo_checkpointer(
 def _create_auto_checkpointer(
     config: dict[str, Any] = None, user_id: str | None = None
 ) -> Any:
-    """Auto-detect checkpointer using bili-core's ``get_checkpointer()``.
+    """Auto-detect checkpointer by checking environment variables.
 
     Forwards keep_last_n and user_id parameters if specified.
+    Mirrors the logic from bili.checkpointers.checkpointer_functions.get_checkpointer
+    but passes arguments correctly.
     """
     config = config or {}
     keep_last_n = config.get("keep_last_n", 5)
 
     try:
-        from bili.checkpointers.checkpointer_functions import (  # pylint: disable=import-outside-toplevel
-            get_checkpointer,
+        import os  # pylint: disable=import-outside-toplevel
+
+        # If POSTGRES_CONNECTION_STRING exists, use PostgresSaver
+        if os.getenv("POSTGRES_CONNECTION_STRING"):
+            from bili.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
+                get_pg_checkpointer,
+            )
+
+            LOGGER.debug("Auto-detected Postgres checkpointer.")
+            return get_pg_checkpointer(keep_last_n=keep_last_n, user_id=user_id)
+
+        # If MONGO_CONNECTION_STRING exists, use MongoDBSaver
+        if os.getenv("MONGO_CONNECTION_STRING"):
+            from bili.checkpointers.mongo_checkpointer import (  # pylint: disable=import-outside-toplevel
+                get_mongo_checkpointer,
+            )
+
+            LOGGER.debug("Auto-detected Mongo checkpointer.")
+            return get_mongo_checkpointer(keep_last_n=keep_last_n, user_id=user_id)
+
+        # Fallback to in-memory
+        from bili.checkpointers.memory_checkpointer import (  # pylint: disable=import-outside-toplevel
+            QueryableMemorySaver,
         )
 
-        # Try passing both keep_last_n and user_id if supported
-        try:
-            checkpointer = get_checkpointer(
-                keep_last_n=keep_last_n, user_id=user_id
-            )  # pylint: disable=unexpected-keyword-arg
-            LOGGER.info(
-                "Auto-detected checkpointer: %s (keep_last_n=%d%s)",
-                type(checkpointer).__name__,
-                keep_last_n,
-                f", user_id={user_id}" if user_id else "",
-            )
-        except TypeError:
-            # Fall back to keep_last_n only if user_id not supported
-            try:
-                checkpointer = get_checkpointer(
-                    keep_last_n=keep_last_n
-                )  # pylint: disable=unexpected-keyword-arg
-                LOGGER.info(
-                    "Auto-detected checkpointer: %s (keep_last_n=%d, user_id not supported)",
-                    type(checkpointer).__name__,
-                    keep_last_n,
-                )
-            except TypeError:
-                # Fall back to no args if neither supported
-                checkpointer = get_checkpointer()
-                LOGGER.info(
-                    "Auto-detected checkpointer: %s (keep_last_n/user_id not supported)",
-                    type(checkpointer).__name__,
-                )
-        return checkpointer
+        LOGGER.debug("Auto-detected Memory checkpointer.")
+        return QueryableMemorySaver(user_id=user_id)
+
     except ImportError:
         LOGGER.warning(
             "bili.checkpointers.checkpointer_functions not available; "

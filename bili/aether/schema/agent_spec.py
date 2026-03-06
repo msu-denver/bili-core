@@ -5,11 +5,15 @@ Defines a domain-agnostic structure for individual agents in a multi-agent syste
 Agent roles and capabilities are free-form strings to support any use case.
 """
 
+import logging
+import warnings
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
 from .enums import OutputFormat
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AgentSpec(BaseModel):
@@ -243,6 +247,20 @@ class AgentSpec(BaseModel):
     )
 
     # =========================================================================
+    # PIPELINE (RICH AGENT SUB-GRAPHS)
+    # =========================================================================
+
+    pipeline: Optional["PipelineSpec"] = Field(
+        None,
+        description=(
+            "Optional internal node pipeline for this agent. When set, the agent "
+            "is compiled as a LangGraph sub-graph instead of a simple react agent. "
+            "Use 'bili_core_default' shorthand (via metadata) or define nodes/edges "
+            "explicitly. Backwards compatible: when absent, agent behaves as before."
+        ),
+    )
+
+    # =========================================================================
     # VALIDATION
     # =========================================================================
 
@@ -276,6 +294,56 @@ class AgentSpec(BaseModel):
                 )
         return self
 
+    @model_validator(mode="after")
+    def validate_pipeline_model_coexistence(self):
+        """Warn when both pipeline and model_name are set.
+
+        When an agent has a pipeline, model_name at the agent level becomes
+        metadata only — the actual models are configured on the pipeline's
+        internal nodes. This is a soft warning, not a hard failure.
+        """
+        if self.pipeline and self.model_name:
+            warnings.warn(
+                f"Agent '{self.agent_id}' has both 'pipeline' and 'model_name' set. "
+                "When pipeline is present, model_name at the agent level is treated "
+                "as metadata only. Models should be configured on pipeline nodes.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_pipeline_depth(self):
+        """Validate that pipeline nesting doesn't exceed max depth.
+
+        Prevents infinite recursion when pipeline nodes contain inline
+        agent specs that themselves have pipelines.
+        """
+        if self.pipeline:
+            self._check_pipeline_depth(self.pipeline, depth=1)
+        return self
+
+    @staticmethod
+    def _check_pipeline_depth(pipeline: "PipelineSpec", depth: int):
+        """Recursively check pipeline nesting depth."""
+        from .pipeline_spec import (  # pylint: disable=import-outside-toplevel
+            MAX_PIPELINE_DEPTH,
+            PipelineSpec,
+        )
+
+        if depth > MAX_PIPELINE_DEPTH:
+            raise ValueError(
+                f"Pipeline nesting depth exceeds maximum of {MAX_PIPELINE_DEPTH}. "
+                "Consider flattening the pipeline or using MAS-level agent orchestration."
+            )
+        for node in pipeline.nodes:
+            if node.agent_spec and isinstance(node.agent_spec, dict):
+                inner_pipeline = node.agent_spec.get("pipeline")
+                if inner_pipeline:
+                    # Inner pipeline is still a dict at validation time
+                    inner = PipelineSpec(**inner_pipeline)
+                    AgentSpec._check_pipeline_depth(inner, depth + 1)
+
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
@@ -295,3 +363,11 @@ class AgentSpec(BaseModel):
             f"role='{self.role}', "
             f"objective='{self.objective[:50]}...')"
         )
+
+
+# Resolve forward reference for PipelineSpec
+from .pipeline_spec import (  # noqa: E402  # pylint: disable=wrong-import-position
+    PipelineSpec,
+)
+
+AgentSpec.model_rebuild()

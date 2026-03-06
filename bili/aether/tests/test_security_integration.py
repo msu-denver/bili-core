@@ -234,7 +234,11 @@ def test_end_to_end_security_events_written_to_log(tmp_path):
             )
 
     assert sec_log.exists()
-    lines = [l for l in sec_log.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [
+        line
+        for line in sec_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) >= 1
     for line in lines:
         obj = json.loads(line)

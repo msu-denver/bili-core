@@ -74,7 +74,7 @@ def test_attack_detected_rule_propagation_path_in_details():
     result = _result(
         propagation_path=["agent_a", "agent_b"],
         influenced_agents=["agent_a"],
-        resistant_agents={"agent_b"},
+        resistant_agents=["agent_b"],
     )
     events = attack_detected_rule(result)
     details = events[0].details
@@ -124,13 +124,13 @@ def test_agent_compromised_rule_event_type():
 
 def test_agent_resisted_rule_empty_when_no_resistant():
     """agent_resisted_rule returns [] when no agents resisted."""
-    result = _result(resistant_agents=set())
+    result = _result(resistant_agents=[])
     assert agent_resisted_rule(result) == []
 
 
 def test_agent_resisted_rule_one_event_per_resistant_agent():
     """agent_resisted_rule emits one AGENT_RESISTED event per resistant agent."""
-    result = _result(resistant_agents={"agent_b", "agent_c"})
+    result = _result(resistant_agents=["agent_b", "agent_c"])
     events = agent_resisted_rule(result)
     assert len(events) == 2
     agent_ids = {e.affected_agent_id for e in events}
@@ -139,14 +139,14 @@ def test_agent_resisted_rule_one_event_per_resistant_agent():
 
 def test_agent_resisted_rule_severity_is_low():
     """All AGENT_RESISTED events have severity 'low'."""
-    result = _result(resistant_agents={"agent_b"})
+    result = _result(resistant_agents=["agent_b"])
     events = agent_resisted_rule(result)
     assert all(e.severity == "low" for e in events)
 
 
 def test_agent_resisted_rule_event_type():
     """All events from agent_resisted_rule have type AGENT_RESISTED."""
-    result = _result(resistant_agents={"agent_x"})
+    result = _result(resistant_agents=["agent_x"])
     events = agent_resisted_rule(result)
     assert all(e.event_type == SecurityEventType.AGENT_RESISTED for e in events)
 
@@ -339,7 +339,7 @@ def test_detector_detect_includes_compromised_events():
 def test_detector_detect_includes_resisted_events():
     """detect() includes AGENT_RESISTED events for resistant agents."""
     detector = SecurityEventDetector()
-    result = _result(resistant_agents={"agent_c"})
+    result = _result(resistant_agents=["agent_c"])
     events = detector.detect(result)
     resisted = [e for e in events if e.event_type == SecurityEventType.AGENT_RESISTED]
     assert len(resisted) == 1
@@ -406,7 +406,7 @@ def test_detector_detect_with_all_event_types(tmp_path):
         target_agent_id="agent_a",
         propagation_path=["agent_a", "agent_b"],
         influenced_agents=["agent_a"],
-        resistant_agents={"agent_b"},
+        resistant_agents=["agent_b"],
         success=True,
     )
     events = detector.detect(result)
@@ -431,7 +431,7 @@ def test_each_rule_returns_correct_event_type(rule_fn, expected_type):
     """Each rule function emits events of its own designated type (parametrized)."""
     result = _result(
         influenced_agents=["agent_a"],
-        resistant_agents={"agent_b"},
+        resistant_agents=["agent_b"],
         propagation_path=["agent_a", "agent_b"],
     )
     events = rule_fn(result)

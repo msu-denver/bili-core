@@ -4,6 +4,15 @@ Wraps the AETHER compiler and LangGraph execution pipeline to provide
 a structured ``MASExecutionResult`` with per-agent outputs, timing,
 communication statistics, and checkpoint metadata.
 
+Supports three execution modes:
+
+- **Synchronous** (``run()``): blocking execution, returns a result.
+- **Sync streaming** (``stream()``): yields ``StreamEvent`` objects
+  using LangGraph's synchronous ``.stream()`` method.
+- **Async streaming** (``astream()``): yields ``StreamEvent`` objects
+  using LangGraph's asynchronous ``.astream_events()`` method for
+  token-level granularity.
+
 Usage::
 
     from bili.aether.runtime.executor import MASExecutor, execute_mas
@@ -11,6 +20,16 @@ Usage::
     executor = MASExecutor(config, log_dir="logs")
     executor.initialize()
     result = executor.run({"messages": [HumanMessage(content="Hello")]})
+
+    # Synchronous streaming:
+    for event in executor.stream({"messages": [HumanMessage(content="Hi")]}):
+        if event.event_type == "token":
+            print(event.data["content"], end="", flush=True)
+
+    # Async streaming:
+    async for event in executor.astream({"messages": [HumanMessage(content="Hi")]}):
+        if event.event_type == "token":
+            print(event.data["content"], end="", flush=True)
 
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
@@ -22,18 +41,20 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
 
+from bili.aether.runtime.context import RuntimeContext
 from bili.aether.runtime.execution_result import (
     AgentExecutionResult,
     MASExecutionResult,
 )
+from bili.aether.runtime.streaming import StreamEvent, StreamEventType, StreamFilter
 from bili.aether.schema import MASConfig, WorkflowType
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MASExecutor:
+class MASExecutor:  # pylint: disable=too-many-instance-attributes
     """Executes a MAS configuration end-to-end and collects results.
 
     Attributes:
@@ -41,13 +62,15 @@ class MASExecutor:
         log_dir: Directory for logs and result files.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         config: MASConfig,
         log_dir: Optional[str] = None,
         validate_config: bool = True,
         user_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        custom_node_registry: Optional[Dict[str, Any]] = None,
+        runtime_context: Optional[RuntimeContext] = None,
     ) -> None:
         """Initialize the executor.
 
@@ -65,12 +88,19 @@ class MASExecutor:
             conversation_id: Optional conversation identifier for
                 multi-conversation support. Used with ``user_id`` to
                 construct unique thread_ids.
+            custom_node_registry: Optional mapping of node names to
+                factory callables for pipeline ``node_type`` resolution.
+                Checked before the global ``GRAPH_NODE_REGISTRY``.
+            runtime_context: Optional :class:`RuntimeContext` holding
+                named services injected into pipeline node builders.
         """
         self._config = config
         self._log_dir = log_dir or os.getcwd()
         self._validate_config = validate_config
         self._user_id = user_id
         self._conversation_id = conversation_id
+        self._custom_node_registry = custom_node_registry
+        self._runtime_context = runtime_context
         self._compiled_mas = None
         self._compiled_graph = None
 
@@ -108,7 +138,11 @@ class MASExecutor:
             compile_mas,
         )
 
-        self._compiled_mas = compile_mas(self._config)
+        self._compiled_mas = compile_mas(
+            self._config,
+            custom_node_registry=self._custom_node_registry,
+            runtime_context=self._runtime_context,
+        )
 
         # Create checkpointer with user_id if multi-tenant mode enabled
         checkpointer = None
@@ -236,6 +270,236 @@ class MASExecutor:
             result.save_to_file(result_path)
 
         return result
+
+    # ------------------------------------------------------------------
+    # Streaming execution
+    # ------------------------------------------------------------------
+
+    def stream(  # pylint: disable=too-many-locals
+        self,
+        input_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None,
+        stream_filter: Optional[StreamFilter] = None,
+    ) -> Generator[StreamEvent, None, None]:
+        """Stream execution events synchronously from the MAS graph.
+
+        Uses LangGraph's ``.stream()`` with ``stream_mode="updates"``
+        to yield node-level state updates wrapped as ``StreamEvent``
+        objects.
+
+        Args:
+            input_data: Initial state overrides.
+            thread_id: Thread ID for checkpointed execution.
+            stream_filter: Optional filter to select event types.
+
+        Yields:
+            ``StreamEvent`` objects for each graph execution step.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before stream()."
+            )
+
+        execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        effective_filter = stream_filter or StreamFilter()
+        initial_state = self._build_initial_state(input_data)
+
+        invoke_config: Dict[str, Any] = {}
+        if self._config.checkpoint_enabled:
+            effective_thread_id = self._construct_thread_id(thread_id, execution_id)
+            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+
+        # Emit run_start
+        start_event = StreamEvent(
+            event_type=StreamEventType.RUN_START,
+            data={"execution_id": execution_id, "mas_id": self._config.mas_id},
+            run_id=execution_id,
+        )
+        if effective_filter.accepts(start_event):
+            yield start_event
+
+        try:
+            for chunk in self._compiled_graph.stream(
+                initial_state,
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                # chunk is a dict {node_name: state_update}
+                for node_name, state_update in chunk.items():
+                    node_event = StreamEvent(
+                        event_type=StreamEventType.NODE_END,
+                        data={"state_update": state_update},
+                        node_name=node_name,
+                        agent_id=self._resolve_agent_for_node(node_name),
+                        run_id=execution_id,
+                    )
+                    if effective_filter.accepts(node_event):
+                        yield node_event
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("Streaming execution failed: %s", exc, exc_info=True)
+            err_event = StreamEvent(
+                event_type=StreamEventType.ERROR,
+                data={"error": str(exc)},
+                run_id=execution_id,
+            )
+            if effective_filter.accepts(err_event):
+                yield err_event
+
+        # Emit run_end
+        end_event = StreamEvent(
+            event_type=StreamEventType.RUN_END,
+            data={"execution_id": execution_id},
+            run_id=execution_id,
+        )
+        if effective_filter.accepts(end_event):
+            yield end_event
+
+    async def astream(
+        self,
+        input_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None,
+        stream_filter: Optional[StreamFilter] = None,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Stream execution events asynchronously with token granularity.
+
+        Uses LangGraph's ``.astream_events(version="v2")`` to yield
+        fine-grained events including token-level LLM output wrapped
+        as ``StreamEvent`` objects.
+
+        Args:
+            input_data: Initial state overrides.
+            thread_id: Thread ID for checkpointed execution.
+            stream_filter: Optional filter to select event types.
+
+        Yields:
+            ``StreamEvent`` objects including token-level events.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before astream()."
+            )
+
+        execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        effective_filter = stream_filter or StreamFilter()
+        initial_state = self._build_initial_state(input_data)
+
+        invoke_config: Dict[str, Any] = {}
+        if self._config.checkpoint_enabled:
+            effective_thread_id = self._construct_thread_id(thread_id, execution_id)
+            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+
+        # Emit run_start
+        start_event = StreamEvent(
+            event_type=StreamEventType.RUN_START,
+            data={"execution_id": execution_id, "mas_id": self._config.mas_id},
+            run_id=execution_id,
+        )
+        if effective_filter.accepts(start_event):
+            yield start_event
+
+        try:
+            async for event in self._compiled_graph.astream_events(
+                initial_state,
+                config=invoke_config,
+                version="v2",
+            ):
+                stream_event = self._map_langgraph_event(event, execution_id)
+                if stream_event and effective_filter.accepts(stream_event):
+                    yield stream_event
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("Async streaming execution failed: %s", exc, exc_info=True)
+            err_event = StreamEvent(
+                event_type=StreamEventType.ERROR,
+                data={"error": str(exc)},
+                run_id=execution_id,
+            )
+            if effective_filter.accepts(err_event):
+                yield err_event
+
+        # Emit run_end
+        end_event = StreamEvent(
+            event_type=StreamEventType.RUN_END,
+            data={"execution_id": execution_id},
+            run_id=execution_id,
+        )
+        if effective_filter.accepts(end_event):
+            yield end_event
+
+    def _map_langgraph_event(
+        self, event: Dict[str, Any], execution_id: str
+    ) -> Optional[StreamEvent]:
+        """Map a LangGraph v2 stream event to a StreamEvent.
+
+        Args:
+            event: Raw event dict from ``astream_events(version="v2")``.
+            execution_id: The current execution run ID.
+
+        Returns:
+            A ``StreamEvent``, or ``None`` to skip the event.
+        """
+        event_kind = event.get("event", "")
+        event_data = event.get("data", {})
+        event_name = event.get("name", "")
+
+        if event_kind == "on_chat_model_stream":
+            # Token-level streaming from LLM
+            chunk = event_data.get("chunk")
+            content = ""
+            if chunk is not None:
+                content = getattr(chunk, "content", str(chunk))
+            if content:
+                return StreamEvent(
+                    event_type=StreamEventType.TOKEN,
+                    data={"content": content},
+                    node_name=event_name,
+                    agent_id=self._resolve_agent_for_node(event_name),
+                    run_id=execution_id,
+                )
+
+        elif event_kind == "on_chain_start":
+            node_name = event_name
+            if node_name and node_name != "LangGraph":
+                return StreamEvent(
+                    event_type=StreamEventType.NODE_START,
+                    data={"name": node_name},
+                    node_name=node_name,
+                    agent_id=self._resolve_agent_for_node(node_name),
+                    run_id=execution_id,
+                )
+
+        elif event_kind == "on_chain_end":
+            node_name = event_name
+            output = event_data.get("output", {})
+            if node_name and node_name != "LangGraph":
+                return StreamEvent(
+                    event_type=StreamEventType.NODE_END,
+                    data={"output": output},
+                    node_name=node_name,
+                    agent_id=self._resolve_agent_for_node(node_name),
+                    run_id=execution_id,
+                )
+
+        return None
+
+    def _resolve_agent_for_node(self, node_name: str) -> Optional[str]:
+        """Try to match a graph node name to an agent_id."""
+        if self._compiled_mas is None:
+            return None
+        if node_name in self._compiled_mas.agent_nodes:
+            return node_name
+        # Check if node_name is a prefix match (e.g. pipeline sub-nodes)
+        for agent_id in self._compiled_mas.agent_nodes:
+            if node_name.startswith(agent_id):
+                return agent_id
+        return None
 
     # ------------------------------------------------------------------
     # Checkpoint persistence testing

@@ -1,0 +1,114 @@
+# =============================================================================
+# MAS: Research Pipeline with Rich Agent Sub-Graphs
+# =============================================================================
+#
+# Pattern: researcher (pipeline) → summarizer (simple)
+#
+# Demonstrates AETHER pipeline agents where an agent's internal processing
+# is defined as a multi-node sub-graph rather than a simple react agent.
+# The researcher agent runs an internal pipeline of persona injection,
+# datetime context, and a react agent node, while the summarizer is a
+# standard single-node agent.
+#
+# Key features:
+#   - Pipeline agents: internal sub-graph compiled as a CompiledStateGraph
+#   - Mixed agents: pipeline and non-pipeline agents in the same MAS
+#   - Backwards compatible: summarizer uses standard AgentSpec (no pipeline)
+#   - Registry nodes: persona and datetime reference GRAPH_NODE_REGISTRY
+#   - Inline agent nodes: sub_researcher is an embedded AgentSpec
+#
+# Note on conditional edges:
+#   Pipeline conditional expressions can only reference the inner state
+#   fields: messages, current_agent, and agent_outputs. Function calls
+#   (len(), .get(), etc.) are blocked by the safe evaluator.
+#
+# Expected flow:
+#   [input] → researcher (pipeline: persona → datetime → sub_researcher)
+#           → summarizer → [output]
+# =============================================================================
+
+mas_id: pipeline_research
+name: Research Pipeline with Rich Agent Sub-Graphs
+description: >
+  A two-agent sequential MAS where the researcher agent uses an internal
+  pipeline sub-graph for multi-step processing (persona injection, datetime
+  context, and research execution), followed by a simple summarizer agent.
+  Demonstrates backwards-compatible mixing of pipeline and non-pipeline agents.
+version: "1.0.0"
+
+workflow_type: sequential
+
+agents:
+  # -------------------------------------------------------------------------
+  # Agent 1: Researcher with internal pipeline sub-graph
+  # -------------------------------------------------------------------------
+  - agent_id: researcher
+    role: researcher
+    objective: >
+      Research and analyze the given topic thoroughly using a multi-step
+      internal pipeline that injects persona context, timestamps, and
+      performs the actual research via a react agent node.
+    capabilities:
+      - web_search
+      - document_analysis
+    output_format: text
+
+    # Pipeline: defines the internal sub-graph for this agent
+    pipeline:
+      entry_point: persona
+
+      nodes:
+        # Registry node: injects persona/system prompt into messages
+        - node_id: persona
+          node_type: add_persona_and_summary
+          config:
+            persona: >
+              You are an expert researcher. Analyze topics thoroughly,
+              cite sources when possible, and provide balanced perspectives.
+
+        # Registry node: adds current datetime to system context
+        - node_id: datetime
+          node_type: inject_current_datetime
+
+        # Inline agent: the actual research agent with tools
+        - node_id: sub_researcher
+          node_type: agent
+          agent_spec:
+            agent_id: inner_researcher
+            role: researcher
+            objective: >
+              Perform research on the given topic using available tools
+              and produce a detailed analysis with key findings.
+
+      edges:
+        - from_node: persona
+          to_node: datetime
+        - from_node: datetime
+          to_node: sub_researcher
+        - from_node: sub_researcher
+          to_node: END
+
+  # -------------------------------------------------------------------------
+  # Agent 2: Simple summarizer (no pipeline — backwards compatible)
+  # -------------------------------------------------------------------------
+  - agent_id: summarizer
+    role: summarizer
+    objective: >
+      Read the research output from the previous agent and produce a
+      concise, well-structured summary highlighting key findings,
+      conclusions, and any areas that need further investigation.
+    temperature: 0.3
+    output_format: text
+
+channels:
+  - channel_id: research_to_summary
+    protocol: direct
+    source: researcher
+    target: summarizer
+    description: Research output sent to summarizer for condensing
+
+tags:
+  - research
+  - pipeline
+  - sequential
+  - mixed-agents
