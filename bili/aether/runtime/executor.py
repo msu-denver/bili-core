@@ -12,8 +12,8 @@ Supports four execution modes:
 - **Async streaming** (``astream()``): yields ``StreamEvent`` objects
   using LangGraph's asynchronous ``.astream_events()`` method for
   token-level granularity.
-- **UI streaming** (``run_streaming()``): yields ``(agent_id, output_dict)``
-  tuples as each agent node completes, for lightweight UI consumers.
+- **UI streaming** (``run_streaming()``): yields ``(node_name, state_update)``
+  tuples as each graph node completes, for lightweight UI consumers.
 
 Usage::
 
@@ -33,11 +33,11 @@ Usage::
         if event.event_type == "token":
             print(event.data["content"], end="", flush=True)
 
-    # UI streaming — yields (agent_id, output_dict) tuples:
-    for agent_id, output in executor.run_streaming(
+    # UI streaming — yields (node_name, state_update) tuples:
+    for node_name, state_update in executor.run_streaming(
         {"messages": [HumanMessage(content="Hi")]}, thread_id="my-thread"
     ):
-        print(f"{agent_id}: {output}")
+        print(f"{node_name}: {state_update}")
 
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
@@ -371,7 +371,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         input_data: Optional[Dict[str, Any]] = None,
         thread_id: Optional[str] = None,
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
-        """Stream agent outputs as ``(agent_id, agent_output_dict)`` tuples.
+        """Stream node outputs as ``(node_name, state_update)`` tuples.
 
         A lightweight streaming API for UI consumers. Yields one tuple per
         agent node as it completes execution, in execution order.
