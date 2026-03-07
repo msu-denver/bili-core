@@ -25,7 +25,7 @@ logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
 )
 
 import streamlit as st
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from bili.aether.config.loader import load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
@@ -45,7 +45,7 @@ LOGGER = logging.getLogger(__name__)
 
 def _is_stub_config(config: MASConfig) -> bool:
     """Return True if any agent in *config* has no ``model_name`` (stub mode)."""
-    return any(agent.model_name is None for agent in config.agents)
+    return any(not agent.model_name for agent in config.agents)
 
 
 def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
@@ -176,35 +176,46 @@ def _render_sidebar() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _render_agent_output(node_name: str, state_update: Dict[str, Any]) -> None:
-    """Render one agent node's state update inside an expander."""
-    with st.expander(f"Agent: {node_name}", expanded=True):
+def _render_agent_panel(
+    agent_id: str, output: Dict[str, Any], *, expanded: bool
+) -> None:
+    """Render one agent's output inside an expander.
+
+    Accepts both raw graph state updates (containing ``BaseMessage`` objects)
+    and already-serialized output dicts stored in ``chat_history``.
+    """
+    with st.expander(f"Agent: {agent_id}", expanded=expanded):
         # Prefer the structured agent_outputs entry for this node
-        agent_outputs: Dict[str, Any] = state_update.get("agent_outputs", {})
-        if node_name in agent_outputs:
-            output = agent_outputs[node_name]
-            status = output.get("status", "")
-            if status == "stub":
-                st.caption(output.get("message", str(output)))
+        agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
+        if agent_id in agent_outputs:
+            inner = agent_outputs[agent_id]
+            if inner.get("status") == "stub":
+                st.caption(inner.get("message", str(inner)))
             else:
-                for key, value in output.items():
-                    if key not in ("agent_id",):
+                for key, value in inner.items():
+                    if key != "agent_id":
                         st.markdown(f"**{key}:** {value}")
             return
 
-        # Fall back to the most recent message in the state update
-        messages: List[Any] = state_update.get("messages", [])
+        # Fall back to the most recent message
+        messages: List[Any] = output.get("messages", [])
         if messages:
             last = messages[-1]
-            content = getattr(last, "content", str(last))
+            content = (
+                last.get("content", str(last))  # serialized dict from chat_history
+                if isinstance(last, dict)
+                else getattr(last, "content", str(last))  # live BaseMessage
+            )
             st.markdown(content)
             return
 
-        # Last resort: display raw state
-        st.json(
-            {k: str(v) for k, v in state_update.items()},
-            expanded=False,
-        )
+        # Last resort: display raw output
+        st.json({k: str(v) for k, v in output.items()}, expanded=False)
+
+
+def _render_agent_output(node_name: str, state_update: Dict[str, Any]) -> None:
+    """Render a live agent node's state update (expanded=True)."""
+    _render_agent_panel(node_name, state_update, expanded=True)
 
 
 def _render_stored_turn(turn: Dict[str, Any]) -> None:
@@ -213,29 +224,9 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
         st.markdown(turn["content"])
     with st.chat_message("assistant"):
         for agent_out in turn.get("agent_outputs", []):
-            agent_id = agent_out["agent_id"]
-            output = agent_out["output"]
-            with st.expander(f"Agent: {agent_id}", expanded=False):
-                agent_outputs = output.get("agent_outputs", {})
-                if agent_id in agent_outputs:
-                    inner = agent_outputs[agent_id]
-                    status = inner.get("status", "")
-                    if status == "stub":
-                        st.caption(inner.get("message", str(inner)))
-                    else:
-                        for key, value in inner.items():
-                            if key not in ("agent_id",):
-                                st.markdown(f"**{key}:** {value}")
-                elif "messages" in output and output["messages"]:
-                    last = output["messages"][-1]
-                    content = (
-                        last.get("content", str(last))
-                        if isinstance(last, dict)
-                        else str(last)
-                    )
-                    st.markdown(content)
-                else:
-                    st.json({k: str(v) for k, v in output.items()}, expanded=False)
+            _render_agent_panel(
+                agent_out["agent_id"], agent_out["output"], expanded=False
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -252,10 +243,6 @@ def _run_turn(user_input: str) -> None:
 
     if "chat_thread_id" not in st.session_state:
         st.session_state.chat_thread_id = str(uuid.uuid4())
-
-    from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
-        HumanMessage,
-    )
 
     turn: Dict[str, Any] = {
         "role": "user",
