@@ -257,17 +257,21 @@ def _run_turn(user_input: str) -> None:
 
     agent_outputs: List[Dict[str, Any]] = []
     with st.chat_message("assistant"):
-        for node_name, state_update in executor.run_streaming(
-            input_data={"messages": [HumanMessage(content=user_input)]},
-            thread_id=st.session_state.chat_thread_id,
-        ):
-            _render_agent_output(node_name, state_update)
-            agent_outputs.append(
-                {
-                    "agent_id": node_name,
-                    "output": _serialize_state_update(state_update),
-                }
-            )
+        try:
+            for node_name, state_update in executor.run_streaming(
+                input_data={"messages": [HumanMessage(content=user_input)]},
+                thread_id=st.session_state.chat_thread_id,
+            ):
+                _render_agent_output(node_name, state_update)
+                agent_outputs.append(
+                    {
+                        "agent_id": node_name,
+                        "output": _serialize_state_update(state_update),
+                    }
+                )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Execution failed: {exc}")
+            return
 
     turn["agent_outputs"] = agent_outputs
 
