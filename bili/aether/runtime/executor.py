@@ -4,7 +4,7 @@ Wraps the AETHER compiler and LangGraph execution pipeline to provide
 a structured ``MASExecutionResult`` with per-agent outputs, timing,
 communication statistics, and checkpoint metadata.
 
-Supports three execution modes:
+Supports four execution modes:
 
 - **Synchronous** (``run()``): blocking execution, returns a result.
 - **Sync streaming** (``stream()``): yields ``StreamEvent`` objects
@@ -12,6 +12,8 @@ Supports three execution modes:
 - **Async streaming** (``astream()``): yields ``StreamEvent`` objects
   using LangGraph's asynchronous ``.astream_events()`` method for
   token-level granularity.
+- **UI streaming** (``run_streaming()``): yields ``(agent_id, output_dict)``
+  tuples as each agent node completes, for lightweight UI consumers.
 
 Usage::
 
@@ -30,6 +32,12 @@ Usage::
     async for event in executor.astream({"messages": [HumanMessage(content="Hi")]}):
         if event.event_type == "token":
             print(event.data["content"], end="", flush=True)
+
+    # UI streaming — yields (agent_id, output_dict) tuples:
+    for agent_id, output in executor.run_streaming(
+        {"messages": [HumanMessage(content="Hi")]}, thread_id="my-thread"
+    ):
+        print(f"{agent_id}: {output}")
 
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
@@ -357,6 +365,54 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         )
         if effective_filter.accepts(end_event):
             yield end_event
+
+    def run_streaming(
+        self,
+        input_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Stream agent outputs as ``(agent_id, agent_output_dict)`` tuples.
+
+        A lightweight streaming API for UI consumers. Yields one tuple per
+        agent node as it completes execution, in execution order.
+
+        Requires the executor to be initialized via ``initialize()`` before
+        calling.
+
+        Args:
+            input_data: Initial state overrides (may include a ``"messages"``
+                key with a list of LangChain messages).
+            thread_id: Thread ID for checkpointed execution. Pass the same
+                ID across calls to maintain conversation context.
+
+        Yields:
+            ``(agent_id, state_update)`` tuples where *agent_id* is the node
+            name (matching the ``agent_id`` field in the MAS config) and
+            *state_update* is the raw state dict produced by that agent node.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before run_streaming()."
+            )
+
+        execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        initial_state = self._build_initial_state(input_data)
+
+        invoke_config: Dict[str, Any] = {}
+        if self._config.checkpoint_enabled:
+            effective_thread_id = self._construct_thread_id(thread_id, execution_id)
+            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+
+        for chunk in self._compiled_graph.stream(
+            initial_state,
+            config=invoke_config,
+            stream_mode="updates",
+        ):
+            for node_name, state_update in chunk.items():
+                yield (node_name, state_update)
 
     async def astream(
         self,
