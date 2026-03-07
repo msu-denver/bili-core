@@ -263,21 +263,29 @@ def _run_turn(user_input: str) -> None:
 
     agent_outputs: List[Dict[str, Any]] = []
     with st.chat_message("assistant"):
-        try:
-            for node_name, state_update in executor.run_streaming(
-                input_data={"messages": [HumanMessage(content=user_input)]},
-                thread_id=st.session_state.chat_thread_id,
-            ):
-                _render_agent_output(node_name, state_update)
-                agent_outputs.append(
-                    {
-                        "agent_id": node_name,
-                        "output": _serialize_state_update(state_update),
-                    }
-                )
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            st.error(f"Execution failed: {exc}")
-            return
+        with st.status("Running MAS...", expanded=True) as status:
+            try:
+                for node_name, state_update in executor.run_streaming(
+                    input_data={"messages": [HumanMessage(content=user_input)]},
+                    thread_id=st.session_state.chat_thread_id,
+                ):
+                    try:
+                        _render_agent_output(node_name, state_update)
+                    except (
+                        Exception
+                    ) as render_exc:  # pylint: disable=broad-exception-caught
+                        st.error(f"Agent {node_name} failed to render: {render_exc}")
+                    agent_outputs.append(
+                        {
+                            "agent_id": node_name,
+                            "output": _serialize_state_update(state_update),
+                        }
+                    )
+                status.update(label="Complete", state="complete", expanded=False)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                status.update(label="Execution failed", state="error")
+                st.error(f"Execution failed: {exc}")
+                return
 
     turn["agent_outputs"] = agent_outputs
 
