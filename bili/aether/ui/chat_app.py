@@ -102,9 +102,10 @@ def _load_config(yaml_path: Path) -> None:
         st.session_state.chat_executor = executor
         st.session_state.chat_history = []
         st.session_state.pop("chat_thread_id", None)
+        st.session_state.pop("chat_load_error", None)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         LOGGER.error("Failed to load config %s: %s", yaml_path.name, exc, exc_info=True)
-        st.error(f"Failed to load `{yaml_path.name}`:\n\n{exc}")
+        st.session_state.chat_load_error = str(exc)
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
 
@@ -146,7 +147,12 @@ def _render_sidebar() -> None:
     if selected_idx is not None:
         _load_config(yaml_files[selected_idx])
     else:
-        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+        for key in (
+            "chat_config",
+            "chat_yaml_path",
+            "chat_executor",
+            "chat_load_error",
+        ):
             st.session_state.pop(key, None)
         return
 
@@ -289,7 +295,11 @@ def _render_chat_area() -> None:
     """Render the main chat area: empty state, history, and input."""
     config: Optional[MASConfig] = st.session_state.get("chat_config")
     if config is None:
-        st.info("Select a YAML configuration from the sidebar to begin.")
+        load_error = st.session_state.get("chat_load_error")
+        if load_error:
+            st.error(f"Failed to load configuration:\n\n{load_error}")
+        else:
+            st.info("Select a YAML configuration from the sidebar to begin.")
         return
 
     st.markdown(f"### {config.name}")
