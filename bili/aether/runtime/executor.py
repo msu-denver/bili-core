@@ -386,12 +386,16 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 ID across calls to maintain conversation context.
 
         Yields:
-            ``(agent_id, state_update)`` tuples where *agent_id* is the node
-            name (matching the ``agent_id`` field in the MAS config) and
-            *state_update* is the raw state dict produced by that agent node.
+            ``(node_name, state_update)`` tuples where *node_name* is the raw
+            graph node name (typically matching the ``agent_id`` field in the
+            MAS config for agent nodes, but may also include internal routing
+            or pipeline nodes) and *state_update* is the raw state dict
+            produced by that node.
 
         Raises:
             RuntimeError: If ``initialize()`` has not been called.
+            Exception: Any exception raised by the graph is logged and
+                re-raised so the caller receives a clean log entry.
         """
         if self._compiled_graph is None:
             raise RuntimeError(
@@ -399,6 +403,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             )
 
         execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        LOGGER.info("Starting MAS streaming execution: %s", execution_id)
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {}
@@ -406,13 +411,17 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config = {"configurable": {"thread_id": effective_thread_id}}
 
-        for chunk in self._compiled_graph.stream(
-            initial_state,
-            config=invoke_config,
-            stream_mode="updates",
-        ):
-            for node_name, state_update in chunk.items():
-                yield (node_name, state_update)
+        try:
+            for chunk in self._compiled_graph.stream(
+                initial_state,
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("run_streaming execution failed: %s", exc, exc_info=True)
+            raise
 
     async def astream(
         self,
