@@ -229,6 +229,8 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
     with st.chat_message("user"):
         st.markdown(turn["content"])
     with st.chat_message("assistant"):
+        if "error" in turn:
+            st.error(f"Execution failed: {turn['error']}")
         for agent_out in turn.get("agent_outputs", []):
             _render_agent_panel(
                 agent_out["agent_id"], agent_out["output"], expanded=False
@@ -285,7 +287,7 @@ def _run_turn(user_input: str) -> None:
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 status.update(label="Execution failed", state="error")
                 st.error(f"Execution failed: {exc}")
-                return
+                turn["error"] = str(exc)
 
     turn["agent_outputs"] = agent_outputs
 
