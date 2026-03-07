@@ -10,6 +10,7 @@ Usage:
 """
 
 # pylint: disable=import-error
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -175,6 +176,23 @@ def _render_sidebar() -> None:
         st.session_state.chat_history = []
         st.session_state.chat_thread_id = str(uuid.uuid4())
         st.rerun()
+
+    chat_history = st.session_state.get("chat_history", [])
+    thread_id = st.session_state.get("chat_thread_id", "")
+    if chat_history:
+        export = {
+            "mas_id": config.mas_id,
+            "thread_id": thread_id,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "turns": chat_history,
+        }
+        st.download_button(
+            "Export Conversation",
+            data=json.dumps(export, indent=2),
+            file_name=f"aether_chat_{config.mas_id}_{thread_id[:8]}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
 
 # ---------------------------------------------------------------------------
