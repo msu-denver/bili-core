@@ -189,7 +189,7 @@ def _render_sidebar() -> None:
         st.download_button(
             "Export Conversation",
             data=json.dumps(export, indent=2),
-            file_name=f"aether_chat_{config.mas_id}_{thread_id[:8]}.json",
+            file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.json",
             mime="application/json",
             use_container_width=True,
         )
