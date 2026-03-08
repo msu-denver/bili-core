@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
+
 # Suppress the FileNotFoundError traceback that Streamlit logs when the browser
 # requests bootstrap.min.css.map — a source map file absent from the
 # streamlit-flow-component package distribution. Source maps are optional
@@ -28,7 +30,7 @@ logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
 import streamlit as st
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from bili.aether.config.loader import load_mas_from_yaml
+from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import MASConfig
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
@@ -97,7 +99,8 @@ def _load_config(yaml_path: Path) -> None:
     try:
         config = load_mas_from_yaml(yaml_path)
         executor = MASExecutor(config)
-        executor.initialize()
+        with st.spinner("Initializing executor..."):
+            executor.initialize()
         st.session_state.chat_config = config
         st.session_state.chat_yaml_path = str(yaml_path)
         st.session_state.chat_executor = executor
@@ -106,6 +109,34 @@ def _load_config(yaml_path: Path) -> None:
         st.session_state.pop("chat_load_error", None)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         LOGGER.error("Failed to load config %s: %s", yaml_path.name, exc, exc_info=True)
+        st.session_state.chat_load_error = str(exc)
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
+
+
+def _load_uploaded_config(name: str, config: MASConfig) -> None:
+    """Initialize the executor from an already-parsed uploaded MASConfig."""
+    cache_key = f"uploaded:{name}"
+    if (
+        st.session_state.get("chat_yaml_path") == cache_key
+        and "chat_config" in st.session_state
+    ):
+        return
+
+    try:
+        executor = MASExecutor(config)
+        with st.spinner("Initializing executor..."):
+            executor.initialize()
+        st.session_state.chat_config = config
+        st.session_state.chat_yaml_path = cache_key
+        st.session_state.chat_executor = executor
+        st.session_state.chat_history = []
+        st.session_state.pop("chat_thread_id", None)
+        st.session_state.pop("chat_load_error", None)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        LOGGER.error(
+            "Failed to initialize uploaded config %s: %s", name, exc, exc_info=True
+        )
         st.session_state.chat_load_error = str(exc)
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
@@ -125,28 +156,54 @@ def _render_sidebar() -> None:
     st.caption("Multi-Agent System Conversation")
     st.markdown("---")
 
+    uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
+    if uploaded:
+        try:
+            raw = yaml.safe_load(uploaded.read())
+            if not isinstance(raw, dict):
+                raise ValueError("YAML must be a mapping at the top level.")
+            upload_config = load_mas_from_dict(raw)
+            if "chat_uploaded_configs" not in st.session_state:
+                st.session_state.chat_uploaded_configs = {}
+            st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
+            st.success(f"Uploaded: {uploaded.name}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Invalid config: {exc}")
+
     if not EXAMPLES_DIR.exists():
         st.error(f"Examples directory not found: {EXAMPLES_DIR}")
         return
 
     yaml_files = sorted(EXAMPLES_DIR.glob("*.yaml"))
-    if not yaml_files:
+    uploaded_configs: Dict[str, MASConfig] = st.session_state.get(
+        "chat_uploaded_configs", {}
+    )
+    uploaded_names = sorted(uploaded_configs.keys())
+
+    if not yaml_files and not uploaded_names:
         st.warning("No YAML files found in examples directory.")
         return
 
-    yaml_display = [f.stem.replace("_", " ").title() for f in yaml_files]
+    all_display = [f.stem.replace("_", " ").title() for f in yaml_files] + [
+        f"[Uploaded] {n}" for n in uploaded_names
+    ]
+    n_files = len(yaml_files)
 
     selected_idx = st.selectbox(
         "Select Configuration",
-        range(len(yaml_files)),
+        range(len(all_display)),
         index=None,
         placeholder="Choose a MAS config...",
-        format_func=lambda i: yaml_display[i],
+        format_func=lambda i: all_display[i],
         key="chat_yaml_selector",
     )
 
     if selected_idx is not None:
-        _load_config(yaml_files[selected_idx])
+        if selected_idx < n_files:
+            _load_config(yaml_files[selected_idx])
+        else:
+            name = uploaded_names[selected_idx - n_files]
+            _load_uploaded_config(name, uploaded_configs[name])
     else:
         for key in (
             "chat_config",
