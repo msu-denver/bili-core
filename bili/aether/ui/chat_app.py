@@ -90,33 +90,8 @@ def _configure_page() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _load_config(yaml_path: Path) -> None:
-    """Load a YAML config and initialize the executor when the path changes."""
-    current_path = st.session_state.get("chat_yaml_path")
-    if current_path == str(yaml_path) and "chat_config" in st.session_state:
-        return
-
-    try:
-        config = load_mas_from_yaml(yaml_path)
-        executor = MASExecutor(config)
-        with st.spinner("Initializing executor..."):
-            executor.initialize()
-        st.session_state.chat_config = config
-        st.session_state.chat_yaml_path = str(yaml_path)
-        st.session_state.chat_executor = executor
-        st.session_state.chat_history = []
-        st.session_state.pop("chat_thread_id", None)
-        st.session_state.pop("chat_load_error", None)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        LOGGER.error("Failed to load config %s: %s", yaml_path.name, exc, exc_info=True)
-        st.session_state.chat_load_error = str(exc)
-        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
-            st.session_state.pop(key, None)
-
-
-def _load_uploaded_config(name: str, config: MASConfig) -> None:
-    """Initialize the executor from an already-parsed uploaded MASConfig."""
-    cache_key = f"uploaded:{name}"
+def _initialize_executor(config: MASConfig, cache_key: str) -> None:
+    """Compile the executor and update session state, or store the error."""
     if (
         st.session_state.get("chat_yaml_path") == cache_key
         and "chat_config" in st.session_state
@@ -134,12 +109,28 @@ def _load_uploaded_config(name: str, config: MASConfig) -> None:
         st.session_state.pop("chat_thread_id", None)
         st.session_state.pop("chat_load_error", None)
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        LOGGER.error(
-            "Failed to initialize uploaded config %s: %s", name, exc, exc_info=True
-        )
+        LOGGER.error("Failed to load config %s: %s", cache_key, exc, exc_info=True)
         st.session_state.chat_load_error = str(exc)
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
+
+
+def _load_config(yaml_path: Path) -> None:
+    """Load a YAML config and initialize the executor when the path changes."""
+    try:
+        config = load_mas_from_yaml(yaml_path)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        LOGGER.error("Failed to load config %s: %s", yaml_path.name, exc, exc_info=True)
+        st.session_state.chat_load_error = str(exc)
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
+        return
+    _initialize_executor(config, str(yaml_path))
+
+
+def _load_uploaded_config(name: str, config: MASConfig) -> None:
+    """Initialize the executor from an already-parsed uploaded MASConfig."""
+    _initialize_executor(config, f"uploaded:{name}")
 
 
 # ---------------------------------------------------------------------------
@@ -157,16 +148,19 @@ def _render_sidebar() -> None:
     st.markdown("---")
 
     uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
-    if uploaded:
+    if uploaded and uploaded.name not in st.session_state.get(
+        "chat_uploaded_configs", {}
+    ):
         try:
             raw = yaml.safe_load(uploaded.read())
             if not isinstance(raw, dict):
-                raise ValueError("YAML must be a mapping at the top level.")
-            upload_config = load_mas_from_dict(raw)
-            if "chat_uploaded_configs" not in st.session_state:
-                st.session_state.chat_uploaded_configs = {}
-            st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
-            st.success(f"Uploaded: {uploaded.name}")
+                st.error("Invalid config: YAML must be a mapping at the top level.")
+            else:
+                upload_config = load_mas_from_dict(raw)
+                if "chat_uploaded_configs" not in st.session_state:
+                    st.session_state.chat_uploaded_configs = {}
+                st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
+                st.success(f"Uploaded: {uploaded.name}")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Invalid config: {exc}")
 
