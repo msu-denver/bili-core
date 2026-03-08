@@ -40,10 +40,7 @@ jobs:
             - name: Build and Test
               run: ./scripts/build/build-and-test.sh
 
-            # Cache dist and package directories
-            - name: Cache dist and package directories
-              uses: actions/cache/save@v4
-              with:
-                  enableCrossOsArchive: true
-                  key: ${{ runner.os }}-build-${{ github.sha }}-${{ github.workflow }}
-                  path: dist/
+            # NOTE: No cache/save or upload-artifact step here intentionally.
+            # bili-core is a shared library with no downstream deploy jobs (no ECR/ECS),
+            # so caching dist/ would waste GitHub Actions storage quota (~3.5 GB per entry)
+            # with nothing ever restoring it.
