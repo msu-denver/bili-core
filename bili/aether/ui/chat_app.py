@@ -139,14 +139,21 @@ def _load_uploaded_config(name: str, config: MASConfig) -> None:
 
 
 def _render_sidebar() -> None:
-    """Render sidebar with YAML selector, stub indicator, and controls."""
+    """Render standalone sidebar: logo, title, and chat controls."""
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
 
     st.markdown("## AETHER Chat")
     st.caption("Multi-Agent System Conversation")
     st.markdown("---")
+    render_sidebar_content()
 
+
+def render_sidebar_content() -> None:
+    """Render the chat sidebar controls — config selector, upload, and buttons.
+
+    Public: called by ``app.py`` when the Chat page is active.
+    """
     uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
     if uploaded and uploaded.name not in st.session_state.get(
         "chat_uploaded_configs", {}
@@ -398,12 +405,20 @@ def _render_chat_area() -> None:
 # ---------------------------------------------------------------------------
 
 
+def render_main() -> None:
+    """Render the chat main area.
+
+    Public: called by ``app.py`` when the Chat page is active.
+    """
+    _render_chat_area()
+
+
 def render_page() -> None:
     """Main entry point — callable from app.py navigation or standalone."""
     _configure_page()
     with st.sidebar:
         _render_sidebar()
-    _render_chat_area()
+    render_main()
 
 
 if __name__ == "__main__":

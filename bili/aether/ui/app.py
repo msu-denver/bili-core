@@ -1,8 +1,9 @@
 """
-AETHER MAS YAML Visualization App.
+AETHER — MAS Visualizer and Chat.
 
-A read-only Streamlit application that visualizes AETHER multi-agent
-system YAML configurations as interactive node graphs.
+A Streamlit application that combines the AETHER multi-agent system graph
+visualizer with the multi-turn chat interface. Use the sidebar navigation
+to switch between pages.
 
 Usage:
     streamlit run bili/aether/ui/app.py
@@ -33,6 +34,10 @@ except ImportError:
     st.stop()
 
 from bili.aether.config.loader import load_mas_from_yaml
+from bili.aether.ui.chat_app import render_main as render_chat_main
+from bili.aether.ui.chat_app import (
+    render_sidebar_content as render_chat_sidebar_content,
+)
 from bili.aether.ui.components.graph_viewer import (
     render_graph_viewer,
     render_metadata_bar,
@@ -46,38 +51,23 @@ LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png
 
 
 def main() -> None:
-    """Main entry point for the AETHER visualization app."""
+    """Main entry point for the AETHER app."""
     _configure_page()
 
     with st.sidebar:
         _render_sidebar()
 
-    config = st.session_state.get("mas_config")
-    if config is None:
-        st.info("Select a YAML configuration from the sidebar to visualize it.")
-        return
-
-    # Title and description
-    st.markdown(f"### {config.name}")
-    if config.description:
-        st.caption(config.description)
-
-    # Convert and render
-    nodes, edges = convert_mas_to_graph(config)
-    render_graph_viewer(config, nodes, edges)
-
-    # Metadata bar below graph
-    st.markdown("---")
-    render_metadata_bar(config)
-
-    # Legend
-    _render_legend()
+    page = st.session_state.get("aether_page", "Visualizer")
+    if page == "Chat":
+        render_chat_main()
+    else:
+        _render_visualizer_main()
 
 
 def _configure_page() -> None:
     """Set up Streamlit page config."""
     st.set_page_config(
-        page_title="AETHER - MAS Visualizer",
+        page_title="AETHER",
         page_icon="A",
         layout="wide",
     )
@@ -85,15 +75,33 @@ def _configure_page() -> None:
 
 
 def _render_sidebar() -> None:
-    """Render the sidebar with YAML selector and MAS info."""
+    """Render the sidebar: logo, nav radio, then page-specific controls."""
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
 
-    st.markdown("## AETHER Visualizer")
-    st.caption("Multi-Agent System Graph Viewer")
+    st.markdown("## AETHER")
     st.markdown("---")
 
-    # Find all YAML files in examples directory
+    st.radio(
+        "Navigation",
+        ["Visualizer", "Chat"],
+        key="aether_page",
+        label_visibility="collapsed",
+        horizontal=True,
+    )
+    st.markdown("---")
+
+    page = st.session_state.get("aether_page", "Visualizer")
+    if page == "Chat":
+        render_chat_sidebar_content()
+    else:
+        _render_visualizer_sidebar()
+
+
+def _render_visualizer_sidebar() -> None:
+    """Render the visualizer-specific sidebar content."""
+    st.caption("Multi-Agent System Graph Viewer")
+
     if not EXAMPLES_DIR.exists():
         st.error(f"Examples directory not found: {EXAMPLES_DIR}")
         return
@@ -117,9 +125,28 @@ def _render_sidebar() -> None:
         _load_config(yaml_path)
 
 
-def _load_config(yaml_path: Path):
+def _render_visualizer_main() -> None:
+    """Render the visualizer main area."""
+    config = st.session_state.get("mas_config")
+    if config is None:
+        st.info("Select a YAML configuration from the sidebar to visualize it.")
+        return
+
+    st.markdown(f"### {config.name}")
+    if config.description:
+        st.caption(config.description)
+
+    nodes, edges = convert_mas_to_graph(config)
+    render_graph_viewer(config, nodes, edges)
+
+    st.markdown("---")
+    render_metadata_bar(config)
+
+    _render_legend()
+
+
+def _load_config(yaml_path: Path) -> None:
     """Load a YAML config and store it in session state."""
-    # Only reload if the path changed
     current_path = st.session_state.get("current_yaml_path")
     if current_path == str(yaml_path) and "mas_config" in st.session_state:
         config = st.session_state.mas_config
@@ -138,7 +165,7 @@ def _load_config(yaml_path: Path):
             ]
             for k in keys_to_clear:
                 del st.session_state[k]
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             st.error(f"Failed to load `{yaml_path.name}`:\n\n{e}")
             st.session_state.mas_config = None
             return
