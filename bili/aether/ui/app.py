@@ -49,15 +49,16 @@ from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
 
+_DEFAULT_PAGE = "Visualizer"
+
 
 def main() -> None:
     """Main entry point for the AETHER app."""
     _configure_page()
 
     with st.sidebar:
-        _render_sidebar()
+        page = _render_sidebar()
 
-    page = st.session_state.get("aether_page", "Visualizer")
     if page == "Chat":
         render_chat_main()
     else:
@@ -74,8 +75,11 @@ def _configure_page() -> None:
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
-def _render_sidebar() -> None:
-    """Render the sidebar: logo, nav radio, then page-specific controls."""
+def _render_sidebar() -> str:
+    """Render the sidebar: logo, nav radio, then page-specific controls.
+
+    Returns the active page name (``"Visualizer"`` or ``"Chat"``).
+    """
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
 
@@ -91,11 +95,12 @@ def _render_sidebar() -> None:
     )
     st.markdown("---")
 
-    page = st.session_state.get("aether_page", "Visualizer")
+    page: str = st.session_state.get("aether_page", _DEFAULT_PAGE)
     if page == "Chat":
         render_chat_sidebar_content()
     else:
         _render_visualizer_sidebar()
+    return page
 
 
 def _render_visualizer_sidebar() -> None:
