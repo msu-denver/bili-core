@@ -621,6 +621,12 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 
     if st.button("New Conversation", use_container_width=True):
         _new_thread(config.mas_id)
+        for _key in (
+            "aether_executing_node",
+            "aether_execution_trace",
+            "aether_selected_trace_node",
+        ):
+            st.session_state.pop(_key, None)
         st.rerun()
 
     chat_history = _active_messages_or_empty()
@@ -731,6 +737,17 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
         if agent_trace:
+            node_ids = [a["agent_id"] for a in agent_trace]
+            turn_idx = turn.get("turn_index", 0)
+            timeline_ph = st.empty()
+            _render_timeline(
+                timeline_ph,
+                completed=node_ids,
+                active=None,
+                all_nodes=node_ids,
+                key_prefix=f"timeline_stored_{turn_idx}",
+            )
+            selected = st.session_state.get("aether_selected_trace_node")
             if "error" in turn:
                 st.divider()
             with st.expander("Agent trace", expanded=False):
@@ -738,7 +755,7 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                     _render_agent_panel(
                         agent_out["agent_id"],
                         agent_out["output"],
-                        expanded=False,
+                        expanded=(agent_out["agent_id"] == selected),
                         use_expander=False,
                     )
 
@@ -746,6 +763,69 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------
+
+
+def _render_timeline(
+    placeholder: Any,
+    completed: List[str],
+    active: Optional[str],
+    all_nodes: List[str],
+    *,
+    key_prefix: str,
+) -> None:
+    """Render a horizontal node-chip row into a ``st.empty()`` placeholder.
+
+    Subsequent calls to this function replace the placeholder content in-place,
+    allowing the timeline to update live during streaming without re-rendering
+    the whole page.
+
+    Completed chips are enabled buttons — clicking one sets
+    ``aether_selected_trace_node`` so ``_render_stored_turn`` can auto-expand
+    that agent's panel on the next rerun.  Active and pending chips are
+    disabled.
+
+    Args:
+        placeholder: A ``st.empty()`` container whose content is replaced on
+            each call.
+        completed: Agent IDs that have already finished (in order).
+        active: Agent ID currently executing, or ``None``.
+        all_nodes: Ordered list of all agent IDs for this config — determines
+            chip order and which nodes show as pending (○).
+        key_prefix: Unique prefix for Streamlit widget keys. Use
+            ``"timeline_live"`` for the live turn and
+            ``f"timeline_stored_{turn_index}"`` for stored turns to avoid
+            key collisions across multiple rendered turns.
+    """
+    if not all_nodes:
+        return
+    completed_set = set(completed)
+    with placeholder.container():
+        cols = st.columns(len(all_nodes))
+        for col, node_id in zip(cols, all_nodes):
+            with col:
+                if node_id in completed_set:
+                    if st.button(
+                        f"✓ {node_id}",
+                        key=f"{key_prefix}_{node_id}",
+                        use_container_width=True,
+                        help="Click to expand this agent's output",
+                    ):
+                        st.session_state["aether_selected_trace_node"] = node_id
+                        st.rerun()
+                elif node_id == active:
+                    st.button(
+                        f"⟳ {node_id}",
+                        key=f"{key_prefix}_{node_id}",
+                        disabled=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.button(
+                        f"○ {node_id}",
+                        key=f"{key_prefix}_{node_id}",
+                        disabled=True,
+                        use_container_width=True,
+                    )
 
 
 def _run_turn(user_input: str) -> None:
@@ -769,8 +849,19 @@ def _run_turn(user_input: str) -> None:
     with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
 
+    all_nodes = [a.agent_id for a in config.agents] if config else []
     agent_trace: List[Dict[str, Any]] = []
     with st.chat_message("assistant", avatar="🤖"):
+        st.session_state["aether_execution_trace"] = []
+        st.session_state.pop("aether_selected_trace_node", None)
+        timeline_placeholder = st.empty()
+        _render_timeline(
+            timeline_placeholder,
+            completed=[],
+            active=None,
+            all_nodes=all_nodes,
+            key_prefix="timeline_live",
+        )
         with st.status("Running MAS...", expanded=True) as status:
             try:
                 for node_name, state_update in executor.run_streaming(
@@ -779,6 +870,14 @@ def _run_turn(user_input: str) -> None:
                 ):
                     if state_update is None:
                         continue
+                    st.session_state["aether_executing_node"] = node_name
+                    _render_timeline(
+                        timeline_placeholder,
+                        completed=st.session_state["aether_execution_trace"],
+                        active=node_name,
+                        all_nodes=all_nodes,
+                        key_prefix="timeline_live",
+                    )
                     try:
                         _render_agent_output(node_name, state_update)
                     except (
@@ -791,11 +890,21 @@ def _run_turn(user_input: str) -> None:
                             "output": _serialize_state_update(state_update),
                         }
                     )
+                    st.session_state["aether_execution_trace"].append(node_name)
                 status.update(label="Complete", state="complete", expanded=False)
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 status.update(label="Execution failed", state="error")
                 st.error(f"Execution failed: {exc}")
                 turn["error"] = str(exc)
+
+        st.session_state["aether_executing_node"] = None
+        _render_timeline(
+            timeline_placeholder,
+            completed=st.session_state["aether_execution_trace"],
+            active=None,
+            all_nodes=all_nodes,
+            key_prefix="timeline_live",
+        )
 
     turn["agent_trace"] = agent_trace
     _active_messages().append(turn)
