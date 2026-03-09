@@ -44,6 +44,50 @@ _HEURISTIC_RULES = [
 ]
 
 
+def _resolve_model_full(
+    model_name: str,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Resolve a model name to ``(provider_type, model_id, extra_kwargs)`` in one pass.
+
+    Search order:
+        1. Exact match on ``model_id`` in ``LLM_MODELS``
+        2. Exact match on display ``model_name`` in ``LLM_MODELS``
+        3. Heuristic fallback using prefix/substring rules
+           (``extra_kwargs`` is empty for heuristic matches)
+
+    Raises:
+        ValueError: If the model cannot be resolved to any provider.
+    """
+    # --- 1 & 2: Look up in LLM_MODELS (single pass, returns extra_kwargs) ---
+    result = _lookup_in_llm_models(model_name)
+    if result is not None:
+        provider, model_id, extra_kwargs = result
+        LOGGER.debug(
+            "Resolved '%s' via LLM_MODELS → provider=%s, model_id=%s",
+            model_name,
+            provider,
+            model_id,
+        )
+        return provider, model_id, extra_kwargs
+
+    # --- 3: Heuristic fallback (model_name IS the model_id) ---
+    lower = model_name.lower()
+    for pattern, ptype in _HEURISTIC_RULES:
+        if pattern in lower:
+            LOGGER.debug(
+                "Resolved '%s' via heuristic ('%s') → %s (using as model_id)",
+                model_name,
+                pattern,
+                ptype,
+            )
+            return ptype, model_name, {}
+
+    raise ValueError(
+        f"Cannot resolve model '{model_name}' to a provider. "
+        f"Set a recognised model_name or use bili.loaders.llm_loader directly."
+    )
+
+
 def resolve_model(model_name: str) -> Tuple[str, str]:
     """Resolve a model name to a ``(provider_type, model_id)`` pair.
 
@@ -65,34 +109,8 @@ def resolve_model(model_name: str) -> Tuple[str, str]:
     Raises:
         ValueError: If the model cannot be resolved to any provider.
     """
-    # --- 1 & 2: Look up in LLM_MODELS ---
-    result = _lookup_in_llm_models(model_name)
-    if result is not None:
-        provider, model_id, _ = result
-        LOGGER.debug(
-            "Resolved '%s' via LLM_MODELS → provider=%s, model_id=%s",
-            model_name,
-            provider,
-            model_id,
-        )
-        return provider, model_id
-
-    # --- 3: Heuristic fallback (model_name IS the model_id) ---
-    lower = model_name.lower()
-    for pattern, ptype in _HEURISTIC_RULES:
-        if pattern in lower:
-            LOGGER.debug(
-                "Resolved '%s' via heuristic ('%s') → %s (using as model_id)",
-                model_name,
-                pattern,
-                ptype,
-            )
-            return ptype, model_name
-
-    raise ValueError(
-        f"Cannot resolve model '{model_name}' to a provider. "
-        f"Set a recognised model_name or use bili.loaders.llm_loader directly."
-    )
+    provider, model_id, _ = _resolve_model_full(model_name)
+    return provider, model_id
 
 
 def resolve_provider(model_name: str) -> str:
@@ -131,16 +149,11 @@ def create_llm(agent: AgentSpec) -> Any:
             f"cannot create LLM instance."
         )
 
-    # resolve_model handles both LLM_MODELS lookup and heuristic fallback.
-    # A second call to _lookup_in_llm_models retrieves provider-specific extras
-    # (e.g. api_version for Azure OpenAI) without duplicating the fallback logic.
-    provider, model_id = resolve_model(agent.model_name)
-    lookup = _lookup_in_llm_models(agent.model_name)
-    extra_kwargs: Dict[str, Any] = lookup[2] if lookup is not None else {}
+    provider, model_id, extra_kwargs = _resolve_model_full(agent.model_name)
 
-    # Build kwargs for load_model — start with provider-specific extras,
-    # then apply agent-level overrides (temperature, max_tokens).
-    kwargs: Dict[str, Any] = {"model_name": model_id, **extra_kwargs}
+    # Build kwargs for load_model — extra_kwargs first so the resolved
+    # model_id always wins if extra_kwargs ever contains a "model_name" key.
+    kwargs: Dict[str, Any] = {**extra_kwargs, "model_name": model_id}
     if agent.temperature is not None:
         kwargs["temperature"] = agent.temperature
     if agent.max_tokens is not None:

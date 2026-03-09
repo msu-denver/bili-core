@@ -14,6 +14,8 @@ from streamlit_flow.state import StreamlitFlowState
 from bili.aether.schema.agent_spec import AgentSpec
 from bili.aether.schema.mas_config import MASConfig
 
+MODEL_KEEP_SENTINEL = "(keep from YAML)"
+
 
 def _overrides_key(mas_id: str) -> str:
     return f"model_overrides_{mas_id}"
@@ -139,7 +141,6 @@ def _render_list_section(title: str, items: list) -> None:
 
 def _render_model_selector(agent: AgentSpec, mas_id: str) -> None:
     """Render the model override selectbox and persist the selection to session state."""
-    _keep = "(keep from YAML)"
     options, _, model_lookup = build_model_options()
     overrides = st.session_state[_overrides_key(mas_id)]
 
@@ -155,14 +156,14 @@ def _render_model_selector(agent: AgentSpec, mas_id: str) -> None:
     st.markdown("**Model**")
     selected = st.selectbox(
         "Model",
-        [_keep] + options,
+        [MODEL_KEEP_SENTINEL] + options,
         index=start_index,
         key=f"model_select_{mas_id}_{agent.agent_id}",
         help="Override the LLM for this agent. '(keep from YAML)' uses the configured model.",
         label_visibility="collapsed",
     )
 
-    if selected == _keep:
+    if selected == MODEL_KEEP_SENTINEL:
         overrides.pop(agent.agent_id, None)
     else:
         overrides[agent.agent_id] = selected

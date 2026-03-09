@@ -39,6 +39,7 @@ from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
 )
 from bili.aether.ui.components.graph_viewer import (
+    MODEL_KEEP_SENTINEL,
     build_model_options,
     render_graph_viewer,
     render_metadata_bar,
@@ -171,7 +172,9 @@ def _on_send_to_chat() -> None:
             display = overrides.get(agent.agent_id)
             patched = (
                 agent.model_copy(update={"model_name": display_to_model_name[display]})
-                if display and display in display_to_model_name
+                if display
+                and display != MODEL_KEEP_SENTINEL
+                and display in display_to_model_name
                 else agent
             )
             patched_agents.append(patched)
