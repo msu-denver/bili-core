@@ -40,10 +40,11 @@ A read-only graph viewer for exploring AETHER YAML configurations as interactive
   - Consensus: circular arrangement
   - Parallel: three-row layout (coordinator, workers, aggregator)
   - Custom/Deliberative: edge-based layered layout
-- **Properties Panel**: Click any node to view agent details (role, objective, model, capabilities, tools, etc.)
+- **Properties Panel**: Click any node to view agent details (role, objective, model, capabilities, tools, etc.). Includes a per-agent **model override selector** — choose any model from the configured LLM registry to override the agent's `model_name` for the current session without editing the YAML
 - **Metadata Bar**: Summary metrics for the selected MAS configuration
 - **Color-Coded Nodes**: Nodes are colored by agent role for quick visual identification
 - **Edge Styling**: Solid lines for channels, dashed for workflow edges, animated for conditional edges
+- **Send to Chat →** button: loads the current config into the Chat page. If model overrides have been applied in the Properties Panel, those overrides are patched onto the config before it is sent — the Chat page receives the modified config, not the original YAML config
 
 ---
 
@@ -57,6 +58,8 @@ A multi-turn conversation interface that executes a compiled MAS against user me
 - **Live agent output panels**: expandable sections rendered as each agent node completes, collapsed automatically in conversation history
 - **Stub mode**: configs without `model_name` execute without LLM calls; a banner in the sidebar indicates stub mode
 - **Loading state**: "Initializing executor..." spinner during graph compilation on config selection
+- **Config validation**: structural validation runs automatically on every config load and on every model patch. Errors block execution; warnings surface as non-blocking notices. Results are shown inline in the sidebar
+- **Model picker**: switch any loaded config between stub mode and a real LLM without editing YAML (see [Model Settings](#model-settings))
 - **Error isolation**: individual agent render failures surface as inline errors without aborting the turn
 - **Config load errors**: surfaced in the main area so the sidebar remains clean
 
@@ -77,6 +80,23 @@ A multi-turn conversation interface that executes a compiled MAS against user me
 4. Agent output panels appear live as each node in the graph completes
 5. The status bar updates to "Complete" or "Execution failed" at the end of each turn
 6. Previous turns are preserved in the conversation history above the input
+
+### Model Settings
+
+After a config is loaded, a **Model Settings** section appears in the sidebar below the config metadata. It lets you switch between stub mode and a real LLM without editing or reloading the YAML.
+
+| Control | Behaviour |
+|---------|-----------|
+| **Model selectbox** | Lists all LLMs from `bili/config/llm_config.py` (74 models), grouped by provider |
+| **Apply to all** | Patches every agent in the loaded config with the selected model and reinitialises the executor. Conversation history is cleared |
+| **Stub mode** | Clears `model_name` from all agents and reinitialises; stub mode indicator reappears |
+
+**Important notes:**
+
+- Patches are **in-memory only** — the original YAML on disk is never modified. Selecting a different config from the dropdown resets to the clean YAML
+- The original loaded config is preserved as a base internally, so clicking **Apply to all** and then **Stub mode** (or vice versa) always patches from the unmodified YAML, not from a previously patched state
+- Applying the same model twice does not trigger a redundant reinit (cache hit)
+- If the config contains **pipeline agents**, a warning is shown because pipeline agents use their own internal node models and the top-level override may have no effect on them
 
 ### Conversation Controls
 
@@ -114,9 +134,10 @@ Failed turns include an additional `"error"` field with the exception message; t
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `chat_config` | `MASConfig` | Active configuration |
+| `chat_config` | `MASConfig` | Active configuration (may be model-patched) |
+| `chat_config_base` | `MASConfig` | Original YAML-loaded config, preserved across model picker operations. Always the unpatched base |
 | `chat_executor` | `MASExecutor` | Compiled executor (set after initialization) |
-| `chat_yaml_path` | `str` | Cache key: file path string or `"uploaded:{name}"` |
+| `chat_yaml_path` | `str` | Cache key: bare file path, `"uploaded:{name}"`, or suffixed with `":model={model_id}"` / `":stub"` after model picker use |
 | `chat_history` | `List[Dict]` | All completed turns |
 | `chat_thread_id` | `str` | UUID for checkpoint continuity; reset on "New Conversation" |
 | `chat_uploaded_configs` | `Dict[str, MASConfig]` | Session-only uploaded configs |
@@ -156,6 +177,12 @@ bili/aether/ui/
 - **YAML fails to load**: Check that the YAML is valid against the MASConfig schema
 - **Chat spinner hangs**: Executor initialization compiles the LangGraph; for real-LLM configs this requires valid provider credentials. Check the terminal for authentication errors.
 - **"Execution failed" in chat**: A runtime error occurred during graph execution. The full traceback is logged to the terminal. Select a stub config (any config without `model_name`) to verify the UI works without credentials.
+- **`ImportError: cannot import name 'MODEL_KEEP_SENTINEL'`** (or similar after updating): The venv has a stale non-editable install of bili-core shadowing the local source. Fix with:
+  ```bash
+  pip uninstall bili-core -y && pip install -e /app/bili-core --ignore-installed blinker
+  ```
+- **Chat stays in stub mode after applying a model**: Confirm the terminal shows "Creating LLM for agent..." log lines. If the executor initialises twice (two "MASExecutor initialized" lines with the second showing no LLM creation), the site-packages install is stale — run the reinstall command above.
+- **Model picker shows no effect on pipeline agents**: Pipeline agents (e.g. `researcher` in `pipeline_agents.yaml`) use internal node models; the top-level `model_name` field has no effect. The UI shows a warning when this case is detected.
 
 ## Known Issues
 
