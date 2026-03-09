@@ -109,6 +109,17 @@ def _active_messages() -> List[Dict]:
     )
 
 
+def _active_messages_or_empty() -> List[Dict]:
+    """Return the active thread's messages or an empty list when no thread exists.
+
+    Safe for read-only call sites (iteration, length checks) where no active
+    thread is a valid state (e.g. before the first message is sent).
+    """
+    thread_id = st.session_state.get("chat_thread_id")
+    threads = st.session_state.get("chat_threads", {})
+    return threads.get(thread_id, {}).get("messages", []) if thread_id else []
+
+
 def _new_thread(mas_id: str) -> str:
     """Create a new thread, set it active, and return the new thread ID."""
     now = datetime.now(timezone.utc)
@@ -177,7 +188,7 @@ def _render_thread_list() -> None:
         is_active = tid == active_id
 
         if editing_id == tid:
-            c1, c2 = st.columns([4, 1])
+            c1, c2, c3 = st.columns([4, 1, 1])
             with c1:
                 new_name = st.text_input(
                     "Rename thread",
@@ -190,6 +201,10 @@ def _render_thread_list() -> None:
                     threads[tid]["name"] = new_name
                     st.session_state.pop("chat_editing_thread", None)
                     st.rerun()
+            with c3:
+                if st.button("✕", key=f"chat_rename_cancel_{tid}", help="Cancel"):
+                    st.session_state.pop("chat_editing_thread", None)
+                    st.rerun()
         else:
             c1, c2, c3 = st.columns([5, 1, 1])
             with c1:
@@ -200,6 +215,7 @@ def _render_thread_list() -> None:
                     use_container_width=True,
                     type=btn_type,
                 ):
+                    st.session_state.pop("chat_editing_thread", None)
                     if not is_active:
                         st.session_state.chat_thread_id = tid
                         st.rerun()
@@ -537,7 +553,7 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
         _new_thread(config.mas_id)
         st.rerun()
 
-    chat_history = _active_messages()
+    chat_history = _active_messages_or_empty()
     thread_id = st.session_state.get("chat_thread_id", "")
     if chat_history:
         export = {
@@ -719,7 +735,7 @@ def _render_chat_area() -> None:
     if config.description:
         st.caption(config.description)
 
-    for turn in _active_messages():
+    for turn in _active_messages_or_empty():
         _render_stored_turn(turn)
 
     user_input = st.chat_input("Send a message to the MAS...")
