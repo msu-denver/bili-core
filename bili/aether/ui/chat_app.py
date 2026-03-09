@@ -52,6 +52,27 @@ def _is_stub_config(config: MASConfig) -> bool:
     return any(not agent.model_name for agent in config.agents)
 
 
+@st.cache_data
+def _build_chat_model_options() -> tuple[list[str], list[str]]:
+    """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
+
+    Lazy-imports ``LLM_MODELS`` so this module loads without bili-core's heavy
+    LLM dependencies.  Result is cached for the lifetime of the Streamlit process.
+    """
+    from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
+        LLM_MODELS,
+    )
+
+    display: list[str] = []
+    ids: list[str] = []
+    for provider_info in LLM_MODELS.values():
+        label = provider_info["name"]
+        for entry in provider_info["models"]:
+            display.append(f"[{label}] {entry['model_name']}")
+            ids.append(entry["model_id"])
+    return display, ids
+
+
 def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a raw graph state update to a JSON-serializable dict.
 
@@ -154,6 +175,7 @@ def _load_config(yaml_path: Path) -> None:
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
         return
+    st.session_state.chat_config_base = config
     _initialize_executor(config, str(yaml_path))
 
 
@@ -163,6 +185,7 @@ def _load_uploaded_config(name: str, config: MASConfig) -> None:
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
         return
+    st.session_state.chat_config_base = config
     _initialize_executor(config, f"uploaded:{name}")
 
 
@@ -287,6 +310,63 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     st.markdown(f"**MAS ID:** `{config.mas_id}`")
     st.markdown(f"**Workflow:** {config.workflow_type.value}")
     st.markdown(f"**Agents:** {len(config.agents)}")
+
+    st.markdown("---")
+    st.markdown("**Model Settings**")
+
+    display_opts, id_opts = _build_chat_model_options()
+    st.selectbox(
+        "Model",
+        range(len(display_opts)),
+        format_func=lambda i: display_opts[i],
+        key="chat_model_selector",
+        label_visibility="collapsed",
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        apply_clicked = st.button(
+            "Apply to all",
+            use_container_width=True,
+            help="Set this model on every agent",
+        )
+    with col2:
+        stub_clicked = st.button(
+            "Stub mode",
+            use_container_width=True,
+            help="Clear model from all agents",
+        )
+
+    base_config: Optional[MASConfig] = st.session_state.get("chat_config_base")
+    if base_config is not None:
+        if apply_clicked:
+            selected_idx = st.session_state.get("chat_model_selector", 0)
+            model_id = id_opts[selected_idx]
+            patched_agents = [
+                a.model_copy(update={"model_name": model_id})
+                for a in base_config.agents
+            ]
+            patched = base_config.model_copy(update={"agents": patched_agents})
+            if _validate_config(patched):
+                base_key = (
+                    st.session_state.get("chat_yaml_path", "config")
+                    .split(":model=")[0]
+                    .split(":stub")[0]
+                )
+                _initialize_executor(patched, f"{base_key}:model={model_id}")
+
+        if stub_clicked:
+            patched_agents = [
+                a.model_copy(update={"model_name": None}) for a in base_config.agents
+            ]
+            patched = base_config.model_copy(update={"agents": patched_agents})
+            if _validate_config(patched):
+                base_key = (
+                    st.session_state.get("chat_yaml_path", "config")
+                    .split(":model=")[0]
+                    .split(":stub")[0]
+                )
+                _initialize_executor(patched, f"{base_key}:stub")
 
     st.markdown("---")
 
