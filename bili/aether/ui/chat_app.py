@@ -748,11 +748,18 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                 active=None,
                 all_nodes=node_ids,
                 key_prefix=f"timeline_stored_{turn_idx}",
+                turn_index=turn_idx,
             )
-            # Pop (not get) the selection so it is consumed for exactly one
-            # render cycle — prevents the auto-expand from persisting into
-            # subsequent turns that share the same agent ID.
-            selected = st.session_state.pop("aether_selected_trace_node", None)
+            # Only consume the selection when it belongs to this turn — the
+            # tuple ``(turn_index, agent_id)`` lets each stored turn check
+            # ownership before popping, so earlier turns in the render loop
+            # don't accidentally steal a click intended for a later turn.
+            raw = st.session_state.get("aether_selected_trace_node")
+            if isinstance(raw, tuple) and raw[0] == turn_idx:
+                st.session_state.pop("aether_selected_trace_node")
+                selected = raw[1]
+            else:
+                selected = None
             if "error" in turn:
                 st.divider()
             with st.expander("Agent trace", expanded=False):
@@ -777,6 +784,7 @@ def _render_timeline(
     all_nodes: List[str],
     *,
     key_prefix: str,
+    turn_index: int = 0,
 ) -> None:
     """Render a horizontal node-chip row into a ``st.empty()`` placeholder.
 
@@ -784,10 +792,10 @@ def _render_timeline(
     allowing the timeline to update live during streaming without re-rendering
     the whole page.
 
-    Completed chips are enabled buttons — clicking one sets
-    ``aether_selected_trace_node`` so ``_render_stored_turn`` can auto-expand
-    that agent's panel on the next rerun.  Active and pending chips are
-    disabled.
+    Completed chips are enabled buttons — clicking one stores
+    ``(turn_index, agent_id)`` in ``aether_selected_trace_node`` so
+    ``_render_stored_turn`` can identify the correct turn and auto-expand that
+    agent's panel on the next rerun.  Active and pending chips are disabled.
 
     Args:
         placeholder: A ``st.empty()`` container whose content is replaced on
@@ -796,10 +804,13 @@ def _render_timeline(
         active: Agent ID currently executing, or ``None``.
         all_nodes: Ordered list of all agent IDs for this config — determines
             chip order and which nodes show as pending (○).
-        key_prefix: Unique prefix for Streamlit widget keys. Use
-            ``"timeline_live"`` for the live turn and
+        key_prefix: Unique prefix for Streamlit widget keys. Use a counter
+            suffix for the live turn (``f"timeline_live_{n}"``) and
             ``f"timeline_stored_{turn_index}"`` for stored turns to avoid
             key collisions across multiple rendered turns.
+        turn_index: The ``turn_index`` of the owning turn. Stored alongside
+            ``agent_id`` in ``aether_selected_trace_node`` so the correct
+            stored turn can consume the selection.
     """
     if not all_nodes:
         return
@@ -815,7 +826,10 @@ def _render_timeline(
                         use_container_width=True,
                         help="Click to expand this agent's output",
                     ):
-                        st.session_state["aether_selected_trace_node"] = node_id
+                        st.session_state["aether_selected_trace_node"] = (
+                            turn_index,
+                            node_id,
+                        )
                         st.rerun()
                 elif node_id == active:
                     st.button(
@@ -841,7 +855,10 @@ def _run_turn(user_input: str) -> None:
         return
 
     config: Optional[MASConfig] = st.session_state.get("chat_config")
-    _ensure_active_thread(config.mas_id if config else "unknown")
+    if config is None:
+        st.error("No configuration loaded.")
+        return
+    _ensure_active_thread(config.mas_id)
 
     turn: Dict[str, Any] = {
         "role": "user",
