@@ -23,6 +23,38 @@ from .state_generator import _merge_dicts, _replace_value, generate_state_schema
 LOGGER = logging.getLogger(__name__)
 
 
+def _build_supervisor_routing_instructions(
+    supervisor_id: str,
+    workers: list,
+) -> str:
+    """Return routing instructions to append to a supervisor agent's system prompt.
+
+    Tells the LLM the available worker agent IDs and the exact format it must
+    use to route to one of them (or end the workflow).
+
+    Args:
+        supervisor_id: The supervisor agent's ID (excluded from worker list).
+        workers: List of worker AgentSpec objects.
+    """
+    worker_lines = "\n".join(
+        f"  - {w.agent_id} ({w.role}): {(w.objective or '').strip()[:120]}"
+        for w in workers
+    )
+    return (
+        "\n\n--- ROUTING INSTRUCTIONS ---\n"
+        "You are the supervisor of a multi-agent system. After analysing the input "
+        "you MUST route to exactly one worker agent by including a routing decision "
+        "in your response.\n\n"
+        f"Available workers:\n{worker_lines}\n\n"
+        "To route to a worker, include ONE of the following in your response:\n"
+        '  JSON format (preferred): {"next_agent": "<agent_id>", ...other fields...}\n'
+        "  Text format:             ROUTE_TO: <agent_id>\n\n"
+        'Use "next_agent": "END" (or ROUTE_TO: END) only when all workers have '
+        "reported back and you are ready to produce a final synthesised answer.\n"
+        "Do NOT output a final answer on the first turn — route to a worker first."
+    )
+
+
 # Safe expression evaluator for workflow conditions
 # Allows: comparisons, boolean ops, attribute access, constants
 # Blocks: imports, exec, function calls, comprehensions
@@ -218,10 +250,29 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
         self._apply_inheritance()
 
         # 2. Generate agent node callables
+        # For supervisor workflows, inject routing instructions into the supervisor's
+        # system prompt so the LLM knows to output a "next_agent" routing decision.
+        supervisor_workers: Dict[str, list] = {}
+        if self._config.workflow_type == WorkflowType.SUPERVISOR:
+            for agent in self._config.agents:
+                if agent.is_supervisor:
+                    workers = [
+                        a for a in self._config.agents if a.agent_id != agent.agent_id
+                    ]
+                    supervisor_workers[agent.agent_id] = workers
+
         for agent in self._config.agents:
             if agent.pipeline:
                 node_fn = self._compile_pipeline_node(agent)
             else:
+                if agent.agent_id in supervisor_workers:
+                    routing_suffix = _build_supervisor_routing_instructions(
+                        agent.agent_id, supervisor_workers[agent.agent_id]
+                    )
+                    base_prompt = agent.system_prompt or agent.objective or ""
+                    agent = agent.model_copy(
+                        update={"system_prompt": base_prompt + routing_suffix}
+                    )
                 node_fn = generate_agent_node(agent)
             wrapped = wrap_agent_node(node_fn, agent.agent_id)
             self._agent_nodes[agent.agent_id] = wrapped
