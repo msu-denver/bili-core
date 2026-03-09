@@ -1,8 +1,9 @@
 """
-AETHER MAS YAML Visualization App.
+AETHER — MAS Visualizer and Chat.
 
-A read-only Streamlit application that visualizes AETHER multi-agent
-system YAML configurations as interactive node graphs.
+A Streamlit application that combines the AETHER multi-agent system graph
+visualizer with the multi-turn chat interface. Use the sidebar navigation
+to switch between pages.
 
 Usage:
     streamlit run bili/aether/ui/app.py
@@ -33,7 +34,13 @@ except ImportError:
     st.stop()
 
 from bili.aether.config.loader import load_mas_from_yaml
+from bili.aether.ui.chat_app import render_main as render_chat_main
+from bili.aether.ui.chat_app import (
+    render_sidebar_content as render_chat_sidebar_content,
+)
 from bili.aether.ui.components.graph_viewer import (
+    MODEL_KEEP_SENTINEL,
+    build_model_options,
     render_graph_viewer,
     render_metadata_bar,
 )
@@ -44,56 +51,64 @@ from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
 
+_DEFAULT_PAGE = "Visualizer"
+
 
 def main() -> None:
-    """Main entry point for the AETHER visualization app."""
+    """Main entry point for the AETHER app."""
     _configure_page()
 
     with st.sidebar:
-        _render_sidebar()
+        page = _render_sidebar()
 
-    config = st.session_state.get("mas_config")
-    if config is None:
-        st.info("Select a YAML configuration from the sidebar to visualize it.")
-        return
-
-    # Title and description
-    st.markdown(f"### {config.name}")
-    if config.description:
-        st.caption(config.description)
-
-    # Convert and render
-    nodes, edges = convert_mas_to_graph(config)
-    render_graph_viewer(config, nodes, edges)
-
-    # Metadata bar below graph
-    st.markdown("---")
-    render_metadata_bar(config)
-
-    # Legend
-    _render_legend()
+    if page == "Chat":
+        render_chat_main()
+    else:
+        _render_visualizer_main()
 
 
 def _configure_page() -> None:
     """Set up Streamlit page config."""
     st.set_page_config(
-        page_title="AETHER - MAS Visualizer",
+        page_title="AETHER",
         page_icon="A",
         layout="wide",
     )
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
-def _render_sidebar() -> None:
-    """Render the sidebar with YAML selector and MAS info."""
+def _render_sidebar() -> str:
+    """Render the sidebar: logo, nav radio, then page-specific controls.
+
+    Returns the active page name (``"Visualizer"`` or ``"Chat"``).
+    """
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
 
-    st.markdown("## AETHER Visualizer")
-    st.caption("Multi-Agent System Graph Viewer")
+    st.markdown("## AETHER")
     st.markdown("---")
 
-    # Find all YAML files in examples directory
+    st.radio(
+        "Navigation",
+        ["Visualizer", "Chat"],
+        key="aether_page",
+        label_visibility="collapsed",
+        horizontal=True,
+    )
+    st.markdown("---")
+
+    page: str = st.session_state.get("aether_page", _DEFAULT_PAGE)
+    if page == "Chat":
+        render_chat_sidebar_content(examples_dir=EXAMPLES_DIR)
+    else:
+        _render_visualizer_sidebar()
+    return page
+
+
+def _render_visualizer_sidebar() -> None:
+    """Render the visualizer-specific sidebar content."""
+    st.caption("Multi-Agent System Graph Viewer")
+
     if not EXAMPLES_DIR.exists():
         st.error(f"Examples directory not found: {EXAMPLES_DIR}")
         return
@@ -117,9 +132,64 @@ def _render_sidebar() -> None:
         _load_config(yaml_path)
 
 
-def _load_config(yaml_path: Path):
+def _render_visualizer_main() -> None:
+    """Render the visualizer main area."""
+    config = st.session_state.get("mas_config")
+    if config is None:
+        st.info("Select a YAML configuration from the sidebar to visualize it.")
+        return
+
+    st.markdown(f"### {config.name}")
+    if config.description:
+        st.caption(config.description)
+
+    nodes, edges = convert_mas_to_graph(config)
+    render_graph_viewer(config, nodes, edges)
+
+    st.markdown("---")
+    render_metadata_bar(config)
+
+    _render_legend()
+
+
+def _on_send_to_chat() -> None:
+    """Button callback: push the current visualizer config to the Chat page.
+
+    Applies any model overrides selected in the Visualizer before sending.
+    Runs before the next render cycle so ``aether_page`` can be written
+    safely without conflicting with the already-instantiated radio widget.
+    """
+    config = st.session_state.get("mas_config")
+    if config is None:
+        return
+
+    # Apply model overrides from the Visualizer properties panel
+    overrides: dict = st.session_state.get(f"model_overrides_{config.mas_id}", {})
+    if overrides:
+        _, display_to_model_name, _ = build_model_options()
+        patched_agents = []
+        for agent in config.agents:
+            display = overrides.get(agent.agent_id)
+            patched = (
+                agent.model_copy(update={"model_name": display_to_model_name[display]})
+                if display
+                and display != MODEL_KEEP_SENTINEL
+                and display in display_to_model_name
+                else agent
+            )
+            patched_agents.append(patched)
+        config = config.model_copy(update={"agents": patched_agents})
+
+    name = st.session_state.get("current_yaml_path", "visualizer_config")
+    if "chat_uploaded_configs" not in st.session_state:
+        st.session_state.chat_uploaded_configs = {}
+    st.session_state.chat_uploaded_configs[name] = config
+    st.session_state.aether_page = "Chat"
+    st.session_state.chat_autoload_name = name
+
+
+def _load_config(yaml_path: Path) -> None:
     """Load a YAML config and store it in session state."""
-    # Only reload if the path changed
     current_path = st.session_state.get("current_yaml_path")
     if current_path == str(yaml_path) and "mas_config" in st.session_state:
         config = st.session_state.mas_config
@@ -138,7 +208,7 @@ def _load_config(yaml_path: Path):
             ]
             for k in keys_to_clear:
                 del st.session_state[k]
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             st.error(f"Failed to load `{yaml_path.name}`:\n\n{e}")
             st.session_state.mas_config = None
             return
@@ -157,7 +227,12 @@ def _load_config(yaml_path: Path):
         st.warning("Human-in-loop enabled")
 
     st.markdown("---")
-    st.button("Deploy", disabled=True, use_container_width=True)
+    st.button(
+        "Send to Chat \u2192",
+        disabled=st.session_state.get("mas_config") is None,
+        use_container_width=True,
+        on_click=_on_send_to_chat,
+    )
 
 
 def _render_legend() -> None:

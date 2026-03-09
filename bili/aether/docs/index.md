@@ -42,4 +42,4 @@ end-to-end usage examples.
 
 | Doc | Contents |
 |---|---|
-| [ui.md](ui.md) | Streamlit MAS visualizer — installation, features, troubleshooting |
+| [ui.md](ui.md) | Streamlit UI — MAS graph visualizer and multi-turn chat interface; installation, navigation, features, troubleshooting |
