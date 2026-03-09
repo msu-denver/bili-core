@@ -52,6 +52,43 @@ def _is_stub_config(config: MASConfig) -> bool:
     return any(not agent.model_name for agent in config.agents)
 
 
+def _base_cache_key() -> str:
+    """Return the canonical cache key for the current config, stripping any model/stub suffix."""
+    raw = st.session_state.get("chat_yaml_path", "config")
+    return raw.split(":model=")[0].split(":stub")[0]
+
+
+def _apply_model_patch(base_config: MASConfig, model_id: Optional[str]) -> None:
+    """Patch every agent in *base_config* with *model_id* (``None`` = stub), then reinit.
+
+    Warns when pipeline agents are present and *model_id* is not ``None``, because
+    pipeline agents use internal node models and the top-level override may have no effect.
+    Validates the patched config before reinitialising the executor.
+    """
+    if model_id is not None:
+        pipeline_agents = [
+            a.agent_id for a in base_config.agents if a.pipeline is not None
+        ]
+        if pipeline_agents:
+            st.warning(
+                f"Pipeline agents ({', '.join(pipeline_agents)}) use internal node "
+                "models — the top-level model override may have no effect on them."
+            )
+
+    patched_agents = [
+        a.model_copy(update={"model_name": model_id}) for a in base_config.agents
+    ]
+    patched = base_config.model_copy(update={"agents": patched_agents})
+    if not _validate_config(patched):
+        return
+
+    base_key = _base_cache_key()
+    cache_key = (
+        f"{base_key}:model={model_id}" if model_id is not None else f"{base_key}:stub"
+    )
+    _initialize_executor(patched, cache_key)
+
+
 @st.cache_data
 def _build_chat_model_options() -> tuple[list[str], list[str]]:
     """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
@@ -294,6 +331,7 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             "chat_yaml_path",
             "chat_executor",
             "chat_load_error",
+            "chat_config_base",
         ):
             st.session_state.pop(key, None)
         return
@@ -340,33 +378,14 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     base_config: Optional[MASConfig] = st.session_state.get("chat_config_base")
     if base_config is not None:
         if apply_clicked:
-            selected_idx = st.session_state.get("chat_model_selector", 0)
-            model_id = id_opts[selected_idx]
-            patched_agents = [
-                a.model_copy(update={"model_name": model_id})
-                for a in base_config.agents
-            ]
-            patched = base_config.model_copy(update={"agents": patched_agents})
-            if _validate_config(patched):
-                base_key = (
-                    st.session_state.get("chat_yaml_path", "config")
-                    .split(":model=")[0]
-                    .split(":stub")[0]
-                )
-                _initialize_executor(patched, f"{base_key}:model={model_id}")
+            model_idx = st.session_state.get("chat_model_selector", 0)
+            if model_idx < 0 or model_idx >= len(id_opts):
+                st.error("Invalid model selection. Please re-select a model.")
+            else:
+                _apply_model_patch(base_config, id_opts[model_idx])
 
         if stub_clicked:
-            patched_agents = [
-                a.model_copy(update={"model_name": None}) for a in base_config.agents
-            ]
-            patched = base_config.model_copy(update={"agents": patched_agents})
-            if _validate_config(patched):
-                base_key = (
-                    st.session_state.get("chat_yaml_path", "config")
-                    .split(":model=")[0]
-                    .split(":stub")[0]
-                )
-                _initialize_executor(patched, f"{base_key}:stub")
+            _apply_model_patch(base_config, None)
 
     st.markdown("---")
 
