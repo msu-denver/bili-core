@@ -182,11 +182,40 @@ def _render_sidebar() -> None:
     render_sidebar_content()
 
 
-def render_sidebar_content() -> None:
+def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     """Render the chat sidebar controls — config selector, upload, and buttons.
 
     Public: called by ``app.py`` when the Chat page is active.
+
+    Args:
+        examples_dir: Override the directory scanned for built-in YAML configs.
+            When ``app.py`` imports this module as a package the module-level
+            ``EXAMPLES_DIR`` may resolve to the installed site-packages copy
+            (which lacks the example files).  Pass ``app.py``'s own
+            ``EXAMPLES_DIR`` to guarantee the correct source-tree path.
     """
+    effective_examples_dir = examples_dir if examples_dir is not None else EXAMPLES_DIR
+
+    autoload_name = st.session_state.pop("_chat_autoload_name", None)
+    if autoload_name is not None:
+        pending = st.session_state.get("chat_uploaded_configs", {}).get(autoload_name)
+        if pending is not None:
+            _load_uploaded_config(autoload_name, pending)
+            # Pre-select the config in the selectbox so the selectbox's else-branch
+            # does not immediately clear the session state we just populated.
+            _n_yaml = (
+                len(sorted(effective_examples_dir.glob("*.yaml")))
+                if effective_examples_dir.exists()
+                else 0
+            )
+            _uploaded_sorted = sorted(
+                st.session_state.get("chat_uploaded_configs", {}).keys()
+            )
+            if autoload_name in _uploaded_sorted:
+                st.session_state.chat_yaml_selector = _n_yaml + _uploaded_sorted.index(
+                    autoload_name
+                )
+
     uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
     if uploaded and uploaded.name not in st.session_state.get(
         "chat_uploaded_configs", {}
@@ -204,11 +233,11 @@ def render_sidebar_content() -> None:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Invalid config: {exc}")
 
-    if not EXAMPLES_DIR.exists():
-        st.error(f"Examples directory not found: {EXAMPLES_DIR}")
+    if not effective_examples_dir.exists():
+        st.error(f"Examples directory not found: {effective_examples_dir}")
         return
 
-    yaml_files = sorted(EXAMPLES_DIR.glob("*.yaml"))
+    yaml_files = sorted(effective_examples_dir.glob("*.yaml"))
     uploaded_configs: Dict[str, MASConfig] = st.session_state.get(
         "chat_uploaded_configs", {}
     )

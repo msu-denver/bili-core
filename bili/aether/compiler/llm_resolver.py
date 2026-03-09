@@ -68,7 +68,7 @@ def resolve_model(model_name: str) -> Tuple[str, str]:
     # --- 1 & 2: Look up in LLM_MODELS ---
     result = _lookup_in_llm_models(model_name)
     if result is not None:
-        provider, model_id = result
+        provider, model_id, _ = result
         LOGGER.debug(
             "Resolved '%s' via LLM_MODELS → provider=%s, model_id=%s",
             model_name,
@@ -131,11 +131,16 @@ def create_llm(agent: AgentSpec) -> Any:
             f"cannot create LLM instance."
         )
 
-    provider, model_id = resolve_model(agent.model_name)
+    lookup = _lookup_in_llm_models(agent.model_name)
+    if lookup is not None:
+        provider, model_id, extra_kwargs = lookup
+    else:
+        provider, model_id = resolve_model(agent.model_name)
+        extra_kwargs = {}
 
-    # Build kwargs for load_model — each provider uses "model_name" as
-    # the kwarg, but the *value* must be the provider's model_id.
-    kwargs: Dict[str, Any] = {"model_name": model_id}
+    # Build kwargs for load_model — start with provider-specific extras
+    # (e.g. api_version for Azure OpenAI), then apply agent overrides.
+    kwargs: Dict[str, Any] = {"model_name": model_id, **extra_kwargs}
     if agent.temperature is not None:
         kwargs["temperature"] = agent.temperature
     if agent.max_tokens is not None:
@@ -215,10 +220,15 @@ def resolve_tools(agent: AgentSpec) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _lookup_in_llm_models(model_name: str) -> Optional[Tuple[str, str]]:
+def _lookup_in_llm_models(
+    model_name: str,
+) -> Optional[Tuple[str, str, Dict[str, Any]]]:
     """Search ``LLM_MODELS`` for a matching model entry.
 
-    Returns ``(provider_type, model_id)`` if found, ``None`` otherwise.
+    Returns ``(provider_type, model_id, extra_kwargs)`` if found,
+    ``None`` otherwise.  ``extra_kwargs`` contains provider-specific
+    parameters stored in the entry's ``kwargs`` dict (e.g.
+    ``api_version`` for Azure OpenAI models).
     """
     try:
         from bili.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
@@ -233,13 +243,14 @@ def _lookup_in_llm_models(model_name: str) -> Optional[Tuple[str, str]]:
         for entry in models:
             entry_model_id = entry.get("model_id", "")
             entry_display = entry.get("model_name", "")
+            extra_kwargs: Dict[str, Any] = entry.get("kwargs", {})
 
             # Match on model_id (e.g. "gpt-4o")
             if entry_model_id == model_name:
-                return provider_type, entry_model_id
+                return provider_type, entry_model_id, extra_kwargs
 
             # Match on display name (e.g. "GPT-4o")
             if entry_display == model_name:
-                return provider_type, entry_model_id
+                return provider_type, entry_model_id, extra_kwargs
 
     return None
