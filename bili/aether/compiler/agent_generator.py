@@ -17,6 +17,36 @@ from bili.aether.schema import AgentSpec, OutputFormat
 LOGGER = logging.getLogger(__name__)
 
 
+def _normalise_content_value(content: Any) -> str:
+    """Coerce a raw LLM content value to ``str``.
+
+    Some providers (e.g. Google Vertex / Gemini) return content as a list of
+    part dicts such as ``[{"type": "text", "text": "..."}]``.  Joins text
+    parts into a single string; falls back to ``str()`` for unrecognised
+    types.  Returns an empty string for falsy input.
+    """
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", str(part)) if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    return content or ""
+
+
+def _normalise_message_content(msg: Any) -> Any:
+    """Return *msg* with its ``content`` coerced to ``str`` if it is a list.
+
+    Some LLM providers (e.g. Google Vertex / Gemini) return ``content`` as a
+    list of content-part dicts.  Forwarding such messages as conversation
+    history to the same or a different provider can cause serialisation errors
+    (e.g. Vertex rejects a message with an unrecognised parts structure).
+    Delegates to :func:`_normalise_content_value` for the join logic.
+    """
+    if not hasattr(msg, "content") or not isinstance(msg.content, list):
+        return msg
+    return msg.model_copy(update={"content": _normalise_content_value(msg.content)})
+
+
 def generate_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     """Create a node callable for the given agent.
 
@@ -112,6 +142,12 @@ def _generate_tool_agent_node(
 
         messages = list(state.get("messages", []))
 
+        # Normalise any list-content messages from previous agents (e.g. Gemini
+        # returns content as a list of parts).  Providers like Google Vertex reject
+        # messages where content is a list they don't recognise when those messages
+        # are forwarded as conversation history to a subsequent agent.
+        messages = [_normalise_message_content(m) for m in messages]
+
         has_system = any(isinstance(m, SystemMessage) for m in messages)
         if not has_system:
             messages.insert(0, SystemMessage(content=system_prompt))
@@ -133,7 +169,7 @@ def _generate_tool_agent_node(
         response_messages = result.get("messages", [])
         content = ""
         if response_messages:
-            content = response_messages[-1].content or ""
+            content = _normalise_content_value(response_messages[-1].content)
 
         output = _build_output(agent, content)
         agent_outputs = dict(state.get("agent_outputs") or {})
@@ -186,10 +222,10 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
         if comm_context:
             system_prompt += "\n\n--- Messages from other agents ---\n" + comm_context
 
-        # Filter state messages to compatible types
+        # Filter state messages to compatible types and normalise list content
         state_messages = state.get("messages", [])
         compatible = [
-            m
+            _normalise_message_content(m)
             for m in state_messages
             if isinstance(m, (AIMessage, HumanMessage, SystemMessage))
         ]
@@ -207,7 +243,7 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
 
         # Invoke the LLM directly
         response = llm.invoke(messages)
-        content = response.content
+        content = _normalise_content_value(response.content)
 
         execution_ms = (time.time() - start_time) * 1000
         LOGGER.info(
