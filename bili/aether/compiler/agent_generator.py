@@ -17,6 +17,22 @@ from bili.aether.schema import AgentSpec, OutputFormat
 LOGGER = logging.getLogger(__name__)
 
 
+def _normalise_content_value(content: Any) -> str:
+    """Coerce a raw LLM content value to ``str``.
+
+    Some providers (e.g. Google Vertex / Gemini) return content as a list of
+    part dicts such as ``[{"type": "text", "text": "..."}]``.  Joins text
+    parts into a single string; falls back to ``str()`` for unrecognised
+    types.  Returns an empty string for falsy input.
+    """
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", str(part)) if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    return content or ""
+
+
 def _normalise_message_content(msg: Any) -> Any:
     """Return *msg* with its ``content`` coerced to ``str`` if it is a list.
 
@@ -24,15 +40,11 @@ def _normalise_message_content(msg: Any) -> Any:
     list of content-part dicts.  Forwarding such messages as conversation
     history to the same or a different provider can cause serialisation errors
     (e.g. Vertex rejects a message with an unrecognised parts structure).
-    Joining the text parts into a single string is the safest normalisation.
+    Delegates to :func:`_normalise_content_value` for the join logic.
     """
     if not hasattr(msg, "content") or not isinstance(msg.content, list):
         return msg
-    normalised = " ".join(
-        part.get("text", str(part)) if isinstance(part, dict) else str(part)
-        for part in msg.content
-    )
-    return msg.model_copy(update={"content": normalised})
+    return msg.model_copy(update={"content": _normalise_content_value(msg.content)})
 
 
 def generate_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
@@ -157,16 +169,7 @@ def _generate_tool_agent_node(
         response_messages = result.get("messages", [])
         content = ""
         if response_messages:
-            raw = response_messages[-1].content or ""
-            # Normalise list-of-parts responses (e.g. Google Vertex / Gemini)
-            # to a plain string so downstream consumers always receive str.
-            if isinstance(raw, list):
-                content = " ".join(
-                    part.get("text", str(part)) if isinstance(part, dict) else str(part)
-                    for part in raw
-                )
-            else:
-                content = raw
+            content = _normalise_content_value(response_messages[-1].content)
 
         output = _build_output(agent, content)
         agent_outputs = dict(state.get("agent_outputs") or {})
@@ -240,14 +243,7 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
 
         # Invoke the LLM directly
         response = llm.invoke(messages)
-        content = response.content
-        # Some providers (e.g. Google Vertex) return content as a list of parts.
-        # Normalise to a plain string so all downstream consumers receive str.
-        if isinstance(content, list):
-            content = " ".join(
-                part.get("text", str(part)) if isinstance(part, dict) else str(part)
-                for part in content
-            )
+        content = _normalise_content_value(response.content)
 
         execution_ms = (time.time() - start_time) * 1000
         LOGGER.info(

@@ -35,6 +35,14 @@ def _build_supervisor_routing_instructions(
     Args:
         supervisor_id: The supervisor agent's ID (excluded from worker list).
         workers: List of worker AgentSpec objects.
+
+    Note:
+        Assumes a single-supervisor topology where all non-supervisor agents
+        are routable workers for this supervisor.  In a hypothetical
+        multi-supervisor config each supervisor's worker list would include
+        the other supervisors, which is unlikely to be correct.  That edge
+        case is not supported by any current example config and is left as a
+        known limitation.
     """
     worker_lines = "\n".join(
         f"  - {w.agent_id} ({w.role}): {(w.objective or '').strip()[:120]}"
