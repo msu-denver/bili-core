@@ -463,7 +463,9 @@ def _build_markdown_export(
         ]
         for agent_out in turn.get("agent_trace", []):
             content = _extract_content(agent_out.get("output", {}))
-            lines.append(f"> **{agent_out['agent_id']}:** {content}")
+            # Prefix every line so multi-line content is fully blockquoted.
+            content_lines = content.replace("\n", "\n> ")
+            lines.append(f"> **{agent_out['agent_id']}:** {content_lines}")
         lines.append("")
     return "\n".join(lines)
 
