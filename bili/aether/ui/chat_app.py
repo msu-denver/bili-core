@@ -737,7 +737,9 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
         if agent_trace:
-            node_ids = [a["agent_id"] for a in agent_trace]
+            # Deduplicate while preserving order — supervisor workflows can
+            # repeat agent IDs, which would cause Streamlit widget key collisions.
+            node_ids = list(dict.fromkeys(a["agent_id"] for a in agent_trace))
             turn_idx = turn.get("turn_index", 0)
             timeline_ph = st.empty()
             _render_timeline(
@@ -747,7 +749,10 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                 all_nodes=node_ids,
                 key_prefix=f"timeline_stored_{turn_idx}",
             )
-            selected = st.session_state.get("aether_selected_trace_node")
+            # Pop (not get) the selection so it is consumed for exactly one
+            # render cycle — prevents the auto-expand from persisting into
+            # subsequent turns that share the same agent ID.
+            selected = st.session_state.pop("aether_selected_trace_node", None)
             if "error" in turn:
                 st.divider()
             with st.expander("Agent trace", expanded=False):
@@ -849,7 +854,7 @@ def _run_turn(user_input: str) -> None:
     with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
 
-    all_nodes = [a.agent_id for a in config.agents] if config else []
+    all_nodes = [a.agent_id for a in config.agents]
     agent_trace: List[Dict[str, Any]] = []
     with st.chat_message("assistant", avatar="🤖"):
         st.session_state["aether_execution_trace"] = []
@@ -897,7 +902,7 @@ def _run_turn(user_input: str) -> None:
                 st.error(f"Execution failed: {exc}")
                 turn["error"] = str(exc)
 
-        st.session_state["aether_executing_node"] = None
+        st.session_state.pop("aether_executing_node", None)
         _render_timeline(
             timeline_placeholder,
             completed=st.session_state["aether_execution_trace"],

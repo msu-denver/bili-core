@@ -10,7 +10,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Optional
 
 from bili.aether.schema import AgentSpec, OutputFormat
 
@@ -110,8 +110,8 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
 def _generate_tool_agent_node(
     agent: AgentSpec,
     llm: object,
-    tools: list,
-    middleware: list = None,
+    tools: List,
+    middleware: Optional[List] = None,
 ) -> Callable[[dict], dict]:
     """Create a node using ``create_agent()`` for tool-enabled agents.
 

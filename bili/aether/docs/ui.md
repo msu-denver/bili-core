@@ -138,10 +138,14 @@ Failed turns include an additional `"error"` field with the exception message; t
 | `chat_config_base` | `MASConfig` | Original YAML-loaded config, preserved across model picker operations. Always the unpatched base |
 | `chat_executor` | `MASExecutor` | Compiled executor (set after initialization) |
 | `chat_yaml_path` | `str` | Cache key: bare file path, `"uploaded:{name}"`, or suffixed with `":model={model_id}"` / `":stub"` after model picker use |
-| `chat_history` | `List[Dict]` | All completed turns |
-| `chat_thread_id` | `str` | UUID for checkpoint continuity; reset on "New Conversation" |
+| `chat_threads` | `Dict[str, Dict]` | All in-session threads keyed by UUID. Each value: `{name, messages, mas_id, created_at}`. Persists across config switches; lost on page reload |
+| `chat_thread_id` | `str` | UUID of the active thread; cleared on config load, re-set when user clicks a thread or sends a message |
+| `chat_editing_thread` | `Optional[str]` | Thread ID currently in rename mode; `None` when idle |
 | `chat_uploaded_configs` | `Dict[str, MASConfig]` | Session-only uploaded configs |
 | `chat_load_error` | `str` | Error message from last failed config load |
+| `aether_executing_node` | `Optional[str]` | Agent ID currently executing during a live streaming turn; `None` between turns |
+| `aether_execution_trace` | `List[str]` | Ordered list of completed agent IDs for the current live turn; reset at turn start |
+| `aether_selected_trace_node` | `Optional[str]` | Agent ID last selected via a timeline chip click; causes that agent's panel to auto-expand in the stored turn on the next render cycle, then cleared |
 
 ---
 
