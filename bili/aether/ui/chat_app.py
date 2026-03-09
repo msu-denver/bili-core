@@ -204,7 +204,10 @@ def _load_config(yaml_path: Path) -> None:
     # with a model-picker suffix applied by _apply_model_patch), skip the reload
     # to avoid overwriting the patched executor on each Streamlit rerun.
     current_key = st.session_state.get("chat_yaml_path", "")
-    if current_key.startswith(str(yaml_path)) and "chat_config" in st.session_state:
+    base = str(yaml_path)
+    if (
+        current_key == base or current_key.startswith(f"{base}:")
+    ) and "chat_config" in st.session_state:
         return
 
     try:
@@ -229,7 +232,9 @@ def _load_uploaded_config(name: str, config: MASConfig) -> None:
     # on this uploaded config (possibly with a model-picker suffix).
     current_key = st.session_state.get("chat_yaml_path", "")
     base_key = f"uploaded:{name}"
-    if current_key.startswith(base_key) and "chat_config" in st.session_state:
+    if (
+        current_key == base_key or current_key.startswith(f"{base_key}:")
+    ) and "chat_config" in st.session_state:
         return
 
     if not _validate_config(config):

@@ -44,7 +44,7 @@ A read-only graph viewer for exploring AETHER YAML configurations as interactive
 - **Metadata Bar**: Summary metrics for the selected MAS configuration
 - **Color-Coded Nodes**: Nodes are colored by agent role for quick visual identification
 - **Edge Styling**: Solid lines for channels, dashed for workflow edges, animated for conditional edges
-- **Send to Chat →** button: loads the current config into the Chat page. If model overrides have been applied in the Properties Panel, those overrides are patched onto the config before it is sent — the Chat page receives the modified config, not the original YAML
+- **Send to Chat →** button: loads the current config into the Chat page. If model overrides have been applied in the Properties Panel, those overrides are patched onto the config before it is sent — the Chat page receives the modified config, not the original YAML config
 
 ---
 
