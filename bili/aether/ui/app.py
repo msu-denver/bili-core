@@ -39,7 +39,7 @@ from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
 )
 from bili.aether.ui.components.graph_viewer import (
-    _build_model_options,
+    build_model_options,
     render_graph_viewer,
     render_metadata_bar,
 )
@@ -165,15 +165,16 @@ def _on_send_to_chat() -> None:
     # Apply model overrides from the Visualizer properties panel
     overrides: dict = st.session_state.get(f"model_overrides_{config.mas_id}", {})
     if overrides:
-        _, display_to_model_name, _ = _build_model_options()
+        _, display_to_model_name, _ = build_model_options()
         patched_agents = []
         for agent in config.agents:
             display = overrides.get(agent.agent_id)
-            if display and display in display_to_model_name:
-                agent = agent.model_copy(
-                    update={"model_name": display_to_model_name[display]}
-                )
-            patched_agents.append(agent)
+            patched = (
+                agent.model_copy(update={"model_name": display_to_model_name[display]})
+                if display and display in display_to_model_name
+                else agent
+            )
+            patched_agents.append(patched)
         config = config.model_copy(update={"agents": patched_agents})
 
     name = st.session_state.get("current_yaml_path", "visualizer_config")
@@ -181,7 +182,7 @@ def _on_send_to_chat() -> None:
         st.session_state.chat_uploaded_configs = {}
     st.session_state.chat_uploaded_configs[name] = config
     st.session_state.aether_page = "Chat"
-    st.session_state._chat_autoload_name = name
+    st.session_state.chat_autoload_name = name
 
 
 def _load_config(yaml_path: Path) -> None:

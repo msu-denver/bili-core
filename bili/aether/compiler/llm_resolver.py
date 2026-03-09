@@ -131,15 +131,15 @@ def create_llm(agent: AgentSpec) -> Any:
             f"cannot create LLM instance."
         )
 
+    # resolve_model handles both LLM_MODELS lookup and heuristic fallback.
+    # A second call to _lookup_in_llm_models retrieves provider-specific extras
+    # (e.g. api_version for Azure OpenAI) without duplicating the fallback logic.
+    provider, model_id = resolve_model(agent.model_name)
     lookup = _lookup_in_llm_models(agent.model_name)
-    if lookup is not None:
-        provider, model_id, extra_kwargs = lookup
-    else:
-        provider, model_id = resolve_model(agent.model_name)
-        extra_kwargs = {}
+    extra_kwargs: Dict[str, Any] = lookup[2] if lookup is not None else {}
 
-    # Build kwargs for load_model — start with provider-specific extras
-    # (e.g. api_version for Azure OpenAI), then apply agent overrides.
+    # Build kwargs for load_model — start with provider-specific extras,
+    # then apply agent-level overrides (temperature, max_tokens).
     kwargs: Dict[str, Any] = {"model_name": model_id, **extra_kwargs}
     if agent.temperature is not None:
         kwargs["temperature"] = agent.temperature

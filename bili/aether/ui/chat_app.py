@@ -196,25 +196,28 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     """
     effective_examples_dir = examples_dir if examples_dir is not None else EXAMPLES_DIR
 
-    autoload_name = st.session_state.pop("_chat_autoload_name", None)
+    if not effective_examples_dir.exists():
+        st.error(f"Examples directory not found: {effective_examples_dir}")
+        return
+
+    # Build option lists once — reused by both the autoload block and the selectbox.
+    yaml_files = sorted(effective_examples_dir.glob("*.yaml"))
+    uploaded_configs: Dict[str, MASConfig] = st.session_state.get(
+        "chat_uploaded_configs", {}
+    )
+    uploaded_names = sorted(uploaded_configs.keys())
+
+    autoload_name = st.session_state.pop("chat_autoload_name", None)
     if autoload_name is not None:
-        pending = st.session_state.get("chat_uploaded_configs", {}).get(autoload_name)
+        pending = uploaded_configs.get(autoload_name)
         if pending is not None:
             _load_uploaded_config(autoload_name, pending)
             # Pre-select the config in the selectbox so the selectbox's else-branch
             # does not immediately clear the session state we just populated.
-            _n_yaml = (
-                len(sorted(effective_examples_dir.glob("*.yaml")))
-                if effective_examples_dir.exists()
-                else 0
-            )
-            _uploaded_sorted = sorted(
-                st.session_state.get("chat_uploaded_configs", {}).keys()
-            )
-            if autoload_name in _uploaded_sorted:
-                st.session_state.chat_yaml_selector = _n_yaml + _uploaded_sorted.index(
-                    autoload_name
-                )
+            if autoload_name in uploaded_names:
+                st.session_state.chat_yaml_selector = len(
+                    yaml_files
+                ) + uploaded_names.index(autoload_name)
 
     uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
     if uploaded and uploaded.name not in st.session_state.get(
@@ -233,14 +236,9 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Invalid config: {exc}")
 
-    if not effective_examples_dir.exists():
-        st.error(f"Examples directory not found: {effective_examples_dir}")
-        return
-
-    yaml_files = sorted(effective_examples_dir.glob("*.yaml"))
-    uploaded_configs: Dict[str, MASConfig] = st.session_state.get(
-        "chat_uploaded_configs", {}
-    )
+    # Re-read uploaded_configs after the uploader so newly uploaded files
+    # appear in the selectbox on the same rerun.
+    uploaded_configs = st.session_state.get("chat_uploaded_configs", {})
     uploaded_names = sorted(uploaded_configs.keys())
 
     if not yaml_files and not uploaded_names:
