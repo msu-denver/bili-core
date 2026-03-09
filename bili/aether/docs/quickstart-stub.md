@@ -75,7 +75,7 @@ If you want to see the agent graph rendered interactively before running it:
 /app/bili-core/venv/bin/streamlit run bili/aether/ui/app.py
 ```
 
-Open [http://localhost:8502](http://localhost:8502) in your browser. Use the sidebar dropdown to select `simple_chain.yaml`. Click any node to inspect its role, objective, capabilities, and output format. See [ui.md](ui.md) for details.
+Open [http://localhost:8502](http://localhost:8502) in your browser. The sidebar shows a **Visualizer | Chat** navigation radio. On the **Visualizer** page, use the dropdown to select `simple_chain.yaml` and click any node to inspect its role, objective, capabilities, and output format. Switch to the **Chat** page to run a multi-turn conversation against the same stub config — no API keys required. See [ui.md](ui.md) for details.
 
 ---
 

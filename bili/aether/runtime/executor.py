@@ -422,7 +422,8 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.error("run_streaming execution failed: %s", exc, exc_info=True)
             raise
-        LOGGER.info("MAS streaming execution complete: %s", execution_id)
+        finally:
+            LOGGER.info("MAS streaming execution complete: %s", execution_id)
 
     async def astream(
         self,
