@@ -292,14 +292,30 @@ def render_sidebar_content() -> None:
 
 
 def _render_agent_panel(
-    agent_id: str, output: Dict[str, Any], *, expanded: bool
+    agent_id: str,
+    output: Dict[str, Any],
+    *,
+    expanded: bool,
+    use_expander: bool = True,
 ) -> None:
-    """Render one agent's output inside an expander.
+    """Render one agent's output inside an expander or plain container.
 
     Accepts both raw graph state updates (containing ``BaseMessage`` objects)
     and already-serialized output dicts stored in ``chat_history``.
+
+    When *use_expander* is ``False`` the panel is rendered as a ``st.container``
+    with a bold header — suitable for use inside an outer expander to avoid
+    nesting expanders inside expanders.
     """
-    with st.expander(f"Agent: {agent_id}", expanded=expanded):
+    if use_expander:
+        ctx = st.expander(f"Agent: {agent_id}", expanded=expanded)
+    else:
+        ctx = st.container()
+
+    with ctx:
+        if not use_expander:
+            st.markdown(f"**Agent: {agent_id}**")
+
         # Prefer the structured agent_outputs entry for this node
         agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
         if agent_id in agent_outputs:
@@ -342,10 +358,15 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
         if agent_trace:
+            if "error" in turn:
+                st.divider()
             with st.expander("Agent trace", expanded=False):
                 for agent_out in agent_trace:
                     _render_agent_panel(
-                        agent_out["agent_id"], agent_out["output"], expanded=False
+                        agent_out["agent_id"],
+                        agent_out["output"],
+                        expanded=False,
+                        use_expander=False,
                     )
 
 
