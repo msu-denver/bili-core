@@ -193,7 +193,7 @@ def _render_thread_list() -> None:
         is_active = tid == active_id
 
         if editing_id == tid:
-            c1, c2, c3 = st.columns([4, 1, 1])
+            c1, c2, c3 = st.columns([4, 1, 1], vertical_alignment="center")
             with c1:
                 new_name = st.text_input(
                     "Rename thread",
@@ -211,7 +211,7 @@ def _render_thread_list() -> None:
                     st.session_state.pop("chat_editing_thread", None)
                     st.rerun()
         else:
-            c1, c2, c3 = st.columns([5, 1, 1])
+            c1, c2, c3 = st.columns([5, 1, 1], vertical_alignment="center")
             with c1:
                 btn_type = "primary" if is_active else "secondary"
                 if st.button(
@@ -414,15 +414,22 @@ def _extract_content(output: Dict[str, Any]) -> str:
     """Extract a readable content string from a serialized agent output dict.
 
     Mirrors the display priority of ``_render_agent_panel`` but returns a plain
-    string suitable for text-based exports.
+    string suitable for text-based exports. Unlike the render panel (which
+    receives a single agent_id), this function collects *all* agent_outputs
+    entries and joins them so no entry is silently dropped.
     """
     agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
-    for inner in agent_outputs.values():
-        if inner.get("status") == "stub":
-            return inner.get("message", str(inner))
-        parts = [f"{k}: {v}" for k, v in inner.items() if k != "agent_id"]
-        if parts:
-            return " | ".join(parts)
+    if agent_outputs:
+        collected: List[str] = []
+        for inner in agent_outputs.values():
+            if inner.get("status") == "stub":
+                collected.append(inner.get("message", str(inner)))
+            else:
+                kv_parts = [f"{k}: {v}" for k, v in inner.items() if k != "agent_id"]
+                if kv_parts:
+                    collected.append(" | ".join(kv_parts))
+        if collected:
+            return "\n".join(collected)
     messages: List[Any] = output.get("messages", [])
     if messages:
         last = messages[-1]
@@ -433,7 +440,7 @@ def _extract_content(output: Dict[str, Any]) -> str:
 
 
 def _build_markdown_export(
-    config: "MASConfig", thread_id: str, chat_history: List[Dict]
+    config: MASConfig, thread_id: str, chat_history: List[Dict]
 ) -> str:
     """Build a Markdown export string for the active conversation."""
     lines = [
@@ -446,6 +453,9 @@ def _build_markdown_export(
         lines += [
             f"## Turn {i}",
             "",
+            # turn['content'] is inserted verbatim; any markdown the user typed
+            # (headings, links, etc.) will render as-is in the exported file.
+            # This is acceptable since users are exporting their own conversations.
             f"**User:** {turn['content']}",
             "",
             "**MAS Response:**",
@@ -614,11 +624,14 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     chat_history = _active_messages_or_empty()
     thread_id = st.session_state.get("chat_thread_id", "")
     if chat_history:
+        base_name = f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}"
         export_json = {
             "mas_id": config.mas_id,
             "thread_id": thread_id,
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "turns": [
+                # Explicitly include agent_trace so the key is always present,
+                # even for turns stored before this field was introduced.
                 {**turn, "agent_trace": turn.get("agent_trace", [])}
                 for turn in chat_history
             ],
@@ -628,7 +641,7 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             st.download_button(
                 "Export JSON",
                 data=json.dumps(export_json, indent=2),
-                file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.json",
+                file_name=f"{base_name}.json",
                 mime="application/json",
                 use_container_width=True,
             )
@@ -636,7 +649,7 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             st.download_button(
                 "Export Markdown",
                 data=_build_markdown_export(config, thread_id, chat_history),
-                file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.md",
+                file_name=f"{base_name}.md",
                 mime="text/markdown",
                 use_container_width=True,
             )
