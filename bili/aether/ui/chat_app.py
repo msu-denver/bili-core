@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
+
 # Suppress the FileNotFoundError traceback that Streamlit logs when the browser
 # requests bootstrap.min.css.map — a source map file absent from the
 # streamlit-flow-component package distribution. Source maps are optional
@@ -28,10 +30,11 @@ logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
 import streamlit as st
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from bili.aether.config.loader import load_mas_from_yaml
+from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import MASConfig
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
+from bili.aether.validation import validate_mas
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
@@ -47,6 +50,209 @@ LOGGER = logging.getLogger(__name__)
 def _is_stub_config(config: MASConfig) -> bool:
     """Return True if any agent in *config* has no ``model_name`` (stub mode)."""
     return any(not agent.model_name for agent in config.agents)
+
+
+def _base_cache_key() -> str:
+    """Return the canonical cache key for the current config, stripping any model/stub suffix."""
+    raw = st.session_state.get("chat_yaml_path", "config")
+    return raw.split(":model=")[0].split(":stub")[0]
+
+
+def _apply_model_patch(base_config: MASConfig, model_id: Optional[str]) -> None:
+    """Patch every agent in *base_config* with *model_id* (``None`` = stub), then reinit.
+
+    Warns when pipeline agents are present and *model_id* is not ``None``, because
+    pipeline agents use internal node models and the top-level override may have no effect.
+    Validates the patched config before reinitialising the executor.
+    """
+    if model_id is not None:
+        pipeline_agents = [
+            a.agent_id for a in base_config.agents if a.pipeline is not None
+        ]
+        if pipeline_agents:
+            st.warning(
+                f"Pipeline agents ({', '.join(pipeline_agents)}) use internal node "
+                "models — the top-level model override may have no effect on them."
+            )
+
+    patched_agents = [
+        a.model_copy(update={"model_name": model_id}) for a in base_config.agents
+    ]
+    patched = base_config.model_copy(update={"agents": patched_agents})
+    if not _validate_config(patched):
+        return
+
+    base_key = _base_cache_key()
+    cache_key = (
+        f"{base_key}:model={model_id}" if model_id is not None else f"{base_key}:stub"
+    )
+    _initialize_executor(patched, cache_key)
+
+
+def _active_messages() -> List[Dict]:
+    """Return the messages list for the active thread.
+
+    Returns a direct reference to the list stored in ``chat_threads`` so that
+    in-place ``append`` calls update session state correctly.
+
+    Raises:
+        RuntimeError: If no active thread exists. Callers must ensure a thread
+            is active (e.g. via ``_ensure_active_thread``) before appending.
+    """
+    thread_id = st.session_state.get("chat_thread_id")
+    threads = st.session_state.get("chat_threads", {})
+    if thread_id and thread_id in threads:
+        return threads[thread_id]["messages"]
+    raise RuntimeError(
+        "_active_messages() called with no active thread. "
+        "Call _ensure_active_thread() before appending."
+    )
+
+
+def _active_messages_or_empty() -> List[Dict]:
+    """Return the active thread's messages or an empty list when no thread exists.
+
+    Safe for read-only call sites (iteration, length checks) where no active
+    thread is a valid state (e.g. before the first message is sent).
+    """
+    thread_id = st.session_state.get("chat_thread_id")
+    threads = st.session_state.get("chat_threads", {})
+    return threads.get(thread_id, {}).get("messages", []) if thread_id else []
+
+
+def _new_thread(mas_id: str) -> str:
+    """Create a new thread, set it active, and return the new thread ID."""
+    now = datetime.now(timezone.utc)
+    display_time = now.astimezone().strftime(
+        "%H:%M:%S"
+    )  # convert to local time for readability
+    thread_id = str(uuid.uuid4())
+    threads = st.session_state.setdefault("chat_threads", {})
+    threads[thread_id] = {
+        "name": f"{mas_id} \u2013 {display_time}",
+        "messages": [],
+        "mas_id": mas_id,
+        "created_at": now.timestamp(),
+    }
+    st.session_state.chat_thread_id = thread_id
+    return thread_id
+
+
+def _ensure_active_thread(mas_id: str) -> None:
+    """Create a thread if no active thread exists — called before first message send."""
+    thread_id = st.session_state.get("chat_thread_id")
+    if not thread_id or thread_id not in st.session_state.get("chat_threads", {}):
+        _new_thread(mas_id)
+
+
+def _delete_thread(thread_id: str) -> None:
+    """Remove a thread; auto-switch to most recent remaining thread if it was active."""
+    threads = st.session_state.get("chat_threads", {})
+    threads.pop(thread_id, None)
+    if st.session_state.get("chat_editing_thread") == thread_id:
+        st.session_state.pop("chat_editing_thread", None)
+    if st.session_state.get("chat_thread_id") == thread_id:
+        if threads:
+            newest_id = max(threads, key=lambda t: threads[t]["created_at"])
+            st.session_state.chat_thread_id = newest_id
+        else:
+            st.session_state.pop("chat_thread_id", None)
+
+
+def _render_thread_list() -> None:
+    """Render the in-sidebar thread list with filter, rename, and delete controls."""
+    threads: Dict[str, Any] = st.session_state.get("chat_threads", {})
+    if not threads:
+        return
+
+    st.markdown("---")
+    st.markdown("**Conversations**")
+    st.caption("In-session only — threads are lost on page reload.")
+
+    filter_text: str = st.text_input(
+        "Filter conversations",
+        key="chat_thread_filter",
+        placeholder="Search…",
+        label_visibility="collapsed",
+    )
+
+    active_id: Optional[str] = st.session_state.get("chat_thread_id")
+    editing_id: Optional[str] = st.session_state.get("chat_editing_thread")
+
+    sorted_threads = sorted(
+        threads.items(), key=lambda x: x[1]["created_at"], reverse=True
+    )
+    if filter_text:
+        sorted_threads = [
+            (tid, t)
+            for tid, t in sorted_threads
+            if filter_text.lower() in t["name"].lower()
+        ]
+
+    for tid, thread in sorted_threads:
+        is_active = tid == active_id
+
+        if editing_id == tid:
+            c1, c2, c3 = st.columns([4, 1, 1], vertical_alignment="center")
+            with c1:
+                new_name = st.text_input(
+                    "Rename thread",
+                    value=thread["name"],
+                    key=f"chat_rename_input_{tid}",
+                    label_visibility="collapsed",
+                )
+            with c2:
+                if st.button("✓", key=f"chat_rename_confirm_{tid}", help="Save name"):
+                    threads[tid]["name"] = new_name
+                    st.session_state.pop("chat_editing_thread", None)
+                    st.rerun()
+            with c3:
+                if st.button("✕", key=f"chat_rename_cancel_{tid}", help="Cancel"):
+                    st.session_state.pop("chat_editing_thread", None)
+                    st.rerun()
+        else:
+            c1, c2, c3 = st.columns([5, 1, 1], vertical_alignment="center")
+            with c1:
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(
+                    thread["name"],
+                    key=f"chat_select_thread_{tid}",
+                    use_container_width=True,
+                    type=btn_type,
+                ):
+                    st.session_state.pop("chat_editing_thread", None)
+                    if not is_active:
+                        st.session_state.chat_thread_id = tid
+                        st.rerun()
+            with c2:
+                if st.button("✏️", key=f"chat_edit_thread_{tid}", help="Rename"):
+                    st.session_state.chat_editing_thread = tid
+                    st.rerun()
+            with c3:
+                if st.button("🗑️", key=f"chat_delete_thread_{tid}", help="Delete"):
+                    _delete_thread(tid)
+                    st.rerun()
+
+
+@st.cache_data
+def _build_chat_model_options() -> tuple[list[str], list[str]]:
+    """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
+
+    Lazy-imports ``LLM_MODELS`` so this module loads without bili-core's heavy
+    LLM dependencies.  Result is cached for the lifetime of the Streamlit process.
+    """
+    from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
+        LLM_MODELS,
+    )
+
+    display: list[str] = []
+    ids: list[str] = []
+    for provider_info in LLM_MODELS.values():
+        label = provider_info["name"]
+        for entry in provider_info["models"]:
+            display.append(f"[{label}] {entry['model_name']}")
+            ids.append(entry["model_id"])
+    return display, ids
 
 
 def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
@@ -69,6 +275,30 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Config validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_config(config: MASConfig) -> bool:
+    """Run structural validation and display results in the active Streamlit context.
+
+    Returns ``True`` if the config is valid (errors list is empty).
+    Warnings are displayed but do not block execution.
+    """
+    result = validate_mas(config)
+    for err in result.errors:
+        st.error(f"Config error: {err}")
+    for warn in result.warnings:
+        st.warning(f"Config warning: {warn}")
+    if result.valid:
+        if result.warnings:
+            st.success("Config valid with warnings ✓")
+        else:
+            st.success("Config valid ✓")
+    return result.valid
+
+
+# ---------------------------------------------------------------------------
 # Page configuration
 # ---------------------------------------------------------------------------
 
@@ -88,27 +318,80 @@ def _configure_page() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _initialize_executor(config: MASConfig, cache_key: str) -> None:
+    """Compile the executor and update session state, or store the error."""
+    if (
+        st.session_state.get("chat_yaml_path") == cache_key
+        and "chat_config" in st.session_state
+    ):
+        return
+
+    try:
+        executor = MASExecutor(config)
+        with st.spinner("Initializing executor..."):
+            executor.initialize()
+        st.session_state.chat_config = config
+        st.session_state.chat_yaml_path = cache_key
+        st.session_state.chat_executor = executor
+        # Clear active pointer only; chat_threads persists across config switches so
+        # the user can re-activate a previous thread by clicking it in the list.
+        # Render paths use _active_messages_or_empty() which safely returns [] when
+        # no thread is active; _active_messages() (write path) requires a prior
+        # _ensure_active_thread() call and will raise if this pointer is absent.
+        st.session_state.pop("chat_thread_id", None)
+        st.session_state.pop("chat_load_error", None)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        LOGGER.error("Failed to load config %s: %s", cache_key, exc, exc_info=True)
+        st.session_state.chat_load_error = str(exc)
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
+
+
 def _load_config(yaml_path: Path) -> None:
     """Load a YAML config and initialize the executor when the path changes."""
-    current_path = st.session_state.get("chat_yaml_path")
-    if current_path == str(yaml_path) and "chat_config" in st.session_state:
+    # If the current executor was already initialized from this YAML (possibly
+    # with a model-picker suffix applied by _apply_model_patch), skip the reload
+    # to avoid overwriting the patched executor on each Streamlit rerun.
+    current_key = st.session_state.get("chat_yaml_path", "")
+    base = str(yaml_path)
+    if (
+        current_key == base or current_key.startswith(f"{base}:")
+    ) and "chat_config" in st.session_state:
         return
 
     try:
         config = load_mas_from_yaml(yaml_path)
-        executor = MASExecutor(config)
-        executor.initialize()
-        st.session_state.chat_config = config
-        st.session_state.chat_yaml_path = str(yaml_path)
-        st.session_state.chat_executor = executor
-        st.session_state.chat_history = []
-        st.session_state.pop("chat_thread_id", None)
-        st.session_state.pop("chat_load_error", None)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         LOGGER.error("Failed to load config %s: %s", yaml_path.name, exc, exc_info=True)
         st.session_state.chat_load_error = str(exc)
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
+        return
+    if not _validate_config(config):
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
+        return
+    st.session_state.chat_config_base = config
+    _initialize_executor(config, str(yaml_path))
+
+
+def _load_uploaded_config(name: str, config: MASConfig) -> None:
+    """Initialize the executor from an already-parsed uploaded MASConfig."""
+    # Same guard as _load_config: skip if the current executor is already based
+    # on this uploaded config (possibly with a model-picker suffix).
+    current_key = st.session_state.get("chat_yaml_path", "")
+    base_key = f"uploaded:{name}"
+    if (
+        current_key == base_key or current_key.startswith(f"{base_key}:")
+    ) and "chat_config" in st.session_state:
+        return
+
+    if not _validate_config(config):
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
+        return
+    st.session_state.chat_config_base = config
+    _initialize_executor(config, base_key)
 
 
 # ---------------------------------------------------------------------------
@@ -117,42 +400,168 @@ def _load_config(yaml_path: Path) -> None:
 
 
 def _render_sidebar() -> None:
-    """Render sidebar with YAML selector, stub indicator, and controls."""
+    """Render standalone sidebar: logo, title, and chat controls."""
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
 
     st.markdown("## AETHER Chat")
     st.caption("Multi-Agent System Conversation")
     st.markdown("---")
+    render_sidebar_content()
 
-    if not EXAMPLES_DIR.exists():
-        st.error(f"Examples directory not found: {EXAMPLES_DIR}")
+
+def _extract_content(output: Dict[str, Any]) -> str:
+    """Extract a readable content string from a serialized agent output dict.
+
+    Mirrors the display priority of ``_render_agent_panel`` but returns a plain
+    string suitable for text-based exports. Unlike the render panel (which
+    receives a single agent_id), this function collects *all* agent_outputs
+    entries and joins them so no entry is silently dropped.
+    """
+    agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
+    if agent_outputs:
+        collected: List[str] = []
+        for inner in agent_outputs.values():
+            if inner.get("status") == "stub":
+                collected.append(inner.get("message", str(inner)))
+            else:
+                kv_parts = [f"{k}: {v}" for k, v in inner.items() if k != "agent_id"]
+                if kv_parts:
+                    collected.append(" | ".join(kv_parts))
+        if collected:
+            return "\n".join(collected)
+    messages: List[Any] = output.get("messages", [])
+    if messages:
+        last = messages[-1]
+        if isinstance(last, dict):
+            return last.get("content", str(last))
+        return getattr(last, "content", str(last))
+    return str(output)
+
+
+def _build_markdown_export(
+    config: MASConfig, thread_id: str, chat_history: List[Dict]
+) -> str:
+    """Build a Markdown export string for the active conversation."""
+    lines = [
+        f"# Conversation — {config.mas_id}",
+        f"Thread: {thread_id}",
+        f"Exported: {datetime.now(timezone.utc).isoformat()}",
+        "",
+    ]
+    for i, turn in enumerate(chat_history, 1):
+        lines += [
+            f"## Turn {i}",
+            "",
+            # turn['content'] is inserted verbatim; any markdown the user typed
+            # (headings, links, etc.) will render as-is in the exported file.
+            # This is acceptable since users are exporting their own conversations.
+            f"**User:** {turn['content']}",
+            "",
+            "**MAS Response:**",
+            "",
+        ]
+        for agent_out in turn.get("agent_trace", []):
+            content = _extract_content(agent_out.get("output", {}))
+            # Prefix every line so multi-line content is fully blockquoted.
+            content_lines = content.replace("\n", "\n> ")
+            lines.append(f"> **{agent_out['agent_id']}:** {content_lines}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
+    """Render the chat sidebar controls — config selector, upload, and buttons.
+
+    Public: called by ``app.py`` when the Chat page is active.
+
+    Args:
+        examples_dir: Override the directory scanned for built-in YAML configs.
+            When ``app.py`` imports this module as a package the module-level
+            ``EXAMPLES_DIR`` may resolve to the installed site-packages copy
+            (which lacks the example files).  Pass ``app.py``'s own
+            ``EXAMPLES_DIR`` to guarantee the correct source-tree path.
+    """
+    effective_examples_dir = examples_dir if examples_dir is not None else EXAMPLES_DIR
+
+    if not effective_examples_dir.exists():
+        st.error(f"Examples directory not found: {effective_examples_dir}")
         return
 
-    yaml_files = sorted(EXAMPLES_DIR.glob("*.yaml"))
-    if not yaml_files:
+    # Build option lists once — reused by both the autoload block and the selectbox.
+    yaml_files = sorted(effective_examples_dir.glob("*.yaml"))
+    uploaded_configs: Dict[str, MASConfig] = st.session_state.get(
+        "chat_uploaded_configs", {}
+    )
+    uploaded_names = sorted(uploaded_configs.keys())
+
+    autoload_name = st.session_state.pop("chat_autoload_name", None)
+    if autoload_name is not None:
+        pending = uploaded_configs.get(autoload_name)
+        if pending is not None:
+            _load_uploaded_config(autoload_name, pending)
+            # Pre-select the config in the selectbox so the selectbox's else-branch
+            # does not immediately clear the session state we just populated.
+            if autoload_name in uploaded_names:
+                st.session_state.chat_yaml_selector = len(
+                    yaml_files
+                ) + uploaded_names.index(autoload_name)
+
+    uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
+    if uploaded and uploaded.name not in st.session_state.get(
+        "chat_uploaded_configs", {}
+    ):
+        try:
+            raw = yaml.safe_load(uploaded.read())
+            if not isinstance(raw, dict):
+                st.error("Invalid config: YAML must be a mapping at the top level.")
+            else:
+                upload_config = load_mas_from_dict(raw)
+                if "chat_uploaded_configs" not in st.session_state:
+                    st.session_state.chat_uploaded_configs = {}
+                st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
+                st.success(f"Uploaded: {uploaded.name}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Invalid config: {exc}")
+
+    # Re-read uploaded_configs after the uploader so newly uploaded files
+    # appear in the selectbox on the same rerun.
+    uploaded_configs = st.session_state.get("chat_uploaded_configs", {})
+    uploaded_names = sorted(uploaded_configs.keys())
+
+    if not yaml_files and not uploaded_names:
         st.warning("No YAML files found in examples directory.")
         return
 
-    yaml_display = [f.stem.replace("_", " ").title() for f in yaml_files]
+    all_display = [f.stem.replace("_", " ").title() for f in yaml_files] + [
+        f"[Uploaded] {n}" for n in uploaded_names
+    ]
+    n_files = len(yaml_files)
 
     selected_idx = st.selectbox(
         "Select Configuration",
-        range(len(yaml_files)),
+        range(len(all_display)),
         index=None,
         placeholder="Choose a MAS config...",
-        format_func=lambda i: yaml_display[i],
+        format_func=lambda i: all_display[i],
         key="chat_yaml_selector",
     )
 
     if selected_idx is not None:
-        _load_config(yaml_files[selected_idx])
+        if selected_idx < n_files:
+            _load_config(yaml_files[selected_idx])
+        else:
+            name = uploaded_names[selected_idx - n_files]
+            _load_uploaded_config(name, uploaded_configs[name])
     else:
         for key in (
             "chat_config",
             "chat_yaml_path",
             "chat_executor",
             "chat_load_error",
+            "chat_config_base",
+            # chat_threads and chat_thread_id are intentionally kept — threads
+            # persist across config switches so the list remains visible.
         ):
             st.session_state.pop(key, None)
         return
@@ -171,28 +580,83 @@ def _render_sidebar() -> None:
     st.markdown(f"**Agents:** {len(config.agents)}")
 
     st.markdown("---")
+    st.markdown("**Model Settings**")
+
+    display_opts, id_opts = _build_chat_model_options()
+    st.selectbox(
+        "Model",
+        range(len(display_opts)),
+        format_func=lambda i: display_opts[i],
+        key="chat_model_selector",
+        label_visibility="collapsed",
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        apply_clicked = st.button(
+            "Apply to all",
+            use_container_width=True,
+            help="Set this model on every agent",
+        )
+    with col2:
+        stub_clicked = st.button(
+            "Stub mode",
+            use_container_width=True,
+            help="Clear model from all agents",
+        )
+
+    base_config: Optional[MASConfig] = st.session_state.get("chat_config_base")
+    if base_config is not None:
+        if apply_clicked:
+            model_idx = st.session_state.get("chat_model_selector", 0)
+            if model_idx < 0 or model_idx >= len(id_opts):
+                st.error("Invalid model selection. Please re-select a model.")
+            else:
+                _apply_model_patch(base_config, id_opts[model_idx])
+
+        if stub_clicked:
+            _apply_model_patch(base_config, None)
+
+    st.markdown("---")
 
     if st.button("New Conversation", use_container_width=True):
-        st.session_state.chat_history = []
-        st.session_state.chat_thread_id = str(uuid.uuid4())
+        _new_thread(config.mas_id)
         st.rerun()
 
-    chat_history = st.session_state.get("chat_history", [])
+    chat_history = _active_messages_or_empty()
     thread_id = st.session_state.get("chat_thread_id", "")
     if chat_history:
-        export = {
+        base_name = f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}"
+        export_json = {
             "mas_id": config.mas_id,
             "thread_id": thread_id,
             "exported_at": datetime.now(timezone.utc).isoformat(),
-            "turns": chat_history,
+            "turns": [
+                # Explicitly include agent_trace so the key is always present,
+                # even for turns stored before this field was introduced.
+                {**turn, "agent_trace": turn.get("agent_trace", [])}
+                for turn in chat_history
+            ],
         }
-        st.download_button(
-            "Export Conversation",
-            data=json.dumps(export, indent=2),
-            file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        col_json, col_md = st.columns(2)
+        with col_json:
+            st.download_button(
+                "Export JSON",
+                data=json.dumps(export_json, indent=2),
+                file_name=f"{base_name}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        with col_md:
+            st.download_button(
+                "Export Markdown",
+                data=_build_markdown_export(config, thread_id, chat_history),
+                file_name=f"{base_name}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
+    _render_thread_list()
 
 
 # ---------------------------------------------------------------------------
@@ -201,14 +665,30 @@ def _render_sidebar() -> None:
 
 
 def _render_agent_panel(
-    agent_id: str, output: Dict[str, Any], *, expanded: bool
+    agent_id: str,
+    output: Dict[str, Any],
+    *,
+    expanded: bool,
+    use_expander: bool = True,
 ) -> None:
-    """Render one agent's output inside an expander.
+    """Render one agent's output inside an expander or plain container.
 
     Accepts both raw graph state updates (containing ``BaseMessage`` objects)
     and already-serialized output dicts stored in ``chat_history``.
+
+    When *use_expander* is ``False`` the panel is rendered as a ``st.container``
+    with a bold header — suitable for use inside an outer expander to avoid
+    nesting expanders inside expanders.
     """
-    with st.expander(f"Agent: {agent_id}", expanded=expanded):
+    if use_expander:
+        ctx = st.expander(f"Agent: {agent_id}", expanded=expanded)
+    else:
+        ctx = st.container()
+
+    with ctx:
+        if not use_expander:
+            st.markdown(f"**Agent: {agent_id}**")
+
         # Prefer the structured agent_outputs entry for this node
         agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
         if agent_id in agent_outputs:
@@ -244,15 +724,23 @@ def _render_agent_output(node_name: str, state_update: Dict[str, Any]) -> None:
 
 def _render_stored_turn(turn: Dict[str, Any]) -> None:
     """Re-render a previously completed turn from chat_history."""
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(turn["content"])
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="🤖"):
         if "error" in turn:
             st.error(f"Execution failed: {turn['error']}")
-        for agent_out in turn.get("agent_outputs", []):
-            _render_agent_panel(
-                agent_out["agent_id"], agent_out["output"], expanded=False
-            )
+        agent_trace = turn.get("agent_trace", [])
+        if agent_trace:
+            if "error" in turn:
+                st.divider()
+            with st.expander("Agent trace", expanded=False):
+                for agent_out in agent_trace:
+                    _render_agent_panel(
+                        agent_out["agent_id"],
+                        agent_out["output"],
+                        expanded=False,
+                        use_expander=False,
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -267,35 +755,37 @@ def _run_turn(user_input: str) -> None:
         st.error("No executor available. Select a configuration first.")
         return
 
-    if "chat_thread_id" not in st.session_state:
-        st.session_state.chat_thread_id = str(uuid.uuid4())
+    config: Optional[MASConfig] = st.session_state.get("chat_config")
+    _ensure_active_thread(config.mas_id if config else "unknown")
 
     turn: Dict[str, Any] = {
         "role": "user",
         "content": user_input,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "turn_index": len(st.session_state.get("chat_history", [])),
-        "agent_outputs": [],
+        "turn_index": len(_active_messages()),
+        "agent_trace": [],
     }
 
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
 
-    agent_outputs: List[Dict[str, Any]] = []
-    with st.chat_message("assistant"):
+    agent_trace: List[Dict[str, Any]] = []
+    with st.chat_message("assistant", avatar="🤖"):
         with st.status("Running MAS...", expanded=True) as status:
             try:
                 for node_name, state_update in executor.run_streaming(
                     input_data={"messages": [HumanMessage(content=user_input)]},
                     thread_id=st.session_state.chat_thread_id,
                 ):
+                    if state_update is None:
+                        continue
                     try:
                         _render_agent_output(node_name, state_update)
                     except (
                         Exception
                     ) as render_exc:  # pylint: disable=broad-exception-caught
                         st.error(f"Agent {node_name} failed to render: {render_exc}")
-                    agent_outputs.append(
+                    agent_trace.append(
                         {
                             "agent_id": node_name,
                             "output": _serialize_state_update(state_update),
@@ -307,11 +797,8 @@ def _run_turn(user_input: str) -> None:
                 st.error(f"Execution failed: {exc}")
                 turn["error"] = str(exc)
 
-    turn["agent_outputs"] = agent_outputs
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    st.session_state.chat_history.append(turn)
+    turn["agent_trace"] = agent_trace
+    _active_messages().append(turn)
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +821,7 @@ def _render_chat_area() -> None:
     if config.description:
         st.caption(config.description)
 
-    for turn in st.session_state.get("chat_history", []):
+    for turn in _active_messages_or_empty():
         _render_stored_turn(turn)
 
     user_input = st.chat_input("Send a message to the MAS...")
@@ -347,12 +834,20 @@ def _render_chat_area() -> None:
 # ---------------------------------------------------------------------------
 
 
+def render_main() -> None:
+    """Render the chat main area.
+
+    Public: called by ``app.py`` when the Chat page is active.
+    """
+    _render_chat_area()
+
+
 def render_page() -> None:
     """Main entry point — callable from app.py navigation or standalone."""
     _configure_page()
     with st.sidebar:
         _render_sidebar()
-    _render_chat_area()
+    render_main()
 
 
 if __name__ == "__main__":
