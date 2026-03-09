@@ -34,6 +34,7 @@ from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import MASConfig
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
+from bili.aether.validation import validate_mas
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
@@ -68,6 +69,27 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
         return value
 
     return {k: _convert(v) for k, v in state_update.items()}
+
+
+# ---------------------------------------------------------------------------
+# Config validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_config(config: MASConfig) -> bool:
+    """Run structural validation and display results in the sidebar.
+
+    Returns ``True`` if the config is valid (errors list is empty).
+    Warnings are displayed but do not block execution.
+    """
+    result = validate_mas(config)
+    for err in result.errors:
+        st.error(f"Config error: {err}")
+    for warn in result.warnings:
+        st.warning(f"Config warning: {warn}")
+    if result.valid and not result.warnings:
+        st.success("Config valid ✓")
+    return result.valid
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +147,15 @@ def _load_config(yaml_path: Path) -> None:
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
         return
+    if not _validate_config(config):
+        return
     _initialize_executor(config, str(yaml_path))
 
 
 def _load_uploaded_config(name: str, config: MASConfig) -> None:
     """Initialize the executor from an already-parsed uploaded MASConfig."""
+    if not _validate_config(config):
+        return
     _initialize_executor(config, f"uploaded:{name}")
 
 
@@ -347,6 +373,8 @@ def _run_turn(user_input: str) -> None:
                     input_data={"messages": [HumanMessage(content=user_input)]},
                     thread_id=st.session_state.chat_thread_id,
                 ):
+                    if state_update is None:
+                        continue
                     try:
                         _render_agent_output(node_name, state_update)
                     except (
