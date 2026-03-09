@@ -93,14 +93,20 @@ def _active_messages() -> List[Dict]:
     """Return the messages list for the active thread.
 
     Returns a direct reference to the list stored in ``chat_threads`` so that
-    in-place ``append`` calls update session state correctly.  Returns an empty
-    list when no active thread exists.
+    in-place ``append`` calls update session state correctly.
+
+    Raises:
+        RuntimeError: If no active thread exists. Callers must ensure a thread
+            is active (e.g. via ``_ensure_active_thread``) before appending.
     """
     thread_id = st.session_state.get("chat_thread_id")
     threads = st.session_state.get("chat_threads", {})
     if thread_id and thread_id in threads:
         return threads[thread_id]["messages"]
-    return []
+    raise RuntimeError(
+        "_active_messages() called with no active thread. "
+        "Call _ensure_active_thread() before appending."
+    )
 
 
 def _new_thread(mas_id: str) -> str:
@@ -112,7 +118,7 @@ def _new_thread(mas_id: str) -> str:
         "name": f"{mas_id} \u2013 {now.strftime('%H:%M:%S')}",
         "messages": [],
         "mas_id": mas_id,
-        "created_at": now.isoformat(),
+        "created_at": now.timestamp(),
     }
     st.session_state.chat_thread_id = thread_id
     return thread_id
@@ -185,12 +191,11 @@ def _render_thread_list() -> None:
                     st.session_state.pop("chat_editing_thread", None)
                     st.rerun()
         else:
-            timestamp = thread["created_at"][11:16]
             c1, c2, c3 = st.columns([5, 1, 1])
             with c1:
                 btn_type = "primary" if is_active else "secondary"
                 if st.button(
-                    f"{thread['name']}  {timestamp}",
+                    thread["name"],
                     key=f"chat_select_thread_{tid}",
                     use_container_width=True,
                     type=btn_type,
@@ -307,7 +312,6 @@ def _initialize_executor(config: MASConfig, cache_key: str) -> None:
         st.session_state.chat_config = config
         st.session_state.chat_yaml_path = cache_key
         st.session_state.chat_executor = executor
-        st.session_state.chat_history = []
         st.session_state.pop("chat_thread_id", None)
         st.session_state.pop("chat_load_error", None)
     except Exception as exc:  # pylint: disable=broad-exception-caught
