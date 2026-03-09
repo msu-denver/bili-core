@@ -89,6 +89,125 @@ def _apply_model_patch(base_config: MASConfig, model_id: Optional[str]) -> None:
     _initialize_executor(patched, cache_key)
 
 
+def _active_messages() -> List[Dict]:
+    """Return the messages list for the active thread.
+
+    Returns a direct reference to the list stored in ``chat_threads`` so that
+    in-place ``append`` calls update session state correctly.  Returns an empty
+    list when no active thread exists.
+    """
+    thread_id = st.session_state.get("chat_thread_id")
+    threads = st.session_state.get("chat_threads", {})
+    if thread_id and thread_id in threads:
+        return threads[thread_id]["messages"]
+    return []
+
+
+def _new_thread(mas_id: str) -> str:
+    """Create a new thread, set it active, and return the new thread ID."""
+    now = datetime.now(timezone.utc)
+    thread_id = str(uuid.uuid4())
+    threads = st.session_state.setdefault("chat_threads", {})
+    threads[thread_id] = {
+        "name": f"{mas_id} \u2013 {now.strftime('%H:%M:%S')}",
+        "messages": [],
+        "mas_id": mas_id,
+        "created_at": now.isoformat(),
+    }
+    st.session_state.chat_thread_id = thread_id
+    return thread_id
+
+
+def _ensure_active_thread(mas_id: str) -> None:
+    """Create a thread if no active thread exists — called before first message send."""
+    thread_id = st.session_state.get("chat_thread_id")
+    if not thread_id or thread_id not in st.session_state.get("chat_threads", {}):
+        _new_thread(mas_id)
+
+
+def _delete_thread(thread_id: str) -> None:
+    """Remove a thread; auto-switch to most recent remaining thread if it was active."""
+    threads = st.session_state.get("chat_threads", {})
+    threads.pop(thread_id, None)
+    if st.session_state.get("chat_thread_id") == thread_id:
+        if threads:
+            newest_id = max(threads, key=lambda t: threads[t]["created_at"])
+            st.session_state.chat_thread_id = newest_id
+        else:
+            st.session_state.pop("chat_thread_id", None)
+
+
+def _render_thread_list() -> None:
+    """Render the in-sidebar thread list with filter, rename, and delete controls."""
+    threads: Dict[str, Any] = st.session_state.get("chat_threads", {})
+    if not threads:
+        return
+
+    st.markdown("---")
+    st.markdown("**Conversations**")
+    st.caption("In-session only — threads are lost on page reload.")
+
+    filter_text: str = st.text_input(
+        "Filter conversations",
+        key="chat_thread_filter",
+        placeholder="Search…",
+        label_visibility="collapsed",
+    )
+
+    active_id: Optional[str] = st.session_state.get("chat_thread_id")
+    editing_id: Optional[str] = st.session_state.get("chat_editing_thread")
+
+    sorted_threads = sorted(
+        threads.items(), key=lambda x: x[1]["created_at"], reverse=True
+    )
+    if filter_text:
+        sorted_threads = [
+            (tid, t)
+            for tid, t in sorted_threads
+            if filter_text.lower() in t["name"].lower()
+        ]
+
+    for tid, thread in sorted_threads:
+        is_active = tid == active_id
+
+        if editing_id == tid:
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                new_name = st.text_input(
+                    "Rename thread",
+                    value=thread["name"],
+                    key=f"chat_rename_input_{tid}",
+                    label_visibility="collapsed",
+                )
+            with c2:
+                if st.button("✓", key=f"chat_rename_confirm_{tid}", help="Save name"):
+                    threads[tid]["name"] = new_name
+                    st.session_state.pop("chat_editing_thread", None)
+                    st.rerun()
+        else:
+            timestamp = thread["created_at"][11:16]
+            c1, c2, c3 = st.columns([5, 1, 1])
+            with c1:
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(
+                    f"{thread['name']}  {timestamp}",
+                    key=f"chat_select_thread_{tid}",
+                    use_container_width=True,
+                    type=btn_type,
+                ):
+                    if not is_active:
+                        st.session_state.chat_thread_id = tid
+                        st.rerun()
+            with c2:
+                if st.button("✏️", key=f"chat_edit_thread_{tid}", help="Rename"):
+                    st.session_state.chat_editing_thread = tid
+                    st.rerun()
+            with c3:
+                if st.button("🗑️", key=f"chat_delete_thread_{tid}", help="Delete"):
+                    _delete_thread(tid)
+                    st.rerun()
+
+
 @st.cache_data
 def _build_chat_model_options() -> tuple[list[str], list[str]]:
     """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
@@ -351,6 +470,8 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             "chat_executor",
             "chat_load_error",
             "chat_config_base",
+            # chat_threads and chat_thread_id are intentionally kept — threads
+            # persist across config switches so the list remains visible.
         ):
             st.session_state.pop(key, None)
         return
@@ -409,11 +530,10 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     st.markdown("---")
 
     if st.button("New Conversation", use_container_width=True):
-        st.session_state.chat_history = []
-        st.session_state.chat_thread_id = str(uuid.uuid4())
+        _new_thread(config.mas_id)
         st.rerun()
 
-    chat_history = st.session_state.get("chat_history", [])
+    chat_history = _active_messages()
     thread_id = st.session_state.get("chat_thread_id", "")
     if chat_history:
         export = {
@@ -429,6 +549,8 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             mime="application/json",
             use_container_width=True,
         )
+
+    _render_thread_list()
 
 
 # ---------------------------------------------------------------------------
@@ -527,14 +649,14 @@ def _run_turn(user_input: str) -> None:
         st.error("No executor available. Select a configuration first.")
         return
 
-    if "chat_thread_id" not in st.session_state:
-        st.session_state.chat_thread_id = str(uuid.uuid4())
+    config: Optional[MASConfig] = st.session_state.get("chat_config")
+    _ensure_active_thread(config.mas_id if config else "unknown")
 
     turn: Dict[str, Any] = {
         "role": "user",
         "content": user_input,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "turn_index": len(st.session_state.get("chat_history", [])),
+        "turn_index": len(_active_messages()),
         "agent_trace": [],
     }
 
@@ -570,10 +692,7 @@ def _run_turn(user_input: str) -> None:
                 turn["error"] = str(exc)
 
     turn["agent_trace"] = agent_trace
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    st.session_state.chat_history.append(turn)
+    _active_messages().append(turn)
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +715,7 @@ def _render_chat_area() -> None:
     if config.description:
         st.caption(config.description)
 
-    for turn in st.session_state.get("chat_history", []):
+    for turn in _active_messages():
         _render_stored_turn(turn)
 
     user_input = st.chat_input("Send a message to the MAS...")
