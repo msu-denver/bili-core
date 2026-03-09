@@ -200,6 +200,13 @@ def _initialize_executor(config: MASConfig, cache_key: str) -> None:
 
 def _load_config(yaml_path: Path) -> None:
     """Load a YAML config and initialize the executor when the path changes."""
+    # If the current executor was already initialized from this YAML (possibly
+    # with a model-picker suffix applied by _apply_model_patch), skip the reload
+    # to avoid overwriting the patched executor on each Streamlit rerun.
+    current_key = st.session_state.get("chat_yaml_path", "")
+    if current_key.startswith(str(yaml_path)) and "chat_config" in st.session_state:
+        return
+
     try:
         config = load_mas_from_yaml(yaml_path)
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -218,12 +225,19 @@ def _load_config(yaml_path: Path) -> None:
 
 def _load_uploaded_config(name: str, config: MASConfig) -> None:
     """Initialize the executor from an already-parsed uploaded MASConfig."""
+    # Same guard as _load_config: skip if the current executor is already based
+    # on this uploaded config (possibly with a model-picker suffix).
+    current_key = st.session_state.get("chat_yaml_path", "")
+    base_key = f"uploaded:{name}"
+    if current_key.startswith(base_key) and "chat_config" in st.session_state:
+        return
+
     if not _validate_config(config):
         for key in ("chat_config", "chat_yaml_path", "chat_executor"):
             st.session_state.pop(key, None)
         return
     st.session_state.chat_config_base = config
-    _initialize_executor(config, f"uploaded:{name}")
+    _initialize_executor(config, base_key)
 
 
 # ---------------------------------------------------------------------------
