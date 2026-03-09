@@ -39,6 +39,8 @@ from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
 )
 from bili.aether.ui.components.graph_viewer import (
+    MODEL_KEEP_SENTINEL,
+    build_model_options,
     render_graph_viewer,
     render_metadata_bar,
 )
@@ -97,7 +99,7 @@ def _render_sidebar() -> str:
 
     page: str = st.session_state.get("aether_page", _DEFAULT_PAGE)
     if page == "Chat":
-        render_chat_sidebar_content()
+        render_chat_sidebar_content(examples_dir=EXAMPLES_DIR)
     else:
         _render_visualizer_sidebar()
     return page
@@ -150,6 +152,42 @@ def _render_visualizer_main() -> None:
     _render_legend()
 
 
+def _on_send_to_chat() -> None:
+    """Button callback: push the current visualizer config to the Chat page.
+
+    Applies any model overrides selected in the Visualizer before sending.
+    Runs before the next render cycle so ``aether_page`` can be written
+    safely without conflicting with the already-instantiated radio widget.
+    """
+    config = st.session_state.get("mas_config")
+    if config is None:
+        return
+
+    # Apply model overrides from the Visualizer properties panel
+    overrides: dict = st.session_state.get(f"model_overrides_{config.mas_id}", {})
+    if overrides:
+        _, display_to_model_name, _ = build_model_options()
+        patched_agents = []
+        for agent in config.agents:
+            display = overrides.get(agent.agent_id)
+            patched = (
+                agent.model_copy(update={"model_name": display_to_model_name[display]})
+                if display
+                and display != MODEL_KEEP_SENTINEL
+                and display in display_to_model_name
+                else agent
+            )
+            patched_agents.append(patched)
+        config = config.model_copy(update={"agents": patched_agents})
+
+    name = st.session_state.get("current_yaml_path", "visualizer_config")
+    if "chat_uploaded_configs" not in st.session_state:
+        st.session_state.chat_uploaded_configs = {}
+    st.session_state.chat_uploaded_configs[name] = config
+    st.session_state.aether_page = "Chat"
+    st.session_state.chat_autoload_name = name
+
+
 def _load_config(yaml_path: Path) -> None:
     """Load a YAML config and store it in session state."""
     current_path = st.session_state.get("current_yaml_path")
@@ -189,7 +227,12 @@ def _load_config(yaml_path: Path) -> None:
         st.warning("Human-in-loop enabled")
 
     st.markdown("---")
-    st.button("Deploy", disabled=True, use_container_width=True)
+    st.button(
+        "Send to Chat \u2192",
+        disabled=st.session_state.get("mas_config") is None,
+        use_container_width=True,
+        on_click=_on_send_to_chat,
+    )
 
 
 def _render_legend() -> None:
