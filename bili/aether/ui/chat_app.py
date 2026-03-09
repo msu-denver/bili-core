@@ -618,9 +618,9 @@ def _render_agent_output(node_name: str, state_update: Dict[str, Any]) -> None:
 
 def _render_stored_turn(turn: Dict[str, Any]) -> None:
     """Re-render a previously completed turn from chat_history."""
-    with st.chat_message("👤"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(turn["content"])
-    with st.chat_message("🤖"):
+    with st.chat_message("assistant", avatar="🤖"):
         if "error" in turn:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
@@ -660,11 +660,11 @@ def _run_turn(user_input: str) -> None:
         "agent_trace": [],
     }
 
-    with st.chat_message("👤"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
 
     agent_trace: List[Dict[str, Any]] = []
-    with st.chat_message("🤖"):
+    with st.chat_message("assistant", avatar="🤖"):
         with st.status("Running MAS...", expanded=True) as status:
             try:
                 for node_name, state_update in executor.run_streaming(
