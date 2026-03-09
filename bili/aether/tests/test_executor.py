@@ -449,6 +449,81 @@ class _BrokenGraph:  # pylint: disable=too-few-public-methods
         raise RuntimeError("Simulated graph failure")
 
 
+class _BrokenStreamingGraph:  # pylint: disable=too-few-public-methods
+    """Mock graph that always raises on stream."""
+
+    def stream(self, *args, **kwargs):
+        raise RuntimeError("Simulated streaming failure")
+
+
+# =========================================================================
+# run_streaming
+# =========================================================================
+
+
+class TestRunStreaming:
+    """Tests for MASExecutor.run_streaming()."""
+
+    def test_run_streaming_requires_initialize(self):
+        config = _seq_config()
+        executor = MASExecutor(config)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            list(executor.run_streaming())
+
+    def test_run_streaming_yields_tuples(self):
+        config = _seq_config(n_agents=2)
+        executor = MASExecutor(config)
+        executor.initialize()
+        results = list(executor.run_streaming())
+        assert len(results) > 0
+        for item in results:
+            assert isinstance(item, tuple)
+            assert len(item) == 2
+
+    def test_run_streaming_tuple_types(self):
+        config = _seq_config(n_agents=2)
+        executor = MASExecutor(config)
+        executor.initialize()
+        for node_name, state_update in executor.run_streaming():
+            assert isinstance(node_name, str)
+            assert isinstance(state_update, dict)
+
+    def test_run_streaming_with_input_data(self):
+        config = _seq_config(n_agents=1)
+        executor = MASExecutor(config)
+        executor.initialize()
+        results = list(
+            executor.run_streaming(
+                input_data={"messages": [HumanMessage(content="Hello")]}
+            )
+        )
+        assert len(results) > 0
+
+    def test_run_streaming_agent_node_names(self):
+        config = _seq_config(n_agents=2)
+        executor = MASExecutor(config)
+        executor.initialize()
+        node_names = [name for name, _ in executor.run_streaming()]
+        assert any("agent_0" in name or "agent_1" in name for name in node_names)
+
+    def test_run_streaming_with_thread_id(self):
+        config = _seq_config(n_agents=1, checkpoint_enabled=True)
+        executor = MASExecutor(config)
+        executor.initialize()
+        results = list(executor.run_streaming(thread_id="test-thread"))
+        assert len(results) > 0
+
+    def test_run_streaming_raises_on_graph_error(self):
+        config = _seq_config(n_agents=1)
+        executor = MASExecutor(config)
+        executor.initialize()
+        executor._compiled_graph = (
+            _BrokenStreamingGraph()
+        )  # pylint: disable=protected-access
+        with pytest.raises(RuntimeError, match="Simulated streaming failure"):
+            list(executor.run_streaming())
+
+
 # =========================================================================
 # CLI Argument Parsing
 # =========================================================================

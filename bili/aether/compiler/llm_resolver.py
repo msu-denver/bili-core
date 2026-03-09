@@ -44,6 +44,50 @@ _HEURISTIC_RULES = [
 ]
 
 
+def _resolve_model_full(
+    model_name: str,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Resolve a model name to ``(provider_type, model_id, extra_kwargs)`` in one pass.
+
+    Search order:
+        1. Exact match on ``model_id`` in ``LLM_MODELS``
+        2. Exact match on display ``model_name`` in ``LLM_MODELS``
+        3. Heuristic fallback using prefix/substring rules
+           (``extra_kwargs`` is empty for heuristic matches)
+
+    Raises:
+        ValueError: If the model cannot be resolved to any provider.
+    """
+    # --- 1 & 2: Look up in LLM_MODELS (single pass, returns extra_kwargs) ---
+    result = _lookup_in_llm_models(model_name)
+    if result is not None:
+        provider, model_id, extra_kwargs = result
+        LOGGER.debug(
+            "Resolved '%s' via LLM_MODELS → provider=%s, model_id=%s",
+            model_name,
+            provider,
+            model_id,
+        )
+        return provider, model_id, extra_kwargs
+
+    # --- 3: Heuristic fallback (model_name IS the model_id) ---
+    lower = model_name.lower()
+    for pattern, ptype in _HEURISTIC_RULES:
+        if pattern in lower:
+            LOGGER.debug(
+                "Resolved '%s' via heuristic ('%s') → %s (using as model_id)",
+                model_name,
+                pattern,
+                ptype,
+            )
+            return ptype, model_name, {}
+
+    raise ValueError(
+        f"Cannot resolve model '{model_name}' to a provider. "
+        f"Set a recognised model_name or use bili.loaders.llm_loader directly."
+    )
+
+
 def resolve_model(model_name: str) -> Tuple[str, str]:
     """Resolve a model name to a ``(provider_type, model_id)`` pair.
 
@@ -65,34 +109,8 @@ def resolve_model(model_name: str) -> Tuple[str, str]:
     Raises:
         ValueError: If the model cannot be resolved to any provider.
     """
-    # --- 1 & 2: Look up in LLM_MODELS ---
-    result = _lookup_in_llm_models(model_name)
-    if result is not None:
-        provider, model_id = result
-        LOGGER.debug(
-            "Resolved '%s' via LLM_MODELS → provider=%s, model_id=%s",
-            model_name,
-            provider,
-            model_id,
-        )
-        return provider, model_id
-
-    # --- 3: Heuristic fallback (model_name IS the model_id) ---
-    lower = model_name.lower()
-    for pattern, ptype in _HEURISTIC_RULES:
-        if pattern in lower:
-            LOGGER.debug(
-                "Resolved '%s' via heuristic ('%s') → %s (using as model_id)",
-                model_name,
-                pattern,
-                ptype,
-            )
-            return ptype, model_name
-
-    raise ValueError(
-        f"Cannot resolve model '{model_name}' to a provider. "
-        f"Set a recognised model_name or use bili.loaders.llm_loader directly."
-    )
+    provider, model_id, _ = _resolve_model_full(model_name)
+    return provider, model_id
 
 
 def resolve_provider(model_name: str) -> str:
@@ -131,11 +149,11 @@ def create_llm(agent: AgentSpec) -> Any:
             f"cannot create LLM instance."
         )
 
-    provider, model_id = resolve_model(agent.model_name)
+    provider, model_id, extra_kwargs = _resolve_model_full(agent.model_name)
 
-    # Build kwargs for load_model — each provider uses "model_name" as
-    # the kwarg, but the *value* must be the provider's model_id.
-    kwargs: Dict[str, Any] = {"model_name": model_id}
+    # Build kwargs for load_model — extra_kwargs first so the resolved
+    # model_id always wins if extra_kwargs ever contains a "model_name" key.
+    kwargs: Dict[str, Any] = {**extra_kwargs, "model_name": model_id}
     if agent.temperature is not None:
         kwargs["temperature"] = agent.temperature
     if agent.max_tokens is not None:
@@ -215,10 +233,15 @@ def resolve_tools(agent: AgentSpec) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _lookup_in_llm_models(model_name: str) -> Optional[Tuple[str, str]]:
+def _lookup_in_llm_models(
+    model_name: str,
+) -> Optional[Tuple[str, str, Dict[str, Any]]]:
     """Search ``LLM_MODELS`` for a matching model entry.
 
-    Returns ``(provider_type, model_id)`` if found, ``None`` otherwise.
+    Returns ``(provider_type, model_id, extra_kwargs)`` if found,
+    ``None`` otherwise.  ``extra_kwargs`` contains provider-specific
+    parameters stored in the entry's ``kwargs`` dict (e.g.
+    ``api_version`` for Azure OpenAI models).
     """
     try:
         from bili.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
@@ -233,13 +256,14 @@ def _lookup_in_llm_models(model_name: str) -> Optional[Tuple[str, str]]:
         for entry in models:
             entry_model_id = entry.get("model_id", "")
             entry_display = entry.get("model_name", "")
+            extra_kwargs: Dict[str, Any] = entry.get("kwargs", {})
 
             # Match on model_id (e.g. "gpt-4o")
             if entry_model_id == model_name:
-                return provider_type, entry_model_id
+                return provider_type, entry_model_id, extra_kwargs
 
             # Match on display name (e.g. "GPT-4o")
             if entry_display == model_name:
-                return provider_type, entry_model_id
+                return provider_type, entry_model_id, extra_kwargs
 
     return None
