@@ -410,6 +410,54 @@ def _render_sidebar() -> None:
     render_sidebar_content()
 
 
+def _extract_content(output: Dict[str, Any]) -> str:
+    """Extract a readable content string from a serialized agent output dict.
+
+    Mirrors the display priority of ``_render_agent_panel`` but returns a plain
+    string suitable for text-based exports.
+    """
+    agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
+    for inner in agent_outputs.values():
+        if inner.get("status") == "stub":
+            return inner.get("message", str(inner))
+        parts = [f"{k}: {v}" for k, v in inner.items() if k != "agent_id"]
+        if parts:
+            return " | ".join(parts)
+    messages: List[Any] = output.get("messages", [])
+    if messages:
+        last = messages[-1]
+        if isinstance(last, dict):
+            return last.get("content", str(last))
+        return getattr(last, "content", str(last))
+    return str(output)
+
+
+def _build_markdown_export(
+    config: "MASConfig", thread_id: str, chat_history: List[Dict]
+) -> str:
+    """Build a Markdown export string for the active conversation."""
+    lines = [
+        f"# Conversation — {config.mas_id}",
+        f"Thread: {thread_id}",
+        f"Exported: {datetime.now(timezone.utc).isoformat()}",
+        "",
+    ]
+    for i, turn in enumerate(chat_history, 1):
+        lines += [
+            f"## Turn {i}",
+            "",
+            f"**User:** {turn['content']}",
+            "",
+            "**MAS Response:**",
+            "",
+        ]
+        for agent_out in turn.get("agent_trace", []):
+            content = _extract_content(agent_out.get("output", {}))
+            lines.append(f"> **{agent_out['agent_id']}:** {content}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     """Render the chat sidebar controls — config selector, upload, and buttons.
 
@@ -566,19 +614,32 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
     chat_history = _active_messages_or_empty()
     thread_id = st.session_state.get("chat_thread_id", "")
     if chat_history:
-        export = {
+        export_json = {
             "mas_id": config.mas_id,
             "thread_id": thread_id,
             "exported_at": datetime.now(timezone.utc).isoformat(),
-            "turns": chat_history,
+            "turns": [
+                {**turn, "agent_trace": turn.get("agent_trace", [])}
+                for turn in chat_history
+            ],
         }
-        st.download_button(
-            "Export Conversation",
-            data=json.dumps(export, indent=2),
-            file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        col_json, col_md = st.columns(2)
+        with col_json:
+            st.download_button(
+                "Export JSON",
+                data=json.dumps(export_json, indent=2),
+                file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        with col_md:
+            st.download_button(
+                "Export Markdown",
+                data=_build_markdown_export(config, thread_id, chat_history),
+                file_name=f"aether_chat_{config.mas_id}_{thread_id[:8] or 'unknown'}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
 
     _render_thread_list()
 
