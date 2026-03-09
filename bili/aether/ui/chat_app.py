@@ -77,7 +77,7 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _validate_config(config: MASConfig) -> bool:
-    """Run structural validation and display results in the sidebar.
+    """Run structural validation and display results in the active Streamlit context.
 
     Returns ``True`` if the config is valid (errors list is empty).
     Warnings are displayed but do not block execution.
@@ -87,8 +87,11 @@ def _validate_config(config: MASConfig) -> bool:
         st.error(f"Config error: {err}")
     for warn in result.warnings:
         st.warning(f"Config warning: {warn}")
-    if result.valid and not result.warnings:
-        st.success("Config valid ✓")
+    if result.valid:
+        if result.warnings:
+            st.success("Config valid with warnings ✓")
+        else:
+            st.success("Config valid ✓")
     return result.valid
 
 
@@ -148,6 +151,8 @@ def _load_config(yaml_path: Path) -> None:
             st.session_state.pop(key, None)
         return
     if not _validate_config(config):
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
         return
     _initialize_executor(config, str(yaml_path))
 
@@ -155,6 +160,8 @@ def _load_config(yaml_path: Path) -> None:
 def _load_uploaded_config(name: str, config: MASConfig) -> None:
     """Initialize the executor from an already-parsed uploaded MASConfig."""
     if not _validate_config(config):
+        for key in ("chat_config", "chat_yaml_path", "chat_executor"):
+            st.session_state.pop(key, None)
         return
     _initialize_executor(config, f"uploaded:{name}")
 
