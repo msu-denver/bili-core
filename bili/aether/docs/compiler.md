@@ -430,6 +430,47 @@ result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
 | `run(input_data, thread_id, save_results)` | `MASExecutionResult` | Execute graph, collect results |
 | `run_with_checkpoint_persistence(input_data, thread_id)` | `(original, restored)` | Run twice with checkpoint save/restore |
 | `run_cross_model_test(input_data, source_model, target_model, thread_id)` | `(source, target)` | Run with two different model configurations |
+| `run_streaming(input_data, thread_id)` | `Generator[Tuple[str, Dict], None, None]` | Yield `(node_name, state_update)` per agent node — lightweight UI streaming |
+| `stream(input_data, thread_id, stream_filter)` | `Generator[StreamEvent, None, None]` | Yield structured `StreamEvent` objects (RUN_START, NODE_END, TOKEN, etc.) |
+| `astream(input_data, thread_id, stream_filter)` | `AsyncGenerator[StreamEvent, None]` | Async token-level streaming via LangGraph `astream_events(v2)` |
+
+### Streaming
+
+AETHER provides three streaming modes for different consumers:
+
+#### `run_streaming()` — UI / real-time rendering
+
+```python
+for node_name, state_update in executor.run_streaming(
+    input_data={"messages": [HumanMessage(content="Hello")]},
+    thread_id="my-thread",
+):
+    print(f"[{node_name}] {state_update}")
+```
+
+Yields one `(node_name, state_update)` tuple per agent node as it completes. Lightweight — no event envelope overhead. Used internally by the AETHER Chat UI.
+
+#### `stream()` — Structured sync streaming
+
+```python
+from bili.aether.runtime import StreamEventType
+
+for event in executor.stream(input_data):
+    if event.event_type == StreamEventType.TOKEN:
+        print(event.data["content"], end="", flush=True)
+```
+
+Yields `StreamEvent` objects with `event_type`, `data`, `node_name`, `agent_id`, and `run_id`. Event types: `RUN_START`, `NODE_START`, `NODE_END`, `TOKEN`, `ERROR`, `RUN_END`. Accepts an optional `StreamFilter` for declarative event filtering.
+
+#### `astream()` — Token-level async streaming
+
+```python
+async for event in executor.astream(input_data):
+    if event.event_type == StreamEventType.TOKEN:
+        print(event.data["content"], end="", flush=True)
+```
+
+Uses LangGraph's `astream_events(v2)` for token-level granularity when streaming LLM responses. Yields the same `StreamEvent` structure as `stream()`.
 
 ### MASExecutionResult
 
