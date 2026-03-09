@@ -860,13 +860,19 @@ def _run_turn(user_input: str) -> None:
         st.session_state["aether_execution_trace"] = []
         st.session_state.pop("aether_selected_trace_node", None)
         timeline_placeholder = st.empty()
+        # Each _render_timeline call within this run must use a unique key_prefix
+        # because Streamlit registers widget keys globally for the entire script
+        # execution — placeholder.container() replaces visual content but does
+        # not de-register previously created widget keys.
+        _tl_call = 0
         _render_timeline(
             timeline_placeholder,
             completed=[],
             active=None,
             all_nodes=all_nodes,
-            key_prefix="timeline_live",
+            key_prefix=f"timeline_live_{_tl_call}",
         )
+        _tl_call += 1
         with st.status("Running MAS...", expanded=True) as status:
             try:
                 for node_name, state_update in executor.run_streaming(
@@ -881,8 +887,9 @@ def _run_turn(user_input: str) -> None:
                         completed=st.session_state["aether_execution_trace"],
                         active=node_name,
                         all_nodes=all_nodes,
-                        key_prefix="timeline_live",
+                        key_prefix=f"timeline_live_{_tl_call}",
                     )
+                    _tl_call += 1
                     try:
                         _render_agent_output(node_name, state_update)
                     except (
@@ -908,7 +915,7 @@ def _run_turn(user_input: str) -> None:
             completed=st.session_state["aether_execution_trace"],
             active=None,
             all_nodes=all_nodes,
-            key_prefix="timeline_live",
+            key_prefix=f"timeline_live_{_tl_call}",
         )
 
     turn["agent_trace"] = agent_trace

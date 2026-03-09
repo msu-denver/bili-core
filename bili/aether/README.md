@@ -971,6 +971,25 @@ python bili/aether/runtime/cli.py configs/production.yaml \
     --source-model gpt-4 --target-model claude-sonnet-3-5-20241022
 ```
 
+## Web UI
+
+AETHER includes a Streamlit application with two pages:
+
+- **Visualizer** — interactive graph explorer for AETHER YAML configurations (pan, zoom, click nodes for agent details, per-agent model override, "Send to Chat" button)
+- **Chat** — multi-turn conversation interface that compiles and executes a MAS in real time, with live execution timeline, in-session thread management, and JSON/Markdown export
+
+### Launch
+
+```bash
+/app/bili-core/venv/bin/streamlit run bili/aether/ui/app.py --server.port 8502
+```
+
+> **Note:** the `streamlit` alias starts BiliCore rather than Streamlit directly. Use the venv path above.
+
+For full documentation — installation, navigation, config selection, model settings, thread management, execution timeline, export formats, and troubleshooting — see [`bili/aether/docs/ui.md`](docs/ui.md).
+
+---
+
 ## Example Workflows
 
 AETHER includes 12 example YAML configurations demonstrating all framework capabilities across multiple domains.
