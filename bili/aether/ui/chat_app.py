@@ -340,10 +340,13 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
     with st.chat_message("assistant"):
         if "error" in turn:
             st.error(f"Execution failed: {turn['error']}")
-        for agent_out in turn.get("agent_outputs", []):
-            _render_agent_panel(
-                agent_out["agent_id"], agent_out["output"], expanded=False
-            )
+        agent_trace = turn.get("agent_trace", [])
+        if agent_trace:
+            with st.expander("Agent trace", expanded=False):
+                for agent_out in agent_trace:
+                    _render_agent_panel(
+                        agent_out["agent_id"], agent_out["output"], expanded=False
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -366,13 +369,13 @@ def _run_turn(user_input: str) -> None:
         "content": user_input,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "turn_index": len(st.session_state.get("chat_history", [])),
-        "agent_outputs": [],
+        "agent_trace": [],
     }
 
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    agent_outputs: List[Dict[str, Any]] = []
+    agent_trace: List[Dict[str, Any]] = []
     with st.chat_message("assistant"):
         with st.status("Running MAS...", expanded=True) as status:
             try:
@@ -388,7 +391,7 @@ def _run_turn(user_input: str) -> None:
                         Exception
                     ) as render_exc:  # pylint: disable=broad-exception-caught
                         st.error(f"Agent {node_name} failed to render: {render_exc}")
-                    agent_outputs.append(
+                    agent_trace.append(
                         {
                             "agent_id": node_name,
                             "output": _serialize_state_update(state_update),
@@ -400,7 +403,7 @@ def _run_turn(user_input: str) -> None:
                 st.error(f"Execution failed: {exc}")
                 turn["error"] = str(exc)
 
-    turn["agent_outputs"] = agent_outputs
+    turn["agent_trace"] = agent_trace
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
