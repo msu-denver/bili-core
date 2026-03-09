@@ -208,6 +208,13 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
         # Invoke the LLM directly
         response = llm.invoke(messages)
         content = response.content
+        # Some providers (e.g. Google Vertex) return content as a list of parts.
+        # Normalise to a plain string so all downstream consumers receive str.
+        if isinstance(content, list):
+            content = " ".join(
+                part.get("text", str(part)) if isinstance(part, dict) else str(part)
+                for part in content
+            )
 
         execution_ms = (time.time() - start_time) * 1000
         LOGGER.info(
