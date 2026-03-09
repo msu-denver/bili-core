@@ -123,7 +123,9 @@ def _active_messages_or_empty() -> List[Dict]:
 def _new_thread(mas_id: str) -> str:
     """Create a new thread, set it active, and return the new thread ID."""
     now = datetime.now(timezone.utc)
-    display_time = datetime.now().strftime("%H:%M:%S")  # local time for readability
+    display_time = now.astimezone().strftime(
+        "%H:%M:%S"
+    )  # convert to local time for readability
     thread_id = str(uuid.uuid4())
     threads = st.session_state.setdefault("chat_threads", {})
     threads[thread_id] = {
@@ -331,8 +333,11 @@ def _initialize_executor(config: MASConfig, cache_key: str) -> None:
         st.session_state.chat_config = config
         st.session_state.chat_yaml_path = cache_key
         st.session_state.chat_executor = executor
-        # Clear active pointer only; chat_threads persists across config switches
-        # so the user can re-activate a previous thread by clicking it in the list.
+        # Clear active pointer only; chat_threads persists across config switches so
+        # the user can re-activate a previous thread by clicking it in the list.
+        # Render paths use _active_messages_or_empty() which safely returns [] when
+        # no thread is active; _active_messages() (write path) requires a prior
+        # _ensure_active_thread() call and will raise if this pointer is absent.
         st.session_state.pop("chat_thread_id", None)
         st.session_state.pop("chat_load_error", None)
     except Exception as exc:  # pylint: disable=broad-exception-caught
