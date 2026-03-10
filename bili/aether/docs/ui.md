@@ -220,7 +220,7 @@ Each agent output is rendered as a blockquote. Multi-line agent outputs have eve
 | `chat_load_error` | `str` | Error message from last failed config load |
 | `aether_executing_node` | `Optional[str]` | Agent ID currently executing during a live streaming turn; absent between turns |
 | `aether_execution_trace` | `List[str]` | Ordered list of completed agent IDs for the current live turn; reset at turn start |
-| `aether_selected_trace_node` | `Optional[str]` | Agent ID last selected via a timeline chip click; causes that agent's panel to auto-expand in the stored turn on the next render cycle, then cleared (popped) |
+| `aether_selected_trace_node` | `Optional[Tuple[int, str]]` | `(turn_index, agent_id)` tuple set by a timeline chip click; the stored turn matching `turn_index` auto-expands that agent's panel on the next render cycle, then pops the value so it does not persist to other turns |
 
 ---
 
