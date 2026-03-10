@@ -666,6 +666,46 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# MAS structure panel
+# ---------------------------------------------------------------------------
+
+
+def _render_mas_structure(config: MASConfig) -> None:
+    """Render a collapsible summary of the active MAS topology.
+
+    Shows the workflow type, agent count, channel count, and a simple
+    left-to-right agent flow diagram using role names. Defaults to expanded
+    when no messages have been sent yet, and collapses automatically once
+    the conversation starts so it doesn't crowd the chat area.
+    """
+    messages = _active_messages_or_empty()
+    with st.expander("MAS Structure", expanded=(len(messages) == 0)):
+        n_channels = len(config.channels)
+        st.markdown(
+            f"**Workflow:** `{config.workflow_type.value}` &nbsp;·&nbsp; "
+            f"**Agents:** {len(config.agents)} &nbsp;·&nbsp; "
+            f"**Channels:** {n_channels}"
+        )
+        st.divider()
+        n = len(config.agents)
+        if n > 0:
+            # Alternating layout: [agent, →, agent, →, agent] = 2N-1 columns.
+            # Arrow columns (odd indices) are narrow; agent columns (even) are wide.
+            widths = [1 if i % 2 == 1 else 3 for i in range(2 * n - 1)]
+            cols = st.columns(widths)
+            agent_col_indices = list(range(0, 2 * n - 1, 2))
+            for idx, agent in zip(agent_col_indices, config.agents):
+                with cols[idx]:
+                    if agent.role != agent.agent_id:
+                        st.markdown(f"**{agent.role}**  \n`{agent.agent_id}`")
+                    else:
+                        st.markdown(f"`{agent.agent_id}`")
+                if idx + 1 < len(cols):
+                    with cols[idx + 1]:
+                        st.markdown("→")
+
+
+# ---------------------------------------------------------------------------
 # Agent output rendering
 # ---------------------------------------------------------------------------
 
@@ -676,6 +716,7 @@ def _render_agent_panel(
     *,
     expanded: bool,
     use_expander: bool = True,
+    role: Optional[str] = None,
 ) -> None:
     """Render one agent's output inside an expander or plain container.
 
@@ -685,15 +726,20 @@ def _render_agent_panel(
     When *use_expander* is ``False`` the panel is rendered as a ``st.container``
     with a bold header — suitable for use inside an outer expander to avoid
     nesting expanders inside expanders.
+
+    Args:
+        role: Human-readable role string for the agent. When set and different
+            from ``agent_id``, the label format is ``"{role} — {agent_id}"``.
     """
+    panel_label = f"{role} — {agent_id}" if role and role != agent_id else agent_id
     if use_expander:
-        ctx = st.expander(f"Agent: {agent_id}", expanded=expanded)
+        ctx = st.expander(panel_label, expanded=expanded)
     else:
         ctx = st.container()
 
     with ctx:
         if not use_expander:
-            st.markdown(f"**Agent: {agent_id}**")
+            st.markdown(f"**{panel_label}**")
 
         # Prefer the structured agent_outputs entry for this node
         agent_outputs: Dict[str, Any] = output.get("agent_outputs", {})
@@ -723,13 +769,17 @@ def _render_agent_panel(
         st.json({k: str(v) for k, v in output.items()}, expanded=False)
 
 
-def _render_agent_output(node_name: str, state_update: Dict[str, Any]) -> None:
+def _render_agent_output(
+    node_name: str, state_update: Dict[str, Any], role: Optional[str] = None
+) -> None:
     """Render a live agent node's state update (expanded=True)."""
-    _render_agent_panel(node_name, state_update, expanded=True)
+    _render_agent_panel(node_name, state_update, expanded=True, role=role)
 
 
 def _render_stored_turn(turn: Dict[str, Any]) -> None:
     """Re-render a previously completed turn from chat_history."""
+    cfg: Optional[MASConfig] = st.session_state.get("chat_config")
+    role_map = _build_role_map(cfg) if cfg else {}
     with st.chat_message("user", avatar="👤"):
         st.markdown(turn["content"])
     with st.chat_message("assistant", avatar="🤖"):
@@ -749,6 +799,7 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                 all_nodes=node_ids,
                 key_prefix=f"timeline_stored_{turn_idx}",
                 turn_index=turn_idx,
+                role_map=role_map,
             )
             # Only consume the selection when it belongs to this turn — the
             # tuple ``(turn_index, agent_id)`` lets each stored turn check
@@ -769,12 +820,18 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                         agent_out["output"],
                         expanded=(agent_out["agent_id"] == selected),
                         use_expander=False,
+                        role=role_map.get(agent_out["agent_id"]),
                     )
 
 
 # ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------
+
+
+def _build_role_map(config: MASConfig) -> Dict[str, str]:
+    """Map agent_id → role for display labels; omits entries where role == agent_id."""
+    return {a.agent_id: a.role for a in config.agents if a.role != a.agent_id}
 
 
 def _render_timeline(
@@ -785,6 +842,8 @@ def _render_timeline(
     *,
     key_prefix: str,
     turn_index: int = 0,
+    role_map: Optional[Dict[str, str]] = None,
+    status_text: Optional[str] = None,
 ) -> None:
     """Render a horizontal node-chip row into a ``st.empty()`` placeholder.
 
@@ -811,17 +870,23 @@ def _render_timeline(
         turn_index: The ``turn_index`` of the owning turn. Stored alongside
             ``agent_id`` in ``aether_selected_trace_node`` so the correct
             stored turn can consume the selection.
+        role_map: Optional mapping of agent_id → role for chip display labels.
+            When provided, chips show the role string instead of the raw agent_id.
+        status_text: Optional short status caption rendered below the chip row
+            (e.g. ``"⟳ Running writer..."``). Pass ``None`` to hide.
     """
     if not all_nodes:
         return
+    _role_map = role_map or {}
     completed_set = set(completed)
     with placeholder.container():
         cols = st.columns(len(all_nodes))
         for col, node_id in zip(cols, all_nodes):
+            label = _role_map.get(node_id, node_id)
             with col:
                 if node_id in completed_set:
                     if st.button(
-                        f"✓ {node_id}",
+                        f"✓ {label}",
                         key=f"{key_prefix}_{node_id}",
                         use_container_width=True,
                         help="Click to expand this agent's output",
@@ -833,18 +898,20 @@ def _render_timeline(
                         st.rerun()
                 elif node_id == active:
                     st.button(
-                        f"⟳ {node_id}",
+                        f"⟳ {label}",
                         key=f"{key_prefix}_{node_id}",
                         disabled=True,
                         use_container_width=True,
                     )
                 else:
                     st.button(
-                        f"○ {node_id}",
+                        f"○ {label}",
                         key=f"{key_prefix}_{node_id}",
                         disabled=True,
                         use_container_width=True,
                     )
+        if status_text:
+            st.caption(status_text)
 
 
 def _run_turn(user_input: str) -> None:
@@ -872,6 +939,7 @@ def _run_turn(user_input: str) -> None:
         st.markdown(user_input)
 
     all_nodes = [a.agent_id for a in config.agents]
+    role_map = _build_role_map(config)
     agent_trace: List[Dict[str, Any]] = []
     with st.chat_message("assistant", avatar="🤖"):
         st.session_state["aether_execution_trace"] = []
@@ -888,43 +956,45 @@ def _run_turn(user_input: str) -> None:
             active=None,
             all_nodes=all_nodes,
             key_prefix=f"timeline_live_{_tl_call}",
+            role_map=role_map,
         )
         _tl_call += 1
-        with st.status("Running MAS...", expanded=True) as status:
-            try:
-                for node_name, state_update in executor.run_streaming(
-                    input_data={"messages": [HumanMessage(content=user_input)]},
-                    thread_id=st.session_state.chat_thread_id,
-                ):
-                    if state_update is None:
-                        continue
-                    st.session_state["aether_executing_node"] = node_name
-                    _render_timeline(
-                        timeline_placeholder,
-                        completed=st.session_state["aether_execution_trace"],
-                        active=node_name,
-                        all_nodes=all_nodes,
-                        key_prefix=f"timeline_live_{_tl_call}",
-                    )
-                    _tl_call += 1
-                    try:
-                        _render_agent_output(node_name, state_update)
-                    except (
-                        Exception
-                    ) as render_exc:  # pylint: disable=broad-exception-caught
-                        st.error(f"Agent {node_name} failed to render: {render_exc}")
-                    agent_trace.append(
-                        {
-                            "agent_id": node_name,
-                            "output": _serialize_state_update(state_update),
-                        }
-                    )
-                    st.session_state["aether_execution_trace"].append(node_name)
-                status.update(label="Complete", state="complete", expanded=False)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                status.update(label="Execution failed", state="error")
-                st.error(f"Execution failed: {exc}")
-                turn["error"] = str(exc)
+        try:
+            for node_name, state_update in executor.run_streaming(
+                input_data={"messages": [HumanMessage(content=user_input)]},
+                thread_id=st.session_state.chat_thread_id,
+            ):
+                if state_update is None:
+                    continue
+                st.session_state["aether_executing_node"] = node_name
+                display_name = role_map.get(node_name, node_name)
+                _render_timeline(
+                    timeline_placeholder,
+                    completed=st.session_state["aether_execution_trace"],
+                    active=node_name,
+                    all_nodes=all_nodes,
+                    key_prefix=f"timeline_live_{_tl_call}",
+                    role_map=role_map,
+                    status_text=f"⟳ Running {display_name}...",
+                )
+                _tl_call += 1
+                node_role = role_map.get(node_name)
+                try:
+                    _render_agent_output(node_name, state_update, role=node_role)
+                except (
+                    Exception
+                ) as render_exc:  # pylint: disable=broad-exception-caught
+                    st.error(f"Agent {node_name} failed to render: {render_exc}")
+                agent_trace.append(
+                    {
+                        "agent_id": node_name,
+                        "output": _serialize_state_update(state_update),
+                    }
+                )
+                st.session_state["aether_execution_trace"].append(node_name)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Execution failed: {exc}")
+            turn["error"] = str(exc)
 
         st.session_state.pop("aether_executing_node", None)
         _render_timeline(
@@ -933,6 +1003,7 @@ def _run_turn(user_input: str) -> None:
             active=None,
             all_nodes=all_nodes,
             key_prefix=f"timeline_live_{_tl_call}",
+            role_map=role_map,
         )
 
     turn["agent_trace"] = agent_trace
@@ -958,6 +1029,7 @@ def _render_chat_area() -> None:
     st.markdown(f"### {config.name}")
     if config.description:
         st.caption(config.description)
+    _render_mas_structure(config)
 
     for turn in _active_messages_or_empty():
         _render_stored_turn(turn)
