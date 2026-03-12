@@ -15,6 +15,7 @@ if ! grep -qxF "alias awslocal='awslocal --endpoint=\${LOCALSTACK_ENDPOINT}'" ~/
   echo '[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"' >> ~/.bashrc
   echo '[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud config set project "$GOOGLE_PROJECT_ID"' >> ~/.bashrc
   echo 'source /app/bili-core/scripts/development/secrets' >>~/.bashrc
+  echo '[ -d "/app/bili-core/venv" ] && source /app/bili-core/venv/bin/activate && cd /app/bili-core' >> ~/.bashrc
 fi
 source ~/.bashrc
 
