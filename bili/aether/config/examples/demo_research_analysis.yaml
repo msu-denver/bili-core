@@ -1,0 +1,100 @@
+# =============================================================================
+# Demo: Research Analysis Pipeline
+# =============================================================================
+#
+# Demo configuration for the Research Analysis Pipeline.
+# Three agents, each using a different model sized to their role:
+#
+#   - researcher  : Haiku  (fast web search + source gathering)
+#   - analyst     : Sonnet (deep pattern recognition and interpretation)
+#   - synthesizer : Sonnet (coherent final report, moderate temperature)
+#
+# To swap a provider on any agent, change model_name only — no code changes.
+# Example: replace researcher model_name with "amazon.nova-lite-..." or
+# "meta.llama3-..." to compare retrieval quality across providers.
+#
+# Input suggestion:
+#   "What are the current limitations of vision-language models
+#    in zero-shot reasoning tasks?"
+# =============================================================================
+
+mas_id: demo_research_analysis
+name: "Demo: Research Analysis Pipeline"
+description: >
+  A three-agent research pipeline demonstrating per-agent model assignment.
+  The researcher gathers and compiles information using a fast, lightweight
+  model suited for broad retrieval. The analyst performs deep pattern
+  recognition and interpretation using a high-capability model. The
+  synthesizer produces a coherent final report with moderate temperature
+  for natural, well-structured prose.
+version: "1.0.0"
+
+workflow_type: sequential
+entry_point: researcher
+
+agents:
+  - agent_id: researcher
+    role: researcher
+    objective: >
+      Search for and gather information on the given research topic.
+      Compile relevant findings, key claims, and source references.
+      Keep your output structured so the downstream analyst can work
+      with it efficiently.
+    model_name: "anthropic.claude-3-5-haiku-20241022-v1:0"
+    temperature: 0.3
+    max_tokens: 1024
+    output_format: json
+    capabilities:
+      - web_search
+      - source_gathering
+      - document_analysis
+    tools:
+      - serp_api_tool
+
+  - agent_id: analyst
+    role: analyst
+    objective: >
+      Analyze the research findings compiled by the researcher. Identify
+      patterns, contradictions, knowledge gaps, and key insights. Provide
+      quantitative and qualitative interpretation of the evidence. Flag
+      any claims that appear contested or insufficiently supported.
+    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    temperature: 0.2
+    max_tokens: 2048
+    output_format: json
+    capabilities:
+      - data_analysis
+      - pattern_recognition
+      - statistical_reasoning
+
+  - agent_id: synthesizer
+    role: synthesizer
+    objective: >
+      Synthesize the research and analysis into a clear, well-structured
+      final report. Include an executive summary, key findings, identified
+      limitations, and recommendations for further investigation. Write
+      for a technical but broad audience — assume domain knowledge but
+      not familiarity with the specific topic.
+    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    temperature: 0.4
+    max_tokens: 2048
+    output_format: text
+
+channels:
+  - channel_id: researcher_to_analyst
+    protocol: direct
+    source: researcher
+    target: analyst
+    description: Raw research findings passed to analyst for interpretation
+
+  - channel_id: analyst_to_synthesizer
+    protocol: direct
+    source: analyst
+    target: synthesizer
+    description: Analysis results passed to synthesizer for final report
+
+tags:
+  - demo
+  - research
+  - sequential
+  - multi-model
