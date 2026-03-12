@@ -60,9 +60,9 @@ Developed as part of the [Colorado Sustainability Hub](https://sustainabilityhub
 git clone https://github.com/msu-denver/bili-core.git
 cd bili-core
 
-# Copy and configure secrets
-cp scripts/development/secrets.template scripts/development/secrets
-# Edit scripts/development/secrets with your API keys
+# Copy and configure environment variables
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
 ### 2. Set Up Credentials
@@ -103,8 +103,8 @@ flask
 
 ### 5. Access the Application
 
-- **Streamlit UI**: http://localhost:8501
-- **Flask API**: http://localhost:5000
+- **Streamlit UI**: http://localhost:8501 (AETHER at `/aether`, Single-Agent RAG at `/bili`)
+- **Flask API**: http://localhost:5001
 
 ---
 
@@ -153,6 +153,17 @@ Streamlit UI documentation.
 - Session state management
 - Customizing the UI
 
+### [AETHER Documentation](../bili/aether/README.md)
+
+AETHER multi-agent system framework documentation.
+
+- Declarative YAML configuration for multi-agent systems
+- 7 workflow patterns (sequential, hierarchical, supervisor, consensus, deliberative, parallel, custom)
+- Agent communication protocols and channel types
+- Pipeline sub-graphs with custom state fields
+- Streaming execution with `MASExecutor`
+- Detailed API reference in [`bili/aether/docs/`](../bili/aether/docs/)
+
 ---
 
 ## Project Structure
@@ -160,6 +171,7 @@ Streamlit UI documentation.
 ```
 bili-core/
 ├── bili/                    # Main source package
+│   ├── aether/             # AETHER multi-agent system framework
 │   ├── auth/               # Authentication providers
 │   ├── checkpointers/      # State persistence (MongoDB, PostgreSQL, memory)
 │   ├── config/             # LLM and tool configurations

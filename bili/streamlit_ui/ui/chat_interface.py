@@ -163,15 +163,18 @@ def run_app_page(checkpointer=None):
                     st.session_state["conversation_chain"],
                     user_query,
                 )
-                response = st.write_stream(token_gen)  # noqa: F841
+                st.write_stream(token_gen)
+                # Don't st.rerun() here — the streamed output is already
+                # visible on screen and the form has clear_on_submit=True.
+                # Rerunning would clear the streamed content immediately.
+                enable_form()
             else:
                 process_query(
                     st.session_state["conversation_chain"],
                     user_query,
                 )
-
-            enable_form()
-            st.rerun()
+                enable_form()
+                st.rerun()
 
         display_state_management(form)
     else:

@@ -308,7 +308,7 @@ Key configuration via environment:
 - LLM provider credentials (AWS, Google, Azure, OpenAI)
 
 ### Configuration Files
-- `scripts/development/secrets.template`: Template for secrets
+- `.env.example`: Template for environment variables (copy to `.env`)
 - `env/bili_root/.aws/`: AWS credentials
 - `env/bili_root/.google/`: Google Cloud credentials
 

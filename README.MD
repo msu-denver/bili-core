@@ -31,13 +31,11 @@ BiliCore empowers users to benchmark and customize RAG implementations through a
 
 BiliCore provides a flexible authentication system with **prebuilt authentication options**, including:
 
-- **Firebase Authentication**: Utilize Firebase for user management and authentication.
-- **Memory-Based Authentication**: A simple in-memory authentication suitable for testing and development.
+- **SQLite Authentication** (local development): Used by default. New accounts are automatically assigned the `researcher` role, so you can sign up and immediately sign in. The profile database is stored at the path set by `PROFILE_DB_PATH` (default: `/root/.bili/profile.db` inside the container).
+- **Firebase Authentication** (production): Used for deployed environments on AWS. Requires admin approval before new accounts can access the platform.
+- **In-Memory Authentication**: A simple in-memory authentication suitable for testing.
 
-To configure authentication:
-
-1. In `bili/streamlit_app.py`, modify the `initialize_auth_manager` call to specify the desired authentication method.
-2. If using Firebase, for instance, you can change `auth_provider_name` from `default`, which is the in-memory authentication provider, to `firebase`.
+To configure authentication, modify the `initialize_auth_manager` call in `bili/streamlit_app.py` to specify the desired provider (e.g., `"sqlite"`, `"firebase"`, or `"in_memory"`).
 
 ### 3. **Extensible Tools Framework**
 
@@ -52,8 +50,8 @@ BiliCore allows **customizable tool selection**, including:
 
 To use these tools:
 
-1. Copy `scripts/development/secrets.template` to `scripts/development/secrets`.
-2. Fill in values for tools, cloud providers, and LLMs in the `secrets` file.
+1. Copy `.env.example` to `.env` in the project root: `cp .env.example .env`
+2. Fill in API keys for tools, cloud providers, and LLMs in the `.env` file.
 3. For AWS services, store credentials in `env/bili_root/.aws/`.
 4. For Google Cloud services, store credentials in `env/bili_root/.google/`.
 
@@ -246,27 +244,42 @@ For complete documentation, examples, and API reference, see [`bili/aether/READM
      ```
 3. **Set Up Environment Variables**
    ```bash
-   cp scripts/development/secrets.template scripts/development/secrets
+   cp .env.example .env
    ```
-   Edit `scripts/development/secrets` to include API keys for tools and LLMs that you plan to use.
+   Edit `.env` to include API keys for the tools, cloud providers, and LLMs you plan to use. Docker Compose reads this file automatically and injects the variables into the container at startup.
+
 4. **Start Docker Containers**
    ```bash
    cd scripts/development
-   ./start-container[.bat]
+   ./start-container.sh    # Linux/macOS (.bat on Windows)
    ```
+   This starts the bili-core container along with PostgreSQL, MongoDB, and LocalStack services.
+
 5. **Attach to Development Container**
    ```bash
    cd scripts/development
-   ./attach-container[.bat]
+   ./attach-container.sh   # Linux/macOS (.bat on Windows)
    ```
-6. **Run BiliCore as a Streamlit Application**
+   When you attach, the container automatically activates the Python virtual environment and sets up shell aliases for common tasks.
+
+6. **Run BiliCore** (inside the container)
    ```bash
-   streamlit
+   streamlit    # Start the Streamlit UI (port 8501)
+   flask        # Start the Flask API (port 5001)
    ```
-7. **Run BiliCore as a Flask Application**
+   These are shell aliases that handle dependency installation, database setup, and server startup. The Streamlit app provides a unified multi-page interface with both the **AETHER Multi-Agent** system and the **Single-Agent RAG** testing interface.
+
+   Other useful container aliases:
    ```bash
-   flask
+   deps         # Install/update Python dependencies
+   cleandeps    # Clean reinstall of dependencies
+   seeds3       # Upload data files to LocalStack S3
+   createpgdb   # Create the LangGraph PostgreSQL database
    ```
+
+7. **Access the Application**
+   - **Streamlit UI**: http://localhost:8501 (AETHER at `/aether`, Single-Agent RAG at `/bili`)
+   - **Flask API**: http://localhost:5001
 
 ## Acknowledgments
 
