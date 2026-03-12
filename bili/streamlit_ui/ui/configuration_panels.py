@@ -89,6 +89,7 @@ def display_configuration_panels():
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div id="import-export"></div>', unsafe_allow_html=True)
     with st.expander("Import/Export Configuration"):
         uploaded_file = st.file_uploader(
             "Import Configuration from JSON",
@@ -153,7 +154,18 @@ def display_configuration_panels():
             del st.session_state["model_name"]
 
     # ---- LLM Configuration Panel ----
+    st.markdown('<div id="llm-configuration"></div>', unsafe_allow_html=True)
     with st.expander("LLM Configuration"):
+        # Streaming toggle
+        if "streaming_enabled" not in st.session_state:
+            st.session_state["streaming_enabled"] = False
+        st.session_state["streaming_enabled"] = st.checkbox(
+            "Enable streaming responses",
+            value=st.session_state["streaming_enabled"],
+            help="When enabled, responses are displayed token-by-token as they "
+            "are generated. Provides a more natural chat experience.",
+        )
+
         model_type_options = [
             (key, value["name"], value["description"])
             for key, value in LLM_MODELS.items()
@@ -622,6 +634,7 @@ def display_configuration_panels():
             st.session_state["thinking_budget"] = None
 
     # ---- Prompt Customization ----
+    st.markdown('<div id="prompts"></div>', unsafe_allow_html=True)
     with st.expander("Prompt Customization"):
         if "selected_prompt_template" not in st.session_state:
             st.session_state["selected_prompt_template"] = list(DEFAULT_PROMPTS.keys())[
@@ -674,6 +687,7 @@ def display_configuration_panels():
         if prompt_key not in st.session_state:
             st.session_state[prompt_key] = details.get("default_prompt", "")
 
+    st.markdown('<div id="tools"></div>', unsafe_allow_html=True)
     with st.expander("Tool Selection and Customization"):
 
         selected_tools = []

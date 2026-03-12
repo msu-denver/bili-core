@@ -1,12 +1,9 @@
 """
-AETHER — MAS Visualizer and Chat.
+AETHER page — MAS Visualizer and Chat.
 
-A Streamlit application that combines the AETHER multi-agent system graph
-visualizer with the multi-turn chat interface. Use the sidebar navigation
-to switch between pages.
-
-Usage:
-    streamlit run bili/aether/ui/app.py
+Renders the AETHER multi-agent system graph visualizer with the multi-turn
+chat interface.  Called by the main Streamlit app (``bili/streamlit_app.py``)
+as a page within ``st.navigation()``.
 """
 
 # pylint: disable=import-error
@@ -45,7 +42,6 @@ from bili.aether.ui.components.graph_viewer import (
     render_metadata_bar,
 )
 from bili.aether.ui.converters.yaml_to_graph import convert_mas_to_graph
-from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 
 # Path constants
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
@@ -54,10 +50,12 @@ LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png
 _DEFAULT_PAGE = "Visualizer"
 
 
-def main() -> None:
-    """Main entry point for the AETHER app."""
-    _configure_page()
+def render_aether_page() -> None:
+    """Render the AETHER page content (sidebar + main area).
 
+    Called by the unified Streamlit app after ``st.set_page_config()``
+    has already been invoked.
+    """
     with st.sidebar:
         page = _render_sidebar()
 
@@ -65,16 +63,6 @@ def main() -> None:
         render_chat_main()
     else:
         _render_visualizer_main()
-
-
-def _configure_page() -> None:
-    """Set up Streamlit page config."""
-    st.set_page_config(
-        page_title="AETHER",
-        page_icon="A",
-        layout="wide",
-    )
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 def _render_sidebar() -> str:
@@ -252,7 +240,3 @@ def _render_legend() -> None:
             st.markdown("- :violet[Purple] \u2014 Pub/Sub")
             st.markdown("- :red[Red] \u2014 Competitive")
             st.markdown("- Teal \u2014 Consensus")
-
-
-if __name__ == "__main__":
-    main()

@@ -106,12 +106,14 @@ def run_app_page(checkpointer=None):
     enable_form()
 
     # Display configuration panels
+    st.header("Configuration", anchor="configuration")
     display_configuration_panels()
 
     # Display state management
     display_state_management_management()
 
     # Load Configuration
+    st.header("Load Configuration", anchor="load-configuration")
     if st.button("Load Configuration", use_container_width=True):
         load_system_components(checkpointer)
         st.success("Configuration loaded successfully.")
@@ -119,16 +121,15 @@ def run_app_page(checkpointer=None):
 
     # Display current model configuration
     st.markdown("---")
-    st.markdown("<h2>Current Model Configuration</h2>", unsafe_allow_html=True)
+    st.header("Active Configuration", anchor="active-configuration")
     display_model_configuration()
     st.markdown("---")
 
-    # Display Chatbot Conversation Sandbox
+    # Display Chatbot Conversation
+    st.header("Conversation", anchor="conversation")
     st.markdown(
-        """<h2>Conversation Sandbox</h2>
-        <p>Use the form below to ask a question to the chatbot using your 
-        specified configuration settings.</p>""",
-        unsafe_allow_html=True,
+        "Use the form below to ask a question to the chatbot using your "
+        "specified configuration settings."
     )
 
     # Status container for feedback
@@ -191,16 +192,7 @@ def display_state_management_management():
         or not initialized in ``st.session_state``.
     :raises ValueError: Raised by Streamlit during value range issues in inputs.
     """
-    # Streaming toggle
-    if "streaming_enabled" not in st.session_state:
-        st.session_state["streaming_enabled"] = False
-    st.session_state["streaming_enabled"] = st.checkbox(
-        "Enable streaming responses",
-        value=st.session_state["streaming_enabled"],
-        help="When enabled, responses are displayed token-by-token as they "
-        "are generated. Provides a more natural chat experience.",
-    )
-
+    st.markdown('<div id="chat-history"></div>', unsafe_allow_html=True)
     with st.expander("Chat History Management"):
         # Toggle between message_count vs token_length
         if "memory_limit_type" not in st.session_state:

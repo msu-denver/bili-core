@@ -23,7 +23,7 @@ services:
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501
-            - 8502:8502  # AETHER UI — remove once integrated into main app
+            # Port 8502 removed — AETHER UI now integrated into main app on 8501
             - 5001:5001
         networks:
             bili-core:
@@ -48,7 +48,7 @@ services:
             - "bili-core-virtualenv:/app/bili-core/venv/"
         ports:
             - 8501:8501
-            - 8502:8502  # AETHER UI — remove once integrated into main app
+            # Port 8502 removed — AETHER UI now integrated into main app on 8501
             - 5001:5001
         networks:
             bili-core:
