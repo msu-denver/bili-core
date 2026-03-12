@@ -12,6 +12,7 @@ Usage:
 # pylint: disable=import-error
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -234,12 +235,39 @@ def _render_thread_list() -> None:
                     st.rerun()
 
 
+def _is_provider_available(provider_key: str) -> bool:
+    """Return True if the environment has credentials for *provider_key*.
+
+    Checks well-known environment variables and credential files for each
+    remote provider.  Local providers are always available.  Unknown provider
+    keys default to visible (fail-open) so new providers are not silently
+    hidden.
+    """
+    checks: Dict[str, Any] = {
+        "remote_openai": lambda: bool(os.environ.get("OPENAI_API_KEY")),
+        "remote_azure_openai": lambda: bool(os.environ.get("AZURE_OPENAI_API_KEY")),
+        "remote_aws_bedrock": lambda: (
+            bool(os.environ.get("AWS_ACCESS_KEY_ID"))
+            or Path(os.path.expanduser("~/.aws/credentials")).exists()
+        ),
+        "remote_google_vertex": lambda: (
+            bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+            or bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+        ),
+        "local_llamacpp": lambda: True,
+        "local_huggingface": lambda: True,
+    }
+    check = checks.get(provider_key)
+    return check() if check is not None else True
+
+
 @st.cache_data
 def _build_chat_model_options() -> tuple[list[str], list[str]]:
     """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
 
     Lazy-imports ``LLM_MODELS`` so this module loads without bili-core's heavy
     LLM dependencies.  Result is cached for the lifetime of the Streamlit process.
+    Providers whose credentials are not detected in the environment are omitted.
     """
     from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
         LLM_MODELS,
@@ -247,7 +275,9 @@ def _build_chat_model_options() -> tuple[list[str], list[str]]:
 
     display: list[str] = []
     ids: list[str] = []
-    for provider_info in LLM_MODELS.values():
+    for provider_key, provider_info in LLM_MODELS.items():
+        if not _is_provider_available(provider_key):
+            continue
         label = provider_info["name"]
         for entry in provider_info["models"]:
             display.append(f"[{label}] {entry['model_name']}")
@@ -278,18 +308,63 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
 # Config validation
 # ---------------------------------------------------------------------------
 
+# Maps warning message substrings to plain-English explanations shown in a
+# popover when the user clicks the warning chip.  Keys are matched via
+# substring search so they remain stable as message wording evolves slightly.
+_WARN_EXPLANATIONS: Dict[str, str] = {
+    "has no channel connections": (
+        "Channels are the explicit message routes between agents. "
+        "This agent has none defined — it will still execute, but it won't "
+        "send or receive inter-agent messages via the channel system. "
+        "Sequential and hierarchical workflows route via graph edges rather "
+        "than explicit channels, so this warning is often informational only."
+    ),
+    "should have 'inter_agent_communication' capability": (
+        "Supervisor agents route tasks to worker agents and need the "
+        "'inter_agent_communication' capability to do so effectively. "
+        "Without it the supervisor can still run, but routing behaviour "
+        "may be degraded."
+    ),
+    "has a separate reverse channel": (
+        "A bidirectional channel already handles communication in both "
+        "directions. The additional reverse channel defined here is redundant "
+        "and could cause duplicate message delivery."
+    ),
+    "outgoing edges": (
+        "A sequential workflow expects each agent to have exactly one "
+        "outgoing edge, forming a linear chain. Multiple outgoing edges "
+        "create branching, which may not behave as expected in sequential mode."
+    ),
+}
+
+
+def _warn_explanation(warn: str) -> Optional[str]:
+    """Return a plain-English explanation for *warn*, or ``None`` if unknown."""
+    for pattern, explanation in _WARN_EXPLANATIONS.items():
+        if pattern in warn:
+            return explanation
+    return None
+
 
 def _validate_config(config: MASConfig) -> bool:
     """Run structural validation and display results in the active Streamlit context.
 
     Returns ``True`` if the config is valid (errors list is empty).
-    Warnings are displayed but do not block execution.
+    Warnings are displayed but do not block execution.  Each warning is rendered
+    as a clickable popover chip so the user can read a plain-English explanation
+    of what the warning means and whether action is required.
     """
     result = validate_mas(config)
     for err in result.errors:
         st.error(f"Config error: {err}")
     for warn in result.warnings:
-        st.warning(f"Config warning: {warn}")
+        explanation = _warn_explanation(warn)
+        if explanation:
+            with st.popover(f"⚠️ {warn}"):
+                st.markdown(explanation)
+                st.caption("Warnings do not block execution.")
+        else:
+            st.warning(f"Config warning: {warn}")
     if result.valid:
         if result.warnings:
             st.success("Config valid with warnings ✓")
@@ -564,8 +639,11 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 
     st.markdown("---")
 
-    if _is_stub_config(config):
-        st.info("Stub mode — no LLM calls will be made.", icon="⚙️")
+    # Placeholder at the correct visual position — filled AFTER the button
+    # handlers below so that clicking "Apply to all" or "Stub mode" clears
+    # or shows the warning in the same script run.  Reading chat_config here
+    # (before _apply_model_patch runs) would always reflect the pre-click state.
+    stub_warning_ph = st.empty()
 
     st.markdown(f"**MAS ID:** `{config.mas_id}`")
     st.markdown(f"**Workflow:** {config.workflow_type.value}")
@@ -608,6 +686,11 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 
         if stub_clicked:
             _apply_model_patch(base_config, None)
+
+    # Fill the placeholder now that any model patch has been applied — uses the
+    # current (possibly just updated) chat_config so the flag is accurate.
+    if _is_stub_config(st.session_state.get("chat_config", config)):
+        stub_warning_ph.info("Stub mode — no LLM calls will be made.", icon="⚙️")
 
     st.markdown("---")
 
@@ -853,8 +936,9 @@ def _render_agent_panel(
             if inner.get("status") == "stub":
                 st.caption(inner.get("message", str(inner)))
             else:
+                _skip = {"agent_id", "raw"}
                 for key, value in inner.items():
-                    if key != "agent_id":
+                    if key not in _skip:
                         st.markdown(f"**{key}:** {value}")
             return
 
@@ -1055,6 +1139,7 @@ def _run_turn(user_input: str) -> None:
             all_nodes=all_nodes,
             key_prefix=f"timeline_live_{_tl_call}",
             role_map=role_map,
+            status_text="⟳ Starting MAS...",
         )
         _tl_call += 1
         # Pre-allocate one st.empty() slot per agent in config order.
