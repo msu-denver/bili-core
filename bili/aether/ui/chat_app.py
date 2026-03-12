@@ -999,23 +999,36 @@ def _render_flow_graph(config: MASConfig) -> None:
     # Build nodes with active-node highlight applied per render so the style
     # tracks execution state without requiring a state rebuild.
     executing = st.session_state.get("aether_executing_node")
-    nodes, edges = convert_mas_to_graph(config)
-    for node in nodes:
-        if node.id == executing:
-            node.style = _ACTIVE_NODE_STYLE
-        else:
+
+    if state_key not in st.session_state:
+        nodes, edges = convert_mas_to_graph(config)
+        for node in nodes:
             node.style = build_node_css(
                 next(
                     (a.role for a in config.agents if a.agent_id == node.id),
                     node.id,
                 )
             )
-
-    if state_key not in st.session_state:
         st.session_state[state_key] = StreamlitFlowState(nodes, edges)
-    else:
-        # Refresh nodes each render so active-highlight stays current; preserve
-        # selected_id from the existing state so clicks survive reruns.
+
+    # Only rebuild the flow state when active-node highlighting changes
+    # (during execution). Rebuilding every render creates new object
+    # identities that the streamlit-flow component interprets as state
+    # changes, causing an infinite rerun loop.
+    prev_executing = st.session_state.get(f"{state_key}_prev_executing")
+    if executing != prev_executing:
+        st.session_state[f"{state_key}_prev_executing"] = executing
+        nodes, edges = convert_mas_to_graph(config)
+        for node in nodes:
+            if node.id == executing:
+                node.style = _ACTIVE_NODE_STYLE
+            else:
+                node.style = build_node_css(
+                    next(
+                        (a.role for a in config.agents if a.agent_id == node.id),
+                        node.id,
+                    )
+                )
         existing = st.session_state[state_key]
         st.session_state[state_key] = StreamlitFlowState(
             nodes, edges, selected_id=existing.selected_id
