@@ -152,13 +152,30 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             runtime_context=self._runtime_context,
         )
 
-        # Create checkpointer with user_id if multi-tenant mode enabled
+        # Determine human-interrupt nodes for HITL configs
+        human_nodes = []
+        if self._config.human_in_loop:
+            human_nodes = [
+                a.agent_id for a in self._config.agents if getattr(a, "is_human", False)
+            ]
+
+        # Create checkpointer — required for HITL resumption even when
+        # checkpoint_enabled is False in the config.
         checkpointer = None
         if self._user_id and self._config.checkpoint_enabled:
             checkpointer = self._create_checkpointer_with_user_id()
+        elif human_nodes and not self._config.checkpoint_enabled:
+            # HITL requires a checkpointer so state can be resumed after the
+            # interrupt.  Fall back to an in-process MemorySaver.
+            from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+                MemorySaver,
+            )
+
+            checkpointer = MemorySaver()
 
         self._compiled_graph = self._compiled_mas.compile_graph(
-            checkpointer=checkpointer
+            checkpointer=checkpointer,
+            interrupt_before=human_nodes,
         )
 
         LOGGER.info(
@@ -407,7 +424,9 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {}
-        if self._config.checkpoint_enabled:
+        effective_thread_id: Optional[str] = None
+        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
+        if needs_checkpoint:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config = {"configurable": {"thread_id": effective_thread_id}}
 
@@ -424,6 +443,77 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             raise
         finally:
             LOGGER.info("MAS streaming execution complete: %s", execution_id)
+
+        # After the stream exhausts, check whether the graph paused at a
+        # human-interrupt node.  If pending nodes remain, yield a sentinel so
+        # the caller can present a human-input UI and later call resume_streaming().
+        if invoke_config and self._config.human_in_loop:
+            try:
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                if graph_state.next:
+                    yield (
+                        "__human_interrupt__",
+                        {
+                            "next": list(graph_state.next),
+                            "thread_id": effective_thread_id,
+                        },
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.warning("Could not inspect graph state for HITL check: %s", exc)
+
+    def resume_streaming(
+        self,
+        human_input: str,
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Resume a graph that was paused at a human-interrupt node.
+
+        Injects *human_input* as a ``HumanMessage`` into the graph state and
+        then continues streaming from where execution left off.  The graph
+        must have been paused via ``run_streaming()`` after a
+        ``__human_interrupt__`` sentinel was yielded.
+
+        Args:
+            human_input: The human reviewer's text response.
+            thread_id: Thread ID originally reported in the
+                ``__human_interrupt__`` sentinel.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the interrupt, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before resume_streaming()."
+            )
+
+        from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
+            HumanMessage,
+        )
+
+        invoke_config = {"configurable": {"thread_id": thread_id}}
+        self._compiled_graph.update_state(
+            invoke_config,
+            {"messages": [HumanMessage(content=human_input)]},
+        )
+
+        LOGGER.info("Resuming HITL execution for thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                None,
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("resume_streaming failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("HITL resume complete for thread '%s'", thread_id)
 
     async def astream(
         self,

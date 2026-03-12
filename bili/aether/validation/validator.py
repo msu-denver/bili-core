@@ -74,7 +74,20 @@ class MASValidator:
         self._check_supervisor_capabilities()
 
     def _check_orphaned_agents(self) -> None:
-        """W1: Warn about agents with no channel connections."""
+        """W1: Warn about agents with no channel connections.
+
+        Skipped for workflow types that route via edges rather than explicit
+        inter-agent channels (sequential, hierarchical, parallel).  Firing
+        the warning for those types is a false positive because channels are
+        optional and unused by their execution model.
+        """
+        edge_routed = {
+            WorkflowType.SEQUENTIAL,
+            WorkflowType.HIERARCHICAL,
+            WorkflowType.PARALLEL,
+        }
+        if self._config.workflow_type in edge_routed:
+            return
         for agent in self._config.agents:
             if agent.agent_id not in self._channel_agents:
                 self._result.add_warning(

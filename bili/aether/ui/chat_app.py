@@ -32,7 +32,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
-from bili.aether.schema import MASConfig
+from bili.aether.schema import AgentSpec, MASConfig, WorkflowType
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 from bili.aether.validation import validate_mas
 
@@ -554,16 +554,8 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             name = uploaded_names[selected_idx - n_files]
             _load_uploaded_config(name, uploaded_configs[name])
     else:
-        for key in (
-            "chat_config",
-            "chat_yaml_path",
-            "chat_executor",
-            "chat_load_error",
-            "chat_config_base",
-            # chat_threads and chat_thread_id are intentionally kept — threads
-            # persist across config switches so the list remains visible.
-        ):
-            st.session_state.pop(key, None)
+        # User cleared the selectbox — leave all session state intact so that
+        # the loaded config, executor, and conversation threads remain visible.
         return
 
     config: Optional[MASConfig] = st.session_state.get("chat_config")
@@ -670,13 +662,141 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _agent_card(agent: AgentSpec) -> None:
+    """Render a single agent as a small card (agent_id + optional role)."""
+    if agent.role != agent.agent_id:
+        st.markdown(
+            f"`{agent.agent_id}`  \n<small>{agent.role}</small>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(f"`{agent.agent_id}`")
+
+
+def _render_sequential_diagram(config: MASConfig) -> None:
+    """Flat left-to-right chain: agent_a → agent_b → agent_c."""
+    n = len(config.agents)
+    if n == 0:
+        return
+    # Alternating layout: [agent, →, agent, →, …] = 2N-1 columns.
+    widths = [1 if i % 2 == 1 else 3 for i in range(2 * n - 1)]
+    cols = st.columns(widths)
+    agent_col_indices = list(range(0, 2 * n - 1, 2))
+    for idx, agent in zip(agent_col_indices, config.agents):
+        with cols[idx]:
+            _agent_card(agent)
+        if idx + 1 < len(cols):
+            with cols[idx + 1]:
+                st.markdown("→")
+
+
+def _render_supervisor_diagram(config: MASConfig) -> None:
+    """Hub-and-spoke: coordinator on the left, specialists stacked on the right."""
+    try:
+        coordinator = config.get_entry_agent()
+    except (ValueError, IndexError):
+        coordinator = config.agents[0] if config.agents else None
+
+    if coordinator is None:
+        _render_sequential_diagram(config)
+        return
+
+    specialists = [a for a in config.agents if a.agent_id != coordinator.agent_id]
+    if not specialists:
+        _render_sequential_diagram(config)
+        return
+
+    col_coord, col_arrows, col_specs = st.columns([1, 0.3, 2])
+    with col_coord:
+        _agent_card(coordinator)
+    with col_arrows:
+        for _ in specialists:
+            st.markdown("→")
+    with col_specs:
+        for spec in specialists:
+            _agent_card(spec)
+
+
+def _render_consensus_diagram(config: MASConfig) -> None:
+    """Parallel agents feeding into a central [consensus] label."""
+    if not config.agents:
+        return
+    col_agents, col_arrow, col_result = st.columns([2, 0.3, 1])
+    with col_agents:
+        for agent in config.agents:
+            _agent_card(agent)
+    with col_arrow:
+        for _ in config.agents:
+            st.markdown("→")
+    with col_result:
+        st.markdown("**[consensus]**")
+
+
+def _render_hierarchical_diagram(config: MASConfig) -> None:
+    """Top-down tree grouped by tier (tier 1 = root)."""
+    if not config.agents:
+        return
+
+    # Group agents by tier; agents without a tier go into tier 1
+    tier_map: dict = {}
+    for agent in config.agents:
+        t = getattr(agent, "tier", None) or 1
+        tier_map.setdefault(t, []).append(agent)
+
+    sorted_tiers = sorted(tier_map.keys())
+    for i, tier in enumerate(sorted_tiers):
+        tier_agents = tier_map[tier]
+        cols = st.columns(len(tier_agents))
+        for col, agent in zip(cols, tier_agents):
+            with col:
+                _agent_card(agent)
+        # Connector row between tiers
+        if i < len(sorted_tiers) - 1:
+            connector_cols = st.columns(len(tier_agents))
+            for col in connector_cols:
+                with col:
+                    st.markdown("↓")
+
+
+def _render_fallback_diagram(config: MASConfig) -> None:
+    """Labeled agent + channel list for custom/unknown workflow types."""
+    if config.agents:
+        agent_list = ", ".join(
+            f"`{a.agent_id}`" + (f" ({a.role})" if a.role != a.agent_id else "")
+            for a in config.agents
+        )
+        st.markdown(f"**Agents:** {agent_list}")
+    if config.channels:
+        channel_lines = "  \n".join(
+            f"`{c.source}` → `{c.target}` ({c.protocol.value})"
+            for c in config.channels
+            if c.source and c.target
+        )
+        if channel_lines:
+            st.markdown(f"**Channels:**  \n{channel_lines}")
+
+
+def _render_mas_diagram(config: MASConfig) -> None:
+    """Dispatch to the topology-specific diagram renderer."""
+    workflow = config.workflow_type
+    if workflow == WorkflowType.SEQUENTIAL:
+        _render_sequential_diagram(config)
+    elif workflow == WorkflowType.SUPERVISOR:
+        _render_supervisor_diagram(config)
+    elif workflow == WorkflowType.CONSENSUS:
+        _render_consensus_diagram(config)
+    elif workflow == WorkflowType.HIERARCHICAL:
+        _render_hierarchical_diagram(config)
+    else:
+        _render_fallback_diagram(config)
+
+
 def _render_mas_structure(config: MASConfig) -> None:
     """Render a collapsible summary of the active MAS topology.
 
-    Shows the workflow type, agent count, channel count, and a simple
-    left-to-right agent flow diagram using role names. Defaults to expanded
-    when no messages have been sent yet, and collapses automatically once
-    the conversation starts so it doesn't crowd the chat area.
+    Shows the workflow type, agent count, channel count, and a topology-aware
+    diagram. Defaults to expanded when no messages have been sent yet, and
+    collapses automatically once the conversation starts.
     """
     messages = _active_messages_or_empty()
     with st.expander("MAS Structure", expanded=(len(messages) == 0)):
@@ -687,22 +807,7 @@ def _render_mas_structure(config: MASConfig) -> None:
             f"**Channels:** {n_channels}"
         )
         st.divider()
-        n = len(config.agents)
-        if n > 0:
-            # Alternating layout: [agent, →, agent, →, agent] = 2N-1 columns.
-            # Arrow columns (odd indices) are narrow; agent columns (even) are wide.
-            widths = [1 if i % 2 == 1 else 3 for i in range(2 * n - 1)]
-            cols = st.columns(widths)
-            agent_col_indices = list(range(0, 2 * n - 1, 2))
-            for idx, agent in zip(agent_col_indices, config.agents):
-                with cols[idx]:
-                    if agent.role != agent.agent_id:
-                        st.markdown(f"**{agent.role}**  \n`{agent.agent_id}`")
-                    else:
-                        st.markdown(f"`{agent.agent_id}`")
-                if idx + 1 < len(cols):
-                    with cols[idx + 1]:
-                        st.markdown("→")
+        _render_mas_diagram(config)
 
 
 # ---------------------------------------------------------------------------
@@ -959,11 +1064,15 @@ def _run_turn(user_input: str) -> None:
             role_map=role_map,
         )
         _tl_call += 1
+        hitl_interrupt: Optional[Dict[str, Any]] = None
         try:
             for node_name, state_update in executor.run_streaming(
                 input_data={"messages": [HumanMessage(content=user_input)]},
                 thread_id=st.session_state.chat_thread_id,
             ):
+                if node_name == "__human_interrupt__":
+                    hitl_interrupt = state_update
+                    break
                 if state_update is None:
                     continue
                 st.session_state["aether_executing_node"] = node_name
@@ -1006,8 +1115,127 @@ def _run_turn(user_input: str) -> None:
             role_map=role_map,
         )
 
+    if hitl_interrupt:
+        # Graph paused for human review.  Save partial turn state so the
+        # resume handler in _render_chat_area() can complete the turn.
+        turn["agent_trace"] = agent_trace
+        st.session_state["hitl_pending"] = {
+            **hitl_interrupt,
+            "partial_turn": turn,
+        }
+        # Rerun to show the HITL form (chat_input will be hidden).
+        st.rerun()
+
     turn["agent_trace"] = agent_trace
     _active_messages().append(turn)
+    # Direct list mutation is invisible to Streamlit's change detector, so
+    # trigger an explicit rerun to render the completed turn via
+    # _render_stored_turn() with all timeline nodes shown as ✓.
+    st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop resume form
+# ---------------------------------------------------------------------------
+
+
+def _render_hitl_form(executor: "MASExecutor") -> None:
+    """Render the human-review form and resume graph execution on submit.
+
+    Called by ``_render_chat_area()`` when ``hitl_pending`` is set in session
+    state (i.e. after a ``__human_interrupt__`` sentinel was received from
+    ``run_streaming()``).
+    """
+    pending: Dict[str, Any] = st.session_state["hitl_pending"]
+    next_nodes: List[str] = pending.get("next", [])
+    thread_id: str = pending["thread_id"]
+    partial_turn: Dict[str, Any] = pending["partial_turn"]
+
+    config: Optional[MASConfig] = st.session_state.get("chat_config")
+    all_nodes = [a.agent_id for a in config.agents] if config else []
+    role_map = _build_role_map(config) if config else {}
+
+    node_label = ", ".join(role_map.get(n, n) for n in next_nodes)
+    st.info(f"⏸ Human review required before: **{node_label}**")
+
+    with st.form("hitl_resume_form"):
+        human_response = st.text_area(
+            "Your review / decision:",
+            key="hitl_human_input",
+            help="This response will be injected as a message before the paused node resumes.",
+        )
+        submitted = st.form_submit_button("Resume execution", type="primary")
+
+    if not submitted or not human_response:
+        return
+
+    # --- Resume execution ---
+    agent_trace: List[Dict[str, Any]] = list(partial_turn.get("agent_trace", []))
+    completed_ids = [a["agent_id"] for a in agent_trace]
+
+    with st.chat_message("assistant", avatar="🤖"):
+        st.session_state["aether_execution_trace"] = completed_ids[:]
+        timeline_placeholder = st.empty()
+        _tl_call = 0
+        _render_timeline(
+            timeline_placeholder,
+            completed=st.session_state["aether_execution_trace"],
+            active=None,
+            all_nodes=all_nodes,
+            key_prefix=f"timeline_hitl_resume_{_tl_call}",
+            role_map=role_map,
+        )
+        _tl_call += 1
+        try:
+            for node_name, state_update in executor.resume_streaming(
+                human_response, thread_id
+            ):
+                if state_update is None:
+                    continue
+                st.session_state["aether_executing_node"] = node_name
+                display_name = role_map.get(node_name, node_name)
+                _render_timeline(
+                    timeline_placeholder,
+                    completed=st.session_state["aether_execution_trace"],
+                    active=node_name,
+                    all_nodes=all_nodes,
+                    key_prefix=f"timeline_hitl_resume_{_tl_call}",
+                    role_map=role_map,
+                    status_text=f"⟳ Running {display_name}...",
+                )
+                _tl_call += 1
+                node_role = role_map.get(node_name)
+                try:
+                    _render_agent_output(node_name, state_update, role=node_role)
+                except (
+                    Exception
+                ) as render_exc:  # pylint: disable=broad-exception-caught
+                    st.error(f"Agent {node_name} failed to render: {render_exc}")
+                agent_trace.append(
+                    {
+                        "agent_id": node_name,
+                        "output": _serialize_state_update(state_update),
+                    }
+                )
+                st.session_state["aether_execution_trace"].append(node_name)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Execution failed: {exc}")
+            partial_turn["error"] = str(exc)
+
+        st.session_state.pop("aether_executing_node", None)
+        _render_timeline(
+            timeline_placeholder,
+            completed=st.session_state["aether_execution_trace"],
+            active=None,
+            all_nodes=all_nodes,
+            key_prefix=f"timeline_hitl_resume_{_tl_call}",
+            role_map=role_map,
+        )
+
+    partial_turn["agent_trace"] = agent_trace
+    _active_messages().append(partial_turn)
+    st.session_state.pop("hitl_pending", None)
+    st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -1033,6 +1261,13 @@ def _render_chat_area() -> None:
 
     for turn in _active_messages_or_empty():
         _render_stored_turn(turn)
+
+    # If a human-in-the-loop interrupt is pending, show the review form
+    # instead of the normal chat input.
+    executor: Optional[MASExecutor] = st.session_state.get("chat_executor")
+    if st.session_state.get("hitl_pending") and executor is not None:
+        _render_hitl_form(executor)
+        return
 
     user_input = st.chat_input("Send a message to the MAS...")
     if user_input:
