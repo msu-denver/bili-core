@@ -52,6 +52,7 @@ def build_model_options() -> tuple[list[str], dict[str, str], dict[str, str]]:
     return options, name_to_model, model_lookup
 
 
+@st.fragment
 def render_graph_viewer(
     config: MASConfig,
     nodes: list[StreamlitFlowNode],

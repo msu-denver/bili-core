@@ -976,6 +976,7 @@ def _render_chat_agent_details(agent: AgentSpec) -> None:
             st.markdown(f"**Tools:** {tools}")
 
 
+@st.fragment
 def _render_flow_graph(config: MASConfig) -> None:
     """Render the 300px interactive flow graph for the chat-tab MAS panel.
 
