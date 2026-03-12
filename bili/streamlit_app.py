@@ -68,6 +68,10 @@ def main():
 def _run_bilicore_page():
     """Render the Single-Agent RAG configuration and chat page."""
     with st.sidebar:
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), width=80)
+        st.markdown("## Single-Agent RAG")
+        st.markdown("---")
         st.markdown("#### Quick Navigation")
         st.markdown(
             "- [:material/tune: Configuration](#configuration)\n"
