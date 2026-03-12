@@ -72,10 +72,10 @@ You'll see four agents (`community_manager`, `content_reviewer`, `policy_expert`
 If you want to see the agent graph rendered interactively before running it:
 
 ```bash
-/app/bili-core/venv/bin/streamlit run bili/streamlit_app.py
+streamlit
 ```
 
-Open [http://localhost:8502](http://localhost:8502) in your browser. The sidebar shows a **Visualizer | Chat** navigation radio. On the **Visualizer** page, use the dropdown to select `simple_chain.yaml` and click any node to inspect its role, objective, capabilities, and output format. Switch to the **Chat** page to run a multi-turn conversation against the same stub config — no API keys required. See [ui.md](ui.md) for details.
+Open [http://localhost:8501](http://localhost:8501) and select **AETHER Multi-Agent** from the sidebar. Use the dropdown to select `simple_chain.yaml` and click any node to inspect its properties. Switch to the **Chat** tab to run a multi-turn conversation against the stub config — no API keys required. See the main [README](../../../README.MD) for full setup details.
 
 ---
 
