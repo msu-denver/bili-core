@@ -1,21 +1,20 @@
 #!/bin/bash
 
-echo "Seeding .bashrc with Google Cloud credentials..."
-touch ~/.bashrc
+echo "Writing .bashrc..."
 mkdir -p /root/.google
-if ! grep -qxF "alias awslocal='awslocal --endpoint=\${LOCALSTACK_ENDPOINT}'" ~/.bashrc; then
-  echo "alias awslocal='awslocal --endpoint=\${LOCALSTACK_ENDPOINT}'" > ~/.bashrc
-  echo "alias cleandeps='cd /app/bili-core/scripts/development && CLEAN=true ./install-deps'" >> ~/.bashrc
-  echo "alias createpgdb='psql \"\${POSTGRES_CONNECTION_STRING%/*}/postgres\" -c \"CREATE DATABASE langgraph;\" || true'" >> ~/.bashrc
-  echo "alias deps='cd /app/bili-core/scripts/development && ./install-deps'" >> ~/.bashrc
-  echo "alias seeds3='cd /app/bili-core/scripts/development && ./upload-to-localstack-s3'" >> ~/.bashrc
-  echo "alias streamlit='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-streamlit-server 2>&1 | tee /tmp/streamlit.log'" >> ~/.bashrc
-  echo "alias flask='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-flask-server'" >> ~/.bashrc
-  echo "export LOCALSTACK_ENDPOINT='http://bili-core-localstack:4566'" >> ~/.bashrc
-  echo '[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"' >> ~/.bashrc
-  echo '[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud config set project "$GOOGLE_PROJECT_ID"' >> ~/.bashrc
-  echo '[ -d "/app/bili-core/venv" ] && source /app/bili-core/venv/bin/activate && cd /app/bili-core' >> ~/.bashrc
-fi
+cat > ~/.bashrc << 'BASHRC'
+alias awslocal='awslocal --endpoint=${LOCALSTACK_ENDPOINT}'
+alias cleandeps='cd /app/bili-core/scripts/development && CLEAN=true ./install-deps'
+alias createpgdb='psql "${POSTGRES_CONNECTION_STRING%/*}/postgres" -c "CREATE DATABASE langgraph;" || true'
+alias deps='cd /app/bili-core/scripts/development && ./install-deps'
+alias seeds3='cd /app/bili-core/scripts/development && ./upload-to-localstack-s3'
+alias streamlit='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-streamlit-server 2>&1 | tee /tmp/streamlit.log'
+alias flask='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-flask-server'
+export LOCALSTACK_ENDPOINT='http://bili-core-localstack:4566'
+[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
+[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud config set project "$GOOGLE_PROJECT_ID"
+[ -d "/app/bili-core/venv" ] && source /app/bili-core/venv/bin/activate && cd /app/bili-core
+BASHRC
 source ~/.bashrc
 
 # Update /etc/hosts with the LocalStack hostname for OpenSearch DNS resolution
