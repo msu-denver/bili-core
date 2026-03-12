@@ -84,15 +84,21 @@ def _update_channel_messages(
 def _update_pending_messages(
     state: dict, sender: str, receiver: str, msg_dict: dict
 ) -> Dict[str, list]:
-    """Append *msg_dict* to the pending_messages for the appropriate agent(s)."""
+    """Append *msg_dict* to the pending_messages for the appropriate agent(s).
+
+    Broadcast messages (``receiver == "__all__"``) are stored under the
+    ``"__all__"`` key rather than expanded to individual agents.  In
+    sequential workflows, downstream agents have not yet run and are
+    therefore absent from ``agent_outputs``; using a shared key means
+    future agents can retrieve the broadcast via ``get_pending_messages``.
+    """
     pending = dict(state.get("pending_messages") or {})
     if receiver == "__all__":
-        agent_outputs = state.get("agent_outputs") or {}
-        for aid in agent_outputs:
-            if aid != sender:
-                agent_pending = list(pending.get(aid, []))
-                agent_pending.append(msg_dict)
-                pending[aid] = agent_pending
+        # Store under the shared broadcast key so agents that have not yet
+        # executed (and are therefore not in agent_outputs) can still read it.
+        broadcast_pending = list(pending.get("__all__", []))
+        broadcast_pending.append(msg_dict)
+        pending["__all__"] = broadcast_pending
     else:
         agent_pending = list(pending.get(receiver, []))
         agent_pending.append(msg_dict)
@@ -103,11 +109,17 @@ def _update_pending_messages(
 def get_pending_messages(state: dict, agent_id: str) -> List[Dict[str, Any]]:
     """Return pending message dicts for *agent_id* without modifying state.
 
+    Returns both direct messages addressed to *agent_id* and broadcast
+    messages stored under the ``"__all__"`` key (excluding any sent by
+    *agent_id* itself to avoid self-feedback loops).
+
     Returns:
         A list of message dicts (may be empty).
     """
     pending = state.get("pending_messages") or {}
-    return list(pending.get(agent_id, []))
+    direct = list(pending.get(agent_id, []))
+    broadcasts = [m for m in pending.get("__all__", []) if m.get("sender") != agent_id]
+    return broadcasts + direct
 
 
 def format_messages_for_context(messages: List[Dict[str, Any]]) -> str:

@@ -874,13 +874,6 @@ def _render_agent_panel(
         st.json({k: str(v) for k, v in output.items()}, expanded=False)
 
 
-def _render_agent_output(
-    node_name: str, state_update: Dict[str, Any], role: Optional[str] = None
-) -> None:
-    """Render a live agent node's state update (expanded=True)."""
-    _render_agent_panel(node_name, state_update, expanded=True, role=role)
-
-
 def _render_stored_turn(turn: Dict[str, Any]) -> None:
     """Re-render a previously completed turn from chat_history."""
     cfg: Optional[MASConfig] = st.session_state.get("chat_config")
@@ -1064,43 +1057,88 @@ def _run_turn(user_input: str) -> None:
             role_map=role_map,
         )
         _tl_call += 1
+        # Pre-allocate one st.empty() slot per agent in config order.
+        # Tokens stream into the active slot as they arrive; a __node_complete__
+        # event overwrites the slot with the full structured panel.  This
+        # eliminates the need to re-render all previous agents on every update
+        # and avoids the DeltaGenerator context-corruption race condition.
+        agent_nodes_set = set(all_nodes)
+        agent_slots: Dict[str, Any] = {node_id: st.empty() for node_id in all_nodes}
+        token_buffer: Dict[str, str] = {}
         hitl_interrupt: Optional[Dict[str, Any]] = None
         try:
-            for node_name, state_update in executor.run_streaming(
+            for event_type, event_data in executor.run_streaming_tokens(
                 input_data={"messages": [HumanMessage(content=user_input)]},
                 thread_id=st.session_state.chat_thread_id,
             ):
-                if node_name == "__human_interrupt__":
-                    hitl_interrupt = state_update
+                if event_type == "__human_interrupt__":
+                    hitl_interrupt = event_data
                     break
-                if state_update is None:
-                    continue
-                st.session_state["aether_executing_node"] = node_name
-                display_name = role_map.get(node_name, node_name)
-                _render_timeline(
-                    timeline_placeholder,
-                    completed=st.session_state["aether_execution_trace"],
-                    active=node_name,
-                    all_nodes=all_nodes,
-                    key_prefix=f"timeline_live_{_tl_call}",
-                    role_map=role_map,
-                    status_text=f"⟳ Running {display_name}...",
-                )
-                _tl_call += 1
-                node_role = role_map.get(node_name)
-                try:
-                    _render_agent_output(node_name, state_update, role=node_role)
-                except (
-                    Exception
-                ) as render_exc:  # pylint: disable=broad-exception-caught
-                    st.error(f"Agent {node_name} failed to render: {render_exc}")
-                agent_trace.append(
-                    {
-                        "agent_id": node_name,
-                        "output": _serialize_state_update(state_update),
-                    }
-                )
-                st.session_state["aether_execution_trace"].append(node_name)
+
+                if event_type == "__token__":
+                    node_name = event_data["node"]
+                    token = event_data["token"]
+                    if node_name not in agent_nodes_set:
+                        continue  # skip internal routing / pipeline sub-nodes
+                    # Update timeline only when the active node changes to avoid
+                    # an unnecessary widget-key churn on every token.
+                    if st.session_state.get("aether_executing_node") != node_name:
+                        st.session_state["aether_executing_node"] = node_name
+                        display_name = role_map.get(node_name, node_name)
+                        _render_timeline(
+                            timeline_placeholder,
+                            completed=st.session_state["aether_execution_trace"],
+                            active=node_name,
+                            all_nodes=all_nodes,
+                            key_prefix=f"timeline_live_{_tl_call}",
+                            role_map=role_map,
+                            status_text=f"⟳ Running {display_name}...",
+                        )
+                        _tl_call += 1
+                    token_buffer[node_name] = token_buffer.get(node_name, "") + token
+                    slot = agent_slots.get(node_name)
+                    if slot is not None:
+                        slot.markdown(token_buffer[node_name])
+
+                elif event_type == "__node_complete__":
+                    node_name = event_data["node"]
+                    state_update = event_data["state_update"]
+                    if state_update is None or node_name not in agent_nodes_set:
+                        continue
+                    serialized = _serialize_state_update(state_update)
+                    agent_trace.append({"agent_id": node_name, "output": serialized})
+                    st.session_state["aether_execution_trace"].append(node_name)
+                    token_buffer.pop(node_name, None)
+                    # Overwrite the streaming slot with the full structured panel.
+                    slot = agent_slots.get(node_name)
+                    if slot is not None:
+                        try:
+                            with slot.container():
+                                _render_agent_panel(
+                                    node_name,
+                                    serialized,
+                                    expanded=True,
+                                    role=role_map.get(node_name),
+                                )
+                        except (
+                            Exception  # pylint: disable=broad-exception-caught
+                        ) as render_exc:
+                            slot.error(
+                                f"Agent {node_name} failed to render: {render_exc}"
+                            )
+                    # Clear the active node and advance the timeline to show
+                    # this node as completed before the next node begins.
+                    st.session_state.pop("aether_executing_node", None)
+                    _render_timeline(
+                        timeline_placeholder,
+                        completed=st.session_state["aether_execution_trace"],
+                        active=None,
+                        all_nodes=all_nodes,
+                        key_prefix=f"timeline_live_{_tl_call}",
+                        role_map=role_map,
+                    )
+                    _tl_call += 1
+
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Execution failed: {exc}")
             turn["error"] = str(exc)
@@ -1127,10 +1165,16 @@ def _run_turn(user_input: str) -> None:
         st.rerun()
 
     turn["agent_trace"] = agent_trace
-    _active_messages().append(turn)
-    # Direct list mutation is invisible to Streamlit's change detector, so
-    # trigger an explicit rerun to render the completed turn via
-    # _render_stored_turn() with all timeline nodes shown as ✓.
+    # Use list reassignment rather than .append() so Streamlit's change
+    # detector sees the mutation and the stored turn is immediately visible
+    # on the rerun that follows.
+    thread_id = st.session_state["chat_thread_id"]
+    st.session_state["chat_threads"][thread_id]["messages"] = st.session_state[
+        "chat_threads"
+    ][thread_id]["messages"] + [turn]
+    # One rerun after the stream is fully exhausted — safe here because both
+    # st.empty() placeholders (timeline + outputs) have already committed their
+    # final state to the frontend before this point.
     st.rerun()
 
 
@@ -1186,6 +1230,7 @@ def _render_hitl_form(executor: "MASExecutor") -> None:
             role_map=role_map,
         )
         _tl_call += 1
+        outputs_placeholder = st.empty()
         try:
             for node_name, state_update in executor.resume_streaming(
                 human_response, thread_id
@@ -1204,13 +1249,6 @@ def _render_hitl_form(executor: "MASExecutor") -> None:
                     status_text=f"⟳ Running {display_name}...",
                 )
                 _tl_call += 1
-                node_role = role_map.get(node_name)
-                try:
-                    _render_agent_output(node_name, state_update, role=node_role)
-                except (
-                    Exception
-                ) as render_exc:  # pylint: disable=broad-exception-caught
-                    st.error(f"Agent {node_name} failed to render: {render_exc}")
                 agent_trace.append(
                     {
                         "agent_id": node_name,
@@ -1218,6 +1256,22 @@ def _render_hitl_form(executor: "MASExecutor") -> None:
                     }
                 )
                 st.session_state["aether_execution_trace"].append(node_name)
+                with outputs_placeholder.container():
+                    for trace_entry in agent_trace:
+                        try:
+                            _render_agent_panel(
+                                trace_entry["agent_id"],
+                                trace_entry["output"],
+                                expanded=True,
+                                role=role_map.get(trace_entry["agent_id"]),
+                            )
+                        except (
+                            Exception  # pylint: disable=broad-exception-caught
+                        ) as render_exc:
+                            st.error(
+                                f"Agent {trace_entry['agent_id']} failed to render:"
+                                f" {render_exc}"
+                            )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Execution failed: {exc}")
             partial_turn["error"] = str(exc)
@@ -1233,7 +1287,10 @@ def _render_hitl_form(executor: "MASExecutor") -> None:
         )
 
     partial_turn["agent_trace"] = agent_trace
-    _active_messages().append(partial_turn)
+    thread_id = st.session_state["chat_thread_id"]
+    st.session_state["chat_threads"][thread_id]["messages"] = st.session_state[
+        "chat_threads"
+    ][thread_id]["messages"] + [partial_turn]
     st.session_state.pop("hitl_pending", None)
     st.rerun()
 
