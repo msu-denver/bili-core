@@ -95,23 +95,35 @@ def _run_bilicore_page():
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<h3>Build and test single-agent Retrieval-Augmented Generation (RAG) "
-        "configurations using BiliCore.</h3>",
-        unsafe_allow_html=True,
+        "The Single-Agent RAG interface is designed for rapid, side-by-side "
+        "comparison of Large Language Models across real-world tasks. "
+        "Researchers can swap models, tools, prompts, and middleware "
+        "without changing a single line of code, making it easy to evaluate "
+        "how different LLMs handle domain-specific questions under identical "
+        "conditions."
     )
     st.markdown(
-        "This interface lets you experiment with different combinations of "
-        "Language Models (LLMs), tools, prompts, and middleware to understand how "
-        "each component affects agent behavior. Select a model from any supported "
-        "provider (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, or a "
-        "local model), then attach tools like vector search, web search, or "
-        "weather APIs to see how the agent responds."
+        "Select a model from any supported provider (AWS Bedrock, Google "
+        "Vertex AI, Azure OpenAI, OpenAI, or a local model), then attach "
+        "Retrieval-Augmented Generation (RAG) tools like FAISS vector search "
+        "or OpenSearch alongside web search, weather APIs, and other "
+        "capabilities. Every conversation is checkpointed with shared history "
+        "and tool chains, so you can ask the same questions across different "
+        "configurations and directly compare how each model responds."
     )
     st.markdown(
-        "Use the configuration panels below to customize the agent, then click "
-        '**"Load Configuration"** to apply your changes and start '
-        "chatting. Each conversation is checkpointed so you can compare results "
-        "across different configurations."
+        "Use the configuration panels below to customize the agent, then "
+        'click **"Load Configuration"** to apply your changes and start '
+        "chatting. Import and export configurations to share setups across "
+        "team members, or iterate quickly by adjusting a single parameter "
+        "and reloading."
+    )
+    st.markdown(
+        "This research is supported by the National Science Foundation (NSF) "
+        "and the National Artificial Intelligence Research Resource (NAIRR) "
+        "Pilot, as part of the "
+        "[Sustainability Hub](https://sustainabilityhub.co) research project "
+        "at Metropolitan State University of Denver."
     )
     st.markdown(
         "**Note:** Refreshing the page will restart your session. "
