@@ -981,7 +981,7 @@ AETHER includes a Streamlit application with two pages:
 ### Launch
 
 ```bash
-/app/bili-core/venv/bin/streamlit run bili/aether/ui/app.py --server.port 8502
+/app/bili-core/venv/bin/streamlit run bili/streamlit_app.py
 ```
 
 > **Note:** the `streamlit` alias starts BiliCore rather than Streamlit directly. Use the venv path above.
