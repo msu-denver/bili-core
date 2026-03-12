@@ -380,8 +380,10 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
 # Config validation
 # ---------------------------------------------------------------------------
 
-# Keys excluded from structured agent output display in _render_agent_panel.
-_AGENT_PANEL_SKIP_KEYS: frozenset = frozenset({"agent_id", "raw"})
+# Keys that get special treatment in _render_agent_panel (not dumped as k:v).
+_AGENT_PANEL_SKIP_KEYS: frozenset = frozenset(
+    {"agent_id", "raw", "role", "status", "message", "parsed"}
+)
 
 # Maps warning message substrings to plain-English explanations shown in a
 # popover when the user clicks the warning chip.  Keys are matched via
@@ -576,6 +578,8 @@ def _extract_content(output: Dict[str, Any]) -> str:
         for inner in agent_outputs.values():
             if inner.get("status") == "stub":
                 collected.append(inner.get("message", str(inner)))
+            elif inner.get("message"):
+                collected.append(inner["message"])
             else:
                 kv_parts = [f"{k}: {v}" for k, v in inner.items() if k != "agent_id"]
                 if kv_parts:
@@ -976,6 +980,7 @@ def _render_chat_agent_details(agent: AgentSpec) -> None:
             st.markdown(f"**Tools:** {tools}")
 
 
+@st.fragment
 def _render_flow_graph(config: MASConfig) -> None:
     """Render the 300px interactive flow graph for the chat-tab MAS panel.
 
@@ -999,23 +1004,36 @@ def _render_flow_graph(config: MASConfig) -> None:
     # Build nodes with active-node highlight applied per render so the style
     # tracks execution state without requiring a state rebuild.
     executing = st.session_state.get("aether_executing_node")
-    nodes, edges = convert_mas_to_graph(config)
-    for node in nodes:
-        if node.id == executing:
-            node.style = _ACTIVE_NODE_STYLE
-        else:
+
+    if state_key not in st.session_state:
+        nodes, edges = convert_mas_to_graph(config)
+        for node in nodes:
             node.style = build_node_css(
                 next(
                     (a.role for a in config.agents if a.agent_id == node.id),
                     node.id,
                 )
             )
-
-    if state_key not in st.session_state:
         st.session_state[state_key] = StreamlitFlowState(nodes, edges)
-    else:
-        # Refresh nodes each render so active-highlight stays current; preserve
-        # selected_id from the existing state so clicks survive reruns.
+
+    # Only rebuild the flow state when active-node highlighting changes
+    # (during execution). Rebuilding every render creates new object
+    # identities that the streamlit-flow component interprets as state
+    # changes, causing an infinite rerun loop.
+    prev_executing = st.session_state.get(f"{state_key}_prev_executing")
+    if executing != prev_executing:
+        st.session_state[f"{state_key}_prev_executing"] = executing
+        nodes, edges = convert_mas_to_graph(config)
+        for node in nodes:
+            if node.id == executing:
+                node.style = _ACTIVE_NODE_STYLE
+            else:
+                node.style = build_node_css(
+                    next(
+                        (a.role for a in config.agents if a.agent_id == node.id),
+                        node.id,
+                    )
+                )
         existing = st.session_state[state_key]
         st.session_state[state_key] = StreamlitFlowState(
             nodes, edges, selected_id=existing.selected_id
@@ -1117,9 +1135,31 @@ def _render_agent_panel(
             if inner.get("status") == "stub":
                 st.caption(inner.get("message", str(inner)))
             else:
-                for key, value in inner.items():
-                    if key not in _AGENT_PANEL_SKIP_KEYS:
-                        st.markdown(f"**{key}:** {value}")
+                # Metadata caption (role + status on one line)
+                meta = []
+                if inner.get("role"):
+                    meta.append(inner["role"])
+                if inner.get("status"):
+                    meta.append(inner["status"])
+                if meta:
+                    st.caption(" · ".join(meta))
+
+                # Main content — the agent's response
+                message = inner.get("message", "")
+                if message:
+                    st.markdown(message)
+
+                # Structured JSON output (if the agent produced parsed data)
+                parsed = inner.get("parsed")
+                if parsed:
+                    st.json(parsed, expanded=False)
+
+                # Any remaining fields not handled above
+                extra = {
+                    k: v for k, v in inner.items() if k not in _AGENT_PANEL_SKIP_KEYS
+                }
+                for key, value in extra.items():
+                    st.markdown(f"**{key}:** {value}")
             return
 
         # Fall back to the most recent message
@@ -1148,6 +1188,11 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
         if "error" in turn:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
+        LOGGER.debug(
+            "Rendering stored turn: %d agents: %s",
+            len(agent_trace),
+            [a["agent_id"] for a in agent_trace],
+        )
         if agent_trace:
             # Deduplicate while preserving order — supervisor workflows can
             # repeat agent IDs, which would cause Streamlit widget key collisions.
@@ -1175,15 +1220,29 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                 selected = None
             if "error" in turn:
                 st.divider()
-            with st.expander("Agent trace", expanded=False):
-                for agent_out in agent_trace:
-                    _render_agent_panel(
-                        agent_out["agent_id"],
-                        agent_out["output"],
-                        expanded=(agent_out["agent_id"] == selected),
-                        use_expander=False,
-                        role=role_map.get(agent_out["agent_id"]),
-                    )
+
+            # Show the last agent's response as the visible summary so
+            # the user sees the final output without expanding the trace.
+            last_agent_id = agent_trace[-1]["agent_id"]
+            last_agent_data = (
+                agent_trace[-1]["output"]
+                .get("agent_outputs", {})
+                .get(last_agent_id, {})
+            )
+            last_message = last_agent_data.get("message", "")
+            if last_message:
+                st.markdown(last_message)
+
+            # Per-agent expanders — each agent's output is clearly
+            # separated.  Clicking a timeline chip auto-expands the
+            # matching agent.
+            for agent_out in agent_trace:
+                _render_agent_panel(
+                    agent_out["agent_id"],
+                    agent_out["output"],
+                    expanded=(agent_out["agent_id"] == selected),
+                    role=role_map.get(agent_out["agent_id"]),
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1368,6 +1427,11 @@ def _run_turn(user_input: str) -> None:
                 elif event_type == "__node_complete__":
                     node_name = event_data["node"]
                     state_update = event_data["state_update"]
+                    LOGGER.debug(
+                        "Node complete: %s (agent=%s)",
+                        node_name,
+                        node_name in agent_nodes_set,
+                    )
                     if state_update is None or node_name not in agent_nodes_set:
                         continue
                     serialized = _serialize_state_update(state_update)
@@ -1430,6 +1494,11 @@ def _run_turn(user_input: str) -> None:
         st.rerun()
 
     turn["agent_trace"] = agent_trace
+    LOGGER.info(
+        "Turn complete: %d agents in trace: %s",
+        len(agent_trace),
+        [a["agent_id"] for a in agent_trace],
+    )
     # Use list reassignment rather than .append() so Streamlit's change
     # detector sees the mutation and the stored turn is immediately visible
     # on the rerun that follows.

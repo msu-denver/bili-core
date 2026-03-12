@@ -191,7 +191,7 @@ LLM_MODELS = {
             },
             {
                 "model_name": "Anthropic Claude 3.5 Haiku",
-                "model_id": "anthropic.claude-3-5-haiku-20241022-v1:0",
+                "model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8192,
@@ -217,7 +217,7 @@ LLM_MODELS = {
             },
             {
                 "model_name": "Anthropic Claude Opus 4",
-                "model_id": "anthropic.claude-opus-4-20250514-v1:0",
+                "model_id": "us.anthropic.claude-opus-4-20250514-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 32000,
@@ -230,7 +230,7 @@ LLM_MODELS = {
             },
             {
                 "model_name": "Anthropic Claude Opus 4.1",
-                "model_id": "anthropic.claude-opus-4-1-20250805-v1:0",
+                "model_id": "us.anthropic.claude-opus-4-1-20250805-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 32000,
@@ -256,7 +256,7 @@ LLM_MODELS = {
             },
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet",
-                "model_id": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+                "model_id": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8192,
@@ -269,7 +269,7 @@ LLM_MODELS = {
             },
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet v2",
-                "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                "model_id": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8192,
@@ -282,7 +282,7 @@ LLM_MODELS = {
             },
             {
                 "model_name": "Anthropic Claude 3.7 Sonnet",
-                "model_id": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+                "model_id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 64000,

@@ -981,10 +981,10 @@ AETHER includes a Streamlit application with two pages:
 ### Launch
 
 ```bash
-/app/bili-core/venv/bin/streamlit run bili/aether/ui/app.py --server.port 8502
+streamlit
 ```
 
-> **Note:** the `streamlit` alias starts BiliCore rather than Streamlit directly. Use the venv path above.
+AETHER is now integrated into the unified BiliCore Streamlit app on port 8501. Select **AETHER Multi-Agent** from the sidebar. See the main [README](../../README.MD) for full setup details.
 
 For full documentation — installation, navigation, config selection, model settings, thread management, execution timeline, export formats, and troubleshooting — see [`bili/aether/docs/ui.md`](docs/ui.md).
 

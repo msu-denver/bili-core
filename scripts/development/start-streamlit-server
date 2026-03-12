@@ -6,11 +6,6 @@ set -e
 # Get the directory where the script is located
 SCRIPT_DIR=$(pwd)
 
-# Load environment variables from a secrets file
-if [ -f "${SCRIPT_DIR}/secrets" ]; then
-    source "${SCRIPT_DIR}/secrets"
-fi
-
 # Create the data directories if they don't exist
 mkdir -p "${SCRIPT_DIR}/../../data/"
 

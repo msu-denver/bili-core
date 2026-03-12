@@ -68,11 +68,18 @@ def format_message_with_citations(message):
     :return: The formatted message string, optionally including citations.
     :rtype: str
     """
+    # Use .content directly instead of .pretty_repr() to avoid the
+    # "===== Ai Message =====" debug headers that break markdown rendering
+    # in Streamlit and add noise to summarization context.
+    content = getattr(message, "content", None)
+    if content is None:
+        return str(message)
+
     if not isinstance(message, AIMessage):
-        return message.pretty_repr()
+        return content
 
     # Start with the content of the message
-    formatted_message = message.pretty_repr()
+    formatted_message = content
 
     # Check for citations in the metadata
     citations = message.response_metadata.get("citation_metadata", {}).get(

@@ -14,14 +14,12 @@ pip install streamlit-flow-component --ignore-installed blinker
 
 | Command | URL | Description |
 |---------|-----|-------------|
-| `/app/bili-core/venv/bin/streamlit run bili/aether/ui/app.py` | [http://localhost:8502](http://localhost:8502) | Combined app — Visualizer **and** Chat. **Recommended.** |
-| `/app/bili-core/venv/bin/streamlit run bili/aether/ui/chat_app.py` | [http://localhost:8501](http://localhost:8501) | Chat interface only — standalone entry point |
-
-Note: the `streamlit` alias starts BiliCore rather than invoking Streamlit directly. Use the venv path above.
+| `streamlit` (container alias) | [http://localhost:8501](http://localhost:8501) | Unified app — AETHER Multi-Agent + Single-Agent RAG. **Recommended.** |
+| `/app/bili-core/venv/bin/streamlit run bili/streamlit_app.py` | [http://localhost:8501](http://localhost:8501) | Same unified app (explicit path) |
 
 ## Navigation
 
-When running `app.py`, the sidebar shows a horizontal **Visualizer | Chat** radio at the top. Selecting a page switches the entire main area and the page-specific sidebar controls beneath the radio. The two pages maintain independent session state — switching from Visualizer to Chat and back does not lose your selected graph or conversation history.
+The unified app uses `st.navigation()` with two pages: **AETHER Multi-Agent** and **Single-Agent RAG**. The sidebar shows page-specific controls (config selection, model overrides, etc.). The two pages maintain independent session state — switching between them does not lose your selected graph or conversation history.
 
 ---
 
