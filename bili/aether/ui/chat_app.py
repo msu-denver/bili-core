@@ -1162,6 +1162,11 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
         if "error" in turn:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
+        LOGGER.debug(
+            "Rendering stored turn: %d agents: %s",
+            len(agent_trace),
+            [a["agent_id"] for a in agent_trace],
+        )
         if agent_trace:
             # Deduplicate while preserving order — supervisor workflows can
             # repeat agent IDs, which would cause Streamlit widget key collisions.
@@ -1189,6 +1194,19 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                 selected = None
             if "error" in turn:
                 st.divider()
+
+            # Show the last agent's response as the visible summary so
+            # the user sees the final output without expanding the trace.
+            last_agent_id = agent_trace[-1]["agent_id"]
+            last_agent_data = (
+                agent_trace[-1]["output"]
+                .get("agent_outputs", {})
+                .get(last_agent_id, {})
+            )
+            last_message = last_agent_data.get("message", "")
+            if last_message:
+                st.markdown(last_message)
+
             with st.expander("Agent trace", expanded=False):
                 for agent_out in agent_trace:
                     _render_agent_panel(
@@ -1382,6 +1400,11 @@ def _run_turn(user_input: str) -> None:
                 elif event_type == "__node_complete__":
                     node_name = event_data["node"]
                     state_update = event_data["state_update"]
+                    LOGGER.debug(
+                        "Node complete: %s (agent=%s)",
+                        node_name,
+                        node_name in agent_nodes_set,
+                    )
                     if state_update is None or node_name not in agent_nodes_set:
                         continue
                     serialized = _serialize_state_update(state_update)
@@ -1444,6 +1467,11 @@ def _run_turn(user_input: str) -> None:
         st.rerun()
 
     turn["agent_trace"] = agent_trace
+    LOGGER.info(
+        "Turn complete: %d agents in trace: %s",
+        len(agent_trace),
+        [a["agent_id"] for a in agent_trace],
+    )
     # Use list reassignment rather than .append() so Streamlit's change
     # detector sees the mutation and the stored turn is immediately visible
     # on the rerun that follows.
