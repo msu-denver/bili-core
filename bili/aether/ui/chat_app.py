@@ -42,6 +42,58 @@ LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png
 
 LOGGER = logging.getLogger(__name__)
 
+# streamlit-flow-component is optional in the chat tab.  When present the MAS
+# structure panel renders an interactive flow graph; when absent it falls back
+# to the text-based topology diagram.  No user-visible error is raised.
+try:
+    from streamlit_flow import streamlit_flow  # type: ignore
+    from streamlit_flow.state import StreamlitFlowState  # type: ignore
+
+    from bili.aether.ui.converters.yaml_to_graph import convert_mas_to_graph
+    from bili.aether.ui.styles.node_styles import build_node_css
+
+    _FLOW_AVAILABLE = True
+except ImportError:
+    _FLOW_AVAILABLE = False
+    LOGGER.warning(
+        "streamlit-flow-component not installed; MAS structure panel will use "
+        "the text-based topology diagram fallback."
+    )
+
+# ---------------------------------------------------------------------------
+# Flow graph node style constants
+# ---------------------------------------------------------------------------
+# DEFAULT_NODE_STYLE mirrors the base output of build_node_css() with the
+# theme's default blue, so chat-graph nodes look identical to Visualizer nodes
+# for roles that don't match any keyword rule.
+#
+# ACTIVE_NODE_STYLE overlays an orange border + box-shadow so the currently
+# executing agent is visually distinct at the 300px graph height.  The orange
+# (#F97316) matches the execution-timeline chip color already in use in the
+# chat UI.  Background is kept dark so the border glow reads clearly against
+# all role-specific fill colors.
+_DEFAULT_NODE_STYLE: dict = {
+    "background": "#55bfef",
+    "color": "#ffffff",
+    "border": "2px solid #55bfef",
+    "borderRadius": "8px",
+    "padding": "10px",
+    "fontSize": "1rem",
+    "width": "160px",
+    "textAlign": "center",
+    "boxShadow": "0 2px 8px rgba(0,0,0,0.3)",
+}
+_ACTIVE_NODE_STYLE: dict = {
+    "background": "#1a1a1a",
+    "color": "#F97316",
+    "border": "3px solid #F97316",
+    "borderRadius": "8px",
+    "padding": "10px",
+    "fontSize": "1rem",
+    "width": "160px",
+    "textAlign": "center",
+    "boxShadow": "0 0 12px rgba(249,115,22,0.6)",
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -248,6 +300,8 @@ def _is_provider_available(provider_key: str) -> bool:
         "remote_azure_openai": lambda: bool(os.environ.get("AZURE_OPENAI_API_KEY")),
         "remote_aws_bedrock": lambda: (
             bool(os.environ.get("AWS_ACCESS_KEY_ID"))
+            or bool(os.environ.get("AWS_SESSION_TOKEN"))
+            or bool(os.environ.get("AWS_PROFILE"))
             or Path(os.path.expanduser("~/.aws/credentials")).exists()
         ),
         "remote_google_vertex": lambda: (
@@ -262,12 +316,13 @@ def _is_provider_available(provider_key: str) -> bool:
 
 
 @st.cache_data
-def _build_chat_model_options() -> tuple[list[str], list[str]]:
-    """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
+def _load_all_model_options() -> tuple[list[str], list[str], list[str]]:
+    """Return ``(display_list, model_id_list, provider_key_list)`` from LLM_MODELS.
 
     Lazy-imports ``LLM_MODELS`` so this module loads without bili-core's heavy
-    LLM dependencies.  Result is cached for the lifetime of the Streamlit process.
-    Providers whose credentials are not detected in the environment are omitted.
+    LLM dependencies.  The full list is cached for the lifetime of the Streamlit
+    process — provider availability filtering is intentionally NOT done here so
+    that credentials added after startup are picked up on the next render.
     """
     from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
         LLM_MODELS,
@@ -275,13 +330,30 @@ def _build_chat_model_options() -> tuple[list[str], list[str]]:
 
     display: list[str] = []
     ids: list[str] = []
+    providers: list[str] = []
     for provider_key, provider_info in LLM_MODELS.items():
-        if not _is_provider_available(provider_key):
-            continue
         label = provider_info["name"]
         for entry in provider_info["models"]:
             display.append(f"[{label}] {entry['model_name']}")
             ids.append(entry["model_id"])
+            providers.append(provider_key)
+    return display, ids, providers
+
+
+def _build_chat_model_options() -> tuple[list[str], list[str]]:
+    """Return ``(display_list, model_id_list)`` filtered to available providers.
+
+    Calls the cached loader then filters by ``_is_provider_available`` on every
+    render so that credentials added after startup are reflected immediately
+    without requiring a process restart.
+    """
+    all_display, all_ids, all_providers = _load_all_model_options()
+    display: list[str] = []
+    ids: list[str] = []
+    for disp, mid, pkey in zip(all_display, all_ids, all_providers):
+        if _is_provider_available(pkey):
+            display.append(disp)
+            ids.append(mid)
     return display, ids
 
 
@@ -308,6 +380,9 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
 # Config validation
 # ---------------------------------------------------------------------------
 
+# Keys excluded from structured agent output display in _render_agent_panel.
+_AGENT_PANEL_SKIP_KEYS: frozenset = frozenset({"agent_id", "raw"})
+
 # Maps warning message substrings to plain-English explanations shown in a
 # popover when the user clicks the warning chip.  Keys are matched via
 # substring search so they remain stable as message wording evolves slightly.
@@ -330,7 +405,7 @@ _WARN_EXPLANATIONS: Dict[str, str] = {
         "directions. The additional reverse channel defined here is redundant "
         "and could cause duplicate message delivery."
     ),
-    "outgoing edges": (
+    "outgoing edges (expected 1 for a linear chain)": (
         "A sequential workflow expects each agent to have exactly one "
         "outgoing edge, forming a linear chain. Multiple outgoing edges "
         "create branching, which may not behave as expected in sequential mode."
@@ -360,7 +435,9 @@ def _validate_config(config: MASConfig) -> bool:
     for warn in result.warnings:
         explanation = _warn_explanation(warn)
         if explanation:
-            with st.popover(f"⚠️ {warn}"):
+            label = warn if len(warn) <= 60 else warn[:57] + "…"
+            with st.popover(f"⚠️ {label}"):
+                st.markdown(f"**{warn}**")
                 st.markdown(explanation)
                 st.caption("Warnings do not block execution.")
         else:
@@ -874,23 +951,127 @@ def _render_mas_diagram(config: MASConfig) -> None:
         _render_fallback_diagram(config)
 
 
-def _render_mas_structure(config: MASConfig) -> None:
-    """Render a collapsible summary of the active MAS topology.
+def _render_chat_agent_details(agent: AgentSpec) -> None:
+    """Render read-only agent details below the flow graph.
 
-    Shows the workflow type, agent count, channel count, and a topology-aware
-    diagram. Defaults to expanded when no messages have been sent yet, and
-    collapses automatically once the conversation starts.
+    Called when a node is selected in the chat-tab flow graph.  Intentionally
+    omits model-override controls — those live exclusively in the sidebar.
+    """
+    with st.container(border=True):
+        name = agent.get_display_name()
+        st.markdown(f"**{name}** &nbsp; `{agent.agent_id}`")
+        if agent.objective:
+            st.markdown(f"**Objective:** {agent.objective}")
+        if agent.model_name:
+            st.markdown(f"**Model:** `{agent.model_name}`")
+        if agent.temperature is not None:
+            st.markdown(f"**Temperature:** {agent.temperature}")
+        if agent.max_tokens:
+            st.markdown(f"**Max tokens:** {agent.max_tokens}")
+        if agent.capabilities:
+            caps = " ".join(f"`{c}`" for c in agent.capabilities)
+            st.markdown(f"**Capabilities:** {caps}")
+        if agent.tools:
+            tools = " ".join(f"`{t}`" for t in agent.tools)
+            st.markdown(f"**Tools:** {tools}")
+
+
+def _render_flow_graph(config: MASConfig) -> None:
+    """Render the 300px interactive flow graph for the chat-tab MAS panel.
+
+    Uses distinct session-state keys (``chat_flow_state_*`` /
+    ``chat_mas_graph_*``) so the chat and Visualizer tabs never share graph
+    state.
+
+    Active-node highlighting: checks ``aether_executing_node`` in session state
+    each render and applies ``_ACTIVE_NODE_STYLE`` to the matching node so the
+    currently running agent is visually distinct during execution.  The style
+    clears automatically when the streaming loop pops the key.
+
+    Node-click details: after ``streamlit_flow()`` returns, ``selected_id`` is
+    checked and ``_render_chat_agent_details`` renders agent info inline below
+    the graph.  No side column is used — details appear in a bordered container
+    within the same expander.
+    """
+    flow_key = f"chat_mas_graph_{config.mas_id}"
+    state_key = f"chat_flow_state_{config.mas_id}"
+
+    # Build nodes with active-node highlight applied per render so the style
+    # tracks execution state without requiring a state rebuild.
+    executing = st.session_state.get("aether_executing_node")
+    nodes, edges = convert_mas_to_graph(config)
+    for node in nodes:
+        if node.id == executing:
+            node.style = _ACTIVE_NODE_STYLE
+        else:
+            node.style = build_node_css(
+                next(
+                    (a.role for a in config.agents if a.agent_id == node.id),
+                    node.id,
+                )
+            )
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = StreamlitFlowState(nodes, edges)
+    else:
+        # Refresh nodes each render so active-highlight stays current; preserve
+        # selected_id from the existing state so clicks survive reruns.
+        existing = st.session_state[state_key]
+        st.session_state[state_key] = StreamlitFlowState(
+            nodes, edges, selected_id=existing.selected_id
+        )
+
+    st.session_state[state_key] = streamlit_flow(
+        key=flow_key,
+        state=st.session_state[state_key],
+        height=300,
+        fit_view=True,
+        show_controls=False,
+        show_minimap=False,
+        allow_new_edges=False,
+        pan_on_drag=True,
+        allow_zoom=True,
+        min_zoom=0.3,
+        get_node_on_click=True,
+        get_edge_on_click=False,
+        enable_pane_menu=False,
+        enable_node_menu=False,
+        enable_edge_menu=False,
+        hide_watermark=True,
+    )
+
+    selected_id = st.session_state[state_key].selected_id
+    if selected_id:
+        agent = config.get_agent(selected_id)
+        if agent:
+            _render_chat_agent_details(agent)
+    else:
+        st.caption("Click a node to view agent details.")
+
+
+def _render_mas_structure(config: MASConfig) -> None:
+    """Render a collapsible MAS topology panel above the chat history.
+
+    When streamlit-flow-component is installed, renders an interactive 300px
+    flow graph with active-node highlighting and node-click details.
+    Falls back to the text-based topology diagram when the dependency is absent.
+
+    Defaults to expanded when no messages exist, collapses once the
+    conversation starts so vertical space is given to the chat history.
     """
     messages = _active_messages_or_empty()
     with st.expander("MAS Structure", expanded=(len(messages) == 0)):
-        n_channels = len(config.channels)
-        st.markdown(
-            f"**Workflow:** `{config.workflow_type.value}` &nbsp;·&nbsp; "
-            f"**Agents:** {len(config.agents)} &nbsp;·&nbsp; "
-            f"**Channels:** {n_channels}"
-        )
-        st.divider()
-        _render_mas_diagram(config)
+        if _FLOW_AVAILABLE:
+            _render_flow_graph(config)
+        else:
+            n_channels = len(config.channels)
+            st.markdown(
+                f"**Workflow:** `{config.workflow_type.value}` &nbsp;·&nbsp; "
+                f"**Agents:** {len(config.agents)} &nbsp;·&nbsp; "
+                f"**Channels:** {n_channels}"
+            )
+            st.divider()
+            _render_mas_diagram(config)
 
 
 # ---------------------------------------------------------------------------
@@ -936,9 +1117,8 @@ def _render_agent_panel(
             if inner.get("status") == "stub":
                 st.caption(inner.get("message", str(inner)))
             else:
-                _skip = {"agent_id", "raw"}
                 for key, value in inner.items():
-                    if key not in _skip:
+                    if key not in _AGENT_PANEL_SKIP_KEYS:
                         st.markdown(f"**{key}:** {value}")
             return
 
@@ -1399,6 +1579,9 @@ def _render_chat_area() -> None:
     st.markdown(f"### {config.name}")
     if config.description:
         st.caption(config.description)
+
+    # MAS structure panel must remain first — do not move below stored turns.
+    # The flow graph is a fixed orientational anchor; chat history grows below it.
     _render_mas_structure(config)
 
     for turn in _active_messages_or_empty():
