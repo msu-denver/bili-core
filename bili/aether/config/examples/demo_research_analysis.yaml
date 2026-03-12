@@ -40,7 +40,7 @@ agents:
       Compile relevant findings, key claims, and source references.
       Keep your output structured so the downstream analyst can work
       with it efficiently.
-    model_name: "anthropic.claude-3-5-haiku-20241022-v1:0"
+    model_name: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
     temperature: 0.3
     max_tokens: 1024
     output_format: json
