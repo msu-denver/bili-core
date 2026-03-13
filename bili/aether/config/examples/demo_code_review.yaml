@@ -1,0 +1,96 @@
+# =============================================================================
+# Demo: Code Review Pipeline
+# =============================================================================
+#
+# Demo configuration for the Code Review Pipeline.
+# Three agents, each using a different model sized to their role:
+#
+#   - lead_developer        : Haiku  (fast, cheap classification + routing)
+#   - code_reviewer : Sonnet (detailed multi-dimension code analysis)
+#   - code_quality_reviewer : Sonnet (deterministic final verdict, temp=0.0)
+#
+# To swap a provider on any agent, change model_name only — no code changes.
+# Example: replace lead_developer model_name with "meta.llama3-..." or
+# "amazon.nova-lite-..." to compare routing performance across providers.
+#
+# Input suggestion:
+#   "Please review this Python function:
+#    def get_user(user_id):
+#        query = f'SELECT * FROM users WHERE id = {user_id}'
+#        return db.execute(query)"
+# =============================================================================
+
+mas_id: demo_code_review
+name: "Demo: Code Review Pipeline"
+description: >
+  A three-agent code review pipeline demonstrating per-agent model assignment.
+  The lead_developer classifies and triages submissions using a fast, lightweight model.
+  The reviewer performs detailed security, performance, and style analysis using
+  a high-capability model. The code_quality_reviewer synthesizes findings into a final verdict
+  with temperature 0.0 for deterministic decisions.
+version: "1.0.0"
+workflow_type: sequential
+entry_point: lead_developer
+
+agents:
+  - agent_id: lead_developer
+    role: lead_developer
+    objective: >
+      Triage the incoming code submission. Identify the primary concern
+      (security, performance, or style) and summarize what the downstream
+      reviewer should focus on. Keep your response concise.
+    model_name: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+    temperature: 0.0
+    max_tokens: 256
+    output_format: json
+    capabilities:
+      - code_analysis
+      - task_routing
+
+  - agent_id: code_reviewer
+    role: security_engineer
+    objective: >
+      Perform a thorough code review covering security vulnerabilities
+      (including OWASP Top 10), performance concerns, and style issues.
+      Reference the triage summary from the lead_developer. Provide specific,
+      actionable recommendations for each issue found.
+    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    temperature: 0.2
+    max_tokens: 2048
+    output_format: json
+    capabilities:
+      - vulnerability_detection
+      - security_analysis
+      - performance_analysis
+      - style_analysis
+
+  - agent_id: code_quality_reviewer
+    role: code_quality_reviewer
+    objective: >
+      Synthesize the lead_developer triage and reviewer findings into a final
+      code review decision. Assign an overall severity rating (critical,
+      major, minor, or pass), list the top three issues, and state
+      whether the submission should be approved, revised, or rejected.
+    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    temperature: 0.0
+    max_tokens: 1024
+    output_format: json
+
+channels:
+  - channel_id: lead_developer_to_reviewer
+    protocol: direct
+    source: lead_developer
+    target: code_reviewer
+    description: Triage summary passed to reviewer for detailed analysis
+
+  - channel_id: reviewer_to_code_quality_reviewer
+    protocol: direct
+    source: code_reviewer
+    target: code_quality_reviewer
+    description: Detailed review findings passed to code_quality_reviewer for final verdict
+
+tags:
+  - demo
+  - code-review
+  - sequential
+  - multi-model

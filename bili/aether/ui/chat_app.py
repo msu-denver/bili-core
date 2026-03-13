@@ -12,6 +12,7 @@ Usage:
 # pylint: disable=import-error
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +42,47 @@ LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png
 
 LOGGER = logging.getLogger(__name__)
 
+# streamlit-flow-component is optional in the chat tab.  When present the MAS
+# structure panel renders an interactive flow graph; when absent it falls back
+# to the text-based topology diagram.  No user-visible error is raised.
+try:
+    from streamlit_flow import streamlit_flow  # type: ignore
+    from streamlit_flow.state import StreamlitFlowState  # type: ignore
+
+    from bili.aether.ui.converters.yaml_to_graph import convert_mas_to_graph
+    from bili.aether.ui.styles.node_styles import build_node_css
+
+    _FLOW_AVAILABLE = True
+except ImportError:
+    _FLOW_AVAILABLE = False
+    LOGGER.warning(
+        "streamlit-flow-component not installed; MAS structure panel will use "
+        "the text-based topology diagram fallback."
+    )
+
+# ---------------------------------------------------------------------------
+# Flow graph node style constants
+# ---------------------------------------------------------------------------
+# DEFAULT_NODE_STYLE mirrors the base output of build_node_css() with the
+# theme's default blue, so chat-graph nodes look identical to Visualizer nodes
+# for roles that don't match any keyword rule.
+#
+# ACTIVE_NODE_STYLE overlays an orange border + box-shadow so the currently
+# executing agent is visually distinct at the 300px graph height.  The orange
+# (#F97316) matches the execution-timeline chip color already in use in the
+# chat UI.  Background is kept dark so the border glow reads clearly against
+# all role-specific fill colors.
+_ACTIVE_NODE_STYLE: dict = {
+    "background": "#1a1a1a",
+    "color": "#F97316",
+    "border": "3px solid #F97316",
+    "borderRadius": "8px",
+    "padding": "10px",
+    "fontSize": "1rem",
+    "width": "160px",
+    "textAlign": "center",
+    "boxShadow": "0 0 12px rgba(249,115,22,0.6)",
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -234,12 +276,42 @@ def _render_thread_list() -> None:
                     st.rerun()
 
 
+def _is_provider_available(provider_key: str) -> bool:
+    """Return True if the environment has credentials for *provider_key*.
+
+    Checks well-known environment variables and credential files for each
+    remote provider.  Local providers are always available.  Unknown provider
+    keys default to visible (fail-open) so new providers are not silently
+    hidden.
+    """
+    checks: Dict[str, Any] = {
+        "remote_openai": lambda: bool(os.environ.get("OPENAI_API_KEY")),
+        "remote_azure_openai": lambda: bool(os.environ.get("AZURE_OPENAI_API_KEY")),
+        "remote_aws_bedrock": lambda: (
+            bool(os.environ.get("AWS_ACCESS_KEY_ID"))
+            or bool(os.environ.get("AWS_SESSION_TOKEN"))
+            or bool(os.environ.get("AWS_PROFILE"))
+            or Path(os.path.expanduser("~/.aws/credentials")).exists()
+        ),
+        "remote_google_vertex": lambda: (
+            bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+            or bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+        ),
+        "local_llamacpp": lambda: True,
+        "local_huggingface": lambda: True,
+    }
+    check = checks.get(provider_key)
+    return check() if check is not None else True
+
+
 @st.cache_data
-def _build_chat_model_options() -> tuple[list[str], list[str]]:
-    """Return ``(display_list, model_id_list)`` from LLM_MODELS, grouped by provider.
+def _load_all_model_options() -> tuple[list[str], list[str], list[str]]:
+    """Return ``(display_list, model_id_list, provider_key_list)`` from LLM_MODELS.
 
     Lazy-imports ``LLM_MODELS`` so this module loads without bili-core's heavy
-    LLM dependencies.  Result is cached for the lifetime of the Streamlit process.
+    LLM dependencies.  The full list is cached for the lifetime of the Streamlit
+    process — provider availability filtering is intentionally NOT done here so
+    that credentials added after startup are picked up on the next render.
     """
     from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
         LLM_MODELS,
@@ -247,11 +319,30 @@ def _build_chat_model_options() -> tuple[list[str], list[str]]:
 
     display: list[str] = []
     ids: list[str] = []
-    for provider_info in LLM_MODELS.values():
+    providers: list[str] = []
+    for provider_key, provider_info in LLM_MODELS.items():
         label = provider_info["name"]
         for entry in provider_info["models"]:
             display.append(f"[{label}] {entry['model_name']}")
             ids.append(entry["model_id"])
+            providers.append(provider_key)
+    return display, ids, providers
+
+
+def _build_chat_model_options() -> tuple[list[str], list[str]]:
+    """Return ``(display_list, model_id_list)`` filtered to available providers.
+
+    Calls the cached loader then filters by ``_is_provider_available`` on every
+    render so that credentials added after startup are reflected immediately
+    without requiring a process restart.
+    """
+    all_display, all_ids, all_providers = _load_all_model_options()
+    display: list[str] = []
+    ids: list[str] = []
+    for disp, mid, pkey in zip(all_display, all_ids, all_providers):
+        if _is_provider_available(pkey):
+            display.append(disp)
+            ids.append(mid)
     return display, ids
 
 
@@ -278,18 +369,70 @@ def _serialize_state_update(state_update: Dict[str, Any]) -> Dict[str, Any]:
 # Config validation
 # ---------------------------------------------------------------------------
 
+# Keys that get special treatment in _render_agent_panel (not dumped as k:v).
+_AGENT_PANEL_SKIP_KEYS: frozenset = frozenset(
+    {"agent_id", "raw", "role", "status", "message", "parsed"}
+)
+
+# Maps warning message substrings to plain-English explanations shown in a
+# popover when the user clicks the warning chip.  Keys are matched via
+# substring search so they remain stable as message wording evolves slightly.
+_WARN_EXPLANATIONS: Dict[str, str] = {
+    "has no channel connections": (
+        "Channels are the explicit message routes between agents. "
+        "This agent has none defined — it will still execute, but it won't "
+        "send or receive inter-agent messages via the channel system. "
+        "Sequential and hierarchical workflows route via graph edges rather "
+        "than explicit channels, so this warning is often informational only."
+    ),
+    "should have 'inter_agent_communication' capability": (
+        "Supervisor agents route tasks to worker agents and need the "
+        "'inter_agent_communication' capability to do so effectively. "
+        "Without it the supervisor can still run, but routing behaviour "
+        "may be degraded."
+    ),
+    "has a separate reverse channel": (
+        "A bidirectional channel already handles communication in both "
+        "directions. The additional reverse channel defined here is redundant "
+        "and could cause duplicate message delivery."
+    ),
+    "outgoing edges (expected 1 for a linear chain)": (
+        "A sequential workflow expects each agent to have exactly one "
+        "outgoing edge, forming a linear chain. Multiple outgoing edges "
+        "create branching, which may not behave as expected in sequential mode."
+    ),
+}
+
+
+def _warn_explanation(warn: str) -> Optional[str]:
+    """Return a plain-English explanation for *warn*, or ``None`` if unknown."""
+    for pattern, explanation in _WARN_EXPLANATIONS.items():
+        if pattern in warn:
+            return explanation
+    return None
+
 
 def _validate_config(config: MASConfig) -> bool:
     """Run structural validation and display results in the active Streamlit context.
 
     Returns ``True`` if the config is valid (errors list is empty).
-    Warnings are displayed but do not block execution.
+    Warnings are displayed but do not block execution.  Each warning is rendered
+    as a clickable popover chip so the user can read a plain-English explanation
+    of what the warning means and whether action is required.
     """
     result = validate_mas(config)
     for err in result.errors:
         st.error(f"Config error: {err}")
     for warn in result.warnings:
-        st.warning(f"Config warning: {warn}")
+        explanation = _warn_explanation(warn)
+        if explanation:
+            label = warn if len(warn) <= 60 else warn[:57] + "…"
+            with st.popover(f"⚠️ {label}"):
+                st.markdown(f"**{warn}**")
+                st.markdown(explanation)
+                st.caption("Warnings do not block execution.")
+        else:
+            st.warning(f"Config warning: {warn}")
     if result.valid:
         if result.warnings:
             st.success("Config valid with warnings ✓")
@@ -424,6 +567,8 @@ def _extract_content(output: Dict[str, Any]) -> str:
         for inner in agent_outputs.values():
             if inner.get("status") == "stub":
                 collected.append(inner.get("message", str(inner)))
+            elif inner.get("message"):
+                collected.append(inner["message"])
             else:
                 kv_parts = [f"{k}: {v}" for k, v in inner.items() if k != "agent_id"]
                 if kv_parts:
@@ -564,8 +709,11 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 
     st.markdown("---")
 
-    if _is_stub_config(config):
-        st.info("Stub mode — no LLM calls will be made.", icon="⚙️")
+    # Placeholder at the correct visual position — filled AFTER the button
+    # handlers below so that clicking "Apply to all" or "Stub mode" clears
+    # or shows the warning in the same script run.  Reading chat_config here
+    # (before _apply_model_patch runs) would always reflect the pre-click state.
+    stub_warning_ph = st.empty()
 
     st.markdown(f"**MAS ID:** `{config.mas_id}`")
     st.markdown(f"**Workflow:** {config.workflow_type.value}")
@@ -608,6 +756,11 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
 
         if stub_clicked:
             _apply_model_patch(base_config, None)
+
+    # Fill the placeholder now that any model patch has been applied — uses the
+    # current (possibly just updated) chat_config so the flag is accurate.
+    if _is_stub_config(st.session_state.get("chat_config", config)):
+        stub_warning_ph.info("Stub mode — no LLM calls will be made.", icon="⚙️")
 
     st.markdown("---")
 
@@ -791,23 +944,141 @@ def _render_mas_diagram(config: MASConfig) -> None:
         _render_fallback_diagram(config)
 
 
-def _render_mas_structure(config: MASConfig) -> None:
-    """Render a collapsible summary of the active MAS topology.
+def _render_chat_agent_details(agent: AgentSpec) -> None:
+    """Render read-only agent details below the flow graph.
 
-    Shows the workflow type, agent count, channel count, and a topology-aware
-    diagram. Defaults to expanded when no messages have been sent yet, and
-    collapses automatically once the conversation starts.
+    Called when a node is selected in the chat-tab flow graph.  Intentionally
+    omits model-override controls — those live exclusively in the sidebar.
+    """
+    with st.container(border=True):
+        name = agent.get_display_name()
+        st.markdown(f"**{name}** &nbsp; `{agent.agent_id}`")
+        if agent.objective:
+            st.markdown(f"**Objective:** {agent.objective}")
+        if agent.model_name:
+            st.markdown(f"**Model:** `{agent.model_name}`")
+        if agent.temperature is not None:
+            st.markdown(f"**Temperature:** {agent.temperature}")
+        if agent.max_tokens:
+            st.markdown(f"**Max tokens:** {agent.max_tokens}")
+        if agent.capabilities:
+            caps = " ".join(f"`{c}`" for c in agent.capabilities)
+            st.markdown(f"**Capabilities:** {caps}")
+        if agent.tools:
+            tools = " ".join(f"`{t}`" for t in agent.tools)
+            st.markdown(f"**Tools:** {tools}")
+
+
+@st.fragment
+def _render_flow_graph(config: MASConfig) -> None:
+    """Render the 300px interactive flow graph for the chat-tab MAS panel.
+
+    Uses distinct session-state keys (``chat_flow_state_*`` /
+    ``chat_mas_graph_*``) so the chat and Visualizer tabs never share graph
+    state.
+
+    Active-node highlighting: checks ``aether_executing_node`` in session state
+    each render and applies ``_ACTIVE_NODE_STYLE`` to the matching node so the
+    currently running agent is visually distinct during execution.  The style
+    clears automatically when the streaming loop pops the key.
+
+    Node-click details: after ``streamlit_flow()`` returns, ``selected_id`` is
+    checked and ``_render_chat_agent_details`` renders agent info inline below
+    the graph.  No side column is used — details appear in a bordered container
+    within the same expander.
+    """
+    flow_key = f"chat_mas_graph_{config.mas_id}"
+    state_key = f"chat_flow_state_{config.mas_id}"
+
+    # Build nodes with active-node highlight applied per render so the style
+    # tracks execution state without requiring a state rebuild.
+    executing = st.session_state.get("aether_executing_node")
+
+    if state_key not in st.session_state:
+        nodes, edges = convert_mas_to_graph(config)
+        for node in nodes:
+            node.style = build_node_css(
+                next(
+                    (a.role for a in config.agents if a.agent_id == node.id),
+                    node.id,
+                )
+            )
+        st.session_state[state_key] = StreamlitFlowState(nodes, edges)
+
+    # Only rebuild the flow state when active-node highlighting changes
+    # (during execution). Rebuilding every render creates new object
+    # identities that the streamlit-flow component interprets as state
+    # changes, causing an infinite rerun loop.
+    prev_executing = st.session_state.get(f"{state_key}_prev_executing")
+    if executing != prev_executing:
+        st.session_state[f"{state_key}_prev_executing"] = executing
+        nodes, edges = convert_mas_to_graph(config)
+        for node in nodes:
+            if node.id == executing:
+                node.style = _ACTIVE_NODE_STYLE
+            else:
+                node.style = build_node_css(
+                    next(
+                        (a.role for a in config.agents if a.agent_id == node.id),
+                        node.id,
+                    )
+                )
+        existing = st.session_state[state_key]
+        st.session_state[state_key] = StreamlitFlowState(
+            nodes, edges, selected_id=existing.selected_id
+        )
+
+    st.session_state[state_key] = streamlit_flow(
+        key=flow_key,
+        state=st.session_state[state_key],
+        height=300,
+        fit_view=True,
+        show_controls=False,
+        show_minimap=False,
+        allow_new_edges=False,
+        pan_on_drag=True,
+        allow_zoom=True,
+        min_zoom=0.3,
+        get_node_on_click=True,
+        get_edge_on_click=False,
+        enable_pane_menu=False,
+        enable_node_menu=False,
+        enable_edge_menu=False,
+        hide_watermark=True,
+    )
+
+    selected_id = st.session_state[state_key].selected_id
+    if selected_id:
+        agent = config.get_agent(selected_id)
+        if agent:
+            _render_chat_agent_details(agent)
+    else:
+        st.caption("Click a node to view agent details.")
+
+
+def _render_mas_structure(config: MASConfig) -> None:
+    """Render a collapsible MAS topology panel above the chat history.
+
+    When streamlit-flow-component is installed, renders an interactive 300px
+    flow graph with active-node highlighting and node-click details.
+    Falls back to the text-based topology diagram when the dependency is absent.
+
+    Defaults to expanded when no messages exist, collapses once the
+    conversation starts so vertical space is given to the chat history.
     """
     messages = _active_messages_or_empty()
     with st.expander("MAS Structure", expanded=(len(messages) == 0)):
-        n_channels = len(config.channels)
-        st.markdown(
-            f"**Workflow:** `{config.workflow_type.value}` &nbsp;·&nbsp; "
-            f"**Agents:** {len(config.agents)} &nbsp;·&nbsp; "
-            f"**Channels:** {n_channels}"
-        )
-        st.divider()
-        _render_mas_diagram(config)
+        if _FLOW_AVAILABLE:
+            _render_flow_graph(config)
+        else:
+            n_channels = len(config.channels)
+            st.markdown(
+                f"**Workflow:** `{config.workflow_type.value}` &nbsp;·&nbsp; "
+                f"**Agents:** {len(config.agents)} &nbsp;·&nbsp; "
+                f"**Channels:** {n_channels}"
+            )
+            st.divider()
+            _render_mas_diagram(config)
 
 
 # ---------------------------------------------------------------------------
@@ -853,9 +1124,31 @@ def _render_agent_panel(
             if inner.get("status") == "stub":
                 st.caption(inner.get("message", str(inner)))
             else:
-                for key, value in inner.items():
-                    if key != "agent_id":
-                        st.markdown(f"**{key}:** {value}")
+                # Metadata caption (role + status on one line)
+                meta = []
+                if inner.get("role"):
+                    meta.append(inner["role"])
+                if inner.get("status"):
+                    meta.append(inner["status"])
+                if meta:
+                    st.caption(" · ".join(meta))
+
+                # Main content — the agent's response
+                message = inner.get("message", "")
+                if message:
+                    st.markdown(message)
+
+                # Structured JSON output (if the agent produced parsed data)
+                parsed = inner.get("parsed")
+                if parsed:
+                    st.json(parsed, expanded=False)
+
+                # Any remaining fields not handled above
+                extra = {
+                    k: v for k, v in inner.items() if k not in _AGENT_PANEL_SKIP_KEYS
+                }
+                for key, value in extra.items():
+                    st.markdown(f"**{key}:** {value}")
             return
 
         # Fall back to the most recent message
@@ -884,6 +1177,11 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
         if "error" in turn:
             st.error(f"Execution failed: {turn['error']}")
         agent_trace = turn.get("agent_trace", [])
+        LOGGER.debug(
+            "Rendering stored turn: %d agents: %s",
+            len(agent_trace),
+            [a["agent_id"] for a in agent_trace],
+        )
         if agent_trace:
             # Deduplicate while preserving order — supervisor workflows can
             # repeat agent IDs, which would cause Streamlit widget key collisions.
@@ -911,15 +1209,29 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
                 selected = None
             if "error" in turn:
                 st.divider()
-            with st.expander("Agent trace", expanded=False):
-                for agent_out in agent_trace:
-                    _render_agent_panel(
-                        agent_out["agent_id"],
-                        agent_out["output"],
-                        expanded=(agent_out["agent_id"] == selected),
-                        use_expander=False,
-                        role=role_map.get(agent_out["agent_id"]),
-                    )
+
+            # Show the last agent's response as the visible summary so
+            # the user sees the final output without expanding the trace.
+            last_agent_id = agent_trace[-1]["agent_id"]
+            last_agent_data = (
+                agent_trace[-1]["output"]
+                .get("agent_outputs", {})
+                .get(last_agent_id, {})
+            )
+            last_message = last_agent_data.get("message", "")
+            if last_message:
+                st.markdown(last_message)
+
+            # Per-agent expanders — each agent's output is clearly
+            # separated.  Clicking a timeline chip auto-expands the
+            # matching agent.
+            for agent_out in agent_trace:
+                _render_agent_panel(
+                    agent_out["agent_id"],
+                    agent_out["output"],
+                    expanded=(agent_out["agent_id"] == selected),
+                    role=role_map.get(agent_out["agent_id"]),
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1055,6 +1367,7 @@ def _run_turn(user_input: str) -> None:
             all_nodes=all_nodes,
             key_prefix=f"timeline_live_{_tl_call}",
             role_map=role_map,
+            status_text="⟳ Starting MAS...",
         )
         _tl_call += 1
         # Pre-allocate one st.empty() slot per agent in config order.
@@ -1103,6 +1416,11 @@ def _run_turn(user_input: str) -> None:
                 elif event_type == "__node_complete__":
                     node_name = event_data["node"]
                     state_update = event_data["state_update"]
+                    LOGGER.debug(
+                        "Node complete: %s (agent=%s)",
+                        node_name,
+                        node_name in agent_nodes_set,
+                    )
                     if state_update is None or node_name not in agent_nodes_set:
                         continue
                     serialized = _serialize_state_update(state_update)
@@ -1165,6 +1483,11 @@ def _run_turn(user_input: str) -> None:
         st.rerun()
 
     turn["agent_trace"] = agent_trace
+    LOGGER.info(
+        "Turn complete: %d agents in trace: %s",
+        len(agent_trace),
+        [a["agent_id"] for a in agent_trace],
+    )
     # Use list reassignment rather than .append() so Streamlit's change
     # detector sees the mutation and the stored turn is immediately visible
     # on the rerun that follows.
@@ -1314,6 +1637,9 @@ def _render_chat_area() -> None:
     st.markdown(f"### {config.name}")
     if config.description:
         st.caption(config.description)
+
+    # MAS structure panel must remain first — do not move below stored turns.
+    # The flow graph is a fixed orientational anchor; chat history grows below it.
     _render_mas_structure(config)
 
     for turn in _active_messages_or_empty():

@@ -8,14 +8,14 @@ This guide follows the same flow as [quickstart-stub.md](quickstart-stub.md) but
 
 ## 1. Set up credentials
 
-AETHER inherits bili-core's secrets system. Before starting the container:
+AETHER inherits bili-core's `.env` configuration. Before starting the container:
 
 ```bash
 # From the repo root
-cp scripts/development/secrets.template scripts/development/secrets
+cp .env.example .env
 ```
 
-Open `scripts/development/secrets` and fill in your API key:
+Open `.env` and fill in your API key:
 
 ```
 OPENAI_API_KEY=sk-...
@@ -31,7 +31,7 @@ cd scripts/development
 ./attach-container.sh
 ```
 
-The secrets file is loaded into the container environment at startup. If you've already started the container without filling in secrets, restart it after editing the file.
+The `.env` file is loaded into the container environment at startup via Docker Compose `env_file`. If you've already started the container without filling in `.env`, restart it after editing the file.
 
 ---
 
@@ -326,7 +326,7 @@ To use AWS Bedrock or Google Vertex instead of OpenAI, substitute the `model_nam
 
 | Provider                           | `model_name` value                          | Credentials                                    |
 | ---------------------------------- | ------------------------------------------- | ---------------------------------------------- |
-| OpenAI                             | `gpt-4o`                                    | `OPENAI_API_KEY` in `secrets`                  |
+| OpenAI                             | `gpt-4o`                                    | `OPENAI_API_KEY` in `.env`                     |
 | AWS Bedrock (Claude 3.5 Sonnet v2) | `anthropic.claude-3-5-sonnet-20241022-v2:0` | AWS credentials in `env/bili_root/.aws/`       |
 | AWS Bedrock (Claude 3.7 Sonnet)    | `anthropic.claude-3-7-sonnet-20250219-v1:0` | AWS credentials in `env/bili_root/.aws/`       |
 | Google Vertex (Gemini 2.5 Flash)   | `gemini-2.5-flash`                          | Google credentials in `env/bili_root/.google/` |

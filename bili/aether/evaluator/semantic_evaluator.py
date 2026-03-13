@@ -34,7 +34,7 @@ model, a warning is logged.  Researchers should switch to the fallback model
 in that case.  The evaluator does **not** refuse to run — the warning is
 informational.
 
-Primary model:  ``anthropic.claude-3-7-sonnet-20250219-v1:0``
+Primary model:  ``us.anthropic.claude-3-7-sonnet-20250219-v1:0``
 Fallback model: ``gemini-2.5-flash``
 """
 

@@ -77,12 +77,52 @@ pip install -e .
 
 - **Python 3.11+** required
 - **LangChain/LangGraph** for LLM orchestration
-- **Configuration Files**: 
-  - Secrets in `scripts/development/secrets.template`
+- **Environment Variables**: `.env` file in project root (Docker Compose reads via `env_file: .env`). Copy `.env.example` to `.env` and fill in API keys. Shared variables are compatible with sustainability-hub-engine's `.env`.
   - AWS credentials in `env/bili_root/.aws/`
   - Google credentials in `env/bili_root/.google/`
 - **Databases**: PostgreSQL with PostGIS and MongoDB for state management
 - **Pre-commit hooks** enforce code quality standards
+
+### Container Aliases
+
+When you attach to the development container, `wait.sh` seeds `.bashrc` with these aliases:
+
+- `streamlit` — Install deps, create PG database, start Streamlit UI (port 8501) with tee to `/tmp/streamlit.log`
+- `flask` — Install deps, create PG database, start Flask API (port 5001)
+- `deps` — Run `install-deps` script to install/update Python dependencies
+- `cleandeps` — Clean reinstall of dependencies (runs install-deps with CLEAN=true)
+- `seeds3` — Upload data files to LocalStack S3
+- `createpgdb` — Create the LangGraph PostgreSQL database
+- `awslocal` — AWS CLI pointing to LocalStack endpoint
+
+The venv is automatically activated on attach.
+
+### Authentication
+
+- **Local development**: Uses SQLite provider. New accounts automatically get `researcher` role (no admin approval needed). Profile DB at `PROFILE_DB_PATH` (default: `/root/.bili/profile.db`).
+- **Production (AWS)**: Uses Firebase provider. Accounts require admin approval.
+- Configure in `bili/streamlit_app.py` via `initialize_auth_manager(auth_provider_name=...)`.
+
+### Unified Streamlit App
+
+The Streamlit app (`bili/streamlit_app.py`) is a multi-page app using `st.navigation()` on port 8501:
+- **AETHER Multi-Agent** (`/aether`) — MAS visualizer and chat (default page)
+- **Single-Agent RAG** (`/bili`) — LLM comparison chatbot
+
+Both pages require authentication. AETHER page content is rendered from `bili/aether/ui/page.py`.
+
+### AETHER Multi-Agent System
+
+AETHER (Agent Ecosystems for Testing, Hardening, Evaluation and Research) is a declarative multi-agent orchestration framework (`bili/aether/`):
+
+- **7 workflow types**: sequential, hierarchical, supervisor, consensus, deliberative, parallel, custom
+- **YAML configuration**: Define agents, channels, and workflows declaratively
+- **6 communication protocols**: direct, broadcast, request-response, pub-sub, competitive, consensus
+- **Pipeline sub-graphs**: Rich multi-node pipelines within agents with custom state fields
+- **Streaming**: Sync/async streaming with `StreamEvent` objects via `MASExecutor`
+- **bili-core integration**: Agents can inherit LLM config, tools, middleware, and checkpointers
+
+For comprehensive AETHER documentation, see `bili/aether/README.md` and `bili/aether/docs/`.
 
 ### Middleware Configuration
 
