@@ -72,17 +72,6 @@ except ImportError:
 # (#F97316) matches the execution-timeline chip color already in use in the
 # chat UI.  Background is kept dark so the border glow reads clearly against
 # all role-specific fill colors.
-_DEFAULT_NODE_STYLE: dict = {
-    "background": "#55bfef",
-    "color": "#ffffff",
-    "border": "2px solid #55bfef",
-    "borderRadius": "8px",
-    "padding": "10px",
-    "fontSize": "1rem",
-    "width": "160px",
-    "textAlign": "center",
-    "boxShadow": "0 2px 8px rgba(0,0,0,0.3)",
-}
 _ACTIVE_NODE_STYLE: dict = {
     "background": "#1a1a1a",
     "color": "#F97316",
