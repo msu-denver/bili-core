@@ -50,16 +50,17 @@ def _build_supervisor_routing_instructions(
     )
     return (
         "\n\n--- ROUTING INSTRUCTIONS ---\n"
-        "You are the supervisor of a multi-agent system. After analysing the input "
-        "you MUST route to exactly one worker agent by including a routing decision "
-        "in your response.\n\n"
+        "You are the supervisor of a multi-agent system. You MUST consult EVERY "
+        "available worker before producing a final answer. Route to one worker per "
+        "turn; after each worker reports back, route to the next unconsulted worker. "
+        "Only route to END once ALL workers have reported.\n\n"
         f"Available workers:\n{worker_lines}\n\n"
         "To route to a worker, include ONE of the following in your response:\n"
         '  JSON format (preferred): {"next_agent": "<agent_id>", ...other fields...}\n'
         "  Text format:             ROUTE_TO: <agent_id>\n\n"
-        'Use "next_agent": "END" (or ROUTE_TO: END) only when all workers have '
-        "reported back and you are ready to produce a final synthesised answer.\n"
-        "Do NOT output a final answer on the first turn — route to a worker first."
+        'Use "next_agent": "END" (or ROUTE_TO: END) ONLY after every worker above '
+        "has already reported back and you are ready to synthesise a final answer. "
+        "Do NOT route to END before all workers have been consulted."
     )
 
 
@@ -1038,6 +1039,15 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
             edges_by_source[edge.from_agent].append(edge)
 
         for from_agent, edges in edges_by_source.items():
+            if from_agent == "START":
+                # The entry-agent edge (START → entry_point) is already added
+                # unconditionally at the top of this method. Workflow YAMLs may
+                # include an explicit "from_agent: START" edge for readability;
+                # we skip it here to avoid passing the string "START" (rather
+                # than the LangGraph START sentinel) to add_edge(), which would
+                # raise "Found edge starting at unknown node 'START'".
+                continue
+
             conditional = [e for e in edges if e.condition]
             unconditional = [e for e in edges if not e.condition]
 

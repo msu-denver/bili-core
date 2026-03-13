@@ -230,6 +230,19 @@ class AgentSpec(BaseModel):
     )
 
     # =========================================================================
+    # HUMAN-IN-THE-LOOP
+    # =========================================================================
+
+    is_human: bool = Field(
+        False,
+        description=(
+            "Whether this agent slot is filled by a human reviewer. "
+            "When True and the parent MASConfig has human_in_loop=True, "
+            "graph execution pauses before this node and waits for human input."
+        ),
+    )
+
+    # =========================================================================
     # CONSENSUS WORKFLOWS
     # =========================================================================
 

@@ -39,6 +39,15 @@ Usage::
     ):
         print(f"{node_name}: {state_update}")
 
+    # UI token streaming — interleaves per-token chunks with node-completion sentinels:
+    for event_type, event_data in executor.run_streaming_tokens(
+        {"messages": [HumanMessage(content="Hi")]}, thread_id="my-thread"
+    ):
+        if event_type == "__token__":
+            print(event_data["token"], end="", flush=True)
+        elif event_type == "__node_complete__":
+            print(f"\n[{event_data['node']} complete]")
+
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
 """
@@ -152,13 +161,30 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             runtime_context=self._runtime_context,
         )
 
-        # Create checkpointer with user_id if multi-tenant mode enabled
+        # Determine human-interrupt nodes for HITL configs
+        human_nodes = []
+        if self._config.human_in_loop:
+            human_nodes = [
+                a.agent_id for a in self._config.agents if getattr(a, "is_human", False)
+            ]
+
+        # Create checkpointer — required for HITL resumption even when
+        # checkpoint_enabled is False in the config.
         checkpointer = None
         if self._user_id and self._config.checkpoint_enabled:
             checkpointer = self._create_checkpointer_with_user_id()
+        elif human_nodes and not self._config.checkpoint_enabled:
+            # HITL requires a checkpointer so state can be resumed after the
+            # interrupt.  Fall back to an in-process MemorySaver.
+            from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+                MemorySaver,
+            )
+
+            checkpointer = MemorySaver()
 
         self._compiled_graph = self._compiled_mas.compile_graph(
-            checkpointer=checkpointer
+            checkpointer=checkpointer,
+            interrupt_before=human_nodes,
         )
 
         LOGGER.info(
@@ -407,7 +433,9 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {}
-        if self._config.checkpoint_enabled:
+        effective_thread_id: Optional[str] = None
+        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
+        if needs_checkpoint:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config = {"configurable": {"thread_id": effective_thread_id}}
 
@@ -424,6 +452,186 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             raise
         finally:
             LOGGER.info("MAS streaming execution complete: %s", execution_id)
+
+        # After the stream exhausts, check whether the graph paused at a
+        # human-interrupt node.  If pending nodes remain, yield a sentinel so
+        # the caller can present a human-input UI and later call resume_streaming().
+        if invoke_config and self._config.human_in_loop:
+            try:
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                if graph_state.next:
+                    yield (
+                        "__human_interrupt__",
+                        {
+                            "next": list(graph_state.next),
+                            "thread_id": effective_thread_id,
+                        },
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.warning("Could not inspect graph state for HITL check: %s", exc)
+
+    def run_streaming_tokens(
+        self,
+        input_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Stream token-level output with node-completion sentinels.
+
+        A token-granularity streaming API for UI consumers.  Uses LangGraph's
+        ``stream_mode=["messages", "updates"]`` to interleave per-token chunks
+        with per-node state updates in a single pass.
+
+        Yields three event types in order:
+
+        - ``("__token__", {"node": node_name, "token": content})``:
+          one yield per non-empty ``AIMessageChunk`` content string as tokens
+          arrive from the LLM.
+        - ``("__node_complete__", {"node": node_name, "state_update": state_update})``:
+          one yield per agent node after all its tokens are exhausted and the
+          node's full state update is available.
+        - ``("__human_interrupt__", {"next": [...], "thread_id": ...})``:
+          yielded once after the stream exhausts if the graph paused at a
+          human-in-the-loop node (only when ``human_in_loop=True`` in config).
+
+        Internal routing and pipeline sub-nodes are included in
+        ``__node_complete__`` events — callers should filter by whether the
+        node name is a known ``agent_id``.
+
+        Args:
+            input_data: Initial state overrides (may include a ``"messages"``
+                key with a list of LangChain messages).
+            thread_id: Thread ID for checkpointed execution. Pass the same
+                ID across calls to maintain conversation context.
+
+        Yields:
+            ``(event_type, event_data)`` tuples as described above.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+            Exception: Any exception raised by the graph is logged and
+                re-raised so the caller receives a clean log entry.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. "
+                "Call initialize() before run_streaming_tokens()."
+            )
+
+        execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        LOGGER.info("Starting MAS token streaming: %s", execution_id)
+        initial_state = self._build_initial_state(input_data)
+
+        invoke_config: Dict[str, Any] = {}
+        effective_thread_id: Optional[str] = None
+        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
+        if needs_checkpoint:
+            effective_thread_id = self._construct_thread_id(thread_id, execution_id)
+            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+
+        try:
+            for mode, data in self._compiled_graph.stream(
+                initial_state,
+                config=invoke_config,
+                stream_mode=["messages", "updates"],
+            ):
+                if mode == "messages":
+                    chunk, metadata = data
+                    if not hasattr(chunk, "content") or not chunk.content:
+                        continue
+                    node_name = metadata.get("langgraph_node", "")
+                    if not node_name:
+                        continue
+                    content = chunk.content
+                    if isinstance(content, list):
+                        # Structured content blocks (e.g. tool-use) — extract text only
+                        content = "".join(
+                            c.get("text", "")
+                            for c in content
+                            if isinstance(c, dict) and "text" in c
+                        )
+                    if content:
+                        yield ("__token__", {"node": node_name, "token": content})
+                elif mode == "updates":
+                    for node_name, state_update in data.items():
+                        yield (
+                            "__node_complete__",
+                            {"node": node_name, "state_update": state_update},
+                        )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("run_streaming_tokens failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("MAS token streaming complete: %s", execution_id)
+
+        # After the stream exhausts, check whether the graph paused at a
+        # human-interrupt node (mirrors the same check in run_streaming()).
+        if invoke_config and self._config.human_in_loop:
+            try:
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                if graph_state.next:
+                    yield (
+                        "__human_interrupt__",
+                        {
+                            "next": list(graph_state.next),
+                            "thread_id": effective_thread_id,
+                        },
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.warning("Could not inspect graph state for HITL check: %s", exc)
+
+    def resume_streaming(
+        self,
+        human_input: str,
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Resume a graph that was paused at a human-interrupt node.
+
+        Injects *human_input* as a ``HumanMessage`` into the graph state and
+        then continues streaming from where execution left off.  The graph
+        must have been paused via ``run_streaming()`` after a
+        ``__human_interrupt__`` sentinel was yielded.
+
+        Args:
+            human_input: The human reviewer's text response.
+            thread_id: Thread ID originally reported in the
+                ``__human_interrupt__`` sentinel.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the interrupt, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before resume_streaming()."
+            )
+
+        from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
+            HumanMessage,
+        )
+
+        invoke_config = {"configurable": {"thread_id": thread_id}}
+        self._compiled_graph.update_state(
+            invoke_config,
+            {"messages": [HumanMessage(content=human_input)]},
+        )
+
+        LOGGER.info("Resuming HITL execution for thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                None,
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("resume_streaming failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("HITL resume complete for thread '%s'", thread_id)
 
     async def astream(
         self,

@@ -1,12 +1,9 @@
 """
-AETHER — MAS Visualizer and Chat.
+AETHER page — MAS Visualizer and Chat.
 
-A Streamlit application that combines the AETHER multi-agent system graph
-visualizer with the multi-turn chat interface. Use the sidebar navigation
-to switch between pages.
-
-Usage:
-    streamlit run bili/aether/ui/app.py
+Renders the AETHER multi-agent system graph visualizer with the multi-turn
+chat interface.  Called by the main Streamlit app (``bili/streamlit_app.py``)
+as a page within ``st.navigation()``.
 """
 
 # pylint: disable=import-error
@@ -45,7 +42,6 @@ from bili.aether.ui.components.graph_viewer import (
     render_metadata_bar,
 )
 from bili.aether.ui.converters.yaml_to_graph import convert_mas_to_graph
-from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 
 # Path constants
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
@@ -54,10 +50,12 @@ LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png
 _DEFAULT_PAGE = "Visualizer"
 
 
-def main() -> None:
-    """Main entry point for the AETHER app."""
-    _configure_page()
+def render_aether_page() -> None:
+    """Render the AETHER page content (sidebar + main area).
 
+    Called by the unified Streamlit app after ``st.set_page_config()``
+    has already been invoked.
+    """
     with st.sidebar:
         page = _render_sidebar()
 
@@ -65,16 +63,6 @@ def main() -> None:
         render_chat_main()
     else:
         _render_visualizer_main()
-
-
-def _configure_page() -> None:
-    """Set up Streamlit page config."""
-    st.set_page_config(
-        page_title="AETHER",
-        page_icon="A",
-        layout="wide",
-    )
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 def _render_sidebar() -> str:
@@ -132,8 +120,96 @@ def _render_visualizer_sidebar() -> None:
         _load_config(yaml_path)
 
 
+def _render_intro() -> None:
+    """Render introductory text about the AETHER framework."""
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=100)
+    st.markdown(
+        "<h1>AETHER Multi-Agent System</h1>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<h2><a href="https://github.com/msu-denver/bili-core">'
+        "BiliCore on GitHub</a></h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "**AETHER** (Agent Ecosystems for Testing, Hardening, Evaluation and "
+        "Research) is a declarative multi-agent orchestration framework for "
+        "building, visualizing, and evaluating coordinated teams of AI agents. "
+        "Developed at Metropolitan State University of Denver as part of an "
+        "NSF-funded, multi-institution research collaboration, AETHER extends "
+        "BiliCore with a general-purpose orchestration layer where complex "
+        "multi-agent systems are defined entirely through YAML configuration, "
+        "with no orchestration code required."
+    )
+    st.markdown(
+        "LLM applications are increasingly built as Multi-Agent Systems (MAS), "
+        "where specialized agents divide labor, review each other's work, and "
+        "reach consensus. AETHER makes it easy to rapidly build, configure, "
+        "and vary these architectures. Define teams of agents with distinct "
+        "roles, objectives, tools, and communication channels, then watch "
+        "them collaborate in real time."
+    )
+    st.markdown(
+        "AETHER supports **seven workflow patterns** to cover a wide range of "
+        "agent collaboration strategies:"
+    )
+    st.markdown(
+        "- **Sequential chains** for staged analysis where each agent builds "
+        "on the previous agent's output\n"
+        "- **Hierarchical voting** with multi-tier adversarial debate and "
+        "weighted aggregation\n"
+        "- **Supervisor routing** where a central agent dynamically delegates "
+        "to specialist workers\n"
+        "- **Consensus networks** with peer deliberation using majority, "
+        "similarity, or explicit agreement detection\n"
+        "- **Deliberative escalation** with human-in-the-loop review at "
+        "decision boundaries\n"
+        "- **Parallel fan-out** for concurrent analysis with broadcast and "
+        "pub-sub coordination\n"
+        "- **Custom graphs** with conditional edge routing for fully "
+        "user-defined topologies"
+    )
+    st.markdown(
+        "Each agent can be configured with its own LLM model from any "
+        "provider BiliCore supports (AWS Bedrock, Google Vertex AI, Azure "
+        "OpenAI, OpenAI, or local models), along with independent temperature "
+        "settings, system prompts, tools, and middleware. Different agents in "
+        "the same system can use different providers and models. Agents "
+        "communicate through six typed channel protocols: direct, broadcast, "
+        "request-response, pub-sub, competitive debate, and peer consensus. "
+        "Rich agent sub-graphs (pipelines) allow individual agents to execute "
+        "multi-node internal workflows with custom state fields and "
+        "conditional branching."
+    )
+    st.markdown(
+        "Use the **Visualizer** below to explore YAML configurations as "
+        "interactive graphs, inspect agent properties and communication "
+        "channels, and override model assignments. Then send any configuration "
+        "to the **Chat** interface for live multi-turn conversations with the "
+        "agent team. All interactions support real-time token-level streaming "
+        "and checkpoint persistence across sessions."
+    )
+    st.markdown(
+        "This research is supported by the National Science Foundation (NSF) "
+        "and the National Artificial Intelligence Research Resource (NAIRR) "
+        "Pilot, as part of the "
+        "[Sustainability Hub](https://sustainabilityhub.co) research project "
+        "at Metropolitan State University of Denver."
+    )
+    st.markdown(
+        "**Note:** Refreshing the page will restart your session. "
+        "For single-agent testing, switch to the "
+        "**Single-Agent RAG** page."
+    )
+    st.markdown("---")
+
+
 def _render_visualizer_main() -> None:
     """Render the visualizer main area."""
+    _render_intro()
+
     config = st.session_state.get("mas_config")
     if config is None:
         st.info("Select a YAML configuration from the sidebar to visualize it.")
@@ -252,7 +328,3 @@ def _render_legend() -> None:
             st.markdown("- :violet[Purple] \u2014 Pub/Sub")
             st.markdown("- :red[Red] \u2014 Competitive")
             st.markdown("- Teal \u2014 Consensus")
-
-
-if __name__ == "__main__":
-    main()

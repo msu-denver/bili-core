@@ -10,7 +10,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Optional
 
 from bili.aether.schema import AgentSpec, OutputFormat
 
@@ -110,8 +110,8 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
 def _generate_tool_agent_node(
     agent: AgentSpec,
     llm: object,
-    tools: list,
-    middleware: list = None,
+    tools: List,
+    middleware: Optional[List] = None,
 ) -> Callable[[dict], dict]:
     """Create a node using ``create_agent()`` for tool-enabled agents.
 
@@ -444,32 +444,36 @@ def _build_output(agent: AgentSpec, content: str) -> dict:
     return output
 
 
-def _extract_next_agent(content: str, agent: AgentSpec) -> str:
+def _extract_next_agent(
+    content: str, agent: AgentSpec
+) -> str:  # pylint: disable=unused-argument
     """Extract next_agent routing decision from supervisor output.
 
     Looks for routing decisions in these formats:
-    - JSON output with "next_agent" field
+    - JSON object with a "next_agent" field (plain or inside a markdown code fence)
+    - JSON-quoted key pattern: ``"next_agent": "agent_id"``
     - Lines like "ROUTE_TO: agent_id" or "NEXT_AGENT: agent_id"
     - Returns "END" if no routing decision found
 
     Args:
         content: Agent output message
-        agent: AgentSpec for the agent
+        agent: AgentSpec for the agent (unused, kept for API compatibility)
 
     Returns:
         Agent ID to route to, or "END" to finish workflow
     """
-    # Try JSON parsing first
-    if agent.output_format == OutputFormat.JSON:
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict) and "next_agent" in parsed:
-                return parsed["next_agent"]
-        except (json.JSONDecodeError, TypeError):
-            pass
+    # Strip markdown code fences (```json ... ``` or ``` ... ```) then try JSON
+    stripped = re.sub(r"```(?:json)?\s*", "", content).strip()
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict) and "next_agent" in parsed:
+            return parsed["next_agent"]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
 
-    # Try text patterns
+    # Try text patterns — JSON-quoted key first, then plain-text directives
     patterns = [
+        r'"next_agent"\s*:\s*"([^"]+)"',
         r"ROUTE_TO:\s*(\w+)",
         r"NEXT_AGENT:\s*(\w+)",
         r"next_agent:\s*(\w+)",

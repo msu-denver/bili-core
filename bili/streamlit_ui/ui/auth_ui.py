@@ -69,7 +69,30 @@ def display_login_signup():
 
     :return: None
     """
-    st.title("Login/Signup")
+    st.markdown(
+        "<h1>Welcome to BiliCore</h1>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "BiliCore is an open-source research platform for benchmarking and "
+        "building dynamic Retrieval-Augmented Generation (RAG) systems. "
+        "Developed at Metropolitan State University of Denver, BiliCore enables "
+        "rapid experimentation with LLMs across AWS Bedrock, Google Vertex AI, "
+        "Azure OpenAI, OpenAI, and local models."
+    )
+    st.markdown(
+        "The platform includes **AETHER**, a multi-agent system framework for "
+        "orchestrating teams of AI agents with declarative YAML configurations, "
+        "as well as a single-agent RAG interface for hands-on testing of "
+        "individual model configurations, tools, and prompts."
+    )
+    st.markdown(
+        "To get started, create an account below. New accounts require approval "
+        "from an administrator before you can sign in. If you already have an "
+        "approved account, use the login form to access the platform."
+    )
+    st.markdown("---")
+
     if "auth_warning" in st.session_state and st.session_state.auth_warning:
         st.warning(st.session_state.auth_warning)
         st.session_state.auth_warning = ""

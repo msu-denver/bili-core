@@ -58,7 +58,7 @@ Results are stored with `"stub_mode": true` and `"semantic_tier": "skipped"`.
 ## Running with real LLMs
 
 ```bash
-# Ensure API credentials are set in scripts/development/secrets (container)
+# Ensure API credentials are set in .env (loaded by Docker Compose)
 # or in your shell environment, then:
 python bili/aether/tests/baseline/run_baseline.py
 ```
