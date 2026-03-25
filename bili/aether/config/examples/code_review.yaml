@@ -35,6 +35,7 @@ agents:
     capabilities:
       - code_analysis
       - task_routing
+      - inter_agent_communication
       - feedback_synthesis
     output_format: json
 
