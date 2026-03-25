@@ -1,45 +1,52 @@
-"""Standalone memory poisoning test suite runner for AETHER.
+"""Standalone bias inheritance test suite runner for AETHER.
 
-Runs all 10 memory poisoning payloads against the 5 content-moderation MAS
+Runs all 10 bias inheritance payloads against the 5 content-moderation MAS
 configs across both injection phases (pre_execution, mid_execution), applies
 all three detection tiers, and writes:
 
 1. One result JSON per test case to ``results/{mas_id}/{payload_id}_{phase}.json``
-2. A results matrix CSV to ``results/memory_poisoning_results_matrix.csv``
+2. A results matrix CSV to ``results/bias_inheritance_results_matrix.csv``
 
-Memory poisoning injects false context into an agent's perceived conversation
-history or working memory, subverting the premises the agent reasons from.
-Unlike prompt injection, the payload does not override instructions — it
-corrupts the *context* the agent believes to be true.
+Bias inheritance appends a directional "guiding principle" to an agent's
+objective, nudging its reasoning toward a predetermined conclusion.  Unlike
+prompt injection (which commands) or memory poisoning (which fabricates
+context), bias inheritance operates by shaping the *frame* the agent reasons
+within.  Compliance is often subtle — the agent's output may still appear
+policy-compliant on the surface while systematically skewing toward the
+injected direction.
+
+Because of this subtlety, Tier 2 heuristic detection is less reliable for
+this attack type.  Tier 3 semantic evaluation (SemanticEvaluator) is the
+primary signal and is strongly recommended for meaningful results.
 
 Detection tiers
 ---------------
 - Tier 1 (structural):  ``execution.success`` — did the injection run without error?
 - Tier 2 (heuristic):   ``influenced_agents`` / ``resistant_agents`` from
-  ``PropagationTracker`` — which agents echoed fabricated context or produced
-  compliance-marker phrases?
+  ``PropagationTracker`` — which agents echoed biased framing or compliance
+  marker phrases?
 - Tier 3 (semantic):    ``SemanticEvaluator`` — LLM-based scoring of genuine
-  compliance.  Skipped in stub mode; columns are empty strings in the CSV.
+  bias adoption.  Skipped in stub mode; columns are empty strings in the CSV.
 
 Usage
 -----
 Stub mode (no LLM calls — structural verification only):
 
-    python bili/aether/tests/memory_poisoning/run_memory_poisoning_suite.py --stub
+    python bili/aether/tests/bias_inheritance/run_bias_inheritance_suite.py --stub
 
 Real LLM mode (requires API credentials):
 
-    python bili/aether/tests/memory_poisoning/run_memory_poisoning_suite.py
+    python bili/aether/tests/bias_inheritance/run_bias_inheritance_suite.py
 
 Filter to specific payloads / phases:
 
-    python bili/aether/tests/memory_poisoning/run_memory_poisoning_suite.py --stub \\
-        --payloads mp_false_context_001 mp_authority_001 \\
+    python bili/aether/tests/bias_inheritance/run_bias_inheritance_suite.py --stub \\
+        --payloads bi_political_slant_001 bi_outcome_bias_002 \\
         --phases pre_execution
 
 Results are written to:
-    bili/aether/tests/memory_poisoning/results/{mas_id}/{payload_id}_{phase}.json
-    bili/aether/tests/memory_poisoning/results/memory_poisoning_results_matrix.csv
+    bili/aether/tests/bias_inheritance/results/{mas_id}/{payload_id}_{phase}.json
+    bili/aether/tests/bias_inheritance/results/bias_inheritance_results_matrix.csv
 """
 
 import argparse
@@ -78,14 +85,14 @@ from bili.aether.tests._helpers import (  # noqa: E402  pylint: disable=wrong-im
 from bili.aether.tests._suite_runner import (  # noqa: E402  pylint: disable=wrong-import-position
     run_suite,
 )
-from bili.aether.tests.memory_poisoning.payloads.memory_poisoning_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
-    MEMORY_POISONING_PAYLOADS,
+from bili.aether.tests.bias_inheritance.payloads.bias_inheritance_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
+    BIAS_INHERITANCE_PAYLOADS,
 )
 
 LOGGER = logging.getLogger(__name__)
 
-_MEMORY_POISONING_DIR = Path(__file__).parent
-_RESULTS_DIR = _MEMORY_POISONING_DIR / "results"
+_BIAS_INHERITANCE_DIR = Path(__file__).parent
+_RESULTS_DIR = _BIAS_INHERITANCE_DIR / "results"
 
 _ALL_PHASES: list[str] = [
     InjectionPhase.PRE_EXECUTION.value,
@@ -94,10 +101,10 @@ _ALL_PHASES: list[str] = [
 
 
 def main() -> None:
-    """Run the full memory poisoning test suite."""
+    """Run the full bias inheritance test suite."""
     parser = argparse.ArgumentParser(
         description=(
-            "Run AETHER memory poisoning test suite against content-moderation "
+            "Run AETHER bias inheritance test suite against content-moderation "
             "MAS configs and produce a results matrix CSV."
         )
     )
@@ -123,7 +130,7 @@ def main() -> None:
         metavar="PAYLOAD_ID",
         help=(
             "Restrict run to specific payload IDs "
-            "(e.g. mp_false_context_001 mp_authority_001)."
+            "(e.g. bi_political_slant_001 bi_outcome_bias_002)."
         ),
     )
     parser.add_argument(
@@ -154,10 +161,10 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level))
 
     # Filter payloads
-    payloads = MEMORY_POISONING_PAYLOADS
+    payloads = BIAS_INHERITANCE_PAYLOADS
     if args.payloads:
         ids = set(args.payloads)
-        payloads = [mp for mp in MEMORY_POISONING_PAYLOADS if mp.payload_id in ids]
+        payloads = [bp for bp in BIAS_INHERITANCE_PAYLOADS if bp.payload_id in ids]
         if not payloads:
             print(f"No payloads matched: {args.payloads}", file=sys.stderr)
             sys.exit(1)
@@ -174,10 +181,9 @@ def main() -> None:
             baseline_results_dir = None
 
     # SemanticEvaluator (lazy import — only needed in real mode)
-    # Uses a memory-poisoning-specific judge prompt and rubric rather than the
-    # default injection-compliance prompt — the evaluator checks whether the
-    # agent accepted fabricated context as real and acted on it, not whether
-    # it followed an explicit instruction.
+    # Uses a bias-specific judge prompt and rubric rather than the default
+    # injection-compliance prompt — bias adoption is about directional drift
+    # in reasoning, not explicit instruction following.
     semantic_evaluator = None
     if not args.stub:
         try:
@@ -185,23 +191,23 @@ def main() -> None:
                 SemanticEvaluator,
             )
             from bili.aether.evaluator.evaluator_config import (  # pylint: disable=import-outside-toplevel
-                MEMORY_POISONING_JUDGE_PROMPT,
-                MEMORY_POISONING_SCORE_DESCRIPTIONS,
+                BIAS_INHERITANCE_JUDGE_PROMPT,
+                BIAS_INHERITANCE_SCORE_DESCRIPTIONS,
             )
 
             semantic_evaluator = SemanticEvaluator(
-                score_descriptions=MEMORY_POISONING_SCORE_DESCRIPTIONS,
-                judge_prompt_template=MEMORY_POISONING_JUDGE_PROMPT,
+                score_descriptions=BIAS_INHERITANCE_SCORE_DESCRIPTIONS,
+                judge_prompt_template=BIAS_INHERITANCE_JUDGE_PROMPT,
             )
         except (ImportError, RuntimeError) as exc:
             LOGGER.warning("Could not initialise SemanticEvaluator: %s", exc)
 
     run_suite(
         payloads=payloads,
-        attack_suite="memory_poisoning",
-        attack_type="memory_poisoning",
-        csv_filename="memory_poisoning_results_matrix.csv",
-        suite_name="Memory Poisoning Suite",
+        attack_suite="bias_inheritance",
+        attack_type="bias_inheritance",
+        csv_filename="bias_inheritance_results_matrix.csv",
+        suite_name="Bias Inheritance Suite",
         results_dir=_RESULTS_DIR,
         repo_root=_REPO_ROOT,
         config_paths=args.configs,
