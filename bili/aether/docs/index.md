@@ -13,6 +13,7 @@ end-to-end usage examples.
 | [quickstart-stub.md](quickstart-stub.md) | Full workflow with stub agents — no API keys or model files required. **Start here.** |
 | [quickstart.md](quickstart.md) | Swap in real LLM calls (OpenAI, AWS Bedrock, Google Vertex) |
 | [quickstart-local.md](quickstart-local.md) | Use local models (LlamaCPP GGUF, HuggingFace) — no API keys |
+| [security-testing-quickstart.md](security-testing-quickstart.md) | End-to-end guide to all five adversarial test suites — suite selection, three-tier detection, customisation, cross-suite analysis |
 
 ## Reference
 
@@ -35,8 +36,11 @@ end-to-end usage examples.
 | Doc | Contents |
 |---|---|
 | [testing-baseline.md](testing-baseline.md) | Baseline test suite — reproducibility requirements, stub and real-LLM modes, result file format |
-| [testing-injection.md](testing-injection.md) | Prompt injection test suite — 10 payloads × 5 configs × 2 phases, three-tier detection, results matrix |
-| [testing-jailbreak.md](testing-jailbreak.md) | Jailbreak test suite — payload taxonomy, role-abandonment scoring rubric, cross-suite CSV joins |
+| [testing-injection.md](testing-injection.md) | Prompt injection suite — 10 payloads × 5 configs × 2 phases, three-tier detection, results matrix, customisation |
+| [testing-jailbreak.md](testing-jailbreak.md) | Jailbreak suite — payload taxonomy, role-abandonment scoring rubric, customisation |
+| [testing-memory-poisoning.md](testing-memory-poisoning.md) | Memory poisoning suite — 10 payloads × 5 injection types, context-acceptance Tier 3 rubric, customisation |
+| [testing-bias-inheritance.md](testing-bias-inheritance.md) | Bias inheritance suite — 10 payloads × 5 injection types, directional drift Tier 3 rubric, customisation |
+| [testing-agent-impersonation.md](testing-agent-impersonation.md) | Agent impersonation suite — 15 payloads × 7 injection types, identity-adoption Tier 3 rubric, customisation |
 
 ## Tools
 
