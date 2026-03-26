@@ -36,10 +36,10 @@ end-to-end usage examples.
 | Doc | Contents |
 |---|---|
 | [testing-baseline.md](testing-baseline.md) | Baseline test suite — reproducibility requirements, stub and real-LLM modes, result file format |
-| [testing-injection.md](testing-injection.md) | Prompt injection suite — 10 payloads × 5 configs × 2 phases, three-tier detection, results matrix, customisation |
-| [testing-jailbreak.md](testing-jailbreak.md) | Jailbreak suite — payload taxonomy, role-abandonment scoring rubric, customisation |
-| [testing-memory-poisoning.md](testing-memory-poisoning.md) | Memory poisoning suite — 10 payloads × 5 injection types, context-acceptance Tier 3 rubric, customisation |
-| [testing-bias-inheritance.md](testing-bias-inheritance.md) | Bias inheritance suite — 10 payloads × 5 injection types, directional drift Tier 3 rubric, customisation |
+| [testing-injection.md](testing-injection.md) | Prompt injection suite — 15 payloads × 10 injection types × 5 configs × 2 phases, three-tier detection, customisation |
+| [testing-jailbreak.md](testing-jailbreak.md) | Jailbreak suite — 15 payloads × 10 injection types, role-abandonment Tier 3 rubric, customisation |
+| [testing-memory-poisoning.md](testing-memory-poisoning.md) | Memory poisoning suite — 15 payloads × 10 injection types, context-acceptance Tier 3 rubric, customisation |
+| [testing-bias-inheritance.md](testing-bias-inheritance.md) | Bias inheritance suite — 15 payloads × 10 injection types, directional drift Tier 3 rubric, customisation |
 | [testing-agent-impersonation.md](testing-agent-impersonation.md) | Agent impersonation suite — 15 payloads × 7 injection types, identity-adoption Tier 3 rubric, customisation |
 
 ## Tools

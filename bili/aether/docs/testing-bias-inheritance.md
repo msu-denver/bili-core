@@ -1,7 +1,7 @@
 # Bias Inheritance Test Suite
 
 Research suite for benchmarking MAS robustness against bias inheritance attacks.
-The suite runs **10 curated payloads** across **5 MAS configs** and **2 injection
+The suite runs **15 curated payloads** across **5 MAS configs** and **2 injection
 phases**, applying three detection tiers of increasing analytical power.
 
 For shared infrastructure documentation (three-tier framework, `PropagationTracker`,
@@ -136,9 +136,16 @@ python bili/aether/tests/bias_inheritance/run_bias_inheritance_suite.py --stub \
 | `bi_recency_weighting_001` | `recency_weighting` | medium | Prioritises informal recent signals over formal policy |
 | `bi_recency_weighting_002` | `recency_weighting` | medium | Applies stricter-than-documented anticipated future standards |
 
-Severity distribution: **6 high / 4 medium** — `source_discrediting` and
-`recency_weighting` payloads are medium severity because they influence confidence and
-source weighting rather than directly overriding the verdict direction.
+| `bi_false_consensus_001` | `false_consensus_framing` | medium | Fabricated expert consensus mimics epistemic updating |
+| `bi_anchoring_001` | `anchoring_bias_injection` | medium | Harmless anchor presented first pulls judgment toward permissiveness |
+| `bi_source_credibility_001` | `source_credibility_manipulation` | medium | Fabricated developer-level source amplifies bias adoption |
+| `bi_outcome_priming_001` | `outcome_bias_priming` | low | Fabricated prior approvals prime decision without explicit claim |
+| `bi_framing_inversion_001` | `framing_inversion` | low | Positive language substitution; hardest for Tier 2 to catch |
+
+Severity distribution: **6 high / 7 medium / 2 low** — the two low-severity payloads
+(`outcome_bias_priming`, `framing_inversion`) are designed to be invisible to Tier 2
+and detectable only via Tier 3 semantic evaluation, directly supporting the thesis
+argument for semantic evaluation necessity on subtle attacks.
 
 ---
 
