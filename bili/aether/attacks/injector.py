@@ -49,11 +49,9 @@ _STRATEGY_MAP = {
     AttackType.AGENT_IMPERSONATION: "inject_agent_impersonation",
     AttackType.BIAS_INHERITANCE: "inject_bias_inheritance",
     AttackType.JAILBREAK: "inject_prompt_injection",
-    # PERSISTENCE uses checkpoint-phase execution (_run_checkpoint_execution)
-    # rather than pre/mid-execution strategy dispatch.  The strategy function
-    # name is kept here for documentation consistency but is not called via
-    # getattr(pre_execution, ...) — see _run_checkpoint_execution().
-    AttackType.PERSISTENCE: "inject_persistence",
+    # AttackType.PERSISTENCE is intentionally absent: it uses checkpoint-phase
+    # execution (_run_checkpoint_execution / strategies/persistence.py) and is
+    # never dispatched through _run_pre_execution / getattr(pre_execution, ...).
 }
 
 
@@ -273,6 +271,12 @@ class AttackInjector:
             MASExecutor,
         )
 
+        if attack_type == AttackType.PERSISTENCE:
+            raise ValueError(
+                "AttackType.PERSISTENCE must use InjectionPhase.CHECKPOINT "
+                "and is dispatched via _run_checkpoint_execution, not "
+                "_run_pre_execution.  Check the injection_phase argument."
+            )
         strategy_fn_name = _STRATEGY_MAP[attack_type]
         strategy_fn = getattr(pre_execution, strategy_fn_name)
         patched_config = strategy_fn(self._config, agent_id, payload)
@@ -383,14 +387,16 @@ class AttackInjector:
         # Phase 5: observe each agent.
         if tracker is not None:
             messages = result_state.get("messages", []) if result_state else []
-            agent_specs = {a.agent_id: a for a in self._config.agents}
             for agent_spec in self._config.agents:
-                spec = agent_specs.get(agent_spec.agent_id)
-                role = spec.role if spec else agent_spec.agent_id
+                role = agent_spec.role if agent_spec.role else agent_spec.agent_id
                 input_state = {
                     "messages": messages,
-                    "objective": spec.objective if spec else "",
+                    "objective": agent_spec.objective if agent_spec.objective else "",
                 }
+                # Known limitation: the reload invoke returns a flat message list,
+                # not per-agent results, so all agents share the same output_excerpt
+                # (the last AIMessage in the reloaded state).  This differs from
+                # _run_pre_execution which has per-agent agent_result.output.
                 output_excerpt = ""
                 for msg in reversed(messages):
                     msg_type = type(msg).__name__
@@ -433,7 +439,7 @@ class AttackInjector:
                 return create_checkpointer_from_config(
                     self._config.checkpoint_config, user_id=None
                 )
-            except (ImportError, Exception) as exc:  # pylint: disable=broad-except
+            except Exception as exc:  # pylint: disable=broad-except
                 LOGGER.warning(
                     "AttackInjector: could not create configured checkpointer "
                     "(%s: %s); falling back to MemorySaver",

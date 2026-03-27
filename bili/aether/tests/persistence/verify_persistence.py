@@ -138,7 +138,9 @@ def _create_checkpointer(backend: str) -> tuple[Any, bool]:
             PruningPostgresSaver,
         )
 
-        checkpointer = PruningPostgresSaver.from_conn_string_sync(None)
+        checkpointer = PruningPostgresSaver.from_conn_string_sync(
+            None
+        )  # None → POSTGRES_* env vars
         return checkpointer, True
 
     if backend in ("mongo", "mongodb"):
@@ -146,7 +148,9 @@ def _create_checkpointer(backend: str) -> tuple[Any, bool]:
         from bili.checkpointers.mongo_checkpointer import PruningMongoDBSaver
 
         # pylint: enable=import-outside-toplevel
-        checkpointer = PruningMongoDBSaver.from_conn_string_sync(None)
+        checkpointer = PruningMongoDBSaver.from_conn_string_sync(
+            None
+        )  # None → MONGO_* env vars
         return checkpointer, True
 
     raise ValueError(f"Unknown backend {backend!r}. Choose: memory | postgres | mongo")

@@ -190,7 +190,7 @@ def _checkpointer_is_persistent(config: Any) -> tuple[bool, str]:
                 "(factory fallback) — not suitable for cross-session persistence"
             )
         return True, ""
-    except (ImportError, Exception) as exc:  # pylint: disable=broad-except
+    except Exception as exc:  # pylint: disable=broad-except
         return False, f"checkpointer factory unavailable or failed: {exc}"
 
 
