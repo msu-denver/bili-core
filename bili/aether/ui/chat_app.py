@@ -31,6 +31,7 @@ logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
 import streamlit as st
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from bili.aether.compiler import compile_mas
 from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import AgentSpec, MASConfig, WorkflowType
@@ -662,10 +663,17 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
                 st.error("Invalid config: YAML must be a mapping at the top level.")
             else:
                 upload_config = load_mas_from_dict(raw)
+                # Graph-level validation: catches circular edges, missing
+                # entry_point, and other structural issues beyond Pydantic parsing.
+                compile_mas(upload_config)
                 if "chat_uploaded_configs" not in st.session_state:
                     st.session_state.chat_uploaded_configs = {}
                 st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
                 st.success(f"Uploaded: {uploaded.name}")
+                # Auto-activate the uploaded config so the stub indicator (and
+                # model picker) appear immediately without a manual dropdown pick.
+                st.session_state.chat_autoload_name = uploaded.name
+                st.rerun()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Invalid config: {exc}")
 
