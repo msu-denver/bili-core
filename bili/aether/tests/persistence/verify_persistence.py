@@ -64,6 +64,7 @@ import argparse
 import datetime
 import json
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -138,9 +139,8 @@ def _create_checkpointer(backend: str) -> tuple[Any, bool]:
             PruningPostgresSaver,
         )
 
-        checkpointer = PruningPostgresSaver.from_conn_string_sync(
-            None
-        )  # None → POSTGRES_* env vars
+        conn_str = os.environ.get("POSTGRES_CONNECTION_STRING")
+        checkpointer = PruningPostgresSaver.from_conn_string_sync(conn_str)
         return checkpointer, True
 
     if backend in ("mongo", "mongodb"):
@@ -148,9 +148,8 @@ def _create_checkpointer(backend: str) -> tuple[Any, bool]:
         from bili.checkpointers.mongo_checkpointer import PruningMongoDBSaver
 
         # pylint: enable=import-outside-toplevel
-        checkpointer = PruningMongoDBSaver.from_conn_string_sync(
-            None
-        )  # None → MONGO_* env vars
+        conn_str = os.environ.get("MONGO_CONNECTION_STRING")
+        checkpointer = PruningMongoDBSaver.from_conn_string_sync(conn_str)
         return checkpointer, True
 
     raise ValueError(f"Unknown backend {backend!r}. Choose: memory | postgres | mongo")

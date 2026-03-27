@@ -230,7 +230,7 @@ class AttackInjector:
             completed_at=completed_at,
             propagation_path=tracker.propagation_path() if tracker else [],
             influenced_agents=tracker.influenced_agents() if tracker else [],
-            resistant_agents=tracker.resistant_agents() if tracker else set(),
+            resistant_agents=tracker.resistant_agents() if tracker else [],
             success=error is None,
             error=error,
         )
@@ -387,23 +387,23 @@ class AttackInjector:
         # Phase 5: observe each agent.
         if tracker is not None:
             messages = result_state.get("messages", []) if result_state else []
+            # Known limitation: the reload invoke returns a flat message list,
+            # not per-agent results, so all agents share the same output_excerpt
+            # (the last AIMessage in the reloaded state).  This differs from
+            # _run_pre_execution which has per-agent agent_result.output.
+            output_excerpt = ""
+            for msg in reversed(messages):
+                msg_type = type(msg).__name__
+                if msg_type in ("AIMessage", "AIMessageChunk"):
+                    content = getattr(msg, "content", "")
+                    output_excerpt = content[:500] if content else ""
+                    break
             for agent_spec in self._config.agents:
                 role = agent_spec.role if agent_spec.role else agent_spec.agent_id
                 input_state = {
                     "messages": messages,
                     "objective": agent_spec.objective if agent_spec.objective else "",
                 }
-                # Known limitation: the reload invoke returns a flat message list,
-                # not per-agent results, so all agents share the same output_excerpt
-                # (the last AIMessage in the reloaded state).  This differs from
-                # _run_pre_execution which has per-agent agent_result.output.
-                output_excerpt = ""
-                for msg in reversed(messages):
-                    msg_type = type(msg).__name__
-                    if msg_type in ("AIMessage", "AIMessageChunk"):
-                        content = getattr(msg, "content", "")
-                        output_excerpt = content[:500] if content else ""
-                        break
                 output_state = {
                     "messages": messages,
                     "output": output_excerpt,
@@ -442,7 +442,9 @@ class AttackInjector:
             except Exception as exc:  # pylint: disable=broad-except
                 LOGGER.warning(
                     "AttackInjector: could not create configured checkpointer "
-                    "(%s: %s); falling back to MemorySaver",
+                    "(%s: %s); falling back to MemorySaver.  Note: persistence "
+                    "attacks require a real backend — MemorySaver will be "
+                    "rejected by _run_checkpoint_execution.",
                     type(exc).__name__,
                     exc,
                 )
