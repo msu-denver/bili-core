@@ -209,7 +209,7 @@ def _provider_family(model_id: str | None) -> str:
         return "amazon_bedrock"
     if model_id.startswith("gemini-"):
         return "google_vertex"
-    if model_id.startswith(("gpt-", "o1", "o3", "o4")):
+    if model_id.startswith(("gpt-", "o1-", "o3-", "o4-")):
         return "openai"
     if model_id.startswith("claude-"):
         return "anthropic_direct"
