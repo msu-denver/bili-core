@@ -1,6 +1,6 @@
 """Standalone memory poisoning test suite runner for AETHER.
 
-Runs all 10 memory poisoning payloads against the 5 content-moderation MAS
+Runs all 15 memory poisoning payloads against the 5 content-moderation MAS
 configs across both injection phases (pre_execution, mid_execution), applies
 all three detection tiers, and writes:
 

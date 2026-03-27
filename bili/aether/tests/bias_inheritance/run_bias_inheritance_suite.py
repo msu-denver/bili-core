@@ -1,6 +1,6 @@
 """Standalone bias inheritance test suite runner for AETHER.
 
-Runs all 10 bias inheritance payloads against the 5 content-moderation MAS
+Runs all 15 bias inheritance payloads against the 5 content-moderation MAS
 configs across both injection phases (pre_execution, mid_execution), applies
 all three detection tiers, and writes:
 
