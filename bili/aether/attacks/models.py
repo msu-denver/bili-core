@@ -19,6 +19,7 @@ class InjectionPhase(str, Enum):  # pylint: disable=too-few-public-methods
 
     PRE_EXECUTION = "pre_execution"
     MID_EXECUTION = "mid_execution"
+    CHECKPOINT = "checkpoint_injection"
 
 
 class AttackType(str, Enum):  # pylint: disable=too-few-public-methods
@@ -29,6 +30,7 @@ class AttackType(str, Enum):  # pylint: disable=too-few-public-methods
     AGENT_IMPERSONATION = "agent_impersonation"
     BIAS_INHERITANCE = "bias_inheritance"
     JAILBREAK = "jailbreak"
+    PERSISTENCE = "persistence"
 
 
 class AgentObservation(BaseModel):  # pylint: disable=too-few-public-methods
