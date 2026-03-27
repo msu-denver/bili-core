@@ -49,6 +49,10 @@ _REPO_ROOT = _find_repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from bili.aether.tests._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
+    model_id_safe as _model_id_safe,
+)
+
 _RESULTS_DIR = Path(__file__).parent / "results"
 
 
@@ -81,13 +85,4 @@ def log_dir(cross_model_result: dict) -> Path:
     """
     mas_id = cross_model_result["mas_id"]
     model_id = cross_model_result.get("model_id")
-    if model_id:
-        model_safe = (
-            model_id.replace(":", "_")
-            .replace("/", "_")
-            .replace(".", "_")
-            .replace("-", "_")
-        )
-    else:
-        model_safe = "stub"
-    return _RESULTS_DIR / mas_id / model_safe
+    return _RESULTS_DIR / mas_id / _model_id_safe(model_id)

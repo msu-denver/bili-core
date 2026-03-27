@@ -1,6 +1,6 @@
 """Shared utilities and constants for AETHER test runners.
 
-Centralises the three helper functions that were previously copy-pasted
+Centralises the helper functions that were previously copy-pasted
 across ``run_baseline.py`` and ``run_injection_suite.py``:
 
 - :func:`find_repo_root` — locates the repository root by walking up until
@@ -9,6 +9,8 @@ across ``run_baseline.py`` and ``run_injection_suite.py``:
   file for reproducibility anchoring.
 - :func:`config_fingerprint` — builds the full reproducibility dict embedded
   in every result JSON.
+- :func:`model_id_safe` — converts a model_id string to a filesystem-safe
+  directory name (used by the cross-model suite and its pytest fixtures).
 
 All functions take explicit parameters (no hidden module-level state) so
 they can be called from any runner regardless of working directory.
@@ -101,3 +103,26 @@ def config_fingerprint(config, yaml_path: str, repo_root: Path) -> dict:
         "model_name": ",".join(model_names),
         "temperature": temps,
     }
+
+
+def model_id_safe(model_id: str | None) -> str:
+    """Convert a model_id to a filesystem-safe directory name.
+
+    Replaces characters that are illegal or awkward in directory names
+    (``:`` ``.`` ``/`` ``-``) with underscores.  Returns ``"stub"`` when
+    *model_id* is ``None`` (stub-mode runs).
+
+    Args:
+        model_id: Provider model identifier (e.g.
+            ``"us.anthropic.claude-3-5-haiku-20241022-v1:0"``), or ``None``
+            for stub runs.
+
+    Returns:
+        A lowercase alphanumeric-and-underscore string safe for use as a
+        filesystem directory component.
+    """
+    if model_id is None:
+        return "stub"
+    return (
+        model_id.replace(":", "_").replace("/", "_").replace(".", "_").replace("-", "_")
+    )

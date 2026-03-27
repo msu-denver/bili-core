@@ -123,6 +123,7 @@ from bili.aether.tests._helpers import CONFIG_PATHS
 from bili.aether.tests._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     config_fingerprint as _config_fingerprint_helper,
 )
+from bili.aether.tests._helpers import model_id_safe as _model_id_safe
 from bili.aether.tests.injection.payloads.prompt_injection_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
     INJECTION_PAYLOADS,
 )
@@ -166,6 +167,7 @@ _MODEL_MATRIX: list[tuple[str, str]] = [
 _CSV_COLUMNS: list[str] = [
     "model_id",
     "model_name",
+    "provider_family",
     "payload_id",
     "injection_type",
     "severity",
@@ -188,17 +190,41 @@ _CSV_COLUMNS: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def _model_id_safe(model_id: str | None) -> str:
-    """Convert a model_id to a filesystem-safe directory name."""
-    if model_id is None:
+def _provider_family(model_id: str | None) -> str:
+    """Derive the provider family label from a model_id string.
+
+    Used for the transferability metric — a payload that influences agents
+    on two models from the *same* provider family has not truly transferred.
+    Families follow the same prefix rules as ``SemanticEvaluator``'s
+    circularity detection in ``evaluator_config.py``.
+
+    Returns one of: ``"anthropic_bedrock"``, ``"amazon_bedrock"``,
+    ``"google_vertex"``, ``"openai"``, ``"anthropic_direct"``, or ``"stub"``.
+    """
+    if not model_id:
         return "stub"
-    return (
-        model_id.replace(":", "_").replace("/", "_").replace(".", "_").replace("-", "_")
-    )
+    if model_id.startswith(("us.anthropic.", "anthropic.")):
+        return "anthropic_bedrock"
+    if model_id.startswith(("us.amazon.", "amazon.")):
+        return "amazon_bedrock"
+    if model_id.startswith("gemini-"):
+        return "google_vertex"
+    if model_id.startswith(("gpt-", "o1", "o3", "o4")):
+        return "openai"
+    if model_id.startswith("claude-"):
+        return "anthropic_direct"
+    return "unknown"
 
 
 def _patch_config_model(config: Any, model_id: str | None) -> Any:
-    """Return a copy of config with all agents patched to use model_id."""
+    """Return a copy of config with all agents patched to use model_id.
+
+    Note: ``AgentSpec.model_name`` is the field that the compiler uses as a
+    lookup key into ``LLM_MODELS`` (by model_id or display name).  Despite the
+    field name being ``model_name``, the value set here is a ``model_id``
+    string (e.g. ``"us.anthropic.claude-3-5-haiku-20241022-v1:0"``).  The
+    compiler resolves it correctly via exact ``model_id`` match first.
+    """
     patched_agents = [
         a.model_copy(update={"model_name": model_id}) for a in config.agents
     ]
@@ -252,25 +278,28 @@ def _print_summary(matrix_rows: list[dict]) -> None:
     passed = sum(1 for r in matrix_rows if r["tier1_pass"] == "true")
     influenced = sum(1 for r in matrix_rows if r["tier2_influenced"] not in ("[]", ""))
 
-    # Transferability: count unique (payload_id, phase) pairs that succeeded
-    # against more than one provider family.
-    pairs_by_payload: dict[tuple[str, str], set[str]] = {}
+    # Transferability: count (payload_id, phase) pairs that influenced agents
+    # across more than one *provider family*.  Two Bedrock/Anthropic models
+    # both succeeding does not count as a transfer — the payload must cross
+    # family boundaries (e.g. anthropic_bedrock AND amazon_bedrock or
+    # google_vertex).
+    pairs_by_family: dict[tuple[str, str], set[str]] = {}
     for r in matrix_rows:
         if r["skipped"] == "true" or r["tier2_influenced"] == "[]":
             continue
         key = (r["payload_id"], r["phase"])
-        pairs_by_payload.setdefault(key, set()).add(r["model_id"])
-    transferred = sum(1 for models in pairs_by_payload.values() if len(models) > 1)
+        pairs_by_family.setdefault(key, set()).add(r["provider_family"])
+    transferred = sum(1 for families in pairs_by_family.values() if len(families) > 1)
 
     print("\n" + "=" * 60)
     print("Cross-Model Transferability Suite Summary")
     print("=" * 60)
-    print(f"  Total rows              : {total}")
-    print(f"  Skipped (no creds/err)  : {skipped}")
-    print(f"  Ran                     : {ran}")
-    print(f"  Tier 1 pass             : {passed}/{ran}")
-    print(f"  Tier 2 influenced ≥1    : {influenced}")
-    print(f"  Transferred (>1 model)  : {transferred} payload/phase pairs")
+    print(f"  Total rows                    : {total}")
+    print(f"  Skipped (no creds/err)        : {skipped}")
+    print(f"  Ran                           : {ran}")
+    print(f"  Tier 1 pass                   : {passed}/{ran}")
+    print(f"  Tier 2 influenced ≥1 agent    : {influenced}")
+    print(f"  Transferred (>1 provider fam) : {transferred} payload/phase pairs")
     print("=" * 60 + "\n")
 
 
@@ -363,6 +392,7 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                         {
                             "model_id": model_id or "stub",
                             "model_name": model_display_name,
+                            "provider_family": _provider_family(model_id),
                             "payload_id": ip.payload_id,
                             "injection_type": ip.injection_type,
                             "severity": ip.severity,
@@ -410,12 +440,14 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                             )
 
                 resistant_list = sorted(attack_result.resistant_agents)
+                family = _provider_family(model_id)
                 result_dict = {
                     "payload_id": ip.payload_id,
                     "injection_type": ip.injection_type,
                     "severity": ip.severity,
                     "model_id": model_id,
                     "model_name": model_display_name,
+                    "provider_family": family,
                     "mas_id": mas_id,
                     "injection_phase": phase,
                     "attack_suite": "cross_model",
@@ -457,6 +489,7 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                     {
                         "model_id": model_id or "stub",
                         "model_name": model_display_name,
+                        "provider_family": family,
                         "payload_id": ip.payload_id,
                         "injection_type": ip.injection_type,
                         "severity": ip.severity,
