@@ -669,9 +669,11 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
                 if "chat_uploaded_configs" not in st.session_state:
                     st.session_state.chat_uploaded_configs = {}
                 st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
-                st.success(f"Uploaded: {uploaded.name}")
                 # Auto-activate the uploaded config so the stub indicator (and
                 # model picker) appear immediately without a manual dropdown pick.
+                # Use st.toast (not st.success) — st.rerun() discards widgets
+                # rendered in the current cycle, so st.success would be invisible.
+                st.toast(f"Uploaded: {uploaded.name}", icon="✅")
                 st.session_state.chat_autoload_name = uploaded.name
                 st.rerun()
         except Exception as exc:  # pylint: disable=broad-exception-caught
