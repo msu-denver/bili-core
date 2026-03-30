@@ -254,23 +254,24 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
     visible.sort(key=lambda r: (cat_rank.get(r["prompt_category"], 99), r["prompt_id"]))
 
     for r in visible:
-        status_icon = "✅" if r["execution"]["success"] else "❌"
-        cat_icon = _CATEGORY_ICON.get(r["prompt_category"], "⚪")
+        execution = r.get("execution", {})
+        run_metadata = r.get("run_metadata", {})
+        status_icon = "✅" if execution.get("success") else "❌"
+        cat_icon = _CATEGORY_ICON.get(r.get("prompt_category", ""), "⚪")
+        duration = execution.get("duration_ms", 0.0)
         label = (
             f"{status_icon} {cat_icon} "
-            f"`{r['prompt_id']}` — `{r['mas_id']}` "
-            f"({r['execution']['duration_ms']:.0f} ms)"
+            f"`{r.get('prompt_id', '?')}` — `{r.get('mas_id', '?')}` "
+            f"({duration:.0f} ms)"
         )
         with st.expander(label, expanded=False):
-            st.markdown(f"**Prompt:** {r['prompt_text']}")
+            st.markdown(f"**Prompt:** {r.get('prompt_text', '(no prompt text)')}")
 
             c1, c2, c3 = st.columns(3)
-            c1.markdown(f"**Category:** `{r['prompt_category']}`")
-            c2.markdown(
-                f"**Stub:** {'Yes' if r['run_metadata']['stub_mode'] else 'No'}"
-            )
-            c3.markdown(f"**Agents:** {r['execution']['agent_count']}")
-            st.caption(f"Run at {r['run_metadata']['timestamp']}")
+            c1.markdown(f"**Category:** `{r.get('prompt_category', '?')}`")
+            c2.markdown(f"**Stub:** {'Yes' if run_metadata.get('stub_mode') else 'No'}")
+            c3.markdown(f"**Agents:** {execution.get('agent_count', '?')}")
+            st.caption(f"Run at {run_metadata.get('timestamp', 'unknown')}")
 
             agent_outputs = r.get("agent_outputs", {})
             if agent_outputs:
