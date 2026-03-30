@@ -59,7 +59,6 @@ def apply_agent_overrides(config: MASConfig) -> MASConfig:
     return config.model_copy(update={"agents": patched_agents})
 
 
-@st.cache_data
 def _get_tool_names() -> list[str]:
     """Return sorted list of registered tool names."""
     from bili.loaders.tools_loader import (  # pylint: disable=import-outside-toplevel
