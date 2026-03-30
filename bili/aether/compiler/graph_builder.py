@@ -305,6 +305,15 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
             _mas_obj = self._config.objective
 
             def _inject_mas_objective(state: dict) -> dict:
+                # Idempotent: skip if this objective is already the first message,
+                # which happens on multi-turn runs with checkpointing enabled.
+                msgs = state.get("messages", [])
+                if (
+                    msgs
+                    and isinstance(msgs[0], SystemMessage)
+                    and msgs[0].content == _mas_obj
+                ):
+                    return {}
                 return {"messages": [SystemMessage(content=_mas_obj)]}
 
             self._graph.add_node("__mas_objective__", _inject_mas_objective)

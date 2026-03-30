@@ -264,7 +264,10 @@ def _render_agent_properties(agent: AgentSpec, mas_id: str) -> None:
         height=100,
         help="Override this agent's objective for this session.",
     )
-    bucket["objective"] = obj_val
+    if obj_val:
+        bucket["objective"] = obj_val
+    else:
+        bucket.pop("objective", None)
 
     _render_model_selector(agent, mas_id)
 
@@ -293,20 +296,27 @@ def _render_agent_properties(agent: AgentSpec, mas_id: str) -> None:
         key=f"temp_{mas_id}_{agent.agent_id}",
         label_visibility="collapsed",
     )
-    bucket["temperature"] = temp_val
+    if temp_val != default_temp:
+        bucket["temperature"] = temp_val
+    else:
+        bucket.pop("temperature", None)
 
     st.markdown("**Max Tokens**")
+    default_max_tokens = agent.max_tokens or 1024
     max_tokens_val = st.number_input(
         "max_tokens",
         min_value=1,
         max_value=32768,
-        value=int(bucket.get("max_tokens", agent.max_tokens or 1024)),
+        value=int(bucket.get("max_tokens", default_max_tokens)),
         step=256,
         key=f"max_tokens_{mas_id}_{agent.agent_id}",
         label_visibility="collapsed",
         help="Maximum tokens the agent may generate per turn.",
     )
-    bucket["max_tokens"] = int(max_tokens_val)
+    if int(max_tokens_val) != default_max_tokens:
+        bucket["max_tokens"] = int(max_tokens_val)
+    else:
+        bucket.pop("max_tokens", None)
 
     st.markdown("**Tools**")
     yaml_tools = agent.tools or []
