@@ -36,8 +36,13 @@ _CATEGORY_ORDER = ["benign", "edge_case", "violating"]
 # ---------------------------------------------------------------------------
 
 
+@st.cache_data(ttl=30)
 def _load_baseline_results() -> list[dict]:
-    """Return all parsed JSON result dicts from the baseline results directory."""
+    """Return all parsed JSON result dicts from the baseline results directory.
+
+    Cached with a 30-second TTL so new result files appear promptly without
+    re-reading disk on every filter interaction or expander toggle.
+    """
     results: list[dict] = []
     for path in sorted(BASELINE_RESULTS_DIR.glob("**/*.json")):
         try:
@@ -48,21 +53,33 @@ def _load_baseline_results() -> list[dict]:
 
 
 def _build_dataframe(results: list[dict]) -> pd.DataFrame:
-    """Flatten result dicts into a tidy DataFrame."""
+    """Flatten result dicts into a tidy DataFrame.
+
+    Rows with missing or unexpected keys are skipped with a warning so a
+    single malformed file cannot crash the page.
+    """
     rows = []
     for r in results:
-        rows.append(
-            {
-                "mas_id": r["mas_id"],
-                "prompt_id": r["prompt_id"],
-                "category": r["prompt_category"],
-                "success": r["execution"]["success"],
-                "duration_ms": r["execution"]["duration_ms"],
-                "agent_count": r["execution"]["agent_count"],
-                "stub_mode": r["run_metadata"]["stub_mode"],
-                "timestamp": r["run_metadata"]["timestamp"],
-            }
-        )
+        try:
+            rows.append(
+                {
+                    "mas_id": r["mas_id"],
+                    "prompt_id": r["prompt_id"],
+                    "category": r["prompt_category"],
+                    "success": r["execution"]["success"],
+                    "duration_ms": r["execution"]["duration_ms"],
+                    "agent_count": r["execution"]["agent_count"],
+                    "stub_mode": r["run_metadata"]["stub_mode"],
+                    "timestamp": r["run_metadata"]["timestamp"],
+                }
+            )
+        except (KeyError, TypeError) as exc:
+            LOGGER.warning(
+                "Skipping malformed result (mas_id=%s, prompt_id=%s): %s",
+                r.get("mas_id", "?"),
+                r.get("prompt_id", "?"),
+                exc,
+            )
     return pd.DataFrame(rows)
 
 
@@ -148,7 +165,7 @@ def _render_summary_metrics(df: pd.DataFrame) -> None:
     cols[1].metric("Prompts", df["prompt_id"].nunique())
     cols[2].metric("Total Runs", total)
     cols[3].metric("Passed", passed)
-    cols[4].metric("Success Rate", f"{passed / total * 100:.0f}%")
+    cols[4].metric("Success Rate", f"{passed / total * 100:.0f}%" if total else "N/A")
 
 
 def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
@@ -162,10 +179,15 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
             key="baseline_filter_configs",
         )
     with col2:
+        # Respect _CATEGORY_ORDER so options always appear benign → edge_case → violating
+        present = set(df["category"].unique())
+        ordered_cats = [c for c in _CATEGORY_ORDER if c in present] + sorted(
+            present - set(_CATEGORY_ORDER)
+        )
         categories = st.multiselect(
             "Category",
-            options=sorted(df["category"].unique()),
-            default=sorted(df["category"].unique()),
+            options=ordered_cats,
+            default=ordered_cats,
             key="baseline_filter_categories",
         )
     with col3:
@@ -194,11 +216,13 @@ def _render_matrix(df: pd.DataFrame) -> None:
         st.info("No results match the current filters.")
         return
 
+    # aggfunc="last" shows the most recent run when duplicates exist (results
+    # are sorted by filename, which is chronological for the baseline runner).
     pivot = df.pivot_table(
         index="prompt_id",
         columns="mas_id",
         values="success",
-        aggfunc="first",
+        aggfunc="last",
     )
 
     display = pivot.map(lambda v: "✓" if v is True else ("✗" if v is False else "—"))
