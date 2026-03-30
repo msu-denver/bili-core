@@ -293,6 +293,24 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
         for agent_id, node_fn in self._agent_nodes.items():
             self._graph.add_node(agent_id, node_fn)
 
+        # 4b. If a MAS-level objective is configured, wire a lightweight entry
+        # node that prepends it as a SystemMessage before the first agent runs.
+        # Replacing self._start_node causes all _build_* workflow methods to
+        # route through this node transparently.
+        if self._config.objective:
+            from langchain_core.messages import (  # pylint: disable=import-outside-toplevel,import-error
+                SystemMessage,
+            )
+
+            _mas_obj = self._config.objective
+
+            def _inject_mas_objective(state: dict) -> dict:
+                return {"messages": [SystemMessage(content=_mas_obj)]}
+
+            self._graph.add_node("__mas_objective__", _inject_mas_objective)
+            self._graph.add_edge(self._start_node, "__mas_objective__")
+            self._start_node = "__mas_objective__"
+
         # 5. Build workflow-specific edges
         builder = self._get_workflow_builder()
         builder()
