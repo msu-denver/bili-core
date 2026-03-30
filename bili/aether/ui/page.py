@@ -269,6 +269,9 @@ def _load_config(yaml_path: Path) -> None:
                 or k.startswith("selected_node_")
                 or k.startswith("max_tokens_")
                 or k.startswith("tools_")
+                or k.startswith("obj_")
+                or k.startswith("sp_")
+                or k.startswith("temp_")
             ]
             for k in keys_to_clear:
                 del st.session_state[k]
