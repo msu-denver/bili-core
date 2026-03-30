@@ -82,9 +82,10 @@ def _render_sidebar() -> str:
         label_visibility="collapsed",
         horizontal=True,
     )
-    st.markdown("---")
 
     page: str = st.session_state.get("aether_page", _DEFAULT_PAGE)
+
+    st.markdown("---")
     if page == "Chat":
         render_chat_sidebar_content(examples_dir=EXAMPLES_DIR)
     else:
@@ -266,6 +267,8 @@ def _load_config(yaml_path: Path) -> None:
                 or k.startswith("agent_overrides_")
                 or k.startswith("model_select_")
                 or k.startswith("selected_node_")
+                or k.startswith("max_tokens_")
+                or k.startswith("tools_")
             ]
             for k in keys_to_clear:
                 del st.session_state[k]
@@ -275,6 +278,13 @@ def _load_config(yaml_path: Path) -> None:
             return
 
     # Show summary in sidebar
+    st.markdown("---")
+    st.button(
+        "Send to Chat \u2192",
+        disabled=st.session_state.get("mas_config") is None,
+        use_container_width=True,
+        on_click=_on_send_to_chat,
+    )
     st.markdown("---")
     st.markdown(f"**MAS ID:** `{config.mas_id}`")
     st.markdown(f"**Version:** {config.version}")
@@ -286,14 +296,6 @@ def _load_config(yaml_path: Path) -> None:
         st.markdown(f"**Consensus:** {config.consensus_threshold}")
     if config.human_in_loop:
         st.warning("Human-in-loop enabled")
-
-    st.markdown("---")
-    st.button(
-        "Send to Chat \u2192",
-        disabled=st.session_state.get("mas_config") is None,
-        use_container_width=True,
-        on_click=_on_send_to_chat,
-    )
 
 
 def _render_legend() -> None:

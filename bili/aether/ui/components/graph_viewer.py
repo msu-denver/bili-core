@@ -51,8 +51,22 @@ def apply_agent_overrides(config: MASConfig) -> MASConfig:
             patch["objective"] = agent_override["objective"]
         if "temperature" in agent_override:
             patch["temperature"] = agent_override["temperature"]
+        if "max_tokens" in agent_override:
+            patch["max_tokens"] = agent_override["max_tokens"]
+        if "tools" in agent_override:
+            patch["tools"] = agent_override["tools"]
         patched_agents.append(agent.model_copy(update=patch) if patch else agent)
     return config.model_copy(update={"agents": patched_agents})
+
+
+@st.cache_data
+def _get_tool_names() -> list[str]:
+    """Return sorted list of registered tool names."""
+    from bili.loaders.tools_loader import (  # pylint: disable=import-outside-toplevel
+        TOOL_REGISTRY,
+    )
+
+    return sorted(TOOL_REGISTRY.keys())
 
 
 @st.cache_data
@@ -145,9 +159,6 @@ def render_graph_viewer(
         st.session_state[overrides_key] = {}
 
     with props_col:
-        _render_properties_panel(config, selected_id, edges, config.mas_id)
-
-        st.markdown("---")
         patched = apply_agent_overrides(config)
         st.download_button(
             "Download YAML",
@@ -161,6 +172,8 @@ def render_graph_viewer(
             mime="text/yaml",
             use_container_width=True,
         )
+        st.markdown("---")
+        _render_properties_panel(config, selected_id, edges, config.mas_id)
 
 
 def _render_properties_panel(
@@ -282,14 +295,43 @@ def _render_agent_properties(agent: AgentSpec, mas_id: str) -> None:
     )
     bucket["temperature"] = temp_val
 
-    if agent.max_tokens:
-        st.markdown(f"**Max Tokens:** {agent.max_tokens}")
+    st.markdown("**Max Tokens**")
+    max_tokens_val = st.number_input(
+        "max_tokens",
+        min_value=1,
+        max_value=32768,
+        value=int(bucket.get("max_tokens", agent.max_tokens or 1024)),
+        step=256,
+        key=f"max_tokens_{mas_id}_{agent.agent_id}",
+        label_visibility="collapsed",
+        help="Maximum tokens the agent may generate per turn.",
+    )
+    bucket["max_tokens"] = int(max_tokens_val)
+
+    st.markdown("**Tools**")
+    yaml_tools = agent.tools or []
+    if yaml_tools:
+        for tool in yaml_tools:
+            st.markdown(f"- `{tool}`")
+    else:
+        st.caption("None configured in YAML")
+    available_tools = _get_tool_names()
+    if available_tools:
+        current_tools = bucket.get("tools", yaml_tools)
+        selected_tools = st.multiselect(
+            "Override tools",
+            options=available_tools,
+            default=[t for t in current_tools if t in available_tools],
+            key=f"tools_{mas_id}_{agent.agent_id}",
+            help="Override the tool set for this session.",
+        )
+        if selected_tools != yaml_tools:
+            bucket["tools"] = selected_tools
+        else:
+            bucket.pop("tools", None)
 
     if agent.capabilities:
         _render_list_section("Capabilities", agent.capabilities)
-
-    if agent.tools:
-        _render_list_section("Tools", agent.tools)
 
     st.markdown(f"**Output:** {agent.output_format.value}")
 
