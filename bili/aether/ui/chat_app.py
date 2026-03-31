@@ -1182,6 +1182,7 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
     cfg: Optional[MASConfig] = st.session_state.get("chat_config")
     role_map = _build_role_map(cfg) if cfg else {}
     with st.chat_message("user", avatar="👤"):
+        st.caption("Input →")
         st.markdown(turn["content"])
     with st.chat_message("assistant", avatar="🤖"):
         if "error" in turn:
@@ -1356,6 +1357,7 @@ def _run_turn(user_input: str) -> None:
     }
 
     with st.chat_message("user", avatar="👤"):
+        st.caption("Input →")
         st.markdown(user_input)
 
     all_nodes = [a.agent_id for a in config.agents]
