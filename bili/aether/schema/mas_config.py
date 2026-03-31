@@ -126,6 +126,15 @@ class MASConfig(BaseModel):
         "", description="Detailed MAS description", max_length=2000
     )
 
+    objective: Optional[str] = Field(
+        None,
+        description=(
+            "MAS-level objective prepended as a SystemMessage at graph entry. "
+            "Applies to the entire run before any agent executes."
+        ),
+        max_length=2000,
+    )
+
     version: str = Field("1.0.0", description="MAS configuration version")
 
     # =========================================================================
