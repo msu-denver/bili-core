@@ -49,6 +49,9 @@ _STRATEGY_MAP = {
     AttackType.AGENT_IMPERSONATION: "inject_agent_impersonation",
     AttackType.BIAS_INHERITANCE: "inject_bias_inheritance",
     AttackType.JAILBREAK: "inject_prompt_injection",
+    # AttackType.PERSISTENCE is intentionally absent: it uses checkpoint-phase
+    # execution (_run_checkpoint_execution / strategies/persistence.py) and is
+    # never dispatched through _run_pre_execution / getattr(pre_execution, ...).
 }
 
 
@@ -203,6 +206,10 @@ class AttackInjector:
                 run_id = self._run_pre_execution(
                     agent_id, attack_type, payload, tracker
                 )
+            elif phase == InjectionPhase.CHECKPOINT:
+                run_id = self._run_checkpoint_execution(
+                    agent_id, attack_type, payload, tracker
+                )
             else:
                 self._run_mid_execution(agent_id, attack_type, payload, tracker)
             completed_at = datetime.datetime.now(datetime.timezone.utc)
@@ -223,7 +230,7 @@ class AttackInjector:
             completed_at=completed_at,
             propagation_path=tracker.propagation_path() if tracker else [],
             influenced_agents=tracker.influenced_agents() if tracker else [],
-            resistant_agents=tracker.resistant_agents() if tracker else set(),
+            resistant_agents=tracker.resistant_agents() if tracker else [],
             success=error is None,
             error=error,
         )
@@ -264,6 +271,12 @@ class AttackInjector:
             MASExecutor,
         )
 
+        if attack_type == AttackType.PERSISTENCE:
+            raise ValueError(
+                "AttackType.PERSISTENCE must use InjectionPhase.CHECKPOINT "
+                "and is dispatched via _run_checkpoint_execution, not "
+                "_run_pre_execution.  Check the injection_phase argument."
+            )
         strategy_fn_name = _STRATEGY_MAP[attack_type]
         strategy_fn = getattr(pre_execution, strategy_fn_name)
         patched_config = strategy_fn(self._config, agent_id, payload)
@@ -293,6 +306,153 @@ class AttackInjector:
                 )
 
         return mas_result.run_id
+
+    def _run_checkpoint_execution(  # pylint: disable=too-many-locals
+        self,
+        agent_id: str,
+        attack_type: AttackType,
+        payload: str,
+        tracker: Optional[PropagationTracker],
+    ) -> Optional[str]:
+        """Inject a poisoned message via the checkpointer and re-run the MAS.
+
+        Execution flow:
+
+        1. Compile the graph with a checkpointer.  The checkpointer is created
+           from ``self._config.checkpoint_config`` via the checkpointer factory;
+           if the factory is unavailable, ``MemorySaver`` is used as a fallback
+           (suitable for in-process simulation but not true cross-session persistence).
+        2. Run the graph once under a fresh ``thread_id`` to establish an initial
+           checkpoint state.
+        3. Inject the poisoned ``HumanMessage`` via
+           ``compiled_graph.update_state()`` — which internally calls the
+           checkpointer's ``put()`` API — bypassing normal agent input validation.
+        4. Simulate session teardown by recompiling the graph from the same
+           ``MASConfig`` while retaining the same checkpointer instance.
+        5. Invoke the recompiled graph under the same ``thread_id``.  The
+           checkpointer loads the poisoned state, making it appear as legitimate
+           prior-session context to all agents.
+        6. Observe each agent's output via ``PropagationTracker``.
+
+        Returns:
+            The ``thread_id`` used as a surrogate ``run_id`` for log correlation.
+
+        Raises:
+            RuntimeError: If the checkpointer cannot be created.
+        """
+        from bili.aether.attacks.strategies import (
+            persistence as checkpoint_strategy,  # pylint: disable=import-outside-toplevel
+        )
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            compile_mas,
+        )
+
+        # Create checkpointer — try factory first, fall back to MemorySaver.
+        checkpointer = self._create_checkpointer()
+
+        thread_id = str(uuid.uuid4())
+        invoke_config = {"configurable": {"thread_id": thread_id}}
+
+        # Guard: refuse to run if the resolved checkpointer is MemorySaver.
+        # MemorySaver is in-process only and does not demonstrate cross-session
+        # persistence.  The persistence suite runner should have already skipped
+        # this config, but this guard catches direct API calls.
+        from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+            MemorySaver,
+        )
+
+        if isinstance(checkpointer, MemorySaver):
+            raise RuntimeError(
+                "inject_persistence: resolved checkpointer is MemorySaver, which is "
+                "in-process only and does not survive session teardown. "
+                "Configure a postgres or mongo checkpointer to run persistence attacks."
+            )
+
+        # Phase 1: initial run to establish checkpoint state.
+        compiled_mas = compile_mas(self._config)
+        compiled_graph = compiled_mas.compile_graph(checkpointer=checkpointer)
+        compiled_graph.invoke({"messages": []}, config=invoke_config)
+
+        # Phase 2: inject via checkpointer's put() API.
+        checkpoint_strategy.inject_persistence(compiled_graph, thread_id, payload)
+
+        # Phase 3: session teardown simulation — recompile with the same
+        # checkpointer instance so the poisoned state is loaded on next invoke.
+        compiled_mas_2 = compile_mas(self._config)
+        compiled_graph_2 = compiled_mas_2.compile_graph(checkpointer=checkpointer)
+
+        # Phase 4: re-invoke; agents receive the poisoned message as prior context.
+        result_state = compiled_graph_2.invoke({"messages": []}, config=invoke_config)
+
+        # Phase 5: observe each agent.
+        if tracker is not None:
+            messages = result_state.get("messages", []) if result_state else []
+            # Known limitation: the reload invoke returns a flat message list,
+            # not per-agent results, so all agents share the same output_excerpt
+            # (the last AIMessage in the reloaded state).  This differs from
+            # _run_pre_execution which has per-agent agent_result.output.
+            output_excerpt = ""
+            for msg in reversed(messages):
+                msg_type = type(msg).__name__
+                if msg_type in ("AIMessage", "AIMessageChunk"):
+                    content = getattr(msg, "content", "")
+                    output_excerpt = content[:500] if content else ""
+                    break
+            for agent_spec in self._config.agents:
+                role = agent_spec.role if agent_spec.role else agent_spec.agent_id
+                input_state = {
+                    "messages": messages,
+                    "objective": agent_spec.objective if agent_spec.objective else "",
+                }
+                output_state = {
+                    "messages": messages,
+                    "output": output_excerpt,
+                }
+                tracker.observe(
+                    agent_id=agent_spec.agent_id,
+                    role=role,
+                    input_state=input_state,
+                    output_state=output_state,
+                    attack_type=attack_type.value,
+                )
+
+        return thread_id
+
+    def _create_checkpointer(self) -> object:
+        """Create a checkpointer from config, falling back to MemorySaver.
+
+        Returns:
+            A LangGraph checkpointer instance.
+        """
+        checkpoint_type = (self._config.checkpoint_config or {}).get("type", "memory")
+        if self._config.checkpoint_enabled and checkpoint_type not in (
+            "memory",
+            "auto",
+        ):
+            try:
+                # pylint: disable=import-outside-toplevel
+                from bili.aether.integration.checkpointer_factory import (
+                    create_checkpointer_from_config,
+                )
+
+                # pylint: enable=import-outside-toplevel
+                return create_checkpointer_from_config(
+                    self._config.checkpoint_config, user_id=None
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                LOGGER.warning(
+                    "AttackInjector: could not create configured checkpointer "
+                    "(%s: %s); falling back to MemorySaver.  Note: persistence "
+                    "attacks require a real backend — MemorySaver will be "
+                    "rejected by _run_checkpoint_execution.",
+                    type(exc).__name__,
+                    exc,
+                )
+        from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+            MemorySaver,
+        )
+
+        return MemorySaver()
 
     def _run_mid_execution(
         self,
