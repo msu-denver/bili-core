@@ -31,6 +31,7 @@ logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
 import streamlit as st
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from bili.aether.compiler import compile_mas
 from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import AgentSpec, MASConfig, WorkflowType
@@ -662,10 +663,19 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
                 st.error("Invalid config: YAML must be a mapping at the top level.")
             else:
                 upload_config = load_mas_from_dict(raw)
+                # Graph-level validation: catches circular edges, missing
+                # entry_point, and other structural issues beyond Pydantic parsing.
+                compile_mas(upload_config)
                 if "chat_uploaded_configs" not in st.session_state:
                     st.session_state.chat_uploaded_configs = {}
                 st.session_state.chat_uploaded_configs[uploaded.name] = upload_config
-                st.success(f"Uploaded: {uploaded.name}")
+                # Auto-activate the uploaded config so the stub indicator (and
+                # model picker) appear immediately without a manual dropdown pick.
+                # Use st.toast (not st.success) — st.rerun() discards widgets
+                # rendered in the current cycle, so st.success would be invisible.
+                st.toast(f"Uploaded: {uploaded.name}", icon="✅")
+                st.session_state.chat_autoload_name = uploaded.name
+                st.rerun()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             st.error(f"Invalid config: {exc}")
 
@@ -1172,6 +1182,7 @@ def _render_stored_turn(turn: Dict[str, Any]) -> None:
     cfg: Optional[MASConfig] = st.session_state.get("chat_config")
     role_map = _build_role_map(cfg) if cfg else {}
     with st.chat_message("user", avatar="👤"):
+        st.caption("Input →")
         st.markdown(turn["content"])
     with st.chat_message("assistant", avatar="🤖"):
         if "error" in turn:
@@ -1346,6 +1357,7 @@ def _run_turn(user_input: str) -> None:
     }
 
     with st.chat_message("user", avatar="👤"):
+        st.caption("Input →")
         st.markdown(user_input)
 
     all_nodes = [a.agent_id for a in config.agents]
