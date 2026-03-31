@@ -1,6 +1,6 @@
 """Standalone jailbreak test suite runner for AETHER.
 
-Runs all 10 jailbreak payloads against the 5 content-moderation MAS configs
+Runs all 15 jailbreak payloads against the 5 content-moderation MAS configs
 across both injection phases (pre_execution, mid_execution), applies all three
 detection tiers, and writes:
 

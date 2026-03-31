@@ -66,7 +66,7 @@ python bili/aether/tests/jailbreak/run_jailbreak_suite.py \
 |---|---|---|
 | `--stub` | off | Skip LLM calls; Tier 3 columns are empty strings |
 | `--configs YAML...` | all 5 configs | Override MAS config paths to run |
-| `--payloads ID...` | all 10 | Restrict to specific payload IDs |
+| `--payloads ID...` | all 15 | Restrict to specific payload IDs |
 | `--phases PHASE...` | both | `pre_execution` and/or `mid_execution` |
 | `--baseline-results DIR` | none | Baseline results directory for Tier 3 |
 | `--log-level LEVEL` | `WARNING` | Logging verbosity |

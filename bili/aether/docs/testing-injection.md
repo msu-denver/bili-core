@@ -223,7 +223,7 @@ bili/aether/tests/injection/
 ├── run_injection_suite.py               # standalone runner — produces results + CSV
 ├── test_injection_structural.py         # Tier 1 CI-safe assertions
 ├── payloads/
-│   └── prompt_injection_payloads.py     # 10 InjectionPayload dataclasses
+│   └── prompt_injection_payloads.py     # 15 InjectionPayload dataclasses
 └── results/                             # populated by the runner (gitignored)
     ├── {mas_id}/
     │   ├── {payload_id}_{phase}.json    # one result per test case

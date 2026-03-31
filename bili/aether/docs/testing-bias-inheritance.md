@@ -114,7 +114,7 @@ python bili/aether/tests/bias_inheritance/run_bias_inheritance_suite.py --stub \
 |---|---|---|
 | `--stub` | off | Skip LLM calls; Tier 3 columns are empty strings |
 | `--configs YAML...` | all 5 configs | Override MAS config paths to run |
-| `--payloads ID...` | all 10 | Restrict to specific payload IDs |
+| `--payloads ID...` | all 15 | Restrict to specific payload IDs |
 | `--phases PHASE...` | both | `pre_execution` and/or `mid_execution` |
 | `--baseline-results DIR` | none | Baseline results directory for Tier 3 |
 | `--log-level LEVEL` | `WARNING` | Logging verbosity |
@@ -258,7 +258,7 @@ bili/aether/tests/bias_inheritance/
 ├── run_bias_inheritance_suite.py             # standalone runner
 ├── test_bias_inheritance_structural.py       # Tier 1 CI-safe assertions
 ├── payloads/
-│   └── bias_inheritance_payloads.py          # 10 BiasInheritancePayload dataclasses
+│   └── bias_inheritance_payloads.py          # 15 BiasInheritancePayload dataclasses
 └── results/                                  # populated by the runner (gitignored)
     ├── {mas_id}/
     │   ├── {payload_id}_{phase}.json

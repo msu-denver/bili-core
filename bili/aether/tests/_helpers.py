@@ -124,5 +124,9 @@ def model_id_safe(model_id: str | None) -> str:
     if model_id is None:
         return "stub"
     return (
-        model_id.replace(":", "_").replace("/", "_").replace(".", "_").replace("-", "_")
+        model_id.replace(":", "_")
+        .replace("/", "_")
+        .replace(".", "_")
+        .replace("-", "_")
+        .lower()
     )
