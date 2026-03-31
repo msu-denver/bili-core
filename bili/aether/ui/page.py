@@ -36,8 +36,7 @@ from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
 )
 from bili.aether.ui.components.graph_viewer import (
-    MODEL_KEEP_SENTINEL,
-    build_model_options,
+    apply_agent_overrides,
     render_graph_viewer,
     render_metadata_bar,
 )
@@ -83,9 +82,10 @@ def _render_sidebar() -> str:
         label_visibility="collapsed",
         horizontal=True,
     )
-    st.markdown("---")
 
     page: str = st.session_state.get("aether_page", _DEFAULT_PAGE)
+
+    st.markdown("---")
     if page == "Chat":
         render_chat_sidebar_content(examples_dir=EXAMPLES_DIR)
     else:
@@ -231,7 +231,7 @@ def _render_visualizer_main() -> None:
 def _on_send_to_chat() -> None:
     """Button callback: push the current visualizer config to the Chat page.
 
-    Applies any model overrides selected in the Visualizer before sending.
+    Applies any agent overrides selected in the Visualizer before sending.
     Runs before the next render cycle so ``aether_page`` can be written
     safely without conflicting with the already-instantiated radio widget.
     """
@@ -239,22 +239,7 @@ def _on_send_to_chat() -> None:
     if config is None:
         return
 
-    # Apply model overrides from the Visualizer properties panel
-    overrides: dict = st.session_state.get(f"model_overrides_{config.mas_id}", {})
-    if overrides:
-        _, display_to_model_name, _ = build_model_options()
-        patched_agents = []
-        for agent in config.agents:
-            display = overrides.get(agent.agent_id)
-            patched = (
-                agent.model_copy(update={"model_name": display_to_model_name[display]})
-                if display
-                and display != MODEL_KEEP_SENTINEL
-                and display in display_to_model_name
-                else agent
-            )
-            patched_agents.append(patched)
-        config = config.model_copy(update={"agents": patched_agents})
+    config = apply_agent_overrides(config)
 
     name = st.session_state.get("current_yaml_path", "visualizer_config")
     if "chat_uploaded_configs" not in st.session_state:
@@ -274,13 +259,19 @@ def _load_config(yaml_path: Path) -> None:
             config = load_mas_from_yaml(yaml_path)
             st.session_state.mas_config = config
             st.session_state.current_yaml_path = str(yaml_path)
-            # Clear any previous flow state, model overrides, and widget state
+            # Clear any previous flow state, agent overrides, and widget state
             keys_to_clear = [
                 k
                 for k in st.session_state
                 if k.startswith("flow_state_")
-                or k.startswith("model_overrides_")
+                or k.startswith("agent_overrides_")
                 or k.startswith("model_select_")
+                or k.startswith("selected_node_")
+                or k.startswith("max_tokens_")
+                or k.startswith("tools_")
+                or k.startswith("obj_")
+                or k.startswith("sp_")
+                or k.startswith("temp_")
             ]
             for k in keys_to_clear:
                 del st.session_state[k]
@@ -290,6 +281,13 @@ def _load_config(yaml_path: Path) -> None:
             return
 
     # Show summary in sidebar
+    st.markdown("---")
+    st.button(
+        "Send to Chat \u2192",
+        disabled=st.session_state.get("mas_config") is None,
+        use_container_width=True,
+        on_click=_on_send_to_chat,
+    )
     st.markdown("---")
     st.markdown(f"**MAS ID:** `{config.mas_id}`")
     st.markdown(f"**Version:** {config.version}")
@@ -301,14 +299,6 @@ def _load_config(yaml_path: Path) -> None:
         st.markdown(f"**Consensus:** {config.consensus_threshold}")
     if config.human_in_loop:
         st.warning("Human-in-loop enabled")
-
-    st.markdown("---")
-    st.button(
-        "Send to Chat \u2192",
-        disabled=st.session_state.get("mas_config") is None,
-        use_container_width=True,
-        on_click=_on_send_to_chat,
-    )
 
 
 def _render_legend() -> None:
