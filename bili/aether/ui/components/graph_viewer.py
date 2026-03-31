@@ -5,8 +5,10 @@ The graph is read-only -- nodes cannot be dragged, connected, or deleted.
 Clicking a node shows its agent properties in a side panel.
 """
 
-# pylint: disable=import-error
 import streamlit as st
+
+# pylint: disable=import-error
+import yaml
 from streamlit_flow import streamlit_flow
 from streamlit_flow.elements import StreamlitFlowEdge, StreamlitFlowNode
 from streamlit_flow.state import StreamlitFlowState
@@ -18,7 +20,52 @@ MODEL_KEEP_SENTINEL = "(keep from YAML)"
 
 
 def _overrides_key(mas_id: str) -> str:
-    return f"model_overrides_{mas_id}"
+    return f"agent_overrides_{mas_id}"
+
+
+def apply_agent_overrides(config: MASConfig) -> MASConfig:
+    """Return *config* with current agent_overrides from session state applied.
+
+    Called inside the ``render_graph_viewer`` fragment (so the Download YAML
+    button always reflects the latest widget values) and re-exported for use
+    by ``page.py``'s Send-to-Chat callback.
+    """
+    overrides: dict = st.session_state.get(_overrides_key(config.mas_id), {})
+    if not overrides:
+        return config
+    _, display_to_model_name, _ = build_model_options()
+    patched_agents = []
+    for agent in config.agents:
+        agent_override = overrides.get(agent.agent_id, {})
+        patch: dict = {}
+        display = agent_override.get("model_name")
+        if (
+            display
+            and display != MODEL_KEEP_SENTINEL
+            and display in display_to_model_name
+        ):
+            patch["model_name"] = display_to_model_name[display]
+        if agent_override.get("system_prompt"):
+            patch["system_prompt"] = agent_override["system_prompt"]
+        if agent_override.get("objective"):
+            patch["objective"] = agent_override["objective"]
+        if "temperature" in agent_override:
+            patch["temperature"] = agent_override["temperature"]
+        if "max_tokens" in agent_override:
+            patch["max_tokens"] = agent_override["max_tokens"]
+        if "tools" in agent_override:
+            patch["tools"] = agent_override["tools"]
+        patched_agents.append(agent.model_copy(update=patch) if patch else agent)
+    return config.model_copy(update={"agents": patched_agents})
+
+
+def _get_tool_names() -> list[str]:
+    """Return sorted list of registered tool names."""
+    from bili.loaders.tools_loader import (  # pylint: disable=import-outside-toplevel
+        TOOL_REGISTRY,
+    )
+
+    return sorted(TOOL_REGISTRY.keys())
 
 
 @st.cache_data
@@ -94,14 +141,37 @@ def render_graph_viewer(
             hide_watermark=True,
         )
 
-        selected_id = st.session_state[state_key].selected_id
+        raw_selected = st.session_state[state_key].selected_id
 
-    # Initialize model override dict for this MAS
+        # Persist the last real click across fragment reruns.  Widget changes
+        # (slider, text_area) cause the fragment to rerun with selected_id=None
+        # even though the user hasn't deselected anything — without this, the
+        # properties panel collapses every time a field is edited.
+        persist_key = f"selected_node_{config.mas_id}"
+        if raw_selected is not None:
+            st.session_state[persist_key] = raw_selected
+        selected_id = st.session_state.get(persist_key)
+
+    # Initialize agent override dict for this MAS
     overrides_key = _overrides_key(config.mas_id)
     if overrides_key not in st.session_state:
         st.session_state[overrides_key] = {}
 
     with props_col:
+        patched = apply_agent_overrides(config)
+        st.download_button(
+            "Download YAML",
+            data=yaml.dump(
+                patched.model_dump(mode="json"),
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            file_name=f"{patched.mas_id}.yaml",
+            mime="text/yaml",
+            use_container_width=True,
+        )
+        st.markdown("---")
         _render_properties_panel(config, selected_id, edges, config.mas_id)
 
 
@@ -145,9 +215,11 @@ def _render_model_selector(agent: AgentSpec, mas_id: str) -> None:
     options, _, model_lookup = build_model_options()
     overrides = st.session_state[_overrides_key(mas_id)]
 
-    current_override = overrides.get(agent.agent_id)
-    if current_override and current_override in options:
-        start_index = options.index(current_override) + 1  # +1 for sentinel
+    # agent_overrides stores a dict per agent; read the model_name sub-key.
+    agent_override = overrides.get(agent.agent_id, {})
+    current_model_display = agent_override.get("model_name")
+    if current_model_display and current_model_display in options:
+        start_index = options.index(current_model_display) + 1  # +1 for sentinel
     else:
         yaml_display = model_lookup.get(agent.model_name)
         start_index = (
@@ -164,32 +236,111 @@ def _render_model_selector(agent: AgentSpec, mas_id: str) -> None:
         label_visibility="collapsed",
     )
 
+    bucket = overrides.setdefault(agent.agent_id, {})
     if selected == MODEL_KEEP_SENTINEL:
-        overrides.pop(agent.agent_id, None)
+        bucket.pop("model_name", None)
     else:
-        overrides[agent.agent_id] = selected
+        bucket["model_name"] = selected
 
 
 def _render_agent_properties(agent: AgentSpec, mas_id: str) -> None:
-    """Render detailed agent properties."""
+    """Render detailed agent properties with editable override fields."""
     st.markdown(f"**{agent.get_display_name()}**")
     st.caption(f"`{agent.agent_id}`")
 
     st.markdown("---")
     st.markdown(f"**Role:** {agent.role}")
-    st.markdown(f"**Objective:** {agent.objective}")
+
+    overrides = st.session_state[_overrides_key(mas_id)]
+    bucket = overrides.setdefault(agent.agent_id, {})
+
+    st.markdown("**Objective**")
+    obj_val = st.text_area(
+        "objective",
+        value=bucket.get("objective", agent.objective),
+        key=f"obj_{mas_id}_{agent.agent_id}",
+        label_visibility="collapsed",
+        height=100,
+        help="Override this agent's objective for this session.",
+    )
+    if obj_val:
+        bucket["objective"] = obj_val
+    else:
+        bucket.pop("objective", None)
+
     _render_model_selector(agent, mas_id)
 
-    if agent.temperature is not None:
-        st.markdown(f"**Temperature:** {agent.temperature}")
-    if agent.max_tokens:
-        st.markdown(f"**Max Tokens:** {agent.max_tokens}")
+    st.markdown("**System Prompt**")
+    sp_val = st.text_area(
+        "system_prompt",
+        value=bucket.get("system_prompt", agent.system_prompt or ""),
+        key=f"sp_{mas_id}_{agent.agent_id}",
+        label_visibility="collapsed",
+        height=80,
+        help="Override this agent's system prompt for this session.",
+    )
+    if sp_val:
+        bucket["system_prompt"] = sp_val
+    else:
+        bucket.pop("system_prompt", None)
+
+    st.markdown("**Temperature**")
+    default_temp = float(agent.temperature if agent.temperature is not None else 0.7)
+    temp_val = st.slider(
+        "temperature",
+        min_value=0.0,
+        max_value=2.0,
+        value=float(bucket.get("temperature", default_temp)),
+        step=0.1,
+        key=f"temp_{mas_id}_{agent.agent_id}",
+        label_visibility="collapsed",
+    )
+    if temp_val != default_temp:
+        bucket["temperature"] = temp_val
+    else:
+        bucket.pop("temperature", None)
+
+    st.markdown("**Max Tokens**")
+    default_max_tokens = agent.max_tokens or 1024
+    max_tokens_val = st.number_input(
+        "max_tokens",
+        min_value=1,
+        max_value=32768,
+        value=int(bucket.get("max_tokens", default_max_tokens)),
+        step=256,
+        key=f"max_tokens_{mas_id}_{agent.agent_id}",
+        label_visibility="collapsed",
+        help="Maximum tokens the agent may generate per turn.",
+    )
+    if int(max_tokens_val) != default_max_tokens:
+        bucket["max_tokens"] = int(max_tokens_val)
+    else:
+        bucket.pop("max_tokens", None)
+
+    st.markdown("**Tools**")
+    yaml_tools = agent.tools or []
+    if yaml_tools:
+        for tool in yaml_tools:
+            st.markdown(f"- `{tool}`")
+    else:
+        st.caption("None configured in YAML")
+    available_tools = _get_tool_names()
+    if available_tools:
+        current_tools = bucket.get("tools", yaml_tools)
+        selected_tools = st.multiselect(
+            "Override tools",
+            options=available_tools,
+            default=[t for t in current_tools if t in available_tools],
+            key=f"tools_{mas_id}_{agent.agent_id}",
+            help="Override the tool set for this session.",
+        )
+        if selected_tools != yaml_tools:
+            bucket["tools"] = selected_tools
+        else:
+            bucket.pop("tools", None)
 
     if agent.capabilities:
         _render_list_section("Capabilities", agent.capabilities)
-
-    if agent.tools:
-        _render_list_section("Tools", agent.tools)
 
     st.markdown(f"**Output:** {agent.output_format.value}")
 

@@ -49,6 +49,7 @@ agents:
 
   - agent_id: code_reviewer
     role: security_engineer
+    system_prompt: "You are a senior security engineer specialising in code review and OWASP Top 10 vulnerability assessment."
     objective: >
       Perform a thorough code review covering security vulnerabilities
       (including OWASP Top 10), performance concerns, and style issues.

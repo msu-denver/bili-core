@@ -16,6 +16,7 @@ import streamlit as st
 from PIL import Image
 
 from bili.aether.ui.page import render_aether_page
+from bili.aether.ui.results_page import render_results_page
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 from bili.checkpointers.checkpointer_functions import get_checkpointer
 from bili.streamlit_ui.ui.auth_ui import check_auth, initialize_auth_manager
@@ -53,6 +54,12 @@ def main():
                 url_path="aether",
                 icon=":material/hub:",
                 default=True,
+            ),
+            st.Page(
+                _run_results_page,
+                title="Results",
+                url_path="results",
+                icon=":material/bar_chart:",
             ),
             st.Page(
                 _run_bilicore_page,
@@ -139,6 +146,11 @@ def _run_bilicore_page():
 def _run_aether_page():
     """Render the AETHER multi-agent system page."""
     render_aether_page()
+
+
+def _run_results_page():
+    """Render the AETHER baseline results viewer page."""
+    render_results_page()
 
 
 # Run the main function when the script is executed.
