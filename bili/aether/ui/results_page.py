@@ -4,6 +4,9 @@ AETHER Results page — Baseline Results Viewer.
 Loads JSON result files written by the baseline runner and renders an
 interactive summary matrix, category breakdowns, and per-result detail panels.
 
+For attack suite results (injection, jailbreak, etc.) see
+``bili/aether/ui/attack_results_page.py``.
+
 Called by the main Streamlit app (``bili/streamlit_app.py``) as a page within
 ``st.navigation()``.
 """
@@ -27,7 +30,6 @@ _CATEGORY_ICON = {
     "violating": "🔴",
     "edge_case": "🟡",
 }
-
 _CATEGORY_ORDER = ["benign", "edge_case", "violating"]
 
 
@@ -169,7 +171,7 @@ def _render_summary_metrics(df: pd.DataFrame) -> None:
 
 
 def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Render filter controls and return the filtered DataFrame."""
+    """Render filter widgets and return the filtered DataFrame."""
     col1, col2, col3 = st.columns(3)
     with col1:
         configs = st.multiselect(
@@ -179,7 +181,6 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
             key="baseline_filter_configs",
         )
     with col2:
-        # Respect _CATEGORY_ORDER so options always appear benign → edge_case → violating
         present = set(df["category"].unique())
         ordered_cats = [c for c in _CATEGORY_ORDER if c in present] + sorted(
             present - set(_CATEGORY_ORDER)
@@ -208,7 +209,7 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_matrix(df: pd.DataFrame) -> None:
-    """Render a colour-coded prompt × config matrix."""
+    """Render a color-coded pass/fail pivot table of prompt × MAS config."""
     st.markdown("### Results Matrix")
     st.caption("✓ = passed  ✗ = failed  — = not run")
 
@@ -216,8 +217,6 @@ def _render_matrix(df: pd.DataFrame) -> None:
         st.info("No results match the current filters.")
         return
 
-    # aggfunc="last" shows the most recent run when duplicates exist (results
-    # are sorted by filename, which is chronological for the baseline runner).
     pivot = df.pivot_table(
         index="prompt_id",
         columns="mas_id",
@@ -225,7 +224,12 @@ def _render_matrix(df: pd.DataFrame) -> None:
         aggfunc="last",
     )
 
-    display = pivot.map(lambda v: "✓" if v is True else ("✗" if v is False else "—"))
+    def _baseline_symbol(v) -> str:
+        if pd.isna(v):
+            return "—"
+        return "✓" if v else "✗"
+
+    display = pivot.map(_baseline_symbol)
 
     def _cell_style(val: str) -> str:
         if val == "✓":
@@ -234,14 +238,11 @@ def _render_matrix(df: pd.DataFrame) -> None:
             return "background-color: #dc3545; color: white; text-align: center"
         return "background-color: #6c757d; color: white; text-align: center"
 
-    st.dataframe(
-        display.style.map(_cell_style),
-        use_container_width=True,
-    )
+    st.dataframe(display.style.map(_cell_style), use_container_width=True)
 
 
 def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None:
-    """Render per-result expandable detail panels."""
+    """Render expandable per-run detail panels sorted by category."""
     st.markdown("### Run Details")
 
     if df_filtered.empty:
@@ -251,7 +252,12 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
     visible = [r for r in results if (r["mas_id"], r["prompt_id"]) in visible_keys]
 
     cat_rank = {c: i for i, c in enumerate(_CATEGORY_ORDER)}
-    visible.sort(key=lambda r: (cat_rank.get(r["prompt_category"], 99), r["prompt_id"]))
+    visible.sort(
+        key=lambda r: (
+            cat_rank.get(r.get("prompt_category", ""), 99),
+            r.get("prompt_id", ""),
+        )
+    )
 
     for r in visible:
         execution = r.get("execution", {})
@@ -286,7 +292,7 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
                             height=80,
                             disabled=True,
                             label_visibility="collapsed",
-                            key=f"detail_{r['mas_id']}_{r['prompt_id']}_{agent_id}",
+                            key=f"bl_detail_{r.get('mas_id')}_{r.get('prompt_id')}_{agent_id}",
                         )
                     else:
                         st.caption("(no output)")
