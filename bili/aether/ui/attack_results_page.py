@@ -168,6 +168,7 @@ def _build_dataframe(results: list[dict]) -> pd.DataFrame:
                     "model_id": r["model_id"],
                     "model_name": r["model_name"],
                     "provider_family": r["provider_family"],
+                    "tier2_influenced": bool(r.get("influenced_agents", [])),
                 }
             )
         except (KeyError, TypeError) as exc:
@@ -512,8 +513,7 @@ def _render_matrix(df: pd.DataFrame, is_cross_model: bool) -> None:
         values="tier1_pass",
         aggfunc="last",
     )
-    # For Tier-2 fallback: a row is "influenced" if influenced_agents is non-empty
-    df["tier2_influenced"] = df.apply(_lookup_influenced, axis=1)
+    # For Tier-2 fallback: use pre-computed boolean column from _build_dataframe
     pivot_tier2 = df.pivot_table(
         index="row_label",
         columns="col_label",
@@ -567,16 +567,6 @@ def _render_matrix(df: pd.DataFrame, is_cross_model: bool) -> None:
         return f"background-color: {color}; color: white; text-align: center"
 
     st.dataframe(display.style.map(_cell_style), use_container_width=True)
-
-
-def _lookup_influenced(row: pd.Series) -> bool | None:
-    """Return True if influenced_agents is non-empty, False if empty, None if missing."""
-    # influenced_agents is stored as a list in the normalised dict but loses
-    # its type through pivot_table — use the raw column directly.
-    agents = row.get("influenced_agents") if hasattr(row, "get") else None
-    if agents is None:
-        return None
-    return bool(agents)
 
 
 # ---------------------------------------------------------------------------
@@ -680,19 +670,16 @@ def _render_expander_content(
     is_cross_model: bool,
 ) -> None:
     """Render the body of a run detail expander."""
-    execution = r.get("execution", {})
-    run_meta = r.get("run_metadata", {})
-
     # Header metadata row
     c1, c2, c3, c4 = st.columns(4)
     c1.markdown(f"**Severity:** `{r.get('severity', '?')}`")
     c2.markdown(f"**Phase:** `{r.get('injection_phase', r.get('phase', '?'))}`")
     c3.markdown(f"**Type:** `{r.get('injection_type', '?')}`")
-    c4.markdown(f"**Stub:** {'Yes' if run_meta.get('stub_mode') else 'No'}")
+    c4.markdown(f"**Stub:** {'Yes' if r.get('stub_mode') else 'No'}")
     st.caption(
         f"Suite: {r.get('attack_suite', '?')}  ·  "
-        f"Run at {run_meta.get('timestamp', 'unknown')}  ·  "
-        f"Duration: {execution.get('duration_ms', 0.0):.0f} ms"
+        f"Run at {r.get('timestamp', 'unknown')}  ·  "
+        f"Duration: {r.get('duration_ms', 0.0):.0f} ms"
     )
 
     if is_cross_model and r.get("model_id"):
@@ -734,8 +721,8 @@ def _render_expander_content(
     # Tier 3 semantic score
     st.markdown("---")
     if tier3_score is not None:
-        confidence = run_meta.get("tier3_confidence", "")
-        reasoning = run_meta.get("tier3_reasoning", "")
+        confidence = r.get("tier3_confidence", "")
+        reasoning = r.get("tier3_reasoning", "")
         s1, s2 = st.columns(2)
         t3_icon = _TIER3_ICON.get(tier3_score, "⚫")
         s1.markdown(f"**Tier-3 Score:** {t3_icon} `{tier3_score}`")
@@ -748,10 +735,17 @@ def _render_expander_content(
     # View MAS graph button
     config_path = r.get("config_path", "")
     if config_path:
-        _render_view_graph_button(config_path, r.get("mas_id", ""))
+        _render_view_graph_button(
+            config_path,
+            r.get("mas_id", ""),
+            r.get("payload_id", ""),
+            r.get("phase", ""),
+        )
 
 
-def _render_view_graph_button(config_path: str, mas_id: str) -> None:
+def _render_view_graph_button(
+    config_path: str, mas_id: str, payload_id: str, phase: str
+) -> None:
     """Render a 'View MAS graph →' button that loads the config into the visualizer."""
     st.markdown("---")
     full_path = _TESTS_DIR.parent.parent.parent / config_path  # repo root / config_path
@@ -760,7 +754,9 @@ def _render_view_graph_button(config_path: str, mas_id: str) -> None:
         st.caption(f"Config not found at `{config_path}` — graph view unavailable.")
         return
 
-    button_key = f"view_graph_{mas_id}_{config_path.replace('/', '_')}"
+    button_key = (
+        f"view_graph_{mas_id}_{payload_id}_{phase}_{config_path.replace('/', '_')}"
+    )
     if st.button("View MAS graph →", key=button_key, use_container_width=False):
         try:
             from bili.aether.config.loader import (  # pylint: disable=import-outside-toplevel
