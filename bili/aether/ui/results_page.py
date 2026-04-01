@@ -35,7 +35,6 @@ _CATEGORY_ICON = {
 _CATEGORY_ORDER = ["benign", "edge_case", "violating"]
 
 # Injection tier-3 score display (0=fully resisted → green, 3=fully complied → red)
-_TIER3_LABEL = {0: "0", 1: "1", 2: "2", 3: "3"}
 _TIER3_COLOR = {
     0: "#28a745",  # green  — no compliance (fully resisted)
     1: "#ffc107",  # yellow — partial compliance
@@ -448,9 +447,10 @@ def _render_injection_filters(df: pd.DataFrame) -> pd.DataFrame:
             key="inj_filter_severity",
         )
     with col4:
+        phase_options = ["All"] + sorted(df["phase"].unique())
         phase = st.selectbox(
             "Phase",
-            options=["All", "pre_execution", "mid_execution"],
+            options=phase_options,
             key="inj_filter_phase",
         )
 
@@ -496,11 +496,11 @@ def _render_injection_matrix(df: pd.DataFrame) -> None:
     )
 
     def _display_val(score, tier1) -> str:
-        if tier1 is False or tier1 == 0:
+        if not tier1:
             return "!"
         if pd.isna(score):
             return "—"
-        return _TIER3_LABEL.get(int(score), str(int(score)))
+        return str(int(score))
 
     display = pd.DataFrame(
         {
@@ -536,6 +536,9 @@ def _render_injection_matrix(df: pd.DataFrame) -> None:
     st.dataframe(display.style.map(_cell_style), use_container_width=True)
 
 
+_TIER3_ICON = {0: "🟢", 1: "🟡", 2: "🟠", 3: "🔴"}
+
+
 def _render_injection_detail_panel(
     results: list[dict], df_filtered: pd.DataFrame
 ) -> None:
@@ -544,9 +547,14 @@ def _render_injection_detail_panel(
     if df_filtered.empty:
         return
 
-    visible_keys = set(
-        zip(df_filtered["mas_id"], df_filtered["payload_id"], df_filtered["phase"])
-    )
+    # Build a lookup from the already-parsed DataFrame so we don't re-parse
+    # tier3_score from the raw result dicts.
+    tier3_lookup: dict[tuple, int | None] = {
+        (row["mas_id"], row["payload_id"], row["phase"]): row["tier3_score"]
+        for _, row in df_filtered.iterrows()
+    }
+
+    visible_keys = set(tier3_lookup.keys())
     visible = [
         r
         for r in results
@@ -567,16 +575,14 @@ def _render_injection_detail_panel(
         execution = r.get("execution", {})
         run_meta = r.get("run_metadata", {})
         tier1_ok = execution.get("success", False)
-        tier3_raw = run_meta.get("tier3_score", "")
-        tier3_score: int | None = int(tier3_raw) if tier3_raw != "" else None
+        key = (r.get("mas_id"), r.get("payload_id"), r.get("injection_phase"))
+        tier3_score: int | None = tier3_lookup.get(key)
 
         t1_icon = "✅" if tier1_ok else "❌"
-        if tier3_score is not None:
-            score_color = _TIER3_COLOR.get(tier3_score, "#6c757d")
-            t3_badge = f"T3:{tier3_score}"
-        else:
-            score_color = "#6c757d"
-            t3_badge = "T3:—"
+        t3_icon = (
+            _TIER3_ICON.get(tier3_score, "⚫") if tier3_score is not None else "⬜"
+        )
+        t3_badge = f"T3:{tier3_score}" if tier3_score is not None else "T3:—"
 
         label = (
             f"{t1_icon} [{t3_badge}] "
@@ -618,12 +624,7 @@ def _render_injection_detail_panel(
                 confidence = run_meta.get("tier3_confidence", "")
                 reasoning = run_meta.get("tier3_reasoning", "")
                 s1, s2 = st.columns(2)
-                s1.markdown(
-                    f"**Tier-3 Score:** "
-                    f'<span style="background-color:{score_color};color:white;'
-                    f'padding:2px 8px;border-radius:4px;">{tier3_score}</span>',
-                    unsafe_allow_html=True,
-                )
+                s1.markdown(f"**Tier-3 Score:** {t3_icon} `{tier3_score}`")
                 s2.markdown(f"**Confidence:** `{confidence}`")
                 if reasoning:
                     st.markdown(f"**Reasoning:** {reasoning}")
