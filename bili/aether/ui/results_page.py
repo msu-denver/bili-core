@@ -171,6 +171,7 @@ def _render_summary_metrics(df: pd.DataFrame) -> None:
 
 
 def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
+    """Render filter widgets and return the filtered DataFrame."""
     col1, col2, col3 = st.columns(3)
     with col1:
         configs = st.multiselect(
@@ -208,6 +209,7 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_matrix(df: pd.DataFrame) -> None:
+    """Render a color-coded pass/fail pivot table of prompt × MAS config."""
     st.markdown("### Results Matrix")
     st.caption("✓ = passed  ✗ = failed  — = not run")
 
@@ -240,6 +242,7 @@ def _render_matrix(df: pd.DataFrame) -> None:
 
 
 def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None:
+    """Render expandable per-run detail panels sorted by category."""
     st.markdown("### Run Details")
 
     if df_filtered.empty:

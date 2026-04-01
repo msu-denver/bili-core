@@ -110,7 +110,7 @@ def _normalise(r: dict) -> dict:
     execution = r.get("execution", {})
     run_meta = r.get("run_metadata", {})
     tier3_raw = run_meta.get("tier3_score", "")
-    tier3_score: int | None = int(tier3_raw) if tier3_raw != "" else None
+    tier3_score: int | None = int(tier3_raw) if tier3_raw not in ("", None) else None
 
     return {
         # Core identity
@@ -234,6 +234,10 @@ def _render_sidebar() -> tuple[str, list[Path]]:
             height=100,
             placeholder="/path/to/results\n/another/path",
         )
+        # NOTE: This accepts arbitrary absolute paths. Acceptable because this app
+        # runs locally with the user's own filesystem permissions and is not
+        # exposed as a public web service. If ever deployed to untrusted users,
+        # path access should be restricted to a safe root directory.
         for line in raw.splitlines():
             line = line.strip()
             if line:
@@ -298,6 +302,10 @@ def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
         return
 
     df_all = _build_dataframe(all_results)
+    # In "All Suites" view, if any cross-model results exist the matrix gains a
+    # model_id dimension for all rows. Non-cross-model rows show "?" in that
+    # column — this is intentional so cross-model and standard results can
+    # coexist in the same matrix without splitting into two separate tables.
     is_cross_model = selected_suite == "Cross-Model" or (
         selected_suite == _ALL_SUITES and df_all["model_id"].notna().any()
     )
@@ -505,7 +513,7 @@ def _render_matrix(df: pd.DataFrame, is_cross_model: bool) -> None:
         aggfunc="last",
     )
     # For Tier-2 fallback: a row is "influenced" if influenced_agents is non-empty
-    df["tier2_influenced"] = df.apply(lambda row: _lookup_influenced(row), axis=1)
+    df["tier2_influenced"] = df.apply(_lookup_influenced, axis=1)
     pivot_tier2 = df.pivot_table(
         index="row_label",
         columns="col_label",
@@ -746,7 +754,7 @@ def _render_expander_content(
 def _render_view_graph_button(config_path: str, mas_id: str) -> None:
     """Render a 'View MAS graph →' button that loads the config into the visualizer."""
     st.markdown("---")
-    full_path = _TESTS_DIR.parent.parent / config_path  # repo root / config_path
+    full_path = _TESTS_DIR.parent.parent.parent / config_path  # repo root / config_path
 
     if not full_path.exists():
         st.caption(f"Config not found at `{config_path}` — graph view unavailable.")
