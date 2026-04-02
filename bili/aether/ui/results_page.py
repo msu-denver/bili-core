@@ -11,8 +11,10 @@ Called by the main Streamlit app (``bili/streamlit_app.py``) as a page within
 ``st.navigation()``.
 """
 
+import io
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -149,9 +151,51 @@ def _render_main() -> None:
     st.markdown("---")
     df_filtered = _render_filters(df)
     st.markdown("---")
+    _render_export_buttons(results, df_filtered)
+    st.markdown("---")
     _render_matrix(df_filtered)
     st.markdown("---")
     _render_detail_panel(results, df_filtered)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+
+def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> None:
+    """Render CSV and JSON download buttons for the current filtered result set."""
+    if df_filtered.empty:
+        return
+
+    visible_keys = set(zip(df_filtered["mas_id"], df_filtered["prompt_id"]))
+    matched = [
+        r for r in results if (r.get("mas_id"), r.get("prompt_id")) in visible_keys
+    ]
+
+    unique_mas = df_filtered["mas_id"].dropna().unique()
+    mas_label = unique_mas[0] if len(unique_mas) == 1 else "multi"
+    today = date.today().isoformat()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        buf = io.StringIO()
+        df_filtered.to_csv(buf, index=False)
+        st.download_button(
+            "⬇ Export CSV",
+            data=buf.getvalue().encode("utf-8"),
+            file_name=f"aether_baseline_{mas_label}_{today}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with col2:
+        st.download_button(
+            "⬇ Export JSON",
+            data=json.dumps(matched, indent=2, default=str).encode("utf-8"),
+            file_name=f"aether_baseline_{mas_label}_{today}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
 
 # ---------------------------------------------------------------------------

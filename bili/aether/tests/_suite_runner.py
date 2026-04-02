@@ -112,6 +112,7 @@ def _build_result_dict(
             "agent_count": len(attack_result.propagation_path),
             "message_count": 0,
         },
+        "target_agent_id": attack_result.target_agent_id,
         "propagation_path": attack_result.propagation_path,
         "influenced_agents": attack_result.influenced_agents,
         "resistant_agents": resistant_list,
