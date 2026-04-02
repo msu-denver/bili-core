@@ -375,13 +375,11 @@ def _build_export_df(
     return pd.DataFrame(rows)
 
 
-def _export_filename(
-    df_filtered: pd.DataFrame, ext: str, prefix: str = "aether_results"
-) -> str:
+def _export_filename(df_filtered: pd.DataFrame, ext: str) -> str:
     """Return a default filename based on unique mas_ids and today's date."""
     unique_mas = df_filtered["mas_id"].dropna().unique()
     mas_label = unique_mas[0] if len(unique_mas) == 1 else "multi"
-    return f"{prefix}_{mas_label}_{date.today().isoformat()}.{ext}"
+    return f"aether_results_{mas_label}_{date.today().isoformat()}.{ext}"
 
 
 def _render_export_buttons(
@@ -392,13 +390,7 @@ def _render_export_buttons(
         return
 
     key_set: set = {
-        (
-            row["mas_id"],
-            row["payload_id"],
-            row["phase"],
-            row["model_id"] if is_cross_model else None,
-        )
-        for _, row in df_filtered.iterrows()
+        _result_export_key(row, is_cross_model) for _, row in df_filtered.iterrows()
     }
     export_df = _build_export_df(all_results, key_set, is_cross_model)
     matched = [

@@ -163,14 +163,33 @@ def _render_main() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _build_baseline_export_df(df_filtered: pd.DataFrame) -> pd.DataFrame:
+    """Return a renamed copy of *df_filtered* with explicit export column names.
+
+    Baseline runs have no attack metadata (agent_id, tier2, etc.) so the schema
+    differs from the attack results export.  Column mapping:
+    ``prompt_id`` → ``prompt_id``, ``success`` → ``tier1_success`` (renamed for
+    clarity alongside attack exports), all others kept as-is.
+    """
+    return df_filtered.rename(columns={"success": "tier1_success"})[
+        [
+            "mas_id",
+            "prompt_id",
+            "category",
+            "tier1_success",
+            "duration_ms",
+            "agent_count",
+            "stub_mode",
+            "timestamp",
+        ]
+    ]
+
+
 def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> None:
     """Render CSV and JSON download buttons for the current filtered result set.
 
-    CSV columns come directly from the DataFrame built by ``_build_dataframe``:
-    ``mas_id``, ``prompt_id``, ``category``, ``success``, ``duration_ms``,
-    ``agent_count``, ``stub_mode``, ``timestamp``.  These are all baseline-relevant
-    fields — there is no attack metadata (agent_id, tier2, etc.) in baseline runs.
-    JSON export contains the full raw result dicts matched by ``(mas_id, prompt_id)``.
+    CSV uses an explicit column mapping via ``_build_baseline_export_df``.
+    JSON export contains full raw result dicts matched by ``(mas_id, prompt_id)``.
     """
     if df_filtered.empty:
         return
@@ -184,10 +203,12 @@ def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> No
     mas_label = unique_mas[0] if len(unique_mas) == 1 else "multi"
     today = date.today().isoformat()
 
+    export_df = _build_baseline_export_df(df_filtered)
+
     col1, col2 = st.columns(2)
     with col1:
         buf = io.StringIO()
-        df_filtered.to_csv(buf, index=False)
+        export_df.to_csv(buf, index=False)
         st.download_button(
             "⬇ Export CSV",
             data=buf.getvalue().encode("utf-8"),

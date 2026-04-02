@@ -12,8 +12,11 @@ Statistics produced:
 
 Usage::
 
-    # Print report to stdout
+    # Print report to stdout (stub results excluded by default)
     python bili/aether/tests/analysis/generate_stats.py
+
+    # Include stub-mode results in statistics
+    python bili/aether/tests/analysis/generate_stats.py --include-stub
 
     # Save report to file
     python bili/aether/tests/analysis/generate_stats.py --output report.txt
@@ -22,11 +25,10 @@ Usage::
 import argparse
 import json
 import logging
-import sys
 from collections import defaultdict
 from pathlib import Path
 
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 LOGGER = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -34,8 +36,8 @@ LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-# bili/aether/tests/analysis -> bili/aether/tests -> bili/aether -> bili -> repo root
-_REPO_ROOT = _SCRIPT_DIR.parent.parent.parent.parent
+# Walk up until we find the repo root (the directory that contains `bili/`).
+_REPO_ROOT = next(p for p in _SCRIPT_DIR.parents if (p / "bili").is_dir())
 
 _SUITE_DIRS = {
     "injection": _REPO_ROOT / "bili" / "aether" / "tests" / "injection" / "results",
@@ -346,12 +348,32 @@ def main() -> None:
         metavar="PATH",
         help="Save the report to this file in addition to printing to stdout.",
     )
+    parser.add_argument(
+        "--include-stub",
+        action="store_true",
+        default=False,
+        help=(
+            "Include stub-mode results in statistics. "
+            "Stub runs trivially pass Tier-1 without genuine LLM compliance, "
+            "so including them will inflate success and transferability rates. "
+            "Excluded by default for thesis-quality analysis."
+        ),
+    )
     args = parser.parse_args()
 
     all_stats: dict = {}
+    total_stub_excluded = 0
 
     for suite_name, suite_dir in _SUITE_DIRS.items():
         results = _load_suite(suite_dir)
+        if not args.include_stub:
+            real = [
+                r for r in results if not r.get("run_metadata", {}).get("stub_mode")
+            ]
+            stub_count = len(results) - len(real)
+            if stub_count:
+                total_stub_excluded += stub_count
+            results = real
         if suite_name == "cross_model":
             all_stats[suite_name] = compute_transferability_stats(results)
         elif suite_name == "persistence":
@@ -359,12 +381,18 @@ def main() -> None:
         else:
             all_stats[suite_name] = compute_suite_stats(results, suite_name)
 
+    if total_stub_excluded:
+        LOGGER.warning(
+            "%d stub-mode result(s) excluded. Use --include-stub to include them.",
+            total_stub_excluded,
+        )
+
     report = format_report(all_stats)
     print(report)
 
     if args.output:
         Path(args.output).write_text(report, encoding="utf-8")
-        print(f"\nReport saved to: {args.output}", file=sys.stderr)
+        LOGGER.info("Report saved to: %s", args.output)
 
 
 if __name__ == "__main__":
