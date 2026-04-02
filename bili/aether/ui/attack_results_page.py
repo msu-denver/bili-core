@@ -21,8 +21,10 @@ Called by the main Streamlit app (``bili/streamlit_app.py``) as a page within
 ``st.navigation()``.
 """
 
+import io
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -125,6 +127,7 @@ def _normalise(r: dict) -> dict:
         "duration_ms": execution.get("duration_ms", 0.0),
         "agent_count": execution.get("agent_count", 0),
         # Propagation (Tier 2)
+        "target_agent_id": r.get("target_agent_id", ""),
         "propagation_path": r.get("propagation_path", []),
         "influenced_agents": r.get("influenced_agents", []),
         "resistant_agents": r.get("resistant_agents", []),
@@ -315,9 +318,104 @@ def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
     st.markdown("---")
     df_filtered = _render_filters(df_all, selected_suite, is_cross_model)
     st.markdown("---")
+    _render_export_buttons(all_results, df_filtered, is_cross_model)
+    st.markdown("---")
     _render_matrix(df_filtered, is_cross_model)
     st.markdown("---")
     _render_detail_panel(all_results, df_filtered, is_cross_model)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+
+def _result_export_key(r: dict, is_cross_model: bool) -> tuple:
+    """Return the lookup key used to match normalised results to df_filtered rows."""
+    return (
+        r.get("mas_id"),
+        r.get("payload_id"),
+        r.get("phase"),
+        r.get("model_id") if is_cross_model else None,
+    )
+
+
+def _build_export_df(
+    all_results: list[dict], key_set: set, is_cross_model: bool
+) -> pd.DataFrame:
+    """Build a flat export DataFrame for the rows identified by *key_set*.
+
+    Columns follow the DoD CSV schema with additional context fields.
+    List fields (influenced_agents, resistant_agents, propagation_path) are
+    serialised as semicolon-joined strings for easy loading in pandas/Excel.
+    """
+    rows = []
+    for r in all_results:
+        if _result_export_key(r, is_cross_model) not in key_set:
+            continue
+        rows.append(
+            {
+                "mas_id": r.get("mas_id", ""),
+                "agent_id": r.get("target_agent_id", ""),
+                "attack_type": r.get("injection_type", ""),
+                "payload_id": r.get("payload_id", ""),
+                "tier1_success": r.get("tier1_pass", False),
+                "tier2_influenced": ";".join(r.get("influenced_agents") or []),
+                "tier2_resisted": ";".join(r.get("resistant_agents") or []),
+                "tier3_score": r.get("tier3_score", ""),
+                "model_name": r.get("model_name") or "",
+                "timestamp": r.get("timestamp", ""),
+                # Extra context columns
+                "phase": r.get("phase", ""),
+                "severity": r.get("severity", ""),
+                "attack_suite": r.get("attack_suite", ""),
+                "propagation_path": ";".join(r.get("propagation_path") or []),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _export_filename(df_filtered: pd.DataFrame, ext: str) -> str:
+    """Return a default filename based on unique mas_ids and today's date."""
+    unique_mas = df_filtered["mas_id"].dropna().unique()
+    mas_label = unique_mas[0] if len(unique_mas) == 1 else "multi"
+    return f"aether_results_{mas_label}_{date.today().isoformat()}.{ext}"
+
+
+def _render_export_buttons(
+    all_results: list[dict], df_filtered: pd.DataFrame, is_cross_model: bool
+) -> None:
+    """Render CSV and JSON download buttons for the current filtered result set."""
+    if df_filtered.empty:
+        return
+
+    key_set: set = {
+        _result_export_key(row, is_cross_model) for _, row in df_filtered.iterrows()
+    }
+    export_df = _build_export_df(all_results, key_set, is_cross_model)
+    matched = [
+        r for r in all_results if _result_export_key(r, is_cross_model) in key_set
+    ]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        buf = io.StringIO()
+        export_df.to_csv(buf, index=False)
+        st.download_button(
+            "⬇ Export CSV",
+            data=buf.getvalue().encode("utf-8"),
+            file_name=_export_filename(df_filtered, "csv"),
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with col2:
+        st.download_button(
+            "⬇ Export JSON",
+            data=json.dumps(matched, indent=2, default=str).encode("utf-8"),
+            file_name=_export_filename(df_filtered, "json"),
+            mime="application/json",
+            use_container_width=True,
+        )
 
 
 # ---------------------------------------------------------------------------
