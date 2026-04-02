@@ -341,25 +341,14 @@ def _result_export_key(r: dict, is_cross_model: bool) -> tuple:
 
 
 def _build_export_df(
-    all_results: list[dict], df_filtered: pd.DataFrame, is_cross_model: bool
+    all_results: list[dict], key_set: set, is_cross_model: bool
 ) -> pd.DataFrame:
-    """Build a flat export DataFrame matching the current filter state.
+    """Build a flat export DataFrame for the rows identified by *key_set*.
 
     Columns follow the DoD CSV schema with additional context fields.
     List fields (influenced_agents, resistant_agents, propagation_path) are
     serialised as semicolon-joined strings for easy loading in pandas/Excel.
     """
-    key_set: set = set()
-    for _, row in df_filtered.iterrows():
-        key_set.add(
-            (
-                row["mas_id"],
-                row["payload_id"],
-                row["phase"],
-                row["model_id"] if is_cross_model else None,
-            )
-        )
-
     rows = []
     for r in all_results:
         if _result_export_key(r, is_cross_model) not in key_set:
@@ -411,7 +400,7 @@ def _render_export_buttons(
         )
         for _, row in df_filtered.iterrows()
     }
-    export_df = _build_export_df(all_results, df_filtered, is_cross_model)
+    export_df = _build_export_df(all_results, key_set, is_cross_model)
     matched = [
         r for r in all_results if _result_export_key(r, is_cross_model) in key_set
     ]

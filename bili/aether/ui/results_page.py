@@ -164,7 +164,14 @@ def _render_main() -> None:
 
 
 def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> None:
-    """Render CSV and JSON download buttons for the current filtered result set."""
+    """Render CSV and JSON download buttons for the current filtered result set.
+
+    CSV columns come directly from the DataFrame built by ``_build_dataframe``:
+    ``mas_id``, ``prompt_id``, ``category``, ``success``, ``duration_ms``,
+    ``agent_count``, ``stub_mode``, ``timestamp``.  These are all baseline-relevant
+    fields — there is no attack metadata (agent_id, tier2, etc.) in baseline runs.
+    JSON export contains the full raw result dicts matched by ``(mas_id, prompt_id)``.
+    """
     if df_filtered.empty:
         return
 
