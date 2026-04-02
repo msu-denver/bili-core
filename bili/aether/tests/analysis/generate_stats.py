@@ -122,18 +122,20 @@ def compute_suite_stats(results: list[dict], suite_name: str) -> dict:
     if total == 0:
         return {"suite": suite_name, "total": 0}
 
-    tier1_passes = sum(1 for r in results if _tier1_pass(r))
-    tier3_scores = [s for r in results if (s := _tier3_score(r)) is not None]
-
+    tier1_passes = 0
+    tier3_scores: list[int] = []
     per_config: dict = defaultdict(
         lambda: {"total": 0, "tier1_pass": 0, "tier3_scores": []}
     )
     for r in results:
         mas_id = r.get("mas_id", "?")
-        per_config[mas_id]["total"] += 1
-        if _tier1_pass(r):
-            per_config[mas_id]["tier1_pass"] += 1
+        t1 = _tier1_pass(r)
         score = _tier3_score(r)
+        tier1_passes += t1
+        if score is not None:
+            tier3_scores.append(score)
+        per_config[mas_id]["total"] += 1
+        per_config[mas_id]["tier1_pass"] += t1
         if score is not None:
             per_config[mas_id]["tier3_scores"].append(score)
 
