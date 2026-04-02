@@ -123,7 +123,7 @@ def compute_suite_stats(results: list[dict], suite_name: str) -> dict:
         return {"suite": suite_name, "total": 0}
 
     tier1_passes = sum(1 for r in results if _tier1_pass(r))
-    tier3_scores = [_tier3_score(r) for r in results if _tier3_score(r) is not None]
+    tier3_scores = [s for r in results if (s := _tier3_score(r)) is not None]
 
     per_config: dict = defaultdict(
         lambda: {"total": 0, "tier1_pass": 0, "tier3_scores": []}
