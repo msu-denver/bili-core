@@ -817,7 +817,30 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
                 use_container_width=True,
             )
 
+    st.markdown("---")
+    if st.button(
+        "Send to Attack Suite \u2192",
+        disabled=st.session_state.get("chat_config") is None,
+        use_container_width=True,
+        key="chat_send_to_attack",
+        help="Load the current config into the Attack GUI page.",
+    ):
+        _on_send_to_attack_from_chat()
+
     _render_thread_list()
+
+
+def _on_send_to_attack_from_chat() -> None:
+    """Push the current chat config to the Attack page."""
+    chat_cfg = st.session_state.get("chat_config")
+    if chat_cfg is None:
+        return
+    st.session_state.attack_config = chat_cfg
+    if chat_cfg.agents:
+        st.session_state.attack_target_agent_id = chat_cfg.agents[0].agent_id
+    for key in ("attack_result", "attack_verdict", "attack_node_states"):
+        st.session_state.pop(key, None)
+    st.toast("Config loaded in Attack Suite \u2713")
 
 
 # ---------------------------------------------------------------------------
