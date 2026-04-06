@@ -37,6 +37,10 @@ from bili.aether.attacks.injector import AttackInjector
 from bili.aether.attacks.models import AttackResult, AttackType, InjectionPhase
 from bili.aether.attacks.propagation import PropagationTracker
 from bili.aether.attacks.strategies import pre_execution as _pre_exec_strats
+from bili.aether.evaluator.evaluator_config import (
+    FALLBACK_EVALUATOR_MODEL,
+    PRIMARY_EVALUATOR_MODEL,
+)
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import MASConfig
 from bili.aether.ui.components.attack_graph import (
@@ -55,7 +59,10 @@ LOGGER = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_EVALUATOR_PRIMARY_MODEL = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+_EVALUATOR_MODELS = {
+    f"Primary — Claude 3.7 Sonnet (Bedrock)": PRIMARY_EVALUATOR_MODEL,
+    f"Fallback — Gemini 2.5 Flash (Vertex)": FALLBACK_EVALUATOR_MODEL,
+}
 
 _SUITE_NAMES = [
     "injection",
@@ -232,6 +239,19 @@ def _render_sidebar() -> None:
     if run_disabled:
         st.caption("Click a graph node to select a target.")
 
+    st.markdown("---")
+    st.markdown("#### Tier 3 Evaluator")
+    st.selectbox(
+        "Evaluator model",
+        options=list(_EVALUATOR_MODELS.keys()),
+        key="attack_evaluator_model_label",
+        help=(
+            "Model used for semantic (Tier 3) evaluation. "
+            "Choose a model from a different provider family than your MAS "
+            "to avoid circularity."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Main area
@@ -362,6 +382,11 @@ def _run_pre_execution_streaming(
         st.markdown(f"**{agent_id}**")
         agent_slots[agent_id] = st.empty()
 
+    # token_buffer accumulates each agent's full streamed output so that the
+    # st.empty() slot shows the complete text so far on each token event.
+    # Memory usage is proportional to total output across all agents — acceptable
+    # for research-scale MAS runs.  The buffer is released when this function
+    # returns.
     token_buffer: dict[str, str] = {}
 
     try:
@@ -480,9 +505,10 @@ def _render_results(config: MASConfig, result_dict: dict) -> None:
         st.info("Semantic evaluation skipped in stub mode.")
         return
 
-    # Circularity check — warn if any agent shares the evaluator's provider family
+    # Circularity check — warn if any agent shares the selected evaluator's provider family
+    evaluator_model = _get_evaluator_model()
     mas_models = [a.model_name or "" for a in config.agents if a.model_name]
-    if any(_same_provider_family(m, _EVALUATOR_PRIMARY_MODEL) for m in mas_models):
+    if any(_same_provider_family(m, evaluator_model) for m in mas_models):
         st.warning(
             "⚠ Attack MAS and evaluator share the same model family — "
             "evaluation may be circular."
@@ -562,6 +588,12 @@ def _render_observation(obs: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _get_evaluator_model() -> str:
+    """Return the model ID selected by the user for Tier 3 evaluation."""
+    label = st.session_state.get("attack_evaluator_model_label")
+    return _EVALUATOR_MODELS.get(label, PRIMARY_EVALUATOR_MODEL)
+
+
 def _run_tier3_evaluation(result_dict: dict, baseline_result: dict) -> Optional[list]:
     """Reconstruct AttackResult and call SemanticEvaluator.evaluate()."""
     try:
@@ -570,7 +602,7 @@ def _run_tier3_evaluation(result_dict: dict, baseline_result: dict) -> Optional[
         )
 
         attack_result = AttackResult.model_validate(result_dict)
-        evaluator = SemanticEvaluator(model_name=_EVALUATOR_PRIMARY_MODEL)
+        evaluator = SemanticEvaluator(model_name=_get_evaluator_model())
         return evaluator.evaluate(baseline_result, attack_result)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         st.error(f"Tier 3 evaluation failed: {exc}")
@@ -586,7 +618,8 @@ def _load_baseline_result(mas_id: str) -> Optional[dict]:
     for path in sorted(mas_dir.glob("**/*.json")):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.warning("Skipping unreadable baseline file %s: %s", path, exc)
             continue
     return None
 
