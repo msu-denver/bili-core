@@ -39,7 +39,10 @@ from bili.aether.attacks.propagation import PropagationTracker
 from bili.aether.attacks.strategies import pre_execution as _pre_exec_strats
 from bili.aether.evaluator.evaluator_config import (
     FALLBACK_EVALUATOR_MODEL,
+    FALLBACK_EVALUATOR_MODEL_DISPLAY,
     PRIMARY_EVALUATOR_MODEL,
+    PRIMARY_EVALUATOR_MODEL_DISPLAY,
+    PROVIDER_FAMILY_PREFIXES,
 )
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import MASConfig
@@ -60,8 +63,8 @@ LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _EVALUATOR_MODELS = {
-    f"Primary — Claude 3.7 Sonnet (Bedrock)": PRIMARY_EVALUATOR_MODEL,
-    f"Fallback — Gemini 2.5 Flash (Vertex)": FALLBACK_EVALUATOR_MODEL,
+    PRIMARY_EVALUATOR_MODEL_DISPLAY: PRIMARY_EVALUATOR_MODEL,
+    FALLBACK_EVALUATOR_MODEL_DISPLAY: FALLBACK_EVALUATOR_MODEL,
 }
 
 _SUITE_NAMES = [
@@ -620,6 +623,7 @@ def _load_baseline_result(mas_id: str) -> Optional[dict]:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.warning("Skipping unreadable baseline file %s: %s", path, exc)
+            st.warning(f"Skipped unreadable baseline file `{path.name}`: {exc}")
             continue
     return None
 
@@ -666,17 +670,21 @@ def _is_stub_mode(config: MASConfig) -> bool:
     return all(not a.model_name for a in config.agents)
 
 
+def _get_provider_family(model_id: str) -> Optional[str]:
+    """Return the canonical provider-family name for *model_id*, or None.
+
+    Uses the same prefix table as ``evaluator_config.PROVIDER_FAMILY_PREFIXES``
+    so circularity detection here stays in sync with the SemanticEvaluator.
+    """
+    lower = model_id.lower()
+    for prefix, family in PROVIDER_FAMILY_PREFIXES:
+        if lower.startswith(prefix):
+            return family
+    return None
+
+
 def _same_provider_family(model_a: str, model_b: str) -> bool:
     """Return True if both model strings belong to the same provider family."""
-    families = [
-        {"anthropic", "claude"},
-        {"google", "gemini", "vertex"},
-        {"amazon", "nova", "bedrock"},
-        {"openai", "gpt"},
-    ]
-    for family in families:
-        if any(k in model_a.lower() for k in family) and any(
-            k in model_b.lower() for k in family
-        ):
-            return True
-    return False
+    family_a = _get_provider_family(model_a)
+    family_b = _get_provider_family(model_b)
+    return family_a is not None and family_a == family_b
