@@ -110,6 +110,20 @@ _PRE_EXEC_STRATEGY_FN = {
 # ---------------------------------------------------------------------------
 
 
+def push_config_to_attack_state(config: MASConfig) -> None:
+    """Write *config* into session state so the Attack page loads it fresh.
+
+    Call this from any page that has a "Send to Attack Suite" button.  Clears
+    previous attack results so the new config starts from a clean slate.
+    """
+    st.session_state.attack_config = config
+    if config.agents:
+        st.session_state.attack_target_agent_id = config.agents[0].agent_id
+    for key in ("attack_result", "attack_verdict", "attack_node_states"):
+        st.session_state.pop(key, None)
+    st.toast("Config loaded in Attack Suite \u2713")
+
+
 def render_attack_page() -> None:
     """Render the Attack page (sidebar + main area).
 
@@ -349,7 +363,6 @@ def _run_pre_execution_streaming(
         agent_slots[agent_id] = st.empty()
 
     token_buffer: dict[str, str] = {}
-    run_success = True
 
     try:
         for event_type, event_data in executor.run_streaming_tokens(
@@ -389,9 +402,9 @@ def _run_pre_execution_streaming(
                     attack_type=attack_type_str,
                 )
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        run_success = False
         LOGGER.error("Streaming execution error: %s", exc, exc_info=True)
-        st.error(f"Execution error: {exc}")
+        # Re-raise so _execute_attack shows the error and discards the partial result.
+        raise
 
     completed_at = datetime.now(timezone.utc)
     return AttackResult(
@@ -407,7 +420,7 @@ def _run_pre_execution_streaming(
         influenced_agents=tracker.influenced_agents(),
         resistant_agents=tracker.resistant_agents(),
         agent_observations=tracker.observations,
-        success=run_success,
+        success=True,
     )
 
 
@@ -467,9 +480,9 @@ def _render_results(config: MASConfig, result_dict: dict) -> None:
         st.info("Semantic evaluation skipped in stub mode.")
         return
 
-    # Circularity check
-    mas_model = (config.agents[0].model_name or "") if config.agents else ""
-    if _same_provider_family(mas_model, _EVALUATOR_PRIMARY_MODEL):
+    # Circularity check — warn if any agent shares the evaluator's provider family
+    mas_models = [a.model_name or "" for a in config.agents if a.model_name]
+    if any(_same_provider_family(m, _EVALUATOR_PRIMARY_MODEL) for m in mas_models):
         st.warning(
             "⚠ Attack MAS and evaluator share the same model family — "
             "evaluation may be circular."
@@ -626,6 +639,7 @@ def _same_provider_family(model_a: str, model_b: str) -> bool:
         {"anthropic", "claude"},
         {"google", "gemini", "vertex"},
         {"amazon", "nova", "bedrock"},
+        {"openai", "gpt"},
     ]
     for family in families:
         if any(k in model_a.lower() for k in family) and any(

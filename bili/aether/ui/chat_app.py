@@ -35,6 +35,7 @@ from bili.aether.compiler import compile_mas
 from bili.aether.config.loader import load_mas_from_dict, load_mas_from_yaml
 from bili.aether.runtime import MASExecutor
 from bili.aether.schema import AgentSpec, MASConfig, WorkflowType
+from bili.aether.ui.attack_page import push_config_to_attack_state
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
 from bili.aether.validation import validate_mas
 
@@ -818,29 +819,24 @@ def render_sidebar_content(examples_dir: Optional[Path] = None) -> None:
             )
 
     st.markdown("---")
-    if st.button(
+    st.button(
         "Send to Attack Suite \u2192",
         disabled=st.session_state.get("chat_config") is None,
         use_container_width=True,
         key="chat_send_to_attack",
         help="Load the current config into the Attack GUI page.",
-    ):
-        _on_send_to_attack_from_chat()
+        on_click=_on_send_to_attack_from_chat,
+    )
 
     _render_thread_list()
 
 
 def _on_send_to_attack_from_chat() -> None:
-    """Push the current chat config to the Attack page."""
+    """Button on_click callback: push the current chat config to the Attack page."""
     chat_cfg = st.session_state.get("chat_config")
     if chat_cfg is None:
         return
-    st.session_state.attack_config = chat_cfg
-    if chat_cfg.agents:
-        st.session_state.attack_target_agent_id = chat_cfg.agents[0].agent_id
-    for key in ("attack_result", "attack_verdict", "attack_node_states"):
-        st.session_state.pop(key, None)
-    st.toast("Config loaded in Attack Suite \u2713")
+    push_config_to_attack_state(chat_cfg)
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ except ImportError:
     st.stop()
 
 from bili.aether.config.loader import load_mas_from_yaml
+from bili.aether.ui.attack_page import push_config_to_attack_state
 from bili.aether.ui.chat_app import render_main as render_chat_main
 from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
@@ -255,13 +256,7 @@ def _on_send_to_attack() -> None:
     if config is None:
         return
     config = apply_agent_overrides(config)
-    st.session_state.attack_config = config
-    if config.agents:
-        st.session_state.attack_target_agent_id = config.agents[0].agent_id
-    # Clear previous attack state so the new config starts fresh
-    for key in ("attack_result", "attack_verdict", "attack_node_states"):
-        st.session_state.pop(key, None)
-    st.toast("Config loaded in Attack Suite ✓")
+    push_config_to_attack_state(config)
 
 
 def _load_config(yaml_path: Path) -> None:

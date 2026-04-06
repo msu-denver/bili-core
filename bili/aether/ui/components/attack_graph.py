@@ -70,9 +70,23 @@ def render_attack_graph(
 
     flow_key = f"attack_graph_{config.mas_id}"
     state_key = f"attack_flow_{config.mas_id}"
+    version_key = f"attack_flow_version_{config.mas_id}"
 
-    # Always rebuild state so style overrides are always fresh.
-    st.session_state[state_key] = StreamlitFlowState(styled_nodes, edges)
+    # Only rebuild StreamlitFlowState when something that affects node appearance
+    # has actually changed (config, target, or post-run overlay).  Rebuilding on
+    # every render sends fresh state to the component, which fires a state-update
+    # event back to Streamlit, causing an infinite rerun loop.
+    graph_version = (
+        config.mas_id,
+        target_agent_id,
+        str(node_states),
+    )
+    if (
+        state_key not in st.session_state
+        or st.session_state.get(version_key) != graph_version
+    ):
+        st.session_state[state_key] = StreamlitFlowState(styled_nodes, edges)
+        st.session_state[version_key] = graph_version
 
     st.session_state[state_key] = streamlit_flow(
         key=flow_key,
@@ -96,7 +110,7 @@ def render_attack_graph(
     if node_states is not None:
         st.caption(_LEGEND_TEXT, unsafe_allow_html=True)
 
-    selected_id: str | None = st.session_state[state_key].selected_id
+    selected_id: str | None = getattr(st.session_state[state_key], "selected_id", None)
     # Only return agent node clicks (not edge clicks or None)
     if selected_id and config.get_agent(selected_id) is not None:
         return selected_id
@@ -141,12 +155,20 @@ def _apply_style_overrides(
 
 
 def _clone_node(node: StreamlitFlowNode, style: dict) -> StreamlitFlowNode:
-    """Return a new StreamlitFlowNode identical to *node* but with *style*."""
+    """Return a new StreamlitFlowNode identical to *node* but with *style*.
+
+    Note: copies only the fields known at the time of writing.  If a future
+    version of streamlit-flow-component adds new node attributes they will be
+    silently dropped here — update this function accordingly.
+    """
+    # StreamlitFlowNode stores pos as self.position ({"x": ..., "y": ...})
+    # and node_type as self.type — use those attribute names when reading back.
+    pos = (node.position["x"], node.position["y"])
     return StreamlitFlowNode(
         id=node.id,
-        pos=node.pos,
+        pos=pos,
         data=node.data,
-        node_type=node.node_type,
+        node_type=node.type,
         source_position=node.source_position,
         target_position=node.target_position,
         draggable=node.draggable,
