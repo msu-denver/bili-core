@@ -4,12 +4,17 @@ AETHER Results page — Baseline Results Viewer.
 Loads JSON result files written by the baseline runner and renders an
 interactive summary matrix, category breakdowns, and per-result detail panels.
 
+For attack suite results (injection, jailbreak, etc.) see
+``bili/aether/ui/attack_results_page.py``.
+
 Called by the main Streamlit app (``bili/streamlit_app.py``) as a page within
 ``st.navigation()``.
 """
 
+import io
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -27,7 +32,6 @@ _CATEGORY_ICON = {
     "violating": "🔴",
     "edge_case": "🟡",
 }
-
 _CATEGORY_ORDER = ["benign", "edge_case", "violating"]
 
 
@@ -147,9 +151,79 @@ def _render_main() -> None:
     st.markdown("---")
     df_filtered = _render_filters(df)
     st.markdown("---")
+    _render_export_buttons(results, df_filtered)
+    st.markdown("---")
     _render_matrix(df_filtered)
     st.markdown("---")
     _render_detail_panel(results, df_filtered)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+
+def _build_baseline_export_df(df_filtered: pd.DataFrame) -> pd.DataFrame:
+    """Return a renamed copy of *df_filtered* with explicit export column names.
+
+    Baseline runs have no attack metadata (agent_id, tier2, etc.) so the schema
+    differs from the attack results export.  Column mapping:
+    ``prompt_id`` → ``prompt_id``, ``success`` → ``tier1_success`` (renamed for
+    clarity alongside attack exports), all others kept as-is.
+    """
+    return df_filtered.rename(columns={"success": "tier1_success"})[
+        [
+            "mas_id",
+            "prompt_id",
+            "category",
+            "tier1_success",
+            "duration_ms",
+            "agent_count",
+            "stub_mode",
+            "timestamp",
+        ]
+    ]
+
+
+def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> None:
+    """Render CSV and JSON download buttons for the current filtered result set.
+
+    CSV uses an explicit column mapping via ``_build_baseline_export_df``.
+    JSON export contains full raw result dicts matched by ``(mas_id, prompt_id)``.
+    """
+    if df_filtered.empty:
+        return
+
+    visible_keys = set(zip(df_filtered["mas_id"], df_filtered["prompt_id"]))
+    matched = [
+        r for r in results if (r.get("mas_id"), r.get("prompt_id")) in visible_keys
+    ]
+
+    unique_mas = df_filtered["mas_id"].dropna().unique()
+    mas_label = unique_mas[0] if len(unique_mas) == 1 else "multi"
+    today = date.today().isoformat()
+
+    export_df = _build_baseline_export_df(df_filtered)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        buf = io.StringIO()
+        export_df.to_csv(buf, index=False)
+        st.download_button(
+            "⬇ Export CSV",
+            data=buf.getvalue().encode("utf-8"),
+            file_name=f"aether_baseline_{mas_label}_{today}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with col2:
+        st.download_button(
+            "⬇ Export JSON",
+            data=json.dumps(matched, indent=2, default=str).encode("utf-8"),
+            file_name=f"aether_baseline_{mas_label}_{today}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +243,7 @@ def _render_summary_metrics(df: pd.DataFrame) -> None:
 
 
 def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Render filter controls and return the filtered DataFrame."""
+    """Render filter widgets and return the filtered DataFrame."""
     col1, col2, col3 = st.columns(3)
     with col1:
         configs = st.multiselect(
@@ -179,7 +253,6 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
             key="baseline_filter_configs",
         )
     with col2:
-        # Respect _CATEGORY_ORDER so options always appear benign → edge_case → violating
         present = set(df["category"].unique())
         ordered_cats = [c for c in _CATEGORY_ORDER if c in present] + sorted(
             present - set(_CATEGORY_ORDER)
@@ -208,7 +281,7 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_matrix(df: pd.DataFrame) -> None:
-    """Render a colour-coded prompt × config matrix."""
+    """Render a color-coded pass/fail pivot table of prompt × MAS config."""
     st.markdown("### Results Matrix")
     st.caption("✓ = passed  ✗ = failed  — = not run")
 
@@ -216,8 +289,6 @@ def _render_matrix(df: pd.DataFrame) -> None:
         st.info("No results match the current filters.")
         return
 
-    # aggfunc="last" shows the most recent run when duplicates exist (results
-    # are sorted by filename, which is chronological for the baseline runner).
     pivot = df.pivot_table(
         index="prompt_id",
         columns="mas_id",
@@ -225,7 +296,12 @@ def _render_matrix(df: pd.DataFrame) -> None:
         aggfunc="last",
     )
 
-    display = pivot.map(lambda v: "✓" if v is True else ("✗" if v is False else "—"))
+    def _baseline_symbol(v) -> str:
+        if pd.isna(v):
+            return "—"
+        return "✓" if v else "✗"
+
+    display = pivot.map(_baseline_symbol)
 
     def _cell_style(val: str) -> str:
         if val == "✓":
@@ -234,14 +310,11 @@ def _render_matrix(df: pd.DataFrame) -> None:
             return "background-color: #dc3545; color: white; text-align: center"
         return "background-color: #6c757d; color: white; text-align: center"
 
-    st.dataframe(
-        display.style.map(_cell_style),
-        use_container_width=True,
-    )
+    st.dataframe(display.style.map(_cell_style), use_container_width=True)
 
 
 def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None:
-    """Render per-result expandable detail panels."""
+    """Render expandable per-run detail panels sorted by category."""
     st.markdown("### Run Details")
 
     if df_filtered.empty:
@@ -251,7 +324,12 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
     visible = [r for r in results if (r["mas_id"], r["prompt_id"]) in visible_keys]
 
     cat_rank = {c: i for i, c in enumerate(_CATEGORY_ORDER)}
-    visible.sort(key=lambda r: (cat_rank.get(r["prompt_category"], 99), r["prompt_id"]))
+    visible.sort(
+        key=lambda r: (
+            cat_rank.get(r.get("prompt_category", ""), 99),
+            r.get("prompt_id", ""),
+        )
+    )
 
     for r in visible:
         execution = r.get("execution", {})
@@ -286,7 +364,7 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
                             height=80,
                             disabled=True,
                             label_visibility="collapsed",
-                            key=f"detail_{r['mas_id']}_{r['prompt_id']}_{agent_id}",
+                            key=f"bl_detail_{r.get('mas_id')}_{r.get('prompt_id')}_{agent_id}",
                         )
                     else:
                         st.caption("(no output)")

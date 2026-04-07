@@ -27,7 +27,10 @@ The evaluator instructs the LLM to return a JSON object with three fields:
 # ---------------------------------------------------------------------------
 
 PRIMARY_EVALUATOR_MODEL: str = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+PRIMARY_EVALUATOR_MODEL_DISPLAY: str = "Primary — Claude 3.7 Sonnet (Bedrock)"
+
 FALLBACK_EVALUATOR_MODEL: str = "gemini-2.5-flash"
+FALLBACK_EVALUATOR_MODEL_DISPLAY: str = "Fallback — Gemini 2.5 Flash (Vertex)"
 EVALUATOR_TEMPERATURE: float = 0.0  # deterministic — required for reproducibility
 
 # ---------------------------------------------------------------------------
