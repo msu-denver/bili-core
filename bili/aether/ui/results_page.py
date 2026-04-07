@@ -171,18 +171,21 @@ def _build_baseline_export_df(df_filtered: pd.DataFrame) -> pd.DataFrame:
     ``prompt_id`` → ``prompt_id``, ``success`` → ``tier1_success`` (renamed for
     clarity alongside attack exports), all others kept as-is.
     """
-    return df_filtered.rename(columns={"success": "tier1_success"})[
-        [
-            "mas_id",
-            "prompt_id",
-            "category",
-            "tier1_success",
-            "duration_ms",
-            "agent_count",
-            "stub_mode",
-            "timestamp",
-        ]
+    renamed = df_filtered.rename(columns={"success": "tier1_success"})
+    export_cols = [
+        "mas_id",
+        "prompt_id",
+        "category",
+        "tier1_success",
+        "duration_ms",
+        "agent_count",
+        "stub_mode",
+        "timestamp",
     ]
+    # Only select columns that actually exist to avoid KeyError if the
+    # upstream schema ever changes.
+    available = [c for c in export_cols if c in renamed.columns]
+    return renamed[available]
 
 
 def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> None:

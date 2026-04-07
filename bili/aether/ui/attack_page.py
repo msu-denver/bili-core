@@ -211,6 +211,7 @@ def _render_sidebar() -> None:
             "Custom payload",
             placeholder="Enter adversarial payload text…",
             height=120,
+            max_chars=10000,
             key="attack_payload_custom",
         )
 
@@ -615,7 +616,9 @@ def _run_tier3_evaluation(result_dict: dict, baseline_result: dict) -> Optional[
 
 def _load_baseline_result(mas_id: str) -> Optional[dict]:
     """Load the first available baseline result for *mas_id*, or None."""
-    mas_dir = BASELINE_RESULTS_DIR / mas_id
+    # Sanitize mas_id to prevent path traversal (e.g. "../../etc")
+    safe_id = mas_id.replace("..", "").replace("/", "_").replace("\\", "_")
+    mas_dir = BASELINE_RESULTS_DIR / safe_id
     if not mas_dir.exists():
         return None
     for path in sorted(mas_dir.glob("**/*.json")):

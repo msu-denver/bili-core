@@ -37,7 +37,13 @@ LOGGER = logging.getLogger(__name__)
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 # Walk up until we find the repo root (the directory that contains `bili/`).
-_REPO_ROOT = next(p for p in _SCRIPT_DIR.parents if (p / "bili").is_dir())
+try:
+    _REPO_ROOT = next(p for p in _SCRIPT_DIR.parents if (p / "bili").is_dir())
+except StopIteration as exc:
+    raise RuntimeError(
+        f"Cannot find repo root (a directory containing 'bili/') "
+        f"in parents of {_SCRIPT_DIR}"
+    ) from exc
 
 _SUITE_DIRS = {
     "injection": _REPO_ROOT / "bili" / "aether" / "tests" / "injection" / "results",

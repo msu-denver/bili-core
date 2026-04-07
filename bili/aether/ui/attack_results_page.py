@@ -32,8 +32,10 @@ import streamlit as st
 
 LOGGER = logging.getLogger(__name__)
 
-_TESTS_DIR = Path(__file__).resolve().parent.parent / "tests"
-LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
+_AETHER_DIR = Path(__file__).resolve().parent.parent
+_TESTS_DIR = _AETHER_DIR / "tests"
+_REPO_ROOT = _AETHER_DIR.parent.parent
+LOGO_PATH = _AETHER_DIR.parent / "images" / "logo.png"
 
 # ---------------------------------------------------------------------------
 # Suite registry
@@ -112,7 +114,12 @@ def _normalise(r: dict) -> dict:
     execution = r.get("execution", {})
     run_meta = r.get("run_metadata", {})
     tier3_raw = run_meta.get("tier3_score", "")
-    tier3_score: int | None = int(tier3_raw) if tier3_raw not in ("", None) else None
+    try:
+        tier3_score: int | None = (
+            int(tier3_raw) if tier3_raw not in ("", None) else None
+        )
+    except (ValueError, TypeError):
+        tier3_score = None
 
     return {
         # Core identity
@@ -846,7 +853,7 @@ def _render_view_graph_button(
 ) -> None:
     """Render a 'View MAS graph →' button that loads the config into the visualizer."""
     st.markdown("---")
-    full_path = _TESTS_DIR.parent.parent.parent / config_path  # repo root / config_path
+    full_path = _REPO_ROOT / config_path
 
     if not full_path.exists():
         st.caption(f"Config not found at `{config_path}` — graph view unavailable.")

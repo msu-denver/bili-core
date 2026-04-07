@@ -10,6 +10,8 @@ The graph state is rebuilt on every render so that style overrides always
 reflect the current ``target_agent_id`` and ``node_states`` values.
 """
 
+import copy
+
 import streamlit as st
 
 # pylint: disable=import-error
@@ -157,25 +159,12 @@ def _apply_style_overrides(
 def _clone_node(node: StreamlitFlowNode, style: dict) -> StreamlitFlowNode:
     """Return a new StreamlitFlowNode identical to *node* but with *style*.
 
-    Note: copies only the fields known at the time of writing.  If a future
-    version of streamlit-flow-component adds new node attributes they will be
-    silently dropped here — update this function accordingly.
+    Uses ``copy.copy`` so that any new attributes added by future versions of
+    ``streamlit-flow-component`` are preserved automatically.
     """
-    # StreamlitFlowNode stores pos as self.position ({"x": ..., "y": ...})
-    # and node_type as self.type — use those attribute names when reading back.
-    pos = (node.position["x"], node.position["y"])
-    return StreamlitFlowNode(
-        id=node.id,
-        pos=pos,
-        data=node.data,
-        node_type=node.type,
-        source_position=node.source_position,
-        target_position=node.target_position,
-        draggable=node.draggable,
-        connectable=node.connectable,
-        deletable=node.deletable,
-        style=style,
-    )
+    cloned = copy.copy(node)
+    cloned.style = style
+    return cloned
 
 
 def build_node_states(agent_observations: list) -> dict[str, str]:
