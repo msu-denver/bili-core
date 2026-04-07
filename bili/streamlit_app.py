@@ -15,6 +15,7 @@ from pathlib import Path
 import streamlit as st
 from PIL import Image
 
+from bili.aether.ui.attack_page import render_attack_page
 from bili.aether.ui.attack_results_page import render_attack_results_page
 from bili.aether.ui.page import render_aether_page
 from bili.aether.ui.results_page import render_results_page
@@ -67,6 +68,12 @@ def main():
                 title="Attack Results",
                 url_path="attack-results",
                 icon=":material/security:",
+            ),
+            st.Page(
+                _run_attack_page,
+                title="Attack",
+                url_path="attack",
+                icon=":material/gps_fixed:",
             ),
             st.Page(
                 _run_bilicore_page,
@@ -163,6 +170,11 @@ def _run_results_page():
 def _run_attack_results_page():
     """Render the AETHER attack suite results viewer page."""
     render_attack_results_page()
+
+
+def _run_attack_page():
+    """Render the AETHER interactive Attack GUI page."""
+    render_attack_page()
 
 
 # Run the main function when the script is executed.
