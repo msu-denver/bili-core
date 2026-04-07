@@ -31,6 +31,7 @@ except ImportError:
     st.stop()
 
 from bili.aether.config.loader import load_mas_from_yaml
+from bili.aether.ui.attack_page import push_config_to_attack_state
 from bili.aether.ui.chat_app import render_main as render_chat_main
 from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
@@ -249,6 +250,15 @@ def _on_send_to_chat() -> None:
     st.session_state.chat_autoload_name = name
 
 
+def _on_send_to_attack() -> None:
+    """Button callback: push the current visualizer config to the Attack page."""
+    config = st.session_state.get("mas_config")
+    if config is None:
+        return
+    config = apply_agent_overrides(config)
+    push_config_to_attack_state(config)
+
+
 def _load_config(yaml_path: Path) -> None:
     """Load a YAML config and store it in session state."""
     current_path = st.session_state.get("current_yaml_path")
@@ -287,6 +297,13 @@ def _load_config(yaml_path: Path) -> None:
         disabled=st.session_state.get("mas_config") is None,
         use_container_width=True,
         on_click=_on_send_to_chat,
+    )
+    st.button(
+        "Send to Attack Suite \u2192",
+        disabled=st.session_state.get("mas_config") is None,
+        use_container_width=True,
+        on_click=_on_send_to_attack,
+        key="vis_send_to_attack",
     )
     st.markdown("---")
     st.markdown(f"**MAS ID:** `{config.mas_id}`")
