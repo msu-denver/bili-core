@@ -39,31 +39,36 @@ pytestmark = pytest.mark.anyio
 # ======================================================================
 
 
+_TEST_DB_NAME = "test_bili_async_security"
+
+
 @pytest.fixture
-async def async_mongo_db():
-    """Provide async MongoDB database for testing."""
+async def async_mongo_client():
+    """Provide async MongoDB client for testing."""
     if not MONGODB_AVAILABLE:
         pytest.skip("MongoDB (motor) not available")
 
     client = AsyncIOMotorClient(_MONGO_URI)
-    db = client["test_bili_async_security"]
+    db = client[_TEST_DB_NAME]
 
     # Clean up before test
-    await db.checkpoints.delete_many({})
-    await db.checkpoint_writes.delete_many({})
+    await db.checkpoints_aio.delete_many({})
+    await db.checkpoint_writes_aio.delete_many({})
 
-    yield db
+    yield client
 
     # Clean up after test
-    await db.checkpoints.delete_many({})
-    await db.checkpoint_writes.delete_many({})
+    await db.checkpoints_aio.delete_many({})
+    await db.checkpoint_writes_aio.delete_many({})
     client.close()
 
 
 @pytest.fixture
-async def async_checkpointer(async_mongo_db):
+async def async_checkpointer(async_mongo_client):
     """Provide async checkpointer without user_id for setup."""
-    return AsyncPruningMongoDBSaver(async_mongo_db, keep_last_n=5)
+    return AsyncPruningMongoDBSaver(
+        async_mongo_client, db_name=_TEST_DB_NAME, keep_last_n=5
+    )
 
 
 def _make_config(thread_id: str):
@@ -100,17 +105,27 @@ def _make_checkpoint_data():
 class TestAsyncMongoCheckpointerUserID:
     """Tests for AsyncPruningMongoDBSaver with user_id parameter."""
 
-    async def test_async_checkpointer_with_user_id_initialization(self, async_mongo_db):
+    async def test_async_checkpointer_with_user_id_initialization(
+        self, async_mongo_client
+    ):
         """Test that async checkpointer accepts user_id parameter."""
         checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="user@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="user@example.com",
         )
         assert checkpointer.user_id == "user@example.com"
 
-    async def test_async_checkpointer_validates_thread_ownership(self, async_mongo_db):
+    async def test_async_checkpointer_validates_thread_ownership(
+        self, async_mongo_client
+    ):
         """Test that async checkpointer validates thread ownership."""
         checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="user@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="user@example.com",
         )
 
         # Valid thread IDs
@@ -125,11 +140,14 @@ class TestAsyncMongoCheckpointerUserID:
             checkpointer._validate_thread_ownership(thread_id)
 
     async def test_async_checkpointer_rejects_invalid_thread_ownership(
-        self, async_mongo_db
+        self, async_mongo_client
     ):
         """Test that async checkpointer rejects invalid threads."""
         checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="user@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="user@example.com",
         )
 
         # Invalid thread IDs
@@ -155,7 +173,7 @@ class TestAsyncCrossTenantAttacks:
     """Test cross-tenant attack scenarios in async context."""
 
     async def test_async_attack_read_via_aget_tuple(
-        self, async_mongo_db, async_checkpointer
+        self, async_mongo_client, async_checkpointer
     ):
         """Test that users cannot read other users' threads via aget_tuple()."""
         # Setup: Create victim's thread using non-validated checkpointer
@@ -170,7 +188,10 @@ class TestAsyncCrossTenantAttacks:
 
         # Attack: Attacker checkpointer tries to read
         attacker_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="attacker@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="attacker@example.com",
         )
 
         with pytest.raises(
@@ -181,7 +202,7 @@ class TestAsyncCrossTenantAttacks:
             )
 
     async def test_async_attack_write_via_aput(
-        self, async_mongo_db, async_checkpointer
+        self, async_mongo_client, async_checkpointer
     ):
         """Test that users cannot write to other users' threads via aput()."""
         # Setup: Create victim's thread
@@ -196,7 +217,10 @@ class TestAsyncCrossTenantAttacks:
 
         # Attack: Attacker tries to overwrite
         attacker_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="attacker@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="attacker@example.com",
         )
 
         malicious_checkpoint = _make_checkpoint_data()
@@ -214,7 +238,9 @@ class TestAsyncCrossTenantAttacks:
                 {},
             )
 
-    async def test_async_attack_delete_thread(self, async_mongo_db, async_checkpointer):
+    async def test_async_attack_delete_thread(
+        self, async_mongo_client, async_checkpointer
+    ):
         """Test that users cannot delete other users' threads."""
         # Setup: Create victim's thread
         checkpoint_data = _make_checkpoint_data()
@@ -228,7 +254,10 @@ class TestAsyncCrossTenantAttacks:
 
         # Attack: Attacker tries to delete
         attacker_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="attacker@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="attacker@example.com",
         )
 
         with pytest.raises(
@@ -236,7 +265,9 @@ class TestAsyncCrossTenantAttacks:
         ):
             await attacker_checkpointer.adelete_thread("victim@example.com_important")
 
-    async def test_async_attack_read_messages(self, async_mongo_db, async_checkpointer):
+    async def test_async_attack_read_messages(
+        self, async_mongo_client, async_checkpointer
+    ):
         """Test that users cannot read other users' messages."""
         # Setup: Create victim's thread with messages
         checkpoint_data = _make_checkpoint_data()
@@ -253,7 +284,10 @@ class TestAsyncCrossTenantAttacks:
 
         # Attack: Attacker tries to read messages
         attacker_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="attacker@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="attacker@example.com",
         )
 
         with pytest.raises(
@@ -264,7 +298,7 @@ class TestAsyncCrossTenantAttacks:
             )
 
     async def test_async_attack_conversation_id_guessing(
-        self, async_mongo_db, async_checkpointer
+        self, async_mongo_client, async_checkpointer
     ):
         """Test that attackers cannot guess conversation IDs."""
         # Setup: Create predictable conversation IDs
@@ -282,7 +316,10 @@ class TestAsyncCrossTenantAttacks:
 
         # Attack: Attacker tries to guess
         attacker_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="attacker@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="attacker@example.com",
         )
 
         for conv_id in common_conv_ids:
@@ -302,7 +339,7 @@ class TestAsyncMultiTenantIsolation:
     """Test multi-tenant isolation in async operations."""
 
     async def test_async_each_user_sees_only_their_threads(
-        self, async_mongo_db, async_checkpointer
+        self, async_mongo_client, async_checkpointer
     ):
         """Test that get_user_threads only returns user's threads in async."""
         checkpoint_data = _make_checkpoint_data()
@@ -322,7 +359,7 @@ class TestAsyncMultiTenantIsolation:
         # Each user should only see their own threads
         for user in users:
             user_checkpointer = AsyncPruningMongoDBSaver(
-                async_mongo_db, keep_last_n=5, user_id=user
+                async_mongo_client, keep_last_n=5, user_id=user
             )
             threads = await user_checkpointer.aget_user_threads(user)
 
@@ -334,7 +371,7 @@ class TestAsyncMultiTenantIsolation:
                 assert thread["thread_id"].startswith(user)
 
     async def test_async_stats_isolated_per_user(
-        self, async_mongo_db, async_checkpointer
+        self, async_mongo_client, async_checkpointer
     ):
         """Test that user stats are isolated in async operations."""
         checkpoint_data = _make_checkpoint_data()
@@ -352,13 +389,19 @@ class TestAsyncMultiTenantIsolation:
 
         # Check stats for each user
         user1_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="user1@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="user1@example.com",
         )
         user1_stats = await user1_checkpointer.aget_user_stats("user1@example.com")
         assert user1_stats["total_threads"] == 3
 
         user2_checkpointer = AsyncPruningMongoDBSaver(
-            async_mongo_db, keep_last_n=5, user_id="user2@example.com"
+            async_mongo_client,
+            db_name=_TEST_DB_NAME,
+            keep_last_n=5,
+            user_id="user2@example.com",
         )
         user2_stats = await user2_checkpointer.aget_user_stats("user2@example.com")
         assert user2_stats["total_threads"] == 5
