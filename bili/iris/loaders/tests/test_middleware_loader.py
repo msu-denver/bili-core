@@ -1,0 +1,88 @@
+"""Tests for bili.iris.loaders.middleware_loader public API."""
+
+import pytest
+
+from bili.iris.loaders.middleware_loader import (
+    LANGCHAIN_MIDDLEWARE_AVAILABLE,
+    MIDDLEWARE_REGISTRY,
+    initialize_middleware,
+)
+
+# ---------------------------------------------------------------------------
+# MIDDLEWARE_REGISTRY
+# ---------------------------------------------------------------------------
+
+
+class TestMiddlewareRegistry:
+    """Verify the middleware registry structure."""
+
+    def test_registry_is_a_dict(self):
+        """Verify MIDDLEWARE_REGISTRY is a dictionary."""
+        assert isinstance(MIDDLEWARE_REGISTRY, dict)
+
+    @pytest.mark.skipif(
+        not LANGCHAIN_MIDDLEWARE_AVAILABLE,
+        reason="LangChain middleware not installed",
+    )
+    def test_registry_has_expected_keys_when_available(self):
+        """Verify expected middleware keys are present when available."""
+        assert "summarization" in MIDDLEWARE_REGISTRY
+        assert "model_call_limit" in MIDDLEWARE_REGISTRY
+
+    @pytest.mark.skipif(
+        not LANGCHAIN_MIDDLEWARE_AVAILABLE,
+        reason="LangChain middleware not installed",
+    )
+    def test_registry_values_are_callable(self):
+        """Verify all registry values are callable factories."""
+        for name, factory in MIDDLEWARE_REGISTRY.items():
+            assert callable(factory), f"Middleware '{name}' is not callable"
+
+
+# ---------------------------------------------------------------------------
+# initialize_middleware
+# ---------------------------------------------------------------------------
+
+
+class TestInitializeMiddleware:
+    """Test the initialize_middleware public function."""
+
+    def test_returns_empty_list_for_none(self):
+        """Verify None active_middleware returns an empty list."""
+        assert not initialize_middleware(active_middleware=None)
+
+    def test_returns_empty_list_for_empty_list(self):
+        """Verify empty active_middleware returns an empty list."""
+        assert not initialize_middleware(active_middleware=[])
+
+    def test_raises_for_unknown_middleware(self):
+        """Verify unknown middleware name raises ValueError."""
+        with pytest.raises(ValueError, match="not found in registry"):
+            initialize_middleware(active_middleware=["nonexistent_middleware_xyz"])
+
+    def test_returns_list_type(self):
+        """Verify the return type is a list."""
+        result = initialize_middleware(active_middleware=[])
+        assert isinstance(result, list)
+
+    @pytest.mark.skipif(
+        not LANGCHAIN_MIDDLEWARE_AVAILABLE,
+        reason="LangChain middleware not installed",
+    )
+    def test_initializes_known_middleware(self):
+        """Verify known middleware is initialized and returned."""
+        result = initialize_middleware(
+            active_middleware=["summarization"],
+            middleware_params={"summarization": {}},
+        )
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+    @pytest.mark.skipif(
+        LANGCHAIN_MIDDLEWARE_AVAILABLE,
+        reason="Only applies when middleware is unavailable",
+    )
+    def test_returns_empty_when_middleware_unavailable(self):
+        """When langchain middleware is not installed, should return empty list."""
+        result = initialize_middleware(active_middleware=["summarization"])
+        assert not result
