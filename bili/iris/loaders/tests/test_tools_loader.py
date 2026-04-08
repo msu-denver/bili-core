@@ -44,11 +44,16 @@ class TestToolRegistry:
 class TestInitializeTools:
     """Test the initialize_tools public function."""
 
+    _MOCK_PARAMS = {
+        "mock_tool": {"mock_response": "test response", "response_time": 0},
+    }
+
     def test_returns_list_for_mock_tool(self):
         """mock_tool has a default prompt and requires no external services."""
         tools = initialize_tools(
             active_tools=["mock_tool"],
             tool_prompts={},
+            tool_params=self._MOCK_PARAMS,
         )
         assert isinstance(tools, list)
         assert len(tools) == 1
@@ -72,6 +77,7 @@ class TestInitializeTools:
         tools = initialize_tools(
             active_tools=["mock_tool"],
             tool_prompts={"mock_tool_prompt": custom_prompt},
+            tool_params=self._MOCK_PARAMS,
         )
         assert len(tools) == 1
 
@@ -97,6 +103,7 @@ class TestInitializeTools:
         tools = initialize_tools(
             active_tools=["mock_tool"],
             tool_prompts={},
+            tool_params=self._MOCK_PARAMS,
             tool_middleware={"mock_tool": []},
         )
         assert isinstance(tools, list)
@@ -106,6 +113,7 @@ class TestInitializeTools:
         tools = initialize_tools(
             active_tools=["mock_tool"],
             tool_prompts={},
+            tool_params=self._MOCK_PARAMS,
             tool_middleware=[],
         )
         assert isinstance(tools, list)

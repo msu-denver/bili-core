@@ -1385,6 +1385,139 @@ class AsyncPruningMongoDBSaver(
             return self.serde.loads_typed((doc_type, checkpoint_data))
         return checkpoint_data
 
+    # ------------------------------------------------------------------
+    # QueryableCheckpointerMixin abstract method implementations (sync)
+    #
+    # These satisfy the ABC contract.  For async callers, use the
+    # ``a``-prefixed async versions below instead.
+    # ------------------------------------------------------------------
+
+    def get_user_threads(
+        self, user_identifier: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Sync wrapper — delegates to the sync MongoDB client."""
+        sync_db = self._get_sync_db()
+        col = sync_db[self.checkpoint_collection.name]
+        escaped_id = re.escape(user_identifier)
+        pipeline: list[dict] = [
+            {"$match": {"thread_id": {"$regex": f"^{escaped_id}(_|$)"}}},
+            {
+                "$group": {
+                    "_id": "$thread_id",
+                    "last_oid": {"$max": "$_id"},
+                    "checkpoint_count": {"$sum": 1},
+                }
+            },
+            {"$addFields": {"last_updated": {"$toDate": "$last_oid"}}},
+            {"$sort": {"last_updated": DESCENDING}},
+        ]
+        if offset > 0:
+            pipeline.append({"$skip": offset})
+        if limit is not None:
+            pipeline.append({"$limit": limit})
+        results = list(col.aggregate(pipeline))
+        threads = []
+        for result in results:
+            thread_id = result["_id"]
+            conversation_id = (
+                thread_id.split("_", 1)[1] if "_" in thread_id else "default"
+            )
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "conversation_id": conversation_id,
+                    "last_updated": result["last_updated"],
+                    "checkpoint_count": result["checkpoint_count"],
+                    "message_count": 0,
+                    "first_message": None,
+                    "last_message": None,
+                    "title": None,
+                    "tags": [],
+                }
+            )
+        return threads
+
+    def get_thread_messages(
+        self,
+        thread_id: str,
+        limit: int | None = None,
+        offset: int = 0,
+        message_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Sync wrapper — delegates to the sync MongoDB client."""
+        self._validate_thread_ownership(thread_id)
+        sync_db = self._get_sync_db()
+        col = sync_db[self.checkpoint_collection.name]
+        doc = col.find_one(
+            {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
+        )
+        if not doc or "checkpoint" not in doc:
+            return []
+        checkpoint_data = self._deserialize_checkpoint_data(doc)
+        raw_messages = checkpoint_data.get("channel_values", {}).get("messages", [])
+        messages = []
+        for msg in raw_messages:
+            msg_type = msg.__class__.__name__
+            if message_types is not None and msg_type not in message_types:
+                continue
+            content = msg.content if hasattr(msg, "content") else str(msg)
+            messages.append(
+                {
+                    "role": "user" if msg_type == "HumanMessage" else "assistant",
+                    "content": content,
+                    "timestamp": None,
+                }
+            )
+        if offset > 0 or limit is not None:
+            end_index = offset + limit if limit is not None else None
+            messages = messages[offset:end_index]
+        return messages
+
+    def delete_thread(self, thread_id: str) -> bool:
+        """Sync wrapper — delegates to the sync MongoDB client."""
+        self._validate_thread_ownership(thread_id)
+        sync_db = self._get_sync_db()
+        cp_col = sync_db[self.checkpoint_collection.name]
+        wr_col = sync_db[self.writes_collection.name]
+        result = cp_col.delete_many({"thread_id": thread_id})
+        wr_col.delete_many({"thread_id": thread_id})
+        return result.deleted_count > 0
+
+    def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
+        """Sync wrapper — derives stats from get_user_threads."""
+        threads = self.get_user_threads(user_identifier)
+        if not threads:
+            return {
+                "total_threads": 0,
+                "total_messages": 0,
+                "total_checkpoints": 0,
+                "oldest_thread": None,
+                "newest_thread": None,
+            }
+        return {
+            "total_threads": len(threads),
+            "total_messages": sum(t["message_count"] for t in threads),
+            "total_checkpoints": sum(t["checkpoint_count"] for t in threads),
+            "oldest_thread": min(
+                (t["last_updated"] for t in threads if t["last_updated"]),
+                default=None,
+            ),
+            "newest_thread": max(
+                (t["last_updated"] for t in threads if t["last_updated"]),
+                default=None,
+            ),
+        }
+
+    def thread_exists(self, thread_id: str) -> bool:
+        """Sync wrapper — delegates to the sync MongoDB client."""
+        sync_db = self._get_sync_db()
+        col = sync_db[self.checkpoint_collection.name]
+        return col.count_documents({"thread_id": thread_id}, limit=1) > 0
+
+    # ------------------------------------------------------------------
+    # Async query methods (preferred for async callers)
+    # ------------------------------------------------------------------
+
     async def aget_user_threads(
         self, user_identifier: str, limit: int | None = None, offset: int = 0
     ) -> list[dict[str, Any]]:

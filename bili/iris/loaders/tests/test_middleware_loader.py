@@ -72,8 +72,8 @@ class TestInitializeMiddleware:
     def test_initializes_known_middleware(self):
         """Verify known middleware is initialized and returned."""
         result = initialize_middleware(
-            active_middleware=["summarization"],
-            middleware_params={"summarization": {}},
+            active_middleware=["model_call_limit"],
+            middleware_params={"model_call_limit": {"run_limit": 5}},
         )
         assert isinstance(result, list)
         assert len(result) == 1

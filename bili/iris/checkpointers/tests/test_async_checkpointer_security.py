@@ -11,6 +11,8 @@ if MongoDB is not available.
 
 # pylint: disable=missing-function-docstring,redefined-outer-name,protected-access,abstract-class-instantiated
 
+import os
+
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -18,6 +20,8 @@ from bili.iris.checkpointers.mongo_checkpointer import AsyncPruningMongoDBSaver
 
 # Skip tests if MongoDB is not available
 pytest_plugins = ("pytest_anyio",)
+
+_MONGO_URI = os.environ.get("MONGO_CONNECTION_STRING", "mongodb://localhost:27017")
 
 try:
     from motor.motor_asyncio import AsyncIOMotorClient
@@ -41,7 +45,7 @@ async def async_mongo_db():
     if not MONGODB_AVAILABLE:
         pytest.skip("MongoDB (motor) not available")
 
-    client = AsyncIOMotorClient("mongodb://localhost:27017")
+    client = AsyncIOMotorClient(_MONGO_URI)
     db = client["test_bili_async_security"]
 
     # Clean up before test
