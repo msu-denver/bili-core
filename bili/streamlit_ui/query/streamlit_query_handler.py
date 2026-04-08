@@ -96,7 +96,7 @@ def process_query_streaming(conversation_chain, user_query):
     :return: A generator yielding token strings.
     :rtype: Generator[str, None, None]
     """
-    from bili.loaders.streaming_utils import (  # pylint: disable=import-outside-toplevel
+    from bili.iris.loaders.streaming_utils import (  # pylint: disable=import-outside-toplevel
         stream_agent,
     )
 

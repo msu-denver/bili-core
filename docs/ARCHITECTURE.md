@@ -85,7 +85,7 @@ Each provider type has multiple implementations:
 - **SQLite**: Local development with persistent storage
 - **In-memory**: Testing/ephemeral sessions
 
-### 2. Checkpointers (`bili/checkpointers/`)
+### 2. Checkpointers (`bili/iris/checkpointers/`)
 
 State persistence layer supporting multiple backends. All checkpointers implement the `QueryableCheckpointerMixin` interface:
 
@@ -109,7 +109,7 @@ Available implementations:
 All checkpointers support multi-tenant isolation via the `user_id` parameter:
 
 ```python
-from bili.checkpointers.pg_checkpointer import AsyncPostgresSaver
+from bili.iris.checkpointers.pg_checkpointer import AsyncPostgresSaver
 
 # Initialize checkpointer with user_id for multi-tenant isolation
 checkpointer = AsyncPostgresSaver.from_conn_string(
@@ -183,7 +183,7 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 - Existing code without `user_id` continues to work unchanged
 - No breaking changes to public APIs
 
-### 3. LLM Configuration (`bili/config/`)
+### 3. LLM Configuration (`bili/iris/config/`)
 
 Configurations for 60+ LLMs across providers:
 
@@ -197,7 +197,7 @@ Configurations for 60+ LLMs across providers:
 
 Factory pattern initialization via `llm_loader.py`.
 
-### 4. LangGraph Workflow (`bili/loaders/`, `bili/nodes/`)
+### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`)
 
 Node-based workflow system with registry pattern. See [LANGGRAPH.md](./LANGGRAPH.md) for details.
 
@@ -206,7 +206,7 @@ Node-based workflow system with registry pattern. See [LANGGRAPH.md](./LANGGRAPH
 START → persona_summary → datetime → react_agent → timestamp → trim_summarize → normalize → END
 ```
 
-### 5. Tools Framework (`bili/tools/`)
+### 5. Tools Framework (`bili/iris/tools/`)
 
 Extensible tool system with registry-based loading. See [TOOLS.md](./TOOLS.md) for details.
 

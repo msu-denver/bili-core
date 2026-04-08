@@ -220,7 +220,7 @@ class SemanticEvaluator:
         from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
             resolve_model,
         )
-        from bili.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
             load_model,
         )
 

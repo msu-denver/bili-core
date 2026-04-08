@@ -91,7 +91,7 @@ agents:
 
 Apply whichever `model_name` form you choose to all four agents (`community_manager`, `content_reviewer`, `policy_expert`, `judge`). The resolver checks `model_id` first, then display name — both routes work.
 
-> **Changing the default path:** If your model is stored elsewhere, edit `bili/config/llm_config.py` directly to update the path that the display name resolves to.
+> **Changing the default path:** If your model is stored elsewhere, edit `bili/iris/config/llm_config.py` directly to update the path that the display name resolves to.
 
 > **`capabilities` note:** Remove `tool_calling` from any agent's `capabilities` list when using local models. Local models don't dispatch tools — leaving it in won't cause an error, but it is misleading.
 

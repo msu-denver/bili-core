@@ -653,7 +653,7 @@ def test_resolve_model_by_model_id():
         create=True,
     ):
         # Patch the import inside _lookup_in_llm_models
-        with patch("bili.config.llm_config.LLM_MODELS", mock_models):
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
             provider, model_id = resolve_model("gpt-4o")
             assert provider == "remote_openai"
             assert model_id == "gpt-4o"
@@ -672,7 +672,7 @@ def test_resolve_model_by_display_name():
             ]
         }
     }
-    with patch("bili.config.llm_config.LLM_MODELS", mock_models):
+    with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
         provider, model_id = resolve_model("GPT-4o")
         assert provider == "remote_openai"
         assert model_id == "gpt-4o"
@@ -685,7 +685,7 @@ def test_resolve_model_heuristic_fallback():
     )
 
     # Empty LLM_MODELS so lookup fails
-    with patch("bili.config.llm_config.LLM_MODELS", {}):
+    with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
         provider, model_id = resolve_model("gpt-4o-mini")
         assert provider == "remote_openai"
         # Heuristic keeps original name as model_id
@@ -698,7 +698,7 @@ def test_resolve_model_bedrock_claude():
         resolve_model,
     )
 
-    with patch("bili.config.llm_config.LLM_MODELS", {}):
+    with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
         provider, _model_id = resolve_model("anthropic.claude-3-sonnet-20240229-v1:0")
         assert provider == "remote_aws_bedrock"
 
@@ -709,7 +709,7 @@ def test_resolve_model_unknown_raises():
         resolve_model,
     )
 
-    with patch("bili.config.llm_config.LLM_MODELS", {}):
+    with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
         with pytest.raises(ValueError, match="Cannot resolve model"):
             resolve_model("totally-unknown-model-xyz")
 

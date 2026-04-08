@@ -39,7 +39,7 @@ def _build_echo_node(**kwargs):
 
 def _make_node_factory(name, builder):
     """Create a partial(Node, name, builder) — same pattern as GRAPH_NODE_REGISTRY."""
-    from bili.graph_builder.classes.node import Node
+    from bili.iris.graph_builder.classes.node import Node
 
     return partial(Node, name, builder)
 
@@ -95,7 +95,7 @@ class TestRegisterNode:
 
     def test_register_and_resolve(self):
         """Registered node appears in GRAPH_NODE_REGISTRY."""
-        from bili.loaders.langchain_loader import (
+        from bili.iris.loaders.langchain_loader import (
             GRAPH_NODE_REGISTRY,
             register_node,
             unregister_node,
@@ -111,7 +111,7 @@ class TestRegisterNode:
 
     def test_register_duplicate_raises(self):
         """register_node() raises ValueError for duplicate names."""
-        from bili.loaders.langchain_loader import register_node, unregister_node
+        from bili.iris.loaders.langchain_loader import register_node, unregister_node
 
         factory = _make_node_factory("dup_test", _build_echo_node)
         try:
@@ -123,14 +123,14 @@ class TestRegisterNode:
 
     def test_unregister_missing_raises(self):
         """unregister_node() raises KeyError for unknown names."""
-        from bili.loaders.langchain_loader import unregister_node
+        from bili.iris.loaders.langchain_loader import unregister_node
 
         with pytest.raises(KeyError, match="not registered"):
             unregister_node("nonexistent_node_xyz")
 
     def test_register_unregister_roundtrip(self):
         """Node can be registered and then cleanly unregistered."""
-        from bili.loaders.langchain_loader import (
+        from bili.iris.loaders.langchain_loader import (
             GRAPH_NODE_REGISTRY,
             register_node,
             unregister_node,

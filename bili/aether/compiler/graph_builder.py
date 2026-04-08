@@ -511,14 +511,14 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
         # 2. Fall back to global bili-core registry
         if factory is None:
             try:
-                from bili.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
+                from bili.iris.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
                     GRAPH_NODE_REGISTRY,
                 )
             except ImportError as exc:
                 raise ValueError(
                     f"Pipeline node '{node_spec.node_id}' references registry "
                     f"type '{node_spec.node_type}' but "
-                    "bili.loaders.langchain_loader is not available."
+                    "bili.iris.loaders.langchain_loader is not available."
                 ) from exc
             factory = GRAPH_NODE_REGISTRY.get(node_spec.node_type)
 
@@ -526,7 +526,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
             # Build combined list of available node types for the error message
             available_keys: Set[str] = set(self._custom_node_registry.keys())
             try:
-                from bili.loaders.langchain_loader import (
+                from bili.iris.loaders.langchain_loader import (
                     GRAPH_NODE_REGISTRY as _global_reg,  # pylint: disable=import-outside-toplevel
                 )
 
@@ -539,7 +539,7 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
                 f"Available: {sorted(available_keys)}"
             )
 
-        from bili.graph_builder.classes.node import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.graph_builder.classes.node import (  # pylint: disable=import-outside-toplevel
             Node,
         )
 

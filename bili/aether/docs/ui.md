@@ -138,7 +138,7 @@ After a config is loaded, a **Model Settings** section appears in the sidebar be
 
 | Control | Behaviour |
 |---------|-----------|
-| **Model selectbox** | Lists all LLMs from `bili/config/llm_config.py` (74 models), grouped by provider |
+| **Model selectbox** | Lists all LLMs from `bili/iris/config/llm_config.py` (74 models), grouped by provider |
 | **Apply to all** | Patches every agent in the loaded config with the selected model and reinitialises the executor. Conversation history is cleared |
 | **Stub mode** | Clears `model_name` from all agents and reinitialises; stub mode indicator reappears |
 

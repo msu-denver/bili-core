@@ -49,8 +49,6 @@ from pathlib import Path
 from flask import Flask, g, jsonify, make_response, request
 
 from bili.auth.auth_manager import get_auth_manager
-from bili.checkpointers.pg_checkpointer import get_pg_checkpointer
-from bili.config.tool_config import TOOLS
 from bili.flask_api.flask_utils import (
     add_unauthorized_handler,
     auth_required,
@@ -59,9 +57,14 @@ from bili.flask_api.flask_utils import (
     per_user_agent,
     set_token_cookies,
 )
-from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION, build_agent_graph
-from bili.loaders.llm_loader import load_model
-from bili.loaders.tools_loader import initialize_tools
+from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
+from bili.iris.config.tool_config import TOOLS
+from bili.iris.loaders.langchain_loader import (
+    DEFAULT_GRAPH_DEFINITION,
+    build_agent_graph,
+)
+from bili.iris.loaders.llm_loader import load_model
+from bili.iris.loaders.tools_loader import initialize_tools
 from bili.utils.file_utils import load_from_json
 from bili.utils.langgraph_utils import State
 

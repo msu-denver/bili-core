@@ -43,8 +43,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from bili.config.llm_config import LLM_MODELS
-from bili.config.tool_config import TOOLS
+from bili.iris.config.llm_config import LLM_MODELS
+from bili.iris.config.tool_config import TOOLS
 from bili.utils.file_utils import load_from_json
 
 # Load default prompts from JSON that will be used in the chatbot system

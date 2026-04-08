@@ -315,7 +315,7 @@ def _load_all_model_options() -> tuple[list[str], list[str], list[str]]:
     process — provider availability filtering is intentionally NOT done here so
     that credentials added after startup are picked up on the next render.
     """
-    from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
+    from bili.iris.config.llm_config import (  # pylint: disable=import-outside-toplevel
         LLM_MODELS,
     )
 

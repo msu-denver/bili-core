@@ -77,9 +77,9 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from bili.auth.auth_manager import AuthManager
-from bili.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
-from bili.nodes.add_persona_and_summary import persona_and_summary_node
-from bili.nodes.per_user_state import per_user_state_node
+from bili.iris.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
+from bili.iris.nodes.add_persona_and_summary import persona_and_summary_node
+from bili.iris.nodes.per_user_state import per_user_state_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -473,7 +473,7 @@ def stream_agent_response(conversation_agent, prompt, thread_id):
     Yields:
         SSE-formatted strings.
     """
-    from bili.loaders.streaming_utils import (  # pylint: disable=import-outside-toplevel
+    from bili.iris.loaders.streaming_utils import (  # pylint: disable=import-outside-toplevel
         stream_agent,
     )
 

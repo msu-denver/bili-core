@@ -610,7 +610,7 @@ Configures how conversation history is managed:
 
 ## LangGraph Integration
 
-### Agent Building (`bili/loaders/langchain_loader.py`)
+### Agent Building (`bili/iris/loaders/langchain_loader.py`)
 
 The Streamlit UI builds a LangGraph agent using `build_agent_graph()`:
 
@@ -760,7 +760,7 @@ User Input
 
 ## Checkpointing and State Persistence
 
-### Checkpointer Selection (`bili/checkpointers/checkpointer_functions.py`)
+### Checkpointer Selection (`bili/iris/checkpointers/checkpointer_functions.py`)
 
 The application automatically selects the appropriate checkpointer based on environment variables:
 
@@ -872,10 +872,10 @@ def clear_state(state):
 }
 ```
 
-#### `bili/config/llm_config.py`
+#### `bili/iris/config/llm_config.py`
 Contains `LLM_MODELS` dictionary with all supported model configurations.
 
-#### `bili/config/tool_config.py`
+#### `bili/iris/config/tool_config.py`
 Contains `TOOLS` dictionary with all available tool configurations.
 
 ---
@@ -979,7 +979,7 @@ Contains `TOOLS` dictionary with all available tool configurations.
 
 ### Adding New LLM Providers
 
-1. Add provider configuration to `bili/config/llm_config.py`:
+1. Add provider configuration to `bili/iris/config/llm_config.py`:
 ```python
 LLM_MODELS["new_provider"] = {
     "name": "Provider Name",
@@ -996,11 +996,11 @@ LLM_MODELS["new_provider"] = {
 }
 ```
 
-2. Add loader support in `bili/loaders/llm_loader.py`
+2. Add loader support in `bili/iris/loaders/llm_loader.py`
 
 ### Adding New Tools
 
-1. Add tool configuration to `bili/config/tool_config.py`:
+1. Add tool configuration to `bili/iris/config/tool_config.py`:
 ```python
 TOOLS["new_tool"] = {
     "description": "Tool description",
@@ -1016,15 +1016,15 @@ TOOLS["new_tool"] = {
 }
 ```
 
-2. Implement tool in `bili/tools/new_tool.py`
-3. Register in `bili/loaders/tools_loader.py`
+2. Implement tool in `bili/iris/tools/new_tool.py`
+3. Register in `bili/iris/loaders/tools_loader.py`
 
 ### Adding Custom Graph Nodes
 
-1. Create node in `bili/nodes/custom_node.py`:
+1. Create node in `bili/iris/nodes/custom_node.py`:
 ```python
 from functools import partial
-from bili.graph_builder.classes.node import Node
+from bili.iris.graph_builder.classes.node import Node
 
 def custom_node_function(state, **kwargs):
     # Node logic
@@ -1037,7 +1037,7 @@ def custom_node(**node_kwargs):
     )
 ```
 
-2. Register in `bili/loaders/langchain_loader.py`:
+2. Register in `bili/iris/loaders/langchain_loader.py`:
 ```python
 GRAPH_NODE_REGISTRY["custom_node"] = custom_node
 ```

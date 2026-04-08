@@ -70,7 +70,7 @@ def _create_memory_checkpointer(
 ) -> Any:
     """Create a QueryableMemorySaver, falling back to plain MemorySaver."""
     try:
-        from bili.checkpointers.memory_checkpointer import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.checkpointers.memory_checkpointer import (  # pylint: disable=import-outside-toplevel
             QueryableMemorySaver,
         )
 
@@ -96,7 +96,7 @@ def _create_postgres_checkpointer(
     """Create a PostgreSQL checkpointer via bili-core."""
     keep_last_n = config.get("keep_last_n", 5)
     try:
-        from bili.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
             get_pg_checkpointer,
         )
 
@@ -115,7 +115,7 @@ def _create_postgres_checkpointer(
         )
     except ImportError:
         LOGGER.warning(
-            "bili.checkpointers.pg_checkpointer not available; "
+            "bili.iris.checkpointers.pg_checkpointer not available; "
             "falling back to memory"
         )
     return _create_memory_checkpointer(user_id=user_id)
@@ -127,7 +127,7 @@ def _create_mongo_checkpointer(
     """Create a MongoDB checkpointer via bili-core."""
     keep_last_n = config.get("keep_last_n", 5)
     try:
-        from bili.checkpointers.mongo_checkpointer import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.checkpointers.mongo_checkpointer import (  # pylint: disable=import-outside-toplevel
             get_mongo_checkpointer,
         )
 
@@ -146,7 +146,7 @@ def _create_mongo_checkpointer(
         )
     except ImportError:
         LOGGER.warning(
-            "bili.checkpointers.mongo_checkpointer not available; "
+            "bili.iris.checkpointers.mongo_checkpointer not available; "
             "falling back to memory"
         )
     return _create_memory_checkpointer(user_id=user_id)
@@ -158,7 +158,7 @@ def _create_auto_checkpointer(
     """Auto-detect checkpointer by checking environment variables.
 
     Forwards keep_last_n and user_id parameters if specified.
-    Mirrors the logic from bili.checkpointers.checkpointer_functions.get_checkpointer
+    Mirrors the logic from bili.iris.checkpointers.checkpointer_functions.get_checkpointer
     but passes arguments correctly.
     """
     config = config or {}
@@ -169,7 +169,7 @@ def _create_auto_checkpointer(
 
         # If POSTGRES_CONNECTION_STRING exists, use PostgresSaver
         if os.getenv("POSTGRES_CONNECTION_STRING"):
-            from bili.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
+            from bili.iris.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
                 get_pg_checkpointer,
             )
 
@@ -178,7 +178,7 @@ def _create_auto_checkpointer(
 
         # If MONGO_CONNECTION_STRING exists, use MongoDBSaver
         if os.getenv("MONGO_CONNECTION_STRING"):
-            from bili.checkpointers.mongo_checkpointer import (  # pylint: disable=import-outside-toplevel
+            from bili.iris.checkpointers.mongo_checkpointer import (  # pylint: disable=import-outside-toplevel
                 get_mongo_checkpointer,
             )
 
@@ -186,7 +186,7 @@ def _create_auto_checkpointer(
             return get_mongo_checkpointer(keep_last_n=keep_last_n, user_id=user_id)
 
         # Fallback to in-memory
-        from bili.checkpointers.memory_checkpointer import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.checkpointers.memory_checkpointer import (  # pylint: disable=import-outside-toplevel
             QueryableMemorySaver,
         )
 
@@ -195,7 +195,7 @@ def _create_auto_checkpointer(
 
     except ImportError:
         LOGGER.warning(
-            "bili.checkpointers.checkpointer_functions not available; "
+            "bili.iris.checkpointers.checkpointer_functions not available; "
             "falling back to memory"
         )
     return _create_memory_checkpointer(user_id=user_id)

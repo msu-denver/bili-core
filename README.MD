@@ -92,8 +92,8 @@ BiliCore supports streaming (token-by-token) responses across the entire stack. 
 **Framework-Agnostic (works anywhere — no Flask/Streamlit required):**
 
 ```python
-from bili.loaders.langchain_loader import build_agent_graph
-from bili.loaders.streaming_utils import stream_agent, invoke_agent
+from bili.iris.loaders.langchain_loader import build_agent_graph
+from bili.iris.loaders.streaming_utils import stream_agent, invoke_agent
 
 agent = build_agent_graph(checkpoint_saver=saver, node_kwargs=kwargs, ...)
 
@@ -178,7 +178,7 @@ print(result.get_summary())
 
 ```python
 from bili.aether.execution.mas_executor import MASExecutor
-from bili.checkpointers.pg_checkpointer import AsyncPostgresSaver
+from bili.iris.checkpointers.pg_checkpointer import AsyncPostgresSaver
 
 # Initialize checkpointer with user_id for multi-tenant isolation
 checkpointer = AsyncPostgresSaver.from_conn_string(

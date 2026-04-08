@@ -3,7 +3,7 @@
 When an ``AgentSpec`` has ``model_name`` set, the generated node makes
 real LLM calls using bili-core's ``llm_loader``.  If the agent also has
 ``tools`` configured, the node is built with ``langchain.agents.create_agent``
-— the same pattern used by ``bili/nodes/react_agent_node.py``.
+— the same pattern used by ``bili/iris/nodes/react_agent_node.py``.
 """
 
 import json
@@ -84,7 +84,7 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     If the agent has ``tools`` configured, resolves them via
     :func:`~bili.aether.compiler.llm_resolver.resolve_tools` and uses
     ``langchain.agents.create_agent`` — the same pattern as
-    ``bili/nodes/react_agent_node.py``.  Middleware (if configured) is
+    ``bili/iris/nodes/react_agent_node.py``.  Middleware (if configured) is
     resolved and passed to ``create_agent`` for tool-enabled agents.
     """
     # pylint: disable=import-outside-toplevel
@@ -115,7 +115,7 @@ def _generate_tool_agent_node(
 ) -> Callable[[dict], dict]:
     """Create a node using ``create_agent()`` for tool-enabled agents.
 
-    Mirrors the tool-enabled path in ``bili/nodes/react_agent_node.py``.
+    Mirrors the tool-enabled path in ``bili/iris/nodes/react_agent_node.py``.
     Middleware (if provided) is forwarded to ``create_agent()``.
     """
     from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
@@ -202,7 +202,7 @@ def _generate_tool_agent_node(
 def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict], dict]:
     """Create a node that calls ``llm.invoke()`` directly (no tools).
 
-    Mirrors the fallback path in ``bili/nodes/react_agent_node.py``.
+    Mirrors the fallback path in ``bili/iris/nodes/react_agent_node.py``.
     """
 
     def _agent_node(state: dict) -> dict:  # pylint: disable=too-many-locals
@@ -384,12 +384,12 @@ def _resolve_middleware(agent: AgentSpec) -> list:
         return []
 
     try:
-        from bili.loaders.middleware_loader import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.loaders.middleware_loader import (  # pylint: disable=import-outside-toplevel
             initialize_middleware,
         )
     except ImportError:
         LOGGER.warning(
-            "bili.loaders.middleware_loader not available; "
+            "bili.iris.loaders.middleware_loader not available; "
             "skipping middleware for agent '%s'",
             agent.agent_id,
         )

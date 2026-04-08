@@ -1,8 +1,8 @@
 """LLM resolution — maps AgentSpec model names to LLM provider instances.
 
 Resolves ``AgentSpec.model_name`` to a provider type and ``model_id``
-using ``bili.config.llm_config.LLM_MODELS``, then instantiates the LLM
-via ``bili.loaders.llm_loader.load_model``.
+using ``bili.iris.config.llm_config.LLM_MODELS``, then instantiates the LLM
+via ``bili.iris.loaders.llm_loader.load_model``.
 
 bili-core distinguishes between a display *model_name* (e.g.
 ``"GPT-4o"``) and the actual *model_id* sent to the provider (e.g.
@@ -166,7 +166,7 @@ def create_llm(agent: AgentSpec) -> Any:
         model_id,
     )
 
-    from bili.loaders.llm_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
+    from bili.iris.loaders.llm_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
         load_model,
     )
 
@@ -192,15 +192,15 @@ def resolve_tools(agent: AgentSpec) -> list:
         return []
 
     try:
-        from bili.config.tool_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
+        from bili.iris.config.tool_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
             TOOLS as TOOL_CONFIG,
         )
-        from bili.loaders.tools_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
+        from bili.iris.loaders.tools_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
             initialize_tools,
         )
     except ImportError:
         LOGGER.warning(
-            "bili.loaders.tools_loader not available; "
+            "bili.iris.loaders.tools_loader not available; "
             "skipping tool resolution for agent '%s'",
             agent.agent_id,
         )
@@ -244,11 +244,13 @@ def _lookup_in_llm_models(
     ``api_version`` for Azure OpenAI models).
     """
     try:
-        from bili.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
+        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
             LLM_MODELS,
         )
     except ImportError:
-        LOGGER.debug("bili.config.llm_config not available; skipping LLM_MODELS lookup")
+        LOGGER.debug(
+            "bili.iris.config.llm_config not available; skipping LLM_MODELS lookup"
+        )
         return None
 
     for provider_type, provider_info in LLM_MODELS.items():

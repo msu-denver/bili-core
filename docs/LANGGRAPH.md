@@ -50,7 +50,7 @@ Nodes are defined using `functools.partial` to create node factories. This patte
 
 ```python
 from functools import partial
-from bili.graph_builder.classes.node import Node
+from bili.iris.graph_builder.classes.node import Node
 
 def build_my_node(**kwargs):
     """Factory function that returns the actual node logic."""
@@ -112,7 +112,7 @@ graph_definition[graph_definition.index("inject_current_datetime")].edges = ["pe
 
 ### The `build_agent_graph` Function
 
-Located in `bili/loaders/langchain_loader.py`:
+Located in `bili/iris/loaders/langchain_loader.py`:
 
 ```python
 def build_agent_graph(
@@ -134,7 +134,7 @@ def build_agent_graph(
 ### Basic Usage
 
 ```python
-from bili.loaders.langchain_loader import build_agent_graph
+from bili.iris.loaders.langchain_loader import build_agent_graph
 
 # Build with defaults
 agent = build_agent_graph()
@@ -149,7 +149,7 @@ result = agent.invoke(
 ### Advanced Usage with Custom Configuration
 
 ```python
-from bili.loaders.langchain_loader import (
+from bili.iris.loaders.langchain_loader import (
     build_agent_graph,
     DEFAULT_GRAPH_DEFINITION,
     GRAPH_NODE_REGISTRY
@@ -237,7 +237,7 @@ class State(MessagesState):
 State is automatically persisted via checkpointers:
 
 ```python
-from bili.checkpointers.checkpointer_functions import get_checkpointer
+from bili.iris.checkpointers.checkpointer_functions import get_checkpointer
 
 # Auto-selects based on environment (Postgres, Mongo, or Memory)
 checkpointer = get_checkpointer()
@@ -284,9 +284,9 @@ INFO - Node 'normalize_state' executed in 0.56 ms
 ### Step 1: Define the Node Builder
 
 ```python
-# bili/nodes/my_custom_node.py
+# bili/iris/nodes/my_custom_node.py
 from functools import partial
-from bili.graph_builder.classes.node import Node
+from bili.iris.graph_builder.classes.node import Node
 from bili.utils.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)
@@ -323,7 +323,7 @@ my_custom_node = partial(Node, "my_custom_node", build_my_custom_node)
 ### Step 2: Register the Node
 
 ```python
-from bili.loaders.langchain_loader import build_agent_graph
+from bili.iris.loaders.langchain_loader import build_agent_graph
 from my_nodes.my_custom_node import my_custom_node
 
 # Add to custom registry
@@ -342,7 +342,7 @@ agent = build_agent_graph(
 
 ```python
 import copy
-from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
+from bili.iris.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
 
 # Deep copy and modify
 graph_def = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
@@ -402,7 +402,7 @@ def build_my_node(**kwargs):
 For complex routing based on state:
 
 ```python
-from bili.graph_builder.classes.conditional_edge import ConditionalEdge
+from bili.iris.graph_builder.classes.conditional_edge import ConditionalEdge
 
 def route_by_tool_count(state):
     """Route based on whether tools were called."""

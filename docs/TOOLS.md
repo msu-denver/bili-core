@@ -26,7 +26,7 @@ Tools are dynamically loaded based on configuration and can be enhanced with mid
 
 ## Tool Configuration
 
-### Configuration File: `bili/config/tool_config.py`
+### Configuration File: `bili/iris/config/tool_config.py`
 
 Each tool is defined with:
 
@@ -94,7 +94,7 @@ TOOLS = {
 
 ## Tool Registry
 
-### Location: `bili/loaders/tools_loader.py`
+### Location: `bili/iris/loaders/tools_loader.py`
 
 The `TOOL_REGISTRY` maps tool names to initialization functions:
 
@@ -134,7 +134,7 @@ TOOL_REGISTRY = {
 ### Basic Usage
 
 ```python
-from bili.loaders.tools_loader import initialize_tools
+from bili.iris.loaders.tools_loader import initialize_tools
 
 tools = initialize_tools(
     active_tools=["free_weather_api_tool", "serp_api_tool"],
@@ -165,7 +165,7 @@ tools = initialize_tools(
 Apply middleware to all tools or specific tools:
 
 ```python
-from bili.loaders.middleware_loader import initialize_middleware
+from bili.iris.loaders.middleware_loader import initialize_middleware
 
 middleware = initialize_middleware(
     active_middleware=["model_call_limit"],
@@ -194,12 +194,12 @@ tools = initialize_tools(
 
 ### FAISS Vector Search
 
-**Location**: `bili/tools/faiss_memory_indexing.py`
+**Location**: `bili/iris/tools/faiss_memory_indexing.py`
 
 Local vector similarity search using FAISS:
 
 ```python
-from bili.tools.faiss_memory_indexing import init_faiss
+from bili.iris.tools.faiss_memory_indexing import init_faiss
 
 # Initialize retriever from local documents
 retriever = init_faiss(data_dir="data/my_documents")
@@ -222,7 +222,7 @@ ALLOWED_PREFIXES = [
 
 ### Amazon OpenSearch
 
-**Location**: `bili/tools/amazon_opensearch.py`
+**Location**: `bili/iris/tools/amazon_opensearch.py`
 
 Cloud-based similarity search with multiple embedding providers:
 
@@ -247,7 +247,7 @@ Supported embedding providers:
 
 ### Weather APIs
 
-**Free Weather API** (`bili/tools/api_free_weather_api.py`):
+**Free Weather API** (`bili/iris/tools/api_free_weather_api.py`):
 ```python
 tools = initialize_tools(
     active_tools=["free_weather_api_tool"],
@@ -257,7 +257,7 @@ tools = initialize_tools(
 )
 ```
 
-**OpenWeatherMap** (`bili/tools/api_open_weather.py`):
+**OpenWeatherMap** (`bili/iris/tools/api_open_weather.py`):
 ```python
 tools = initialize_tools(
     active_tools=["weather_api_tool"],
@@ -270,7 +270,7 @@ tools = initialize_tools(
 )
 ```
 
-**Weather.gov** (`bili/tools/api_weather_gov.py`):
+**Weather.gov** (`bili/iris/tools/api_weather_gov.py`):
 ```python
 tools = initialize_tools(
     active_tools=["weather_gov_api_tool"],
@@ -282,7 +282,7 @@ tools = initialize_tools(
 
 ### SERP API (Web Search)
 
-**Location**: `bili/tools/api_serp.py`
+**Location**: `bili/iris/tools/api_serp.py`
 
 ```python
 tools = initialize_tools(
@@ -298,7 +298,7 @@ tools = initialize_tools(
 
 ### Mock Tool (Testing)
 
-**Location**: `bili/tools/mock_tool.py`
+**Location**: `bili/iris/tools/mock_tool.py`
 
 For testing tool interactions without external dependencies:
 
@@ -320,7 +320,7 @@ tools = initialize_tools(
 ### Step 1: Create the Tool Module
 
 ```python
-# bili/tools/my_custom_tool.py
+# bili/iris/tools/my_custom_tool.py
 from langchain_core.tools import Tool
 from bili.utils.logging_utils import get_logger
 
@@ -357,7 +357,7 @@ def init_my_custom_tool(name: str, prompt: str, **params):
 ### Step 2: Add to Tool Config
 
 ```python
-# bili/config/tool_config.py
+# bili/iris/config/tool_config.py
 TOOLS = {
     # ... existing tools ...
     "my_custom_tool": {
@@ -378,8 +378,8 @@ TOOLS = {
 ### Step 3: Register the Tool
 
 ```python
-# bili/loaders/tools_loader.py
-from bili.tools.my_custom_tool import init_my_custom_tool
+# bili/iris/loaders/tools_loader.py
+from bili.iris.tools.my_custom_tool import init_my_custom_tool
 
 TOOL_REGISTRY = {
     # ... existing tools ...
@@ -404,8 +404,8 @@ tools = initialize_tools(
 Tools are passed to the agent via `node_kwargs`:
 
 ```python
-from bili.loaders.langchain_loader import build_agent_graph
-from bili.loaders.tools_loader import initialize_tools
+from bili.iris.loaders.langchain_loader import build_agent_graph
+from bili.iris.loaders.tools_loader import initialize_tools
 
 # Initialize tools
 tools = initialize_tools(

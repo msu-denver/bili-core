@@ -18,7 +18,7 @@ BiliCore implements defense-in-depth security for multi-tenant deployments with:
 All checkpointers validate that thread IDs belong to the authenticated user:
 
 ```python
-from bili.checkpointers.pg_checkpointer import AsyncPostgresSaver
+from bili.iris.checkpointers.pg_checkpointer import AsyncPostgresSaver
 
 # Initialize with user_id to enable validation
 checkpointer = AsyncPostgresSaver.from_conn_string(
@@ -282,7 +282,7 @@ checkpointer.put({"configurable": {"thread_id": "other@example.com"}}, checkpoin
 
 ```python
 import pytest
-from bili.checkpointers.memory_checkpointer import QueryableMemorySaver
+from bili.iris.checkpointers.memory_checkpointer import QueryableMemorySaver
 
 def test_thread_ownership_validation():
     checkpointer = QueryableMemorySaver(user_id="user@example.com")
@@ -447,4 +447,4 @@ if "work" not in existing_ids:
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Overall architecture documentation
 - [LANGGRAPH.md](./LANGGRAPH.md) - LangGraph workflow documentation
 - [bili/aether/README.md](../bili/aether/README.md) - AETHER framework documentation
-- [bili/checkpointers/README.md](../bili/checkpointers/README.md) - Checkpointer implementation details
+- [bili/iris/checkpointers/README.md](../bili/iris/checkpointers/README.md) - Checkpointer implementation details

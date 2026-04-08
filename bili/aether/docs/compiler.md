@@ -126,7 +126,7 @@ Agent nodes are generated in one of three modes based on `AgentSpec` configurati
 
 3. **Stub node** — `model_name` is `None`. Emits a placeholder `AIMessage` without LLM calls. Allows full compilation and graph execution without API keys. All example YAMLs use this mode.
 
-Model resolution is handled by `llm_resolver.py`, which maps `model_name` to a `(provider_type, model_id)` pair by searching `bili.config.llm_config.LLM_MODELS` and falling back to heuristic prefix-based detection. LLMs are created via `bili.loaders.llm_loader.load_model()`. Tools are resolved via `bili.loaders.tools_loader.initialize_tools()`.
+Model resolution is handled by `llm_resolver.py`, which maps `model_name` to a `(provider_type, model_id)` pair by searching `bili.iris.config.llm_config.LLM_MODELS` and falling back to heuristic prefix-based detection. LLMs are created via `bili.iris.loaders.llm_loader.load_model()`. Tools are resolved via `bili.iris.loaders.tools_loader.initialize_tools()`.
 
 Each agent node callable has an `.agent_spec` attribute for introspection:
 
@@ -356,7 +356,7 @@ checkpoint_config:
 **Explicit override:**
 
 ```python
-from bili.checkpointers.pg_checkpointer import get_pg_checkpointer
+from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
 
 compiled = compile_mas(config)
 graph = compiled.compile_graph(checkpointer=get_pg_checkpointer(keep_last_n=5))

@@ -61,7 +61,7 @@ def apply_agent_overrides(config: MASConfig) -> MASConfig:
 
 def _get_tool_names() -> list[str]:
     """Return sorted list of registered tool names."""
-    from bili.loaders.tools_loader import (  # pylint: disable=import-outside-toplevel
+    from bili.iris.loaders.tools_loader import (  # pylint: disable=import-outside-toplevel
         TOOL_REGISTRY,
     )
 
@@ -81,7 +81,7 @@ def build_model_options() -> tuple[list[str], dict[str, str], dict[str, str]]:
     their selectbox display string, used to pre-select the current model when
     rendering the model override selectbox.
     """
-    from bili.config.llm_config import (  # pylint: disable=import-outside-toplevel
+    from bili.iris.config.llm_config import (  # pylint: disable=import-outside-toplevel
         LLM_MODELS,
     )
 

@@ -20,7 +20,7 @@ from bili.aether.ui.attack_results_page import render_attack_results_page
 from bili.aether.ui.page import render_aether_page
 from bili.aether.ui.results_page import render_results_page
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
-from bili.checkpointers.checkpointer_functions import get_checkpointer
+from bili.iris.checkpointers.checkpointer_functions import get_checkpointer
 from bili.streamlit_ui.ui.auth_ui import check_auth, initialize_auth_manager
 from bili.streamlit_ui.ui.chat_interface import run_app_page
 

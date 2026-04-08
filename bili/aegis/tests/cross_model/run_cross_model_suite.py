@@ -144,7 +144,7 @@ _ALL_PHASES: list[str] = [
 # ---------------------------------------------------------------------------
 
 # Each entry: (model_id, human-readable display name).
-# model_id values must match entries in bili/config/llm_config.py.
+# model_id values must match entries in bili/iris/config/llm_config.py.
 _MODEL_MATRIX: list[tuple[str, str]] = [
     (
         "us.anthropic.claude-3-5-haiku-20241022-v1:0",

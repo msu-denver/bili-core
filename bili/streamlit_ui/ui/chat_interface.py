@@ -66,12 +66,15 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from bili.config.tool_config import TOOLS
-from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION, build_agent_graph
-from bili.loaders.llm_loader import load_model
-from bili.loaders.tools_loader import initialize_tools
-from bili.nodes.per_user_state import per_user_state_node
-from bili.nodes.prepare_llm_config_node import prepare_llm_config_node
+from bili.iris.config.tool_config import TOOLS
+from bili.iris.loaders.langchain_loader import (
+    DEFAULT_GRAPH_DEFINITION,
+    build_agent_graph,
+)
+from bili.iris.loaders.llm_loader import load_model
+from bili.iris.loaders.tools_loader import initialize_tools
+from bili.iris.nodes.per_user_state import per_user_state_node
+from bili.iris.nodes.prepare_llm_config_node import prepare_llm_config_node
 from bili.streamlit_ui.query.streamlit_query_handler import (
     process_query,
     process_query_streaming,

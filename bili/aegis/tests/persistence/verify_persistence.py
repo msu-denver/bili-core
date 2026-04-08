@@ -135,7 +135,7 @@ def _create_checkpointer(backend: str) -> tuple[Any, bool]:
         return MemorySaver(), False
 
     if backend in ("postgres", "pg"):
-        from bili.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
+        from bili.iris.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
             PruningPostgresSaver,
         )
 
@@ -145,7 +145,7 @@ def _create_checkpointer(backend: str) -> tuple[Any, bool]:
 
     if backend in ("mongo", "mongodb"):
         # pylint: disable=import-outside-toplevel
-        from bili.checkpointers.mongo_checkpointer import PruningMongoDBSaver
+        from bili.iris.checkpointers.mongo_checkpointer import PruningMongoDBSaver
 
         # pylint: enable=import-outside-toplevel
         conn_str = os.environ.get("MONGO_CONNECTION_STRING")

@@ -65,7 +65,7 @@ def _build_state_reader_node(field_name):
 
 def _make_node_factory(name, builder):
     """Create a partial(Node, name, builder)."""
-    from bili.graph_builder.classes.node import Node
+    from bili.iris.graph_builder.classes.node import Node
 
     return partial(Node, name, builder)
 

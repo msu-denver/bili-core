@@ -56,15 +56,15 @@ pip install -e .
 
 1. **Authentication System** (`bili/auth/`): Modular authentication with Firebase, SQLite, and in-memory providers. Each provider implements a common interface.
 
-2. **Checkpointers** (`bili/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
+2. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
 
-3. **LLM Configuration** (`bili/config/`): Model configurations for 60+ LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models. Uses factory pattern for model initialization.
+3. **LLM Configuration** (`bili/iris/config/`): Model configurations for 60+ LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models. Uses factory pattern for model initialization.
 
-4. **Tools Framework** (`bili/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
+4. **Tools Framework** (`bili/iris/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
 
-5. **LangGraph Workflows** (`bili/loaders/`, `bili/nodes/`, `bili/graph_builder/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → per_user_state → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
+5. **LangGraph Workflows** (`bili/iris/loaders/`, `bili/iris/nodes/`, `bili/iris/graph_builder/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → per_user_state → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
 
-6. **Middleware System** (`bili/loaders/middleware_loader.py`, `bili/config/middleware_config.py`): Extensible middleware framework for intercepting and modifying agent execution. Supports built-in middleware (summarization, model call limiting) and custom middleware creation.
+6. **Middleware System** (`bili/iris/loaders/middleware_loader.py`, `bili/iris/config/middleware_config.py`): Extensible middleware framework for intercepting and modifying agent execution. Supports built-in middleware (summarization, model call limiting) and custom middleware creation.
 
 ### Key Patterns
 
@@ -133,7 +133,7 @@ Middleware can be applied at two levels: agent-level and tool-level.
 Middleware can be configured via `node_kwargs` when building the agent graph:
 
 ```python
-from bili.loaders.middleware_loader import initialize_middleware
+from bili.iris.loaders.middleware_loader import initialize_middleware
 
 # Initialize middleware
 middleware = initialize_middleware(
@@ -157,8 +157,8 @@ node_kwargs = {
 Middleware can also be applied to individual tools for fine-grained control:
 
 ```python
-from bili.loaders.tools_loader import initialize_tools
-from bili.loaders.middleware_loader import initialize_middleware
+from bili.iris.loaders.tools_loader import initialize_tools
+from bili.iris.loaders.middleware_loader import initialize_middleware
 
 # Initialize middleware
 middleware = initialize_middleware(
@@ -201,7 +201,7 @@ Nodes are defined using `functools.partial` to create node factories:
 
 ```python
 from functools import partial
-from bili.graph_builder.classes.node import Node
+from bili.iris.graph_builder.classes.node import Node
 
 def build_my_node(**kwargs):
     def _execute_node(state: dict) -> dict:
@@ -215,7 +215,7 @@ my_node = partial(Node, "my_node_name", build_my_node)
 
 #### Graph Definition
 
-The default graph is defined in `bili/loaders/langchain_loader.py`:
+The default graph is defined in `bili/iris/loaders/langchain_loader.py`:
 
 1. **Node Instantiation**: Node factories (partials) are called to create Node instances
 2. **Property Configuration**: Node properties (edges, is_entry, routes_to_end) are set on instances
@@ -243,7 +243,7 @@ When modifying graphs (e.g., in Streamlit UI), **always use `copy.deepcopy`** to
 
 ```python
 import copy
-from bili.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
+from bili.iris.loaders.langchain_loader import DEFAULT_GRAPH_DEFINITION
 
 # CORRECT: Deep copy to avoid mutations
 graph_definition = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
@@ -273,11 +273,11 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
 
 Both normal bili and AETHER support streaming and non-streaming agent interactions with clean, symmetric APIs.
 
-#### Normal Bili — Framework-Agnostic Streaming (`bili/loaders/streaming_utils.py`)
+#### Normal Bili — Framework-Agnostic Streaming (`bili/iris/loaders/streaming_utils.py`)
 
 ```python
-from bili.loaders.langchain_loader import build_agent_graph
-from bili.loaders.streaming_utils import stream_agent, invoke_agent, astream_agent
+from bili.iris.loaders.langchain_loader import build_agent_graph
+from bili.iris.loaders.streaming_utils import stream_agent, invoke_agent, astream_agent
 
 agent = build_agent_graph(checkpoint_saver=saver, node_kwargs=kwargs, ...)
 
