@@ -359,7 +359,10 @@ class TestAsyncMultiTenantIsolation:
         # Each user should only see their own threads
         for user in users:
             user_checkpointer = AsyncPruningMongoDBSaver(
-                async_mongo_client, keep_last_n=5, user_id=user
+                async_mongo_client,
+                db_name=_TEST_DB_NAME,
+                keep_last_n=5,
+                user_id=user,
             )
             threads = await user_checkpointer.aget_user_threads(user)
 
