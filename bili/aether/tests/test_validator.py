@@ -101,11 +101,16 @@ def test_validation_result_str_formatting():
 
 
 def test_orphaned_agent_warning():
-    """W1: Agent with no channel connections triggers a warning."""
+    """W1: Agent with no channel connections triggers a warning.
+
+    Uses CONSENSUS workflow type because edge-routed types (sequential,
+    hierarchical, parallel) skip the orphan check — channels are optional
+    for those execution models.
+    """
     config = MASConfig(
         mas_id="test",
         name="Test",
-        workflow_type=WorkflowType.SEQUENTIAL,
+        workflow_type=WorkflowType.CONSENSUS,
         agents=[_agent("connected"), _agent("orphaned")],
         channels=[
             Channel(
