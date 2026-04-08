@@ -6,7 +6,9 @@ Tests async checkpointer implementations (AsyncPruningMongoDBSaver) for:
 - Multi-tenant isolation with async methods
 
 Note: These tests require MongoDB to be running locally. They will be skipped
-if MongoDB is not available.
+if MongoDB is not available. AsyncPruningMongoDBSaver now inherits from
+MongoDBSaver (langgraph-checkpoint-mongodb 0.3.x) which uses a sync
+pymongo.MongoClient and provides both sync and async methods natively.
 """
 
 # pylint: disable=missing-function-docstring,redefined-outer-name,protected-access,abstract-class-instantiated
@@ -24,7 +26,7 @@ pytest_plugins = ("pytest_anyio",)
 _MONGO_URI = os.environ.get("MONGO_CONNECTION_STRING", "mongodb://localhost:27017")
 
 try:
-    from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo import MongoClient
 
     MONGODB_AVAILABLE = True
 except ImportError:
@@ -44,22 +46,26 @@ _TEST_DB_NAME = "test_bili_async_security"
 
 @pytest.fixture
 async def async_mongo_client():
-    """Provide async MongoDB client for testing."""
-    if not MONGODB_AVAILABLE:
-        pytest.skip("MongoDB (motor) not available")
+    """Provide sync MongoDB client for testing.
 
-    client = AsyncIOMotorClient(_MONGO_URI)
+    MongoDBSaver 0.3.x uses a sync pymongo.MongoClient internally and
+    provides async methods natively — no motor AsyncIOMotorClient needed.
+    """
+    if not MONGODB_AVAILABLE:
+        pytest.skip("MongoDB (pymongo) not available")
+
+    client = MongoClient(_MONGO_URI)
     db = client[_TEST_DB_NAME]
 
-    # Clean up before test
-    await db.checkpoints_aio.delete_many({})
-    await db.checkpoint_writes_aio.delete_many({})
+    # Clean up before test (sync pymongo operations)
+    db.checkpoints_aio.delete_many({})
+    db.checkpoint_writes_aio.delete_many({})
 
     yield client
 
     # Clean up after test
-    await db.checkpoints_aio.delete_many({})
-    await db.checkpoint_writes_aio.delete_many({})
+    db.checkpoints_aio.delete_many({})
+    db.checkpoint_writes_aio.delete_many({})
     client.close()
 
 

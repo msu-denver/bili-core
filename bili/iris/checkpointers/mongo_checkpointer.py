@@ -52,8 +52,6 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.mongodb import MongoDBSaver
-from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
-from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.errors import OperationFailure
 
@@ -923,44 +921,6 @@ class PruningMongoDBSaver(
 # Async MongoDB Checkpointer Support for Streaming
 
 
-class AsyncClientManager:
-    """Manages async MongoDB client singleton."""
-
-    def __init__(self):
-        self._client = None
-
-    async def get_client(self):
-        """Get async MongoDB client (not database)."""
-        if self._client is None:
-            connection_string = os.getenv("MONGO_CONNECTION_STRING")
-            if not connection_string:
-                LOGGER.info(
-                    "MONGO_CONNECTION_STRING not set. No async MongoDB client created."
-                )
-                return None
-
-            LOGGER.info("Initializing shared async MongoDB client for streaming.")
-            self._client = AsyncIOMotorClient(connection_string)
-            atexit.register(self._close_client)
-
-        return self._client
-
-    def _close_client(self):
-        """Close async client."""
-        if self._client:
-            LOGGER.info("Closing shared async MongoDB client.")
-            self._client.close()
-            self._client = None
-
-
-_async_client_manager = AsyncClientManager()
-
-
-async def get_async_mongo_client():
-    """Get async MongoDB client."""
-    return await _async_client_manager.get_client()
-
-
 async def get_async_mongo_checkpointer(
     keep_last_n: int = 5, user_id: str | None = None
 ):
@@ -983,13 +943,14 @@ async def get_async_mongo_checkpointer(
 
 
 class AsyncPruningMongoDBSaver(
-    VersionedCheckpointerMixin, QueryableCheckpointerMixin, AsyncMongoDBSaver
+    VersionedCheckpointerMixin, QueryableCheckpointerMixin, MongoDBSaver
 ):
     """
     Async version of PruningMongoDBSaver for streaming operations.
 
     Manages saving and pruning of checkpoints in MongoDB using async operations
-    for improved performance during streaming.
+    for improved performance during streaming. Inherits from MongoDBSaver which
+    provides both sync and async methods in langgraph-checkpoint-mongodb 0.3.x.
 
     Also implements:
     - VersionedCheckpointerMixin: Version detection and lazy migration
@@ -1011,124 +972,29 @@ class AsyncPruningMongoDBSaver(
         """
         Initialize async pruning MongoDB saver.
 
-        :param args: Positional arguments for parent class
+        In langgraph-checkpoint-mongodb 0.3.x, MongoDBSaver accepts a sync
+        MongoClient and provides both sync and async methods natively.
+
+        :param args: Positional arguments for MongoDBSaver
+            (client, db_name, checkpoint_collection_name, writes_collection_name, ...)
         :param keep_last_n: Number of checkpoints to keep (-1 for unlimited)
         :param user_id: Optional user identifier for thread ownership validation.
             When provided, automatically creates user_id index (on-demand migration)
             and validates that thread_ids belong to this user.
-        :param kwargs: Keyword arguments for parent class
+        :param kwargs: Keyword arguments for MongoDBSaver
         """
-        try:
-            super().__init__(*args, **kwargs)
-        except TypeError as exc:
-            # langgraph-checkpoint-mongodb 0.2.x calls _append_client_metadata
-            # which requires motor >=3.8 (not yet released). Gracefully
-            # initialize the required attributes when this call fails.
-            if "append_metadata" not in str(exc):
-                raise
-            LOGGER.debug(
-                "Skipping client metadata (motor lacks append_metadata): %s",
-                exc,
-            )
-            client = args[0] if args else kwargs.get("client")
-            db_name = kwargs.get("db_name", "checkpointing_db")
-            db = client[db_name]
-            self.client = client
-            self.db = db
-            self.checkpoint_collection = db[
-                kwargs.get("checkpoint_collection_name", "checkpoints_aio")
-            ]
-            self.writes_collection = db[
-                kwargs.get("writes_collection_name", "checkpoint_writes_aio")
-            ]
+        super().__init__(*args, **kwargs)
         self.keep_last_n = keep_last_n
         self.user_id = user_id
-        # Lazy-initialized attributes (set on first use)
-        self._sync_db: Any = None
         self._indexes_ensured: bool = False
 
-    @staticmethod
-    async def _async_drop_conflicting_indexes(collection, desired_keys, desired_name):
+    def _ensure_indexes(self) -> None:
         """
-        Async version of _drop_conflicting_indexes. Drop any existing index
-        on the same key pattern that has a different name or options.
+        Ensures that required indexes exist in MongoDB collections.
 
-        :param collection: The async MongoDB collection.
-        :param desired_keys: The key pattern as a list of (field, direction) tuples.
-        :param desired_name: The name we want to give our index.
-        """
-        desired_key_tuple = tuple(desired_keys)
-        try:
-            existing = await collection.index_information()
-            for idx_name, idx_info in existing.items():
-                if idx_name == "_id_" or idx_name == desired_name:
-                    continue
-                existing_key_tuple = tuple((k, d) for k, d in idx_info["key"])
-                if existing_key_tuple == desired_key_tuple:
-                    LOGGER.info(
-                        "Dropping conflicting index '%s' on %s "
-                        "(same keys as '%s' but different options)",
-                        idx_name,
-                        collection.name,
-                        desired_name,
-                    )
-                    await collection.drop_index(idx_name)
-        except OperationFailure as exc:
-            LOGGER.warning(
-                "Could not check/drop conflicting indexes on %s: %s",
-                collection.name,
-                exc,
-            )
-
-    @staticmethod
-    async def _async_create_index_safe(collection, keys, name, **kwargs):
-        """
-        Async version of _create_index_safe. Create an index, handling
-        DocumentDB limitations gracefully.
-
-        :param collection: The async MongoDB collection.
-        :param keys: The index key pattern.
-        :param name: The index name.
-        :param kwargs: Additional index options.
-        """
-        import asyncio
-
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                await collection.create_index(keys, name=name, **kwargs)
-                return
-            except OperationFailure as exc:
-                if exc.code == 40333 and attempt < max_retries - 1:
-                    LOGGER.info(
-                        "Index build in progress on %s, retrying in %ds...",
-                        collection.name,
-                        attempt + 1,
-                    )
-                    await asyncio.sleep(attempt + 1)
-                    continue
-                if exc.code == 85:
-                    LOGGER.warning(
-                        "Index conflict on %s for '%s': %s. "
-                        "Dropping conflicting index and retrying.",
-                        collection.name,
-                        name,
-                        exc,
-                    )
-                    await AsyncPruningMongoDBSaver._async_drop_conflicting_indexes(
-                        collection, keys, name
-                    )
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(1)
-                        continue
-                raise
-
-    async def _ensure_indexes(self) -> None:
-        """
-        Ensures that required indexes exist in MongoDB collections (async version).
-
-        Handles conflicts with the parent AsyncMongoDBSaver's auto-created
-        indexes and DocumentDB's single-concurrent-index-build limitation.
+        In langgraph-checkpoint-mongodb 0.3.x, MongoDBSaver uses sync pymongo
+        collections, so index operations are synchronous. Delegates to
+        PruningMongoDBSaver's static helper methods.
         """
         LOGGER.info("Ensuring indexes exist in async MongoDB checkpointer collections.")
 
@@ -1137,10 +1003,10 @@ class AsyncPruningMongoDBSaver(
             ("checkpoint_ns", ASCENDING),
             ("checkpoint_id", DESCENDING),
         ]
-        await self._async_drop_conflicting_indexes(
+        PruningMongoDBSaver._drop_conflicting_indexes(
             self.checkpoint_collection, cp_keys, "idx_thread_ns_id"
         )
-        await self._async_create_index_safe(
+        PruningMongoDBSaver._create_index_safe(
             self.checkpoint_collection,
             cp_keys,
             "idx_thread_ns_id",
@@ -1153,10 +1019,10 @@ class AsyncPruningMongoDBSaver(
             ("checkpoint_ns", ASCENDING),
             ("checkpoint_id", ASCENDING),
         ]
-        await self._async_drop_conflicting_indexes(
+        PruningMongoDBSaver._drop_conflicting_indexes(
             self.checkpoint_collection, cp_exact_keys, "idx_thread_ns_exact"
         )
-        await self._async_create_index_safe(
+        PruningMongoDBSaver._create_index_safe(
             self.checkpoint_collection,
             cp_exact_keys,
             "idx_thread_ns_exact",
@@ -1168,10 +1034,10 @@ class AsyncPruningMongoDBSaver(
             ("checkpoint_ns", ASCENDING),
             ("checkpoint_id", ASCENDING),
         ]
-        await self._async_drop_conflicting_indexes(
+        PruningMongoDBSaver._drop_conflicting_indexes(
             self.writes_collection, writes_keys, "idx_writes_lookup"
         )
-        await self._async_create_index_safe(
+        PruningMongoDBSaver._create_index_safe(
             self.writes_collection,
             writes_keys,
             "idx_writes_lookup",
@@ -1181,33 +1047,20 @@ class AsyncPruningMongoDBSaver(
         # On-demand migration: Add user_id index if user_id is configured
         if self.user_id:
             LOGGER.info("Creating user_id index (on-demand migration)")
-            await self._async_create_index_safe(
+            PruningMongoDBSaver._create_index_safe(
                 self.checkpoint_collection,
                 [("user_id", ASCENDING), ("thread_id", ASCENDING)],
                 "idx_user_thread",
                 background=True,
             )
 
-    # VersionedCheckpointerMixin implementation for async MongoDB
-
-    def _get_sync_db(self):
-        """Get a sync MongoDB database for migration operations."""
-        # For migrations we need a sync client; VersionedCheckpointerMixin expects sync methods
-        # Use the connection string from the async client to create a sync client
-        if self._sync_db is None:
-            # Get a sync mongo client for migrations
-            sync_db = get_mongo_client()
-            if sync_db is None:
-                LOGGER.error("Failed to get sync MongoDB client for migrations")
-                raise RuntimeError("Sync MongoDB client not available for migrations")
-            self._sync_db = sync_db
-        return self._sync_db
+    # VersionedCheckpointerMixin implementation for MongoDB
 
     def _get_raw_checkpoint(
         self, thread_id: str, checkpoint_ns: str = ""
     ) -> dict[str, Any] | None:
         """
-        Get raw checkpoint document directly from MongoDB (sync method for migration).
+        Get raw checkpoint document directly from MongoDB.
 
         Bypasses LangGraph's deserialization to allow inspection and migration
         of incompatible formats.
@@ -1216,22 +1069,19 @@ class AsyncPruningMongoDBSaver(
         :param checkpoint_ns: Checkpoint namespace
         :return: Raw checkpoint document or None
         """
-        # Use sync client for migration (migration is infrequent)
-        sync_db = self._get_sync_db()
-        collection_name = self.checkpoint_collection.name
-        sync_collection = sync_db[collection_name]
-
         query = {
             "thread_id": thread_id,
             "checkpoint_ns": checkpoint_ns,
         }
-        return sync_collection.find_one(query, sort=[("checkpoint_id", DESCENDING)])
+        return self.checkpoint_collection.find_one(
+            query, sort=[("checkpoint_id", DESCENDING)]
+        )
 
     def _replace_raw_checkpoint(
         self, thread_id: str, document: dict[str, Any], checkpoint_ns: str = ""
     ) -> bool:
         """
-        Replace raw checkpoint document in MongoDB (sync method for migration).
+        Replace raw checkpoint document in MongoDB.
 
         :param thread_id: Thread ID to update
         :param document: Migrated document to write
@@ -1244,12 +1094,9 @@ class AsyncPruningMongoDBSaver(
             )
             return False
 
-        # Use sync client for migration
-        sync_db = self._get_sync_db()
-        collection_name = self.checkpoint_collection.name
-        sync_collection = sync_db[collection_name]
-
-        result = sync_collection.replace_one({"_id": document["_id"]}, document)
+        result = self.checkpoint_collection.replace_one(
+            {"_id": document["_id"]}, document
+        )
         return result.matched_count > 0
 
     def _archive_checkpoint(
@@ -1264,8 +1111,7 @@ class AsyncPruningMongoDBSaver(
         :param document: Raw document that couldn't be migrated
         :param error: Exception that occurred during migration
         """
-        sync_db = self._get_sync_db()
-        archive_collection = sync_db["checkpoints_archive"]
+        archive_collection = self.db["checkpoints_archive"]
 
         # Add migration failure metadata
         archived_doc = {
@@ -1281,9 +1127,7 @@ class AsyncPruningMongoDBSaver(
 
             # Remove from main collection
             if "_id" in document:
-                collection_name = self.checkpoint_collection.name
-                sync_collection = sync_db[collection_name]
-                sync_collection.delete_one({"_id": document["_id"]})
+                self.checkpoint_collection.delete_one({"_id": document["_id"]})
                 LOGGER.info("Removed failed checkpoint from main collection")
         except Exception as archive_error:  # pylint: disable=broad-exception-caught
             LOGGER.error("Failed to archive checkpoint: %s", archive_error)
@@ -1346,7 +1190,7 @@ class AsyncPruningMongoDBSaver(
 
         # Ensure indexes exist on first use
         if not self._indexes_ensured:
-            await self._ensure_indexes()
+            self._ensure_indexes()
             self._indexes_ensured = True
 
         # Add format version to metadata for future migrations
@@ -1365,27 +1209,25 @@ class AsyncPruningMongoDBSaver(
         if self.keep_last_n is None or self.keep_last_n < 0:
             return result_config
 
-        # Perform async pruning
+        # Perform pruning using sync pymongo collections
+        # (MongoDBSaver 0.3.x uses sync pymongo collections internally)
         thread_id = config["configurable"]["thread_id"]
         query = {"thread_id": thread_id}
 
-        # Find documents to potentially delete
-        cursor = self.checkpoint_collection.find(query).sort(
-            "checkpoint_id", DESCENDING
+        docs = list(
+            self.checkpoint_collection.find(query).sort("checkpoint_id", DESCENDING)
         )
-        docs = await cursor.to_list(length=None)
 
         if len(docs) > self.keep_last_n:
             to_delete = docs[self.keep_last_n :]
 
-            # Delete old checkpoints and writes asynchronously
             for doc in to_delete:
                 del_query = {
                     "thread_id": thread_id,
                     "checkpoint_id": doc["checkpoint_id"],
                 }
-                await self.checkpoint_collection.delete_one(del_query)
-                await self.writes_collection.delete_many(del_query)
+                self.checkpoint_collection.delete_one(del_query)
+                self.writes_collection.delete_many(del_query)
 
         return result_config
 
@@ -1410,16 +1252,15 @@ class AsyncPruningMongoDBSaver(
     # ------------------------------------------------------------------
     # QueryableCheckpointerMixin abstract method implementations (sync)
     #
-    # These satisfy the ABC contract.  For async callers, use the
-    # ``a``-prefixed async versions below instead.
+    # MongoDBSaver 0.3.x uses sync pymongo collections, so these methods
+    # operate directly on self.checkpoint_collection / self.writes_collection.
+    # For async callers, use the ``a``-prefixed async versions below instead.
     # ------------------------------------------------------------------
 
     def get_user_threads(
         self, user_identifier: str, limit: int | None = None, offset: int = 0
     ) -> list[dict[str, Any]]:
-        """Sync wrapper — delegates to the sync MongoDB client."""
-        sync_db = self._get_sync_db()
-        col = sync_db[self.checkpoint_collection.name]
+        """Get all conversation threads for a user from MongoDB."""
         escaped_id = re.escape(user_identifier)
         pipeline: list[dict] = [
             {"$match": {"thread_id": {"$regex": f"^{escaped_id}(_|$)"}}},
@@ -1437,7 +1278,7 @@ class AsyncPruningMongoDBSaver(
             pipeline.append({"$skip": offset})
         if limit is not None:
             pipeline.append({"$limit": limit})
-        results = list(col.aggregate(pipeline))
+        results = list(self.checkpoint_collection.aggregate(pipeline))
         threads = []
         for result in results:
             thread_id = result["_id"]
@@ -1466,11 +1307,9 @@ class AsyncPruningMongoDBSaver(
         offset: int = 0,
         message_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Sync wrapper — delegates to the sync MongoDB client."""
+        """Get all messages from a conversation thread."""
         self._validate_thread_ownership(thread_id)
-        sync_db = self._get_sync_db()
-        col = sync_db[self.checkpoint_collection.name]
-        doc = col.find_one(
+        doc = self.checkpoint_collection.find_one(
             {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
         )
         if not doc or "checkpoint" not in doc:
@@ -1496,17 +1335,14 @@ class AsyncPruningMongoDBSaver(
         return messages
 
     def delete_thread(self, thread_id: str) -> bool:
-        """Sync wrapper — delegates to the sync MongoDB client."""
+        """Delete all checkpoints for a conversation thread."""
         self._validate_thread_ownership(thread_id)
-        sync_db = self._get_sync_db()
-        cp_col = sync_db[self.checkpoint_collection.name]
-        wr_col = sync_db[self.writes_collection.name]
-        result = cp_col.delete_many({"thread_id": thread_id})
-        wr_col.delete_many({"thread_id": thread_id})
+        result = self.checkpoint_collection.delete_many({"thread_id": thread_id})
+        self.writes_collection.delete_many({"thread_id": thread_id})
         return result.deleted_count > 0
 
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
-        """Sync wrapper — derives stats from get_user_threads."""
+        """Get usage statistics for a user."""
         threads = self.get_user_threads(user_identifier)
         if not threads:
             return {
@@ -1531,109 +1367,27 @@ class AsyncPruningMongoDBSaver(
         }
 
     def thread_exists(self, thread_id: str) -> bool:
-        """Sync wrapper — delegates to the sync MongoDB client."""
-        sync_db = self._get_sync_db()
-        col = sync_db[self.checkpoint_collection.name]
-        return col.count_documents({"thread_id": thread_id}, limit=1) > 0
+        """Check if a thread exists in MongoDB."""
+        return (
+            self.checkpoint_collection.count_documents(
+                {"thread_id": thread_id}, limit=1
+            )
+            > 0
+        )
 
     # ------------------------------------------------------------------
-    # Async query methods (preferred for async callers)
+    # Async query methods
+    #
+    # MongoDBSaver 0.3.x uses sync pymongo collections, so these async
+    # methods delegate to their sync counterparts. They are kept as
+    # async for API compatibility with callers that ``await`` them.
     # ------------------------------------------------------------------
 
     async def aget_user_threads(
         self, user_identifier: str, limit: int | None = None, offset: int = 0
     ) -> list[dict[str, Any]]:
         """Get all conversation threads for a user from MongoDB (async)."""
-        escaped_id = re.escape(user_identifier)
-        pipeline = [
-            {"$match": {"thread_id": {"$regex": f"^{escaped_id}(_|$)"}}},
-            {
-                "$group": {
-                    "_id": "$thread_id",
-                    "last_oid": {"$max": "$_id"},
-                    "checkpoint_count": {"$sum": 1},
-                }
-            },
-            {
-                "$addFields": {
-                    "last_updated": {"$toDate": "$last_oid"},
-                }
-            },
-            {"$sort": {"last_updated": -1}},
-        ]
-
-        if offset > 0:
-            pipeline.append({"$skip": offset})
-        if limit is not None:
-            pipeline.append({"$limit": limit})
-
-        results = await self.checkpoint_collection.aggregate(pipeline).to_list(
-            length=None
-        )
-
-        threads = []
-        for result in results:
-            thread_id = result["_id"]
-
-            if "_" in thread_id:
-                conversation_id = thread_id.split("_", 1)[1]
-            else:
-                conversation_id = "default"
-
-            latest_checkpoint = await self.checkpoint_collection.find_one(
-                {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
-            )
-
-            first_message = None
-            last_message = None
-            message_count = 0
-            title = None
-            tags = []
-
-            if latest_checkpoint and "checkpoint" in latest_checkpoint:
-                checkpoint_data = self._deserialize_checkpoint_data(latest_checkpoint)
-                channel_values = checkpoint_data.get("channel_values", {})
-                messages = channel_values.get("messages", [])
-
-                title = channel_values.get("title")
-                tags = channel_values.get("tags", [])
-
-                if messages:
-                    message_count = len(messages)
-                    for msg in messages:
-                        if (
-                            hasattr(msg, "content")
-                            and msg.content
-                            and msg.__class__.__name__ == "HumanMessage"
-                        ):
-                            content = msg.content
-                            if isinstance(content, list):
-                                text_parts = [
-                                    p.get("text", "")
-                                    for p in content
-                                    if isinstance(p, dict) and p.get("type") == "text"
-                                ]
-                                content = " ".join(text_parts)
-
-                            if first_message is None:
-                                first_message = content
-                            last_message = content
-
-            threads.append(
-                {
-                    "thread_id": thread_id,
-                    "conversation_id": conversation_id,
-                    "last_updated": result["last_updated"],
-                    "checkpoint_count": result["checkpoint_count"],
-                    "message_count": message_count,
-                    "first_message": first_message,
-                    "last_message": last_message,
-                    "title": title,
-                    "tags": tags,
-                }
-            )
-
-        return threads
+        return self.get_user_threads(user_identifier, limit=limit, offset=offset)
 
     async def aget_thread_messages(
         self,
@@ -1643,97 +1397,18 @@ class AsyncPruningMongoDBSaver(
         message_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Get all messages from a conversation thread (async)."""
-        # Validate thread ownership if user_id is set
-        self._validate_thread_ownership(thread_id)
-
-        latest_checkpoint = await self.checkpoint_collection.find_one(
-            {"thread_id": thread_id}, sort=[("checkpoint.ts", DESCENDING)]
+        return self.get_thread_messages(
+            thread_id, limit=limit, offset=offset, message_types=message_types
         )
-
-        if not latest_checkpoint or "checkpoint" not in latest_checkpoint:
-            return []
-
-        checkpoint_data = self._deserialize_checkpoint_data(latest_checkpoint)
-        channel_values = checkpoint_data.get("channel_values", {})
-        raw_messages = channel_values.get("messages", [])
-
-        messages = []
-        for msg in raw_messages:
-            msg_type = msg.__class__.__name__
-
-            if message_types is not None and msg_type not in message_types:
-                continue
-
-            content = msg.content if hasattr(msg, "content") else str(msg)
-            if isinstance(content, list):
-                text_parts = [
-                    p.get("text", "")
-                    for p in content
-                    if isinstance(p, dict) and p.get("type") == "text"
-                ]
-                content = " ".join(text_parts)
-
-            if msg_type == "AIMessage":
-                content = self._strip_thinking_blocks(content)
-
-            messages.append(
-                {
-                    "role": "user" if msg_type == "HumanMessage" else "assistant",
-                    "content": content,
-                    "timestamp": None,
-                }
-            )
-
-        if offset > 0:
-            messages = messages[offset:]
-        if limit is not None:
-            messages = messages[:limit]
-
-        return messages
 
     async def adelete_thread(self, thread_id: str) -> bool:
         """Delete all checkpoints for a conversation thread (async)."""
-        # Validate thread ownership if user_id is set
-        self._validate_thread_ownership(thread_id)
-
-        result = await self.checkpoint_collection.delete_many({"thread_id": thread_id})
-        # Also delete writes for this thread
-        await self.writes_collection.delete_many({"thread_id": thread_id})
-        return result.deleted_count > 0
+        return self.delete_thread(thread_id)
 
     async def aget_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user (async)."""
-        threads = await self.aget_user_threads(user_identifier)
-
-        if not threads:
-            return {
-                "total_threads": 0,
-                "total_messages": 0,
-                "total_checkpoints": 0,
-                "oldest_thread": None,
-                "newest_thread": None,
-            }
-
-        total_messages = sum(thread["message_count"] for thread in threads)
-        total_checkpoints = sum(thread["checkpoint_count"] for thread in threads)
-        oldest_thread = min(
-            (t["last_updated"] for t in threads if t["last_updated"]), default=None
-        )
-        newest_thread = max(
-            (t["last_updated"] for t in threads if t["last_updated"]), default=None
-        )
-
-        return {
-            "total_threads": len(threads),
-            "total_messages": total_messages,
-            "total_checkpoints": total_checkpoints,
-            "oldest_thread": oldest_thread,
-            "newest_thread": newest_thread,
-        }
+        return self.get_user_stats(user_identifier)
 
     async def athread_exists(self, thread_id: str) -> bool:
         """Check if a thread exists in MongoDB (async)."""
-        count = await self.checkpoint_collection.count_documents(
-            {"thread_id": thread_id}, limit=1
-        )
-        return count > 0
+        return self.thread_exists(thread_id)

@@ -12,7 +12,7 @@ langchain~=1.0.3
 langchain-core~=1.0.3
 langchain-community~=0.4.1
 langgraph==1.0.2
-langgraph-checkpoint-mongodb~=0.2.1
+langgraph-checkpoint-mongodb~=0.3.0
 langgraph-checkpoint-postgres~=3.0.0
 
 # -----------------------------------------------------------------------------

@@ -105,7 +105,7 @@ async def get_async_checkpointer():
         - Async MongoDB checkpointer if MONGO_CONNECTION_STRING is available.
         - MemorySaver as fallback (works in async contexts).
 
-    :rtype: AsyncPostgresSaver | AsyncMongoDBSaver | MemorySaver
+    :rtype: AsyncPostgresSaver | PruningMongoDBSaver | MemorySaver
     """
     # Priority 1: PostgreSQL async checkpointer
     if os.getenv("POSTGRES_CONNECTION_STRING"):
@@ -114,7 +114,7 @@ async def get_async_checkpointer():
 
     # Priority 2: MongoDB async checkpointer
     if os.getenv("MONGO_CONNECTION_STRING"):
-        LOGGER.debug("Using AsyncMongoDBSaver for streaming operations.")
+        LOGGER.debug("Using MongoDBSaver for streaming operations.")
         return await get_async_mongo_checkpointer()
 
     # Priority 3: Memory checkpointer (inherently async-compatible, no await needed)
