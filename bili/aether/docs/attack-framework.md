@@ -15,7 +15,7 @@ The framework has three concerns:
 ## Quick Start
 
 ```python
-from bili.aether.attacks import AttackInjector, AttackType, InjectionPhase
+from bili.aegis.attacks import AttackInjector, AttackType, InjectionPhase
 from bili.aether.runtime.executor import MASExecutor
 
 executor = MASExecutor(mas_config)
@@ -104,15 +104,15 @@ assert result.completed_at is None  # not yet resolved
 
 ## Log File
 
-All results are appended to `bili/aether/attacks/logs/attack_log.ndjson` as newline-
+All results are appended to `bili/aegis/attacks/logs/attack_log.ndjson` as newline-
 delimited JSON. Each line is an independently parseable `AttackResult` object.
 
 ```bash
 # Inspect recent results
-tail -n 20 bili/aether/attacks/logs/attack_log.ndjson | python -m json.tool
+tail -n 20 bili/aegis/attacks/logs/attack_log.ndjson | python -m json.tool
 
 # Filter by attack type
-grep '"prompt_injection"' bili/aether/attacks/logs/attack_log.ndjson | python -m json.tool
+grep '"prompt_injection"' bili/aegis/attacks/logs/attack_log.ndjson | python -m json.tool
 ```
 
 Note: `resistant_agents` is a `list[str]` stored in insertion order for deterministic
@@ -138,7 +138,7 @@ inject_attack()
 ## Module Structure
 
 ```
-bili/aether/attacks/
+bili/aegis/attacks/
 ├── __init__.py          Public exports
 ├── injector.py          AttackInjector — public API
 ├── models.py            AttackResult, AgentObservation, InjectionPhase, AttackType

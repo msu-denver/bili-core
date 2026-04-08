@@ -262,9 +262,9 @@ def _render_sidebar() -> tuple[str, list[Path]]:
     st.caption("**Runner commands:**")
     st.markdown(
         "```\n# Stub mode (no LLM calls)\n"
-        "python bili/aether/tests/{suite}/run_{suite}_suite.py --stub\n\n"
+        "python bili/aegis/tests/{suite}/run_{suite}_suite.py --stub\n\n"
         "# Full run\n"
-        "python bili/aether/tests/{suite}/run_{suite}_suite.py\n```"
+        "python bili/aegis/tests/{suite}/run_{suite}_suite.py\n```"
     )
 
     return selected, extra_paths
@@ -308,7 +308,7 @@ def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
         st.info(
             f"No results found for **{suite_label}**.\n\n"
             "Run the suite to populate this view. Example:\n\n"
-            "```\npython bili/aether/tests/injection/run_injection_suite.py --stub\n```"
+            "```\npython bili/aegis/tests/injection/run_injection_suite.py --stub\n```"
         )
         return
 

@@ -33,11 +33,11 @@ logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
     logging.ERROR
 )
 
-from bili.aether.attacks.injector import AttackInjector
-from bili.aether.attacks.models import AttackResult, AttackType, InjectionPhase
-from bili.aether.attacks.propagation import PropagationTracker
-from bili.aether.attacks.strategies import pre_execution as _pre_exec_strats
-from bili.aether.evaluator.evaluator_config import (
+from bili.aegis.attacks.injector import AttackInjector
+from bili.aegis.attacks.models import AttackResult, AttackType, InjectionPhase
+from bili.aegis.attacks.propagation import PropagationTracker
+from bili.aegis.attacks.strategies import pre_execution as _pre_exec_strats
+from bili.aegis.evaluator.evaluator_config import (
     FALLBACK_EVALUATOR_MODEL,
     FALLBACK_EVALUATOR_MODEL_DISPLAY,
     PRIMARY_EVALUATOR_MODEL,
@@ -84,16 +84,16 @@ _SUITE_DISPLAY = {
 }
 
 _SUITE_PAYLOAD_MODULES = {
-    "injection": "bili.aether.tests.injection.payloads.prompt_injection_payloads",
-    "jailbreak": "bili.aether.tests.jailbreak.payloads.jailbreak_payloads",
+    "injection": "bili.aegis.tests.injection.payloads.prompt_injection_payloads",
+    "jailbreak": "bili.aegis.tests.jailbreak.payloads.jailbreak_payloads",
     "memory_poisoning": (
-        "bili.aether.tests.memory_poisoning.payloads.memory_poisoning_payloads"
+        "bili.aegis.tests.memory_poisoning.payloads.memory_poisoning_payloads"
     ),
     "bias_inheritance": (
-        "bili.aether.tests.bias_inheritance.payloads.bias_inheritance_payloads"
+        "bili.aegis.tests.bias_inheritance.payloads.bias_inheritance_payloads"
     ),
     "agent_impersonation": (
-        "bili.aether.tests.agent_impersonation.payloads.agent_impersonation_payloads"
+        "bili.aegis.tests.agent_impersonation.payloads.agent_impersonation_payloads"
     ),
 }
 
@@ -601,7 +601,7 @@ def _get_evaluator_model() -> str:
 def _run_tier3_evaluation(result_dict: dict, baseline_result: dict) -> Optional[list]:
     """Reconstruct AttackResult and call SemanticEvaluator.evaluate()."""
     try:
-        from bili.aether.evaluator.semantic_evaluator import (  # pylint: disable=import-outside-toplevel
+        from bili.aegis.evaluator.semantic_evaluator import (  # pylint: disable=import-outside-toplevel
             SemanticEvaluator,
         )
 

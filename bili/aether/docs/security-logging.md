@@ -23,7 +23,7 @@ The security subpackage has three concerns:
 
 ```python
 from pathlib import Path
-from bili.aether.security import SecurityEventDetector, SecurityEventLogger
+from bili.aegis.security import SecurityEventDetector, SecurityEventLogger
 
 logger = SecurityEventLogger(log_path=Path("security_events.ndjson"))
 detector = SecurityEventDetector(logger=logger)
@@ -45,8 +45,8 @@ Pass a `SecurityEventDetector` to `AttackInjector` at construction time.
 
 ```python
 from pathlib import Path
-from bili.aether.attacks import AttackInjector, AttackType
-from bili.aether.security import SecurityEventDetector, SecurityEventLogger
+from bili.aegis.attacks import AttackInjector, AttackType
+from bili.aegis.security import SecurityEventDetector, SecurityEventLogger
 
 sec_logger = SecurityEventLogger(log_path=Path("security_events.ndjson"))
 sec_detector = SecurityEventDetector(
@@ -181,20 +181,20 @@ for line in open("security_events.ndjson"):
 
 ## Log File
 
-Security events are appended to `bili/aether/security/logs/security_events.ndjson`.
+Security events are appended to `bili/aegis/security/logs/security_events.ndjson`.
 Each line is an independently parseable JSON object — one per `SecurityEvent`.
 The file is **append-only** and is never truncated.
 
 ```bash
 # Inspect recent events
-tail -n 20 bili/aether/security/logs/security_events.ndjson | python -m json.tool
+tail -n 20 bili/aegis/security/logs/security_events.ndjson | python -m json.tool
 
 # Filter high-severity events
-grep '"severity": "high"' bili/aether/security/logs/security_events.ndjson
+grep '"severity": "high"' bili/aegis/security/logs/security_events.ndjson
 
 # Export all events as a JSON array
 python -c "
-from bili.aether.security import SecurityEventLogger
+from bili.aegis.security import SecurityEventLogger
 print(SecurityEventLogger().export_json())
 "
 ```
@@ -250,7 +250,7 @@ inject_attack()
 ## Module Structure
 
 ```
-bili/aether/security/
+bili/aegis/security/
 ├── __init__.py        Public exports
 ├── models.py          SecurityEvent, SecurityEventType
 ├── logger.py          SecurityEventLogger — NDJSON log writer + export_json()

@@ -164,10 +164,10 @@ cat > run_attack_local.py << 'EOF'
 from pathlib import Path
 from bili.aether.config.loader import load_mas_from_yaml
 from bili.aether.runtime.executor import MASExecutor
-from bili.aether.attacks.injector import AttackInjector
-from bili.aether.attacks.models import AttackType, InjectionPhase
-from bili.aether.security.detector import SecurityEventDetector
-from bili.aether.security.logger import SecurityEventLogger
+from bili.aegis.attacks.injector import AttackInjector
+from bili.aegis.attacks.models import AttackType, InjectionPhase
+from bili.aegis.security.detector import SecurityEventDetector
+from bili.aegis.security.logger import SecurityEventLogger
 
 # --- Configuration ---
 CONFIG_PATH = "bili/aether/config/examples/simple_chain_local.yaml"

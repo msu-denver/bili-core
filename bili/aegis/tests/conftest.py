@@ -1,13 +1,13 @@
-"""Shared test helpers for the AETHER test suite.
+"""Shared test helpers for the AEGIS test suite.
 
 Provides factory functions for building ``AttackResult`` and ``SecurityEvent``
 instances with sensible defaults.  All fields are overridable via ``**kwargs``.
 
 Usage in test files::
 
-    from bili.aether.tests.conftest import make_attack_result as _result
-    from bili.aether.tests.conftest import make_security_event as _event
-    from bili.aether.tests.conftest import _NOW
+    from bili.aegis.tests.conftest import make_attack_result as _result
+    from bili.aegis.tests.conftest import make_security_event as _event
+    from bili.aegis.tests.conftest import _NOW
 """
 
 import datetime
