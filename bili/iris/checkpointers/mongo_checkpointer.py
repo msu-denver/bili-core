@@ -1018,7 +1018,29 @@ class AsyncPruningMongoDBSaver(
             and validates that thread_ids belong to this user.
         :param kwargs: Keyword arguments for parent class
         """
-        super().__init__(*args, **kwargs)
+        try:
+            super().__init__(*args, **kwargs)
+        except TypeError as exc:
+            # langgraph-checkpoint-mongodb 0.2.x calls _append_client_metadata
+            # which requires motor >=3.8 (not yet released). Gracefully
+            # initialize the required attributes when this call fails.
+            if "append_metadata" not in str(exc):
+                raise
+            LOGGER.debug(
+                "Skipping client metadata (motor lacks append_metadata): %s",
+                exc,
+            )
+            client = args[0] if args else kwargs.get("client")
+            db_name = kwargs.get("db_name", "checkpointing_db")
+            db = client[db_name]
+            self.client = client
+            self.db = db
+            self.checkpoint_collection = db[
+                kwargs.get("checkpoint_collection_name", "checkpoints_aio")
+            ]
+            self.writes_collection = db[
+                kwargs.get("writes_collection_name", "checkpoint_writes_aio")
+            ]
         self.keep_last_n = keep_last_n
         self.user_id = user_id
         # Lazy-initialized attributes (set on first use)
