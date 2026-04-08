@@ -7,6 +7,7 @@ Welcome to the BiliCore documentation. This guide provides comprehensive informa
 ## Table of Contents
 
 - [Overview](#overview)
+- [Three-Component Architecture](#three-component-architecture)
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
 - [Documentation Index](#documentation-index)
@@ -26,8 +27,39 @@ Developed as part of the [Colorado Sustainability Hub](https://sustainabilityhub
 
 - **Multi-Provider Support**: Test LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models using a unified interface
 - **Dynamic Configuration**: Switch LLMs mid-conversation without losing chat history
+- **Three-Component Design**: Cleanly separated concerns across IRIS (single-agent), AETHER (multi-agent), and AEGIS (security)
 - **Modular Architecture**: Extensible authentication, tools, checkpointing, and workflow systems
 - **Research-Ready**: Built for benchmarking with reproducible configurations and comprehensive logging
+
+---
+
+## Three-Component Architecture
+
+BiliCore is organized into three major subsystems, each with a distinct responsibility:
+
+| Component | Package | Purpose |
+|-----------|---------|---------|
+| **IRIS** | `bili.iris` | Single-agent RAG orchestration -- LLM configuration, LangGraph workflows, tools, checkpointers, and loaders |
+| **AETHER** | `bili.aether` | Multi-agent system (MAS) framework -- declarative YAML workflows, agent communication protocols, and streaming execution |
+| **AEGIS** | `bili.aegis` | Security testing and evaluation -- adversarial attacks, LLM evaluators, and security scanning utilities |
+
+Shared modules (`bili.auth`, `bili.utils`, `bili.flask_api`, `bili.streamlit_ui`) sit outside these three packages and are used by all of them.
+
+When writing import statements, use the component-qualified paths:
+
+```python
+# IRIS -- single-agent orchestration
+from bili.iris.loaders.langchain_loader import build_agent_graph
+from bili.iris.config.llm_config import LLM_MODELS
+from bili.iris.tools.faiss_memory_indexing import init_faiss
+
+# AETHER -- multi-agent systems
+from bili.aether.runtime import MASExecutor
+
+# AEGIS -- security testing
+from bili.aegis.attacks import AttackRunner
+from bili.aegis.evaluator import Evaluator
+```
 
 ---
 
@@ -35,10 +67,12 @@ Developed as part of the [Colorado Sustainability Hub](https://sustainabilityhub
 
 | Feature | Description |
 |---------|-------------|
-| **60+ LLM Configurations** | Pre-configured models across major cloud providers |
-| **LangGraph Workflows** | Node-based workflow system with customizable execution pipelines |
-| **Extensible Tools** | FAISS, OpenSearch, weather APIs, web search, and custom tool support |
-| **Flexible State Management** | MongoDB, PostgreSQL, and in-memory checkpointers with query APIs |
+| **60+ LLM Configurations** | Pre-configured models across major cloud providers (via `bili.iris.config`) |
+| **LangGraph Workflows** | Node-based workflow system with customizable execution pipelines (via `bili.iris.loaders`) |
+| **Extensible Tools** | FAISS, OpenSearch, weather APIs, web search, and custom tool support (via `bili.iris.tools`) |
+| **Multi-Agent Orchestration** | Declarative YAML-driven multi-agent workflows with 7 workflow types (via `bili.aether`) |
+| **Security Testing** | Adversarial attack runners, LLM evaluators, and security scanners (via `bili.aegis`) |
+| **Flexible State Management** | MongoDB, PostgreSQL, and in-memory checkpointers with query APIs (via `bili.iris.checkpointers`) |
 | **Modular Authentication** | Firebase, SQLite, and in-memory auth providers |
 | **Dual Interfaces** | Streamlit UI for interactive testing, Flask API for programmatic access |
 | **Memory Management** | Trimming and summarization strategies for context optimization |
@@ -116,7 +150,7 @@ Detailed documentation is organized by topic:
 
 System architecture and code organization reference.
 
-- Core component overview (auth, checkpointers, config, tools, loaders)
+- Three-component architecture (IRIS, AETHER, AEGIS)
 - Directory structure and module responsibilities
 - Key design patterns (Provider, Registry, Factory)
 - State management and data flow
@@ -124,7 +158,7 @@ System architecture and code organization reference.
 
 ### [LANGGRAPH.md](./LANGGRAPH.md)
 
-LangGraph workflow system documentation.
+LangGraph workflow system documentation (IRIS component).
 
 - Default execution pipeline and node descriptions
 - Node architecture using `functools.partial` pattern
@@ -135,13 +169,22 @@ LangGraph workflow system documentation.
 
 ### [TOOLS.md](./TOOLS.md)
 
-Tools framework and extension guide.
+Tools framework and extension guide (IRIS component).
 
 - Available tools (FAISS, OpenSearch, weather APIs, SERP, mock tool)
 - Tool registry and initialization patterns
 - Creating custom tools
 - Middleware integration for tools
 - Tool configuration and prompts
+
+### [SECURITY.md](./SECURITY.md)
+
+Multi-tenant security features and cloud-ready architecture.
+
+- Thread ownership validation at checkpointer and executor layers
+- Multi-conversation isolation via conversation_id
+- Defense-in-depth architecture across multiple layers
+- Cloud-ready state management with database-backed persistence
 
 ### [STREAMLIT.md](./STREAMLIT.md)
 
@@ -164,36 +207,52 @@ AETHER multi-agent system framework documentation.
 - Streaming execution with `MASExecutor`
 - Detailed API reference in [`bili/aether/docs/`](../bili/aether/docs/)
 
+### [AEGIS Documentation](../bili/aegis/)
+
+AEGIS security testing and evaluation framework.
+
+- Adversarial attack runners (`bili.aegis.attacks`)
+- LLM output evaluators (`bili.aegis.evaluator`)
+- Security scanning utilities (`bili.aegis.security`)
+
 ---
 
 ## Project Structure
 
 ```
 bili-core/
-├── bili/                    # Main source package
-│   ├── aether/             # AETHER multi-agent system framework
-│   ├── auth/               # Authentication providers
-│   ├── checkpointers/      # State persistence (MongoDB, PostgreSQL, memory)
-│   ├── config/             # LLM and tool configurations
-│   ├── flask_api/          # Flask REST API components
-│   ├── graph_builder/      # LangGraph building utilities
-│   ├── loaders/            # Component initialization
-│   │   ├── langchain_loader.py    # Graph building and node registration
-│   │   ├── llm_loader.py          # LLM initialization
-│   │   ├── tools_loader.py        # Tool initialization
-│   │   └── middleware_loader.py   # Middleware configuration
-│   ├── nodes/              # LangGraph node implementations
-│   ├── prompts/            # System prompts and templates
-│   ├── streamlit_ui/       # Streamlit UI components
-│   ├── tools/              # Tool implementations
-│   └── utils/              # Utility functions
-├── docs/                   # Documentation (you are here)
-├── env/                    # Environment configurations
-├── scripts/                # Development and build scripts
-├── tests/                  # Test suite
-├── CLAUDE.md              # AI assistant development guide
-├── README.MD              # Project overview
-└── requirements.txt       # Python dependencies
+├── bili/                        # Main source package
+│   ├── iris/                    # IRIS: Single-agent RAG orchestration
+│   │   ├── config/              #   LLM and tool configurations
+│   │   ├── checkpointers/       #   State persistence (PostgreSQL, MongoDB, memory)
+│   │   ├── graph_builder/       #   LangGraph building utilities
+│   │   ├── loaders/             #   Component initialization
+│   │   │   ├── langchain_loader.py    # Graph building and node registration
+│   │   │   ├── llm_loader.py          # LLM initialization
+│   │   │   ├── tools_loader.py        # Tool initialization
+│   │   │   └── middleware_loader.py   # Middleware configuration
+│   │   ├── nodes/               #   LangGraph node implementations
+│   │   └── tools/               #   Tool implementations (FAISS, OpenSearch, etc.)
+│   ├── aether/                  # AETHER: Multi-agent system framework
+│   │   ├── runtime/             #   MASExecutor and streaming
+│   │   ├── docs/                #   AETHER-specific documentation
+│   │   └── ...                  #   Workflow types, channels, agents
+│   ├── aegis/                   # AEGIS: Security testing and evaluation
+│   │   ├── attacks/             #   Adversarial attack runners
+│   │   ├── evaluator/           #   LLM output evaluators
+│   │   └── security/            #   Security scanning utilities
+│   ├── auth/                    # Shared: Authentication providers
+│   ├── flask_api/               # Shared: Flask REST API components
+│   ├── prompts/                 # Shared: System prompts and templates
+│   ├── streamlit_ui/            # Shared: Streamlit UI components
+│   └── utils/                   # Shared: Utility functions
+├── docs/                        # Documentation (you are here)
+├── env/                         # Environment configurations
+├── scripts/                     # Development and build scripts
+├── tests/                       # Test suite
+├── CLAUDE.md                    # AI assistant development guide
+├── README.MD                    # Project overview
+└── requirements.txt             # Python dependencies
 ```
 
 ---

@@ -1,15 +1,18 @@
 # BiliCore Security Features
 
-This document describes the multi-tenant security features and cloud-ready architecture implemented in BiliCore.
+This document describes the multi-tenant security features and cloud-ready architecture implemented in BiliCore. These features live primarily in the **IRIS** checkpointer layer (`bili/iris/checkpointers/`) and in the **AETHER** executor (`bili/aether/`).
+
+For adversarial security testing (prompt injection, jailbreak detection, etc.), see the **AEGIS** package (`bili/aegis/`).
 
 ## Overview
 
-BiliCore implements defense-in-depth security for multi-tenant deployments with:
+When BiliCore is deployed as a shared service (e.g., multiple researchers on the same instance), it must ensure that one user cannot read or modify another user's conversation state. BiliCore implements defense-in-depth security for these multi-tenant deployments with:
+
 - **Thread ownership validation** at checkpointer and executor layers
 - **Multi-conversation isolation** via conversation_id parameter
-- **State-based persistence** for cloud-native deployments
+- **State-based persistence** for cloud-native deployments (survives pod restarts)
 - **On-demand schema migration** with zero downtime
-- **Backward compatibility** - all security features are opt-in
+- **Backward compatibility** -- all security features are opt-in via the `user_id` parameter
 
 ## Multi-Tenant Security
 
@@ -90,7 +93,7 @@ response = handle_agent_prompt(user, agent, "Vacation ideas?", conversation_id="
 ### AETHER Integration
 
 ```python
-from bili.aether.execution.mas_executor import MASExecutor
+from bili.aether.runtime.executor import MASExecutor
 
 # Work conversation
 work_executor = MASExecutor(
@@ -447,4 +450,5 @@ if "work" not in existing_ids:
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Overall architecture documentation
 - [LANGGRAPH.md](./LANGGRAPH.md) - LangGraph workflow documentation
 - [bili/aether/README.md](../bili/aether/README.md) - AETHER framework documentation
+- [bili/aegis/](../bili/aegis/) - AEGIS adversarial security testing framework
 - [bili/iris/checkpointers/README.md](../bili/iris/checkpointers/README.md) - Checkpointer implementation details

@@ -1,10 +1,12 @@
 # Tools Framework
 
-This document describes the BiliCore tools system for extending agent capabilities with external services and data sources.
+This document describes the BiliCore tools system for extending agent capabilities with external services and data sources. Tools are part of the **IRIS** single-agent component (`bili/iris/tools/`).
 
 ## Overview
 
-BiliCore provides an extensible tools framework that allows agents to:
+In LangChain, a "tool" is a callable that an LLM agent can invoke during reasoning (the "Action" step of a ReAct loop). BiliCore wraps this concept in a registry-and-factory system so that tools can be declared in configuration and dynamically loaded at runtime without hard-coding them into the agent graph.
+
+BiliCore's tools framework allows agents to:
 
 - Retrieve information from vector databases (FAISS, OpenSearch)
 - Fetch real-time data from external APIs (weather, search)

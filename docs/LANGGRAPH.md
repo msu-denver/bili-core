@@ -1,14 +1,16 @@
 # LangGraph Workflow System
 
-This document describes how BiliCore uses LangGraph to build dynamic, customizable agent workflows.
+This document describes how BiliCore uses LangGraph to build dynamic, customizable agent workflows. The workflow system is part of the **IRIS** single-agent component and lives in `bili/iris/loaders/` (graph construction), `bili/iris/nodes/` (individual processing steps), and `bili/iris/graph_builder/` (data classes).
 
 ## Overview
 
-BiliCore uses [LangGraph](https://langchain-ai.github.io/langgraph/) to create stateful, graph-based agent workflows. The framework provides:
+[LangGraph](https://langchain-ai.github.io/langgraph/) is a library for building stateful, graph-based agent workflows on top of LangChain. A LangGraph workflow is a directed graph where each node is a function that receives the current conversation state, performs some work (e.g., injecting a system prompt, calling an LLM, trimming messages), and returns an updated state. Edges connect nodes in sequence, and a checkpointer persists state between invocations so conversations can be resumed.
+
+BiliCore wraps LangGraph with:
 
 - **Node-based architecture**: Modular processing steps that can be composed and reordered
-- **Registry pattern**: Dynamic node registration for extensibility
-- **State management**: Automatic checkpointing and persistence
+- **Registry pattern**: Dynamic node registration for extensibility -- you can add custom nodes without modifying core code
+- **State management**: Automatic checkpointing and persistence via IRIS checkpointers
 - **Performance monitoring**: Execution time logging for all nodes
 
 ## Default Execution Pipeline

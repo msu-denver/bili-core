@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments.
+BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments. The framework is organized into three core components:
+
+- **IRIS** (`bili/iris/`) — Single-agent RAG pipeline: LLM configuration, tools, graph building, node workflows, checkpointers, and streaming utilities.
+- **AETHER** (`bili/aether/`) — Declarative multi-agent orchestration: workflow types, communication protocols, pipeline sub-graphs, and streaming via `MASExecutor`.
+- **AEGIS** (`bili/aegis/`) — Security evaluation and adversarial testing: attack simulations, security analysis, and LLM robustness evaluation.
 
 ## Development Commands
 
@@ -52,19 +56,39 @@ pip install -e .
 
 ## High-Level Architecture
 
-### Core Components
+### Three-Component Architecture
+
+BiliCore is structured around three major components:
+
+#### IRIS — Single-Agent RAG (`bili/iris/`)
+
+The core single-agent pipeline for retrieval-augmented generation:
+
+1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
+
+2. **LLM Configuration** (`bili/iris/config/`): Model configurations for 60+ LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models. Uses factory pattern for model initialization.
+
+3. **Tools Framework** (`bili/iris/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
+
+4. **LangGraph Workflows** (`bili/iris/loaders/`, `bili/iris/nodes/`, `bili/iris/graph_builder/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → per_user_state → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
+
+5. **Middleware System** (`bili/iris/loaders/middleware_loader.py`, `bili/iris/config/middleware_config.py`): Extensible middleware framework for intercepting and modifying agent execution. Supports built-in middleware (summarization, model call limiting) and custom middleware creation.
+
+#### AETHER — Multi-Agent Orchestration (`bili/aether/`)
+
+Declarative multi-agent system with 7 workflow types, 6 communication protocols, YAML-driven configuration, and streaming support. See the [AETHER section](#aether-multi-agent-system) below for details.
+
+#### AEGIS — Security and Adversarial Evaluation (`bili/aegis/`)
+
+Security evaluation framework for testing LLM robustness:
+
+- **Attacks** (`bili/aegis/attacks/`): Adversarial attack simulations for probing LLM vulnerabilities.
+- **Security** (`bili/aegis/security/`): Security analysis tools and threat modeling.
+- **Evaluator** (`bili/aegis/evaluator/`): Automated evaluation of LLM responses against security benchmarks.
+
+### Shared Components
 
 1. **Authentication System** (`bili/auth/`): Modular authentication with Firebase, SQLite, and in-memory providers. Each provider implements a common interface.
-
-2. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
-
-3. **LLM Configuration** (`bili/iris/config/`): Model configurations for 60+ LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models. Uses factory pattern for model initialization.
-
-4. **Tools Framework** (`bili/iris/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
-
-5. **LangGraph Workflows** (`bili/iris/loaders/`, `bili/iris/nodes/`, `bili/iris/graph_builder/`): Node-based workflow system with a registry pattern. Default pipeline: persona → datetime → per_user_state → react agent → timestamp → memory management → normalization. Custom nodes can be registered dynamically.
-
-6. **Middleware System** (`bili/iris/loaders/middleware_loader.py`, `bili/iris/config/middleware_config.py`): Extensible middleware framework for intercepting and modifying agent execution. Supports built-in middleware (summarization, model call limiting) and custom middleware creation.
 
 ### Key Patterns
 
@@ -107,7 +131,7 @@ The venv is automatically activated on attach.
 
 The Streamlit app (`bili/streamlit_app.py`) is a multi-page app using `st.navigation()` on port 8501:
 - **AETHER Multi-Agent** (`/aether`) — MAS visualizer and chat (default page)
-- **Single-Agent RAG** (`/bili`) — LLM comparison chatbot
+- **IRIS Single-Agent RAG** (`/bili`) — LLM comparison chatbot
 
 Both pages require authentication. AETHER page content is rendered from `bili/aether/ui/page.py`.
 
@@ -120,7 +144,7 @@ AETHER (Agent Ecosystems for Testing, Hardening, Evaluation and Research) is a d
 - **6 communication protocols**: direct, broadcast, request-response, pub-sub, competitive, consensus
 - **Pipeline sub-graphs**: Rich multi-node pipelines within agents with custom state fields
 - **Streaming**: Sync/async streaming with `StreamEvent` objects via `MASExecutor`
-- **bili-core integration**: Agents can inherit LLM config, tools, middleware, and checkpointers
+- **IRIS integration**: Agents can inherit IRIS LLM config, tools, middleware, and checkpointers
 
 For comprehensive AETHER documentation, see `bili/aether/README.md` and `bili/aether/docs/`.
 
@@ -271,9 +295,9 @@ def wrap_node(node_func: Callable, node_name: str) -> Callable:
 
 ### Streaming Support
 
-Both normal bili and AETHER support streaming and non-streaming agent interactions with clean, symmetric APIs.
+IRIS and AETHER both support streaming and non-streaming agent interactions with clean, symmetric APIs.
 
-#### Normal Bili — Framework-Agnostic Streaming (`bili/iris/loaders/streaming_utils.py`)
+#### IRIS — Framework-Agnostic Streaming (`bili/iris/loaders/streaming_utils.py`)
 
 ```python
 from bili.iris.loaders.langchain_loader import build_agent_graph

@@ -1,77 +1,98 @@
 # BiliCore Architecture
 
-This document describes the architecture and organization of the BiliCore framework.
+This document describes the architecture and organization of the BiliCore framework. It is written for new developers joining the project; if you are already familiar with the codebase, the [Table of Contents](#core-components) can help you jump to the section you need.
 
 ## Overview
 
 BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments.
 
+The codebase is split into **three major subsystems** plus a set of shared modules:
+
+| Subsystem | Package | Responsibility |
+|-----------|---------|----------------|
+| **IRIS** | `bili/iris/` | Single-agent RAG orchestration -- LLM configs, LangGraph workflows, tools, checkpointers, and loaders |
+| **AETHER** | `bili/aether/` | Multi-agent system (MAS) framework -- declarative YAML workflows, communication protocols, streaming execution |
+| **AEGIS** | `bili/aegis/` | Security testing and evaluation -- adversarial attack runners, LLM evaluators, security scanners |
+
+Shared modules (`bili/auth/`, `bili/utils/`, `bili/flask_api/`, `bili/streamlit_ui/`, `bili/prompts/`) are consumed by all three subsystems.
+
 ## Directory Structure
 
 ```
 bili-core/
-├── bili/                      # Main Python package
-│   ├── auth/                  # Authentication system
-│   │   └── providers/         # Auth provider implementations
-│   │       ├── auth/          # Authentication providers (Firebase, SQLite, In-memory)
-│   │       ├── role/          # Role/permission providers
-│   │       └── profile/       # User profile providers
-│   ├── checkpointers/         # State persistence layer
-│   │   ├── migrations/        # Schema migrations (Mongo, PostgreSQL)
-│   │   ├── base_checkpointer.py
-│   │   ├── mongo_checkpointer.py
-│   │   ├── pg_checkpointer.py
-│   │   └── memory_checkpointer.py
-│   ├── config/                # Configuration management
-│   │   ├── llm_config.py      # LLM model configurations
-│   │   ├── tool_config.py     # Tool configurations
-│   │   └── middleware_config.py
-│   ├── flask_api/             # Flask REST API
-│   ├── graph_builder/         # LangGraph construction utilities
-│   │   └── classes/           # Node, ConditionalEdge classes
-│   ├── loaders/               # Component initialization
-│   │   ├── langchain_loader.py  # Graph builder
-│   │   ├── tools_loader.py    # Tool initialization
-│   │   ├── llm_loader.py      # LLM initialization
-│   │   ├── embeddings_loader.py
-│   │   └── middleware_loader.py
-│   ├── nodes/                 # LangGraph node implementations
-│   │   ├── add_persona_and_summary.py
-│   │   ├── inject_current_datetime.py
-│   │   ├── per_user_state.py
-│   │   ├── react_agent_node.py
-│   │   ├── update_timestamp.py
-│   │   ├── trim_and_summarize.py
-│   │   └── normalize_state.py
-│   ├── tools/                 # Tool implementations
-│   │   ├── faiss_memory_indexing.py
-│   │   ├── amazon_opensearch.py
-│   │   ├── api_serp.py
-│   │   ├── api_weather_gov.py
-│   │   ├── api_open_weather.py
-│   │   └── mock_tool.py
-│   ├── streamlit_ui/          # Streamlit components
-│   │   └── ui/                # UI modules
-│   ├── utils/                 # Utility functions
-│   ├── streamlit_app.py       # Streamlit entry point
-│   └── flask_app.py           # Flask entry point
-├── scripts/                   # Build and development scripts
-│   ├── development/           # Container scripts
-│   └── build/                 # Build scripts
-├── env/                       # Environment configurations
-├── data/                      # Data files (FAISS indexes, etc.)
-├── models/                    # Local model files (symlink)
-├── CLAUDE.md                  # AI assistant guidelines
-├── requirements.txt           # Python dependencies
-├── setup.py                   # Package installation
-└── docker-compose.yml         # Container orchestration
+├── bili/                          # Main Python package
+│   ├── iris/                      # IRIS: Single-agent RAG orchestration
+│   │   ├── checkpointers/         #   State persistence layer
+│   │   │   ├── migrations/        #     Schema migrations (Mongo, PostgreSQL)
+│   │   │   ├── base_checkpointer.py
+│   │   │   ├── mongo_checkpointer.py
+│   │   │   ├── pg_checkpointer.py
+│   │   │   └── memory_checkpointer.py
+│   │   ├── config/                #   Configuration management
+│   │   │   ├── llm_config.py      #     LLM model configurations (60+ models)
+│   │   │   ├── tool_config.py     #     Tool configurations
+│   │   │   └── middleware_config.py
+│   │   ├── graph_builder/         #   LangGraph construction utilities
+│   │   │   └── classes/           #     Node, ConditionalEdge classes
+│   │   ├── loaders/               #   Component initialization
+│   │   │   ├── langchain_loader.py  #   Graph builder & node registry
+│   │   │   ├── tools_loader.py    #     Tool initialization & registry
+│   │   │   ├── llm_loader.py      #     LLM initialization (factory pattern)
+│   │   │   ├── embeddings_loader.py
+│   │   │   └── middleware_loader.py
+│   │   ├── nodes/                 #   LangGraph node implementations
+│   │   │   ├── add_persona_and_summary.py
+│   │   │   ├── inject_current_datetime.py
+│   │   │   ├── per_user_state.py
+│   │   │   ├── react_agent_node.py
+│   │   │   ├── update_timestamp.py
+│   │   │   ├── trim_and_summarize.py
+│   │   │   └── normalize_state.py
+│   │   └── tools/                 #   Tool implementations
+│   │       ├── faiss_memory_indexing.py
+│   │       ├── amazon_opensearch.py
+│   │       ├── api_serp.py
+│   │       ├── api_weather_gov.py
+│   │       ├── api_open_weather.py
+│   │       └── mock_tool.py
+│   ├── aether/                    # AETHER: Multi-agent system framework
+│   │   ├── runtime/               #   MASExecutor, streaming, events
+│   │   ├── docs/                  #   Detailed AETHER documentation
+│   │   └── ...                    #   Workflows, channels, agents, configs
+│   ├── aegis/                     # AEGIS: Security testing & evaluation
+│   │   ├── attacks/               #   Adversarial attack runners
+│   │   ├── evaluator/             #   LLM output evaluators
+│   │   ├── security/              #   Security scanning utilities
+│   │   └── tests/                 #   AEGIS-specific tests
+│   ├── auth/                      # Shared: Authentication system
+│   │   └── providers/             #   Auth provider implementations
+│   │       ├── auth/              #     Firebase, SQLite, In-memory
+│   │       ├── role/              #     Role/permission providers
+│   │       └── profile/           #     User profile providers
+│   ├── flask_api/                 # Shared: Flask REST API
+│   ├── streamlit_ui/              # Shared: Streamlit components
+│   │   └── ui/                    #   UI modules
+│   ├── prompts/                   # Shared: System prompts and templates
+│   ├── utils/                     # Shared: Utility functions
+│   ├── streamlit_app.py           # Streamlit entry point
+│   └── flask_app.py               # Flask entry point
+├── scripts/                       # Build and development scripts
+│   ├── development/               #   Container scripts
+│   └── build/                     #   Build scripts
+├── env/                           # Environment configurations
+├── data/                          # Data files (FAISS indexes, etc.)
+├── models/                        # Local model files (symlink)
+├── CLAUDE.md                      # AI assistant guidelines
+├── requirements.txt               # Python dependencies
+├── setup.py                       # Package installation
+└── docker-compose.yml             # Container orchestration
 ```
 
 ## Core Components
 
-### 1. Authentication System (`bili/auth/`)
+### 1. Authentication System (`bili/auth/`) -- Shared
 
-Modular authentication with pluggable providers implementing a common interface:
+The authentication system lives outside the three subsystems because it is shared by IRIS, AETHER, and AEGIS. It uses a provider-based architecture with pluggable implementations behind a common interface:
 
 ```
 AuthManager
@@ -81,13 +102,13 @@ AuthManager
 ```
 
 Each provider type has multiple implementations:
-- **Firebase**: Production auth via Firebase Admin SDK
-- **SQLite**: Local development with persistent storage
-- **In-memory**: Testing/ephemeral sessions
+- **Firebase**: Production auth via Firebase Admin SDK (used in AWS deployments)
+- **SQLite**: Local development with persistent storage (auto-grants `researcher` role)
+- **In-memory**: Testing/ephemeral sessions (no persistence across restarts)
 
-### 2. Checkpointers (`bili/iris/checkpointers/`)
+### 2. Checkpointers (`bili/iris/checkpointers/`) -- IRIS
 
-State persistence layer supporting multiple backends. All checkpointers implement the `QueryableCheckpointerMixin` interface:
+Checkpointers are the state persistence layer for LangGraph agents. Every time a node in the graph executes, the current state (messages, summaries, metadata) is saved to a checkpoint so it can be resumed later. All checkpointers implement the `QueryableCheckpointerMixin` interface, which adds conversation-management queries on top of LangGraph's base checkpointer:
 
 ```python
 class QueryableCheckpointerMixin(ABC):
@@ -183,7 +204,9 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 - Existing code without `user_id` continues to work unchanged
 - No breaking changes to public APIs
 
-### 3. LLM Configuration (`bili/iris/config/`)
+### 3. LLM Configuration (`bili/iris/config/`) -- IRIS
+
+The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
 Configurations for 60+ LLMs across providers:
 
@@ -197,18 +220,18 @@ Configurations for 60+ LLMs across providers:
 
 Factory pattern initialization via `llm_loader.py`.
 
-### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`)
+### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`) -- IRIS
 
-Node-based workflow system with registry pattern. See [LANGGRAPH.md](./LANGGRAPH.md) for details.
+The heart of single-agent RAG execution. The loaders module (`bili/iris/loaders/`) provides factory functions that wire together LLMs, tools, and checkpointers into a compiled LangGraph `StateGraph`. The nodes module (`bili/iris/nodes/`) contains the individual processing steps that make up the default pipeline. See [LANGGRAPH.md](./LANGGRAPH.md) for details.
 
 **Default Pipeline:**
 ```
 START → persona_summary → datetime → react_agent → timestamp → trim_summarize → normalize → END
 ```
 
-### 5. Tools Framework (`bili/iris/tools/`)
+### 5. Tools Framework (`bili/iris/tools/`) -- IRIS
 
-Extensible tool system with registry-based loading. See [TOOLS.md](./TOOLS.md) for details.
+Tools give agents the ability to call external services (weather APIs, search engines) or query internal data stores (FAISS, OpenSearch). Each tool is a LangChain `Tool` object created by a factory function in `bili/iris/loaders/tools_loader.py` and registered in the `TOOL_REGISTRY`. See [TOOLS.md](./TOOLS.md) for details.
 
 **Available Tools:**
 - FAISS vector search
@@ -226,6 +249,22 @@ Intercepts and modifies agent execution at two levels:
 Built-in middleware:
 - `summarization`: Auto-summarize long conversations
 - `model_call_limit`: Limit LLM invocations per turn
+
+### 7. AETHER Multi-Agent System (`bili/aether/`)
+
+AETHER (Agent Ecosystems for Testing, Hardening, Evaluation and Research) is a declarative multi-agent orchestration framework. It lets you define multiple cooperating agents, each with their own LLM, tools, and sub-graph, and wire them together using one of seven workflow types (sequential, hierarchical, supervisor, consensus, deliberative, parallel, custom). Configuration is done in YAML, and execution is handled by the `MASExecutor` class with sync and async streaming support.
+
+For full documentation, see [`bili/aether/README.md`](../bili/aether/README.md) and [`bili/aether/docs/`](../bili/aether/docs/).
+
+### 8. AEGIS Security Testing (`bili/aegis/`)
+
+AEGIS provides adversarial testing and evaluation capabilities for LLM-based systems. It contains three sub-packages:
+
+- **`bili/aegis/attacks/`**: Attack runners that generate adversarial prompts to test agent robustness (e.g., prompt injection, jailbreaking)
+- **`bili/aegis/evaluator/`**: Evaluators that score LLM outputs for safety, accuracy, and compliance
+- **`bili/aegis/security/`**: Security scanning utilities for detecting vulnerabilities in agent configurations
+
+AEGIS was previously part of the AETHER package (as `bili.aether.attacks`, `bili.aether.evaluator`, `bili.aether.security`) and was extracted into its own top-level package to separate security concerns from multi-agent orchestration.
 
 ## Application Entry Points
 
@@ -348,7 +387,9 @@ Key configuration via environment:
 ## See Also
 
 - [SECURITY.md](./SECURITY.md) - Multi-tenant security and cloud-ready features
-- [LANGGRAPH.md](./LANGGRAPH.md) - LangGraph workflow documentation
-- [TOOLS.md](./TOOLS.md) - Tools framework documentation
+- [LANGGRAPH.md](./LANGGRAPH.md) - LangGraph workflow documentation (IRIS)
+- [TOOLS.md](./TOOLS.md) - Tools framework documentation (IRIS)
 - [STREAMLIT.md](./STREAMLIT.md) - Streamlit UI documentation
+- [bili/aether/README.md](../bili/aether/README.md) - AETHER multi-agent system
+- [bili/aegis/](../bili/aegis/) - AEGIS security testing framework
 - [../CLAUDE.md](../CLAUDE.md) - Development commands and patterns

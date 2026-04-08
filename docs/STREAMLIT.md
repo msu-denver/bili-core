@@ -2,13 +2,16 @@
 
 ## Overview
 
-BiliCore provides a comprehensive Streamlit-based web interface for benchmarking and interacting with Large Language Models (LLMs). The Streamlit application serves as the primary user interface for the BiliCore framework, enabling researchers and developers to:
+BiliCore provides a comprehensive Streamlit-based web interface for benchmarking and interacting with Large Language Models (LLMs). The Streamlit application is the primary user interface for the BiliCore framework and surfaces both the **IRIS** single-agent and **AETHER** multi-agent subsystems in a unified web app.
+
+The UI enables researchers and developers to:
 
 - Configure and compare different LLM providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, local models)
 - Customize chatbot behavior with configurable prompts and personas
 - Select and configure external tools for enhanced conversational capabilities
 - Manage conversation state and memory strategies
 - Export and import configurations for reproducible testing
+- Visualize and interact with AETHER multi-agent workflows (via the `/aether` page)
 
 This document provides a detailed technical overview of the Streamlit implementation architecture.
 
@@ -38,8 +41,8 @@ This document provides a detailed technical overview of the Streamlit implementa
 
 ```
 bili/
-├── streamlit_app.py              # Main entry point
-├── streamlit_ui/
+├── streamlit_app.py              # Main entry point (multi-page app)
+├── streamlit_ui/                 # Shared UI components
 │   ├── __init__.py
 │   ├── query/
 │   │   ├── __init__.py
@@ -47,22 +50,24 @@ bili/
 │   ├── ui/
 │   │   ├── __init__.py
 │   │   ├── auth_ui.py                   # Authentication UI components
-│   │   ├── chat_interface.py            # Main chat interface
+│   │   ├── chat_interface.py            # Main chat interface (IRIS page)
 │   │   ├── configuration_panels.py      # LLM/tool configuration panels
 │   │   └── ui_auth_manager.py           # Streamlit-specific auth manager
 │   └── utils/
 │       ├── __init__.py
 │       ├── state_management.py          # Session state utilities
 │       └── streamlit_utils.py           # Caching decorators
-├── config/
-│   ├── llm_config.py                    # LLM model configurations
-│   └── tool_config.py                   # Tool configurations
-├── prompts/
-│   └── default_prompts.json             # Default prompt templates
-├── checkpointers/
-│   └── checkpointer_functions.py        # Checkpointer initialization
-└── loaders/
-    └── langchain_loader.py              # LangGraph agent builder
+├── aether/ui/page.py                    # AETHER multi-agent page
+├── iris/                                # IRIS single-agent subsystem
+│   ├── config/
+│   │   ├── llm_config.py               #   LLM model configurations
+│   │   └── tool_config.py              #   Tool configurations
+│   ├── checkpointers/
+│   │   └── checkpointer_functions.py   #   Checkpointer initialization
+│   └── loaders/
+│       └── langchain_loader.py         #   LangGraph agent builder
+└── prompts/
+    └── default_prompts.json             # Default prompt templates
 ```
 
 ### High-Level Architecture Diagram

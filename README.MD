@@ -2,100 +2,157 @@
   <img src="bili/images/logo.png" alt="BiliCore Logo" width="150"/>
 </p>
 
-# BiliCore: A Framework for Benchmarking and Building Dynamic RAG Implementations
+# BiliCore: An Open-Source LLM Framework
 
-## Overview
+**BiliCore** is an open-source, domain-agnostic framework for building and testing LLM-powered applications. It provides single-agent orchestration, multi-agent system creation, and adversarial security testing — all in one modular package.
 
-**BiliCore** is an open-source, reusable framework designed to benchmark Large Language Models (LLMs) across cloud providers and local environments. It enables rapid, reproducible testing without requiring researchers to run models locally. Developed as part of the [**Colorado Sustainability Hub**](https://sustainabilityhub.co/). initiative, BiliCore contributes to the AI/ML community by providing a **flexible and extensible core library** built with **LangChain** and **LangGraph**. The framework emphasizes modular authentication, customizable tool selection, support for multiple LLMs across different providers, a robust web interface in Streamlit that enables on-the-fly RAG customization during a user's session, and a Flask REST API for programmatic access and backend integration. This allows users to start a conversation with one LLM and switch to another mid-session without losing conversation history.
-
-Via the Streamlit UI, users can also test different personas using unique prompts, configure tools, adjust LLM parameters such as top-p, top-k, and seed values, and manage state with complete flexibility, including using truncation or summarization to preserve context when a customizable context window limit is reached.
-
-This project is funded by the **[National Science Foundation (NSF)](https://www.nsf.gov/)** and the **[NAIRR Pilot](https://nairrpilot.org/)**, aligning with their mission to advance AI accessibility and sustainability.
+Developed as part of the [**Colorado Sustainability Hub**](https://sustainabilityhub.co/) initiative, funded by the **[National Science Foundation (NSF)](https://www.nsf.gov/)** and the **[NAIRR Pilot](https://nairrpilot.org/)**.
 
 ---
 
-## Key Features
+## Three Components
 
-### 1. **Benchmarking and RAG Configuration**
+BiliCore is organized into three named components, each solving a distinct problem:
 
-BiliCore empowers users to benchmark and customize RAG implementations through an intuitive interface:
+### IRIS — Interactive Reasoning and Integration Services
+**Single-agent orchestration.** 60+ models across 6 providers.
 
-- Select and test various **Large Language Models (LLMs)**
-- Define **custom prompts** for conversational agents
-- Adjust RAG parameters, such as model size and context window
-- **Integrate external tools** for enhanced conversational capabilities
-- **Manage chat history** and state persistence with MongoDB or PostgreSQL
-- Optimize memory management strategies for efficient token usage
+IRIS bridges users to LLMs, tools, and data sources. It provides a node-based workflow pipeline where each step (persona injection, tool execution, memory management, response normalization) is a composable node. Switch models mid-conversation, configure tools on the fly, and persist state across sessions.
 
-### 2. **Modular Authentication System**
+- **Providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local models
+- **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
+- **Middleware:** Summarization, model call limiting, custom middleware
+- **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management
+- **Streaming:** Token-by-token responses via sync and async APIs
+- **Location:** `bili/iris/`
 
-BiliCore provides a flexible authentication system with **prebuilt authentication options**, including:
+### AETHER — Agent Ecosystems for Testing, Hardening, Evaluation, and Research
+**Multi-agent orchestration.** Declarative YAML configuration.
 
-- **SQLite Authentication** (local development): Used by default. New accounts are automatically assigned the `researcher` role, so you can sign up and immediately sign in. The profile database is stored at the path set by `PROFILE_DB_PATH` (default: `/root/.bili/profile.db` inside the container).
-- **Firebase Authentication** (production): Used for deployed environments on AWS. Requires admin approval before new accounts can access the platform.
-- **In-Memory Authentication**: A simple in-memory authentication suitable for testing.
+AETHER lets you define multi-agent systems (MAS) in YAML and compile them into executable LangGraph workflows. Each agent can have its own LLM, tools, persona, and multi-node processing pipeline. Agents communicate through typed channels with configurable protocols.
 
-To configure authentication, modify the `initialize_auth_manager` call in `bili/streamlit_app.py` to specify the desired provider (e.g., `"sqlite"`, `"firebase"`, or `"in_memory"`).
+- **7 workflow types:** Sequential, hierarchical, supervisor, consensus, parallel, deliberative, custom
+- **6 communication protocols:** Direct, broadcast, request-response, pub-sub, competitive, consensus
+- **Pipeline sub-graphs:** Multi-node pipelines within individual agents
+- **Custom state fields:** Type-safe YAML state declarations with reducers and defaults
+- **Runtime injection:** `RuntimeContext` container for dependency injection into pipeline nodes
+- **Streaming:** `MASExecutor` with structured `StreamEvent` objects and `StreamFilter`
+- **Location:** `bili/aether/`
 
-### 3. **Extensible Tools Framework**
+### AEGIS — Adversarial Evaluation and Guarding of Intelligent Systems
+**Security testing for multi-agent systems.** Built on AETHER.
 
-BiliCore allows **customizable tool selection**, including:
+AEGIS provides a systematic framework for testing how adversarial payloads propagate through multi-agent systems. It injects attacks at different phases (pre-execution, mid-execution, checkpoint), tracks propagation across agents, and evaluates compliance using a 3-tier detection system.
 
-- **[FAISS](https://github.com/facebookresearch/faiss)** for vectorized similarity search
-- **[OpenSearch](https://opensearch.org/)** for vectorized search in AWS-hosted OpenSearch
-- **[OpenWeather API](https://openweathermap.org/)** for weather-related queries
-- **[Weather.gov API](https://www.weather.gov/documentation/services-web-api)** for real-time weather data
-- **[SerpAPI](https://serpapi.com/)** for web search and scraping
-- **MockTool** for testing new tool APIs before deployment
+- **7 test suites:** Prompt injection, jailbreak, memory poisoning, bias inheritance, agent impersonation, persistence, cross-model transferability
+- **3-tier detection:** Structural (CI-safe), heuristic (propagation tracking), semantic (LLM-based scoring)
+- **Baseline comparison:** Ground-truth runner for controlled before/after analysis
+- **Results viewer:** Interactive Streamlit dashboards for attack results and baseline analysis
+- **Attack GUI:** Run adversarial attacks interactively with graph visualization
+- **Location:** `bili/aegis/`
 
-To use these tools:
+---
 
-1. Copy `.env.example` to `.env` in the project root: `cp .env.example .env`
-2. Fill in API keys for tools, cloud providers, and LLMs in the `.env` file.
-3. For AWS services, store credentials in `env/bili_root/.aws/`.
-4. For Google Cloud services, store credentials in `env/bili_root/.google/`.
+## Quick Start
 
-### 4. **LangGraph-Powered Conversational AI**
+### Prerequisites
 
-BiliCore integrates **[LangGraph](https://www.langchain.com/langgraph)** to enable advanced conversational AI workflows:
+- **Docker**: [Get Docker](https://docs.docker.com/get-docker/) — all services run in containers
+- **Git**: To clone the repository
 
-- **Prebuilt multi-LLM capable RAG graph** for modularity and extensibility
-- **Custom nodes** to extend graph functionality with personalized features
-- **Flexible conversation flow control**, allowing structured interactions between LLMs
+### 1. Clone and configure
 
-Users can extend the prebuilt LangGraph workflows by adding **custom nodes** in the `bili` module by modifying the call to `load_langgraph_agent` in `bili/loaders/langchain_loader.py`.
+```bash
+git clone https://github.com/msu-denver/bili-core.git
+cd bili-core
+cp .env.example .env
+# Edit .env with your API keys (AWS, Google, OpenAI, etc.)
+```
 
-### 5. **Chat History and Memory Management**
+### 2. Start the development environment
 
-Efficiently manages conversation states in LangGraph by persisting chat history with:
+```bash
+cd scripts/development
+./start-container.sh    # Linux/macOS (.bat on Windows)
+./attach-container.sh   # Attach to the running container
+```
 
-- **[MongoDB Checkpointer](https://langchain-ai.github.io/langgraph/how-tos/persistence_mongodb/)**: Supports flexible document-based state storage with async support
-- **[PostgreSQL Checkpointer](https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres/)**: Provides relational database storage for robust checkpointing with async support
-- **Memory Checkpointer**: In-memory storage for testing and development
-- **Trim Strategy**: Retains only the last `k` messages for simple memory management
-- **Summarization Strategy**: Aggregates older messages into a coherent summary to optimize token usage
+This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases.
 
-All checkpointers implement a unified queryable interface for conversation management:
+### 3. Run the application
 
-- **Query conversations by user**: List all conversations for a specific user
-- **Retrieve conversation history**: Get all messages from a thread
-- **Delete conversations**: Remove conversation data
-- **Get usage statistics**: Track conversation counts and message volumes
-- **Check thread existence**: Validate thread IDs before operations
+Inside the container:
 
-Both synchronous and asynchronous checkpointer APIs are supported for flexibility across different application architectures.
+```bash
+streamlit    # Start the Streamlit UI on port 8501
+flask        # Start the Flask API on port 5001
+```
 
-### 6. **Streaming Responses**
+### 4. Access the application
 
-BiliCore supports streaming (token-by-token) responses across the entire stack. Both normal bili agents and AETHER multi-agent systems have clean, symmetric APIs for streaming and non-streaming interactions:
+- **Streamlit UI:** http://localhost:8501
+  - `/aether` — AETHER Multi-Agent system (visualizer, chat, attack suite)
+  - `/bili` — Single-Agent RAG testing interface
+  - `/attack-results` — AEGIS attack results viewer
+  - `/results` — Baseline results viewer
+- **Flask API:** http://localhost:5001
 
-**Framework-Agnostic (works anywhere — no Flask/Streamlit required):**
+---
+
+## Architecture Overview
+
+```
+bili-core/
+├── bili/
+│   ├── iris/                  # IRIS: Single-agent orchestration
+│   │   ├── loaders/           #   Graph builder, streaming, tool/middleware/LLM loaders
+│   │   ├── nodes/             #   Pipeline nodes (persona, datetime, react agent, etc.)
+│   │   ├── graph_builder/     #   Node and edge class definitions
+│   │   ├── config/            #   LLM, tool, and middleware configurations
+│   │   ├── tools/             #   Tool implementations (FAISS, OpenSearch, weather, etc.)
+│   │   └── checkpointers/     #   State persistence (MongoDB, PostgreSQL, memory)
+│   │
+│   ├── aether/                # AETHER: Multi-agent orchestration
+│   │   ├── schema/            #   MASConfig, AgentSpec, WorkflowType, Channel definitions
+│   │   ├── compiler/          #   YAML → LangGraph compilation (graph builder, LLM resolver)
+│   │   ├── runtime/           #   MASExecutor, streaming, communication state
+│   │   ├── config/examples/   #   Example YAML configurations
+│   │   ├── integration/       #   Checkpointer factory for MAS
+│   │   ├── validation/        #   Static MAS validation engine
+│   │   └── ui/                #   Streamlit pages (chat, visualizer, attack, results)
+│   │
+│   ├── aegis/                 # AEGIS: Adversarial security testing
+│   │   ├── attacks/           #   Attack injector, propagation tracker, strategies
+│   │   ├── evaluator/         #   Semantic evaluator, scoring rubrics
+│   │   ├── security/          #   Security event detector, logger
+│   │   └── tests/             #   7 attack suites + baseline + analysis
+│   │
+│   ├── auth/                  # Shared: Authentication (Firebase, SQLite, in-memory)
+│   ├── utils/                 # Shared: Logging, LangGraph utilities, file I/O
+│   ├── prompts/               # Shared: Prompt templates
+│   ├── streamlit_ui/          # Shared: Streamlit UI components
+│   ├── flask_api/             # Shared: Flask API utilities
+│   ├── streamlit_app.py       # Unified Streamlit entry point
+│   └── flask_app.py           # Flask API entry point
+│
+├── docs/                      # Project-level documentation
+├── scripts/                   # Development and build scripts
+├── .env.example               # Environment variable template
+├── docker-compose.yml         # Full development stack
+└── requirements.txt           # Python dependencies
+```
+
+---
+
+## Code Examples
+
+### IRIS: Single-Agent Streaming
 
 ```python
 from bili.iris.loaders.langchain_loader import build_agent_graph
 from bili.iris.loaders.streaming_utils import stream_agent, invoke_agent
 
-agent = build_agent_graph(checkpoint_saver=saver, node_kwargs=kwargs, ...)
+agent = build_agent_graph(checkpoint_saver=saver, node_kwargs=kwargs)
 
 # Non-streaming
 response = invoke_agent(agent, "What is the weather?", thread_id="user1")
@@ -105,7 +162,17 @@ for token in stream_agent(agent, "What is the weather?", thread_id="user1"):
     print(token, end="", flush=True)
 ```
 
-**AETHER Multi-Agent Streaming:**
+### AETHER: Multi-Agent System
+
+```python
+from bili.aether import load_mas_from_yaml, compile_mas, execute_mas
+
+config = load_mas_from_yaml("bili/aether/config/examples/simple_chain.yaml")
+result = execute_mas(config, {"messages": ["Analyze quantum computing trends"]})
+print(result.get_summary())
+```
+
+### AETHER: Streaming Multi-Agent
 
 ```python
 from bili.aether.runtime import MASExecutor, StreamEventType
@@ -118,171 +185,112 @@ for event in executor.stream(input_data):
         print(event.data["content"], end="", flush=True)
 ```
 
-- **Flask**: `/nova_stream` SSE endpoint for real-time token streaming
-- **Streamlit**: "Enable streaming responses" toggle for token-by-token display
-- **Async**: `astream_agent()` and `executor.astream()` for async contexts
+### AEGIS: Run a Security Test Suite
 
-### 7. Flask REST API for Programmatic Access
+```bash
+# Stub mode (no LLM calls — validates framework execution)
+python bili/aegis/tests/injection/run_injection_suite.py --stub
 
-BiliCore includes an optional Flask API for applications that require stateless, token-based authentication and API-based access to the benchmarking framework.
-With the Flask integration, you can:
+# Full run (requires API credentials)
+python bili/aegis/tests/injection/run_injection_suite.py
 
-- Authenticate users via JWT-based authentication
-- Secure API routes using role-based access control
-- Access LLMs via RESTful API endpoints, including **SSE streaming** via `/nova_stream`
-- Use the same authentication providers (Firebase, In-Memory) as the Streamlit UI
-
-### 8. AETHER: Multi-Agent System Framework
-
-BiliCore includes **AETHER** (Agent Ecosystems for Testing, Hardening, Evaluation, and Research), a domain-agnostic framework for building and testing multi-agent systems (MAS).
-
-**Key Capabilities:**
-
-- **Declarative Configuration**: Define multi-agent systems using YAML or Python
-- **7 Workflow Types**: Sequential, hierarchical, supervisor, consensus, parallel, deliberative, and custom
-- **Pipeline Sub-Graphs**: Rich multi-node pipelines within single agents for complex processing flows
-- **Agent Communication**: Built-in channels for direct, broadcast, request-response, pub-sub, competitive, and consensus protocols
-- **Custom Node Registry**: Register custom pipeline nodes via `register_node()` or per-compilation `custom_node_registry`
-- **Custom Pipeline State**: Declare custom state fields with type-safe YAML (`state_fields`) — supports reducers, defaults, and promotion to outer MAS state
-- **Runtime Dependency Injection**: `RuntimeContext` container injects services (Celery, HTTP clients, model singletons) into pipeline node builders
-- **Streaming**: Sync `.stream()` and async `.astream()` on `MASExecutor` with structured `StreamEvent` objects and `StreamFilter`
-- **bili-core Integration**: Leverage checkpointers, middleware, and role registry from bili-core
-- **Execution & Testing**: Built-in executor with checkpoint persistence and cross-model transfer testing
-- **Comprehensive Validation**: Catches structural issues (circular dependencies, orphaned agents) before execution
-- **Cloud-Ready Architecture**: State-based persistence survives Kubernetes pod restarts and supports multi-instance deployments
-- **Multi-Tenant Security**: Thread ownership validation and user isolation across all checkpointer backends
-- **Multi-Conversation Support**: Users can maintain multiple isolated conversation threads simultaneously
-
-**Example Use Cases:**
-
-- Research analysis workflows (gather → analyze → synthesize → review)
-- Content moderation pipelines (detect → classify → escalate → decide)
-- Code review systems (parse → analyze → suggest → approve)
-- Multi-agent debate and consensus building
-- Hierarchical decision-making with escalation
-
-**Quick Example:**
-
-```python
-from bili.aether import load_mas_from_yaml, compile_mas, execute_mas
-
-# Load configuration
-config = load_mas_from_yaml("examples/research_analysis.yaml")
-
-# Compile to LangGraph and execute
-result = execute_mas(config, {"messages": ["Analyze quantum computing trends"]})
-print(result.get_summary())
+# Generate statistics report
+python bili/aegis/tests/analysis/generate_stats.py
 ```
-
-**Multi-Tenant & Multi-Conversation Example:**
-
-```python
-from bili.aether.execution.mas_executor import MASExecutor
-from bili.iris.checkpointers.pg_checkpointer import AsyncPostgresSaver
-
-# Initialize checkpointer with user_id for multi-tenant isolation
-checkpointer = AsyncPostgresSaver.from_conn_string(
-    conn_string="postgresql://user:pass@localhost/bili",
-    user_id="user@example.com"  # Enforces thread ownership
-)
-
-# Create executor for user's work conversation
-executor = MASExecutor(
-    mas_config=config,
-    checkpointer=checkpointer,
-    user_id="user@example.com",
-    conversation_id="work"  # Isolated work conversation
-)
-
-# Execute with automatic state persistence
-result = await executor.execute_async({"messages": ["Summarize Q4 results"]})
-
-# Create separate personal conversation (isolated state)
-personal_executor = MASExecutor(
-    mas_config=config,
-    checkpointer=checkpointer,
-    user_id="user@example.com",
-    conversation_id="personal"  # Separate conversation thread
-)
-```
-
-For complete documentation, examples, and API reference, see [`bili/aether/README.md`](bili/aether/README.md).
 
 ---
 
-## Installation
+## Authentication
 
-### Prerequisites
+BiliCore provides three authentication providers:
 
-1. **Docker**: Ensure Docker is installed and running. [Get Docker](https://docs.docker.com/get-docker/)
-2. **Python**: Requires Python 3.11+. Python is provided as part of the Docker Compose setup in the `bili-core` container.
-3. **MongoDB/PostgreSQL**: A MongoDB or PostgreSQL instance is required for state persistence. This is provided as part of the Docker Compose setup.
-4. **Cloud Credentials**:
-   - AWS keys must be placed in `env/bili_root/.aws/`
-   - Google Cloud credentials must be placed in `env/bili_root/.google/`
+| Provider | Use Case | Auto-Approve? | Configuration |
+|----------|----------|---------------|---------------|
+| **SQLite** | Local development (default) | Yes — `researcher` role | `PROFILE_DB_PATH` env var |
+| **Firebase** | Production (AWS) | No — admin approval | Firebase credentials in `.env` |
+| **In-Memory** | Testing | Yes | No configuration needed |
 
-### Steps
+Configure in `bili/streamlit_app.py` via `initialize_auth_manager(auth_provider_name=...)`.
 
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/msu-denver/bili-core.git
-   cd bili-core
-   ```
-2. **Install Dependencies**
-   - To install BiliCore locally with pre-commit hooks, run:
-     ```bash
-     python setup.py install
-     ```
-     This installs all dependencies, sets up pre-commit hooks, and installs any git-based dependencies.
-   - If you want to use BiliCore as a dependency in another project, add the following line to your requirements.txt file:
-     ```bash
-     git+https://github.com/msu-denver/bili-core.git@main
-     ```
-     Then install it with:
-     ```bash
-     pip install -r requirements.txt
-     ```
-3. **Set Up Environment Variables**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` to include API keys for the tools, cloud providers, and LLMs you plan to use. Docker Compose reads this file automatically and injects the variables into the container at startup.
+---
 
-4. **Start Docker Containers**
-   ```bash
-   cd scripts/development
-   ./start-container.sh    # Linux/macOS (.bat on Windows)
-   ```
-   This starts the bili-core container along with PostgreSQL, MongoDB, and LocalStack services.
+## Development
 
-5. **Attach to Development Container**
-   ```bash
-   cd scripts/development
-   ./attach-container.sh   # Linux/macOS (.bat on Windows)
-   ```
-   When you attach, the container automatically activates the Python virtual environment and sets up shell aliases for common tasks.
+### Container Aliases
 
-6. **Run BiliCore** (inside the container)
-   ```bash
-   streamlit    # Start the Streamlit UI (port 8501)
-   flask        # Start the Flask API (port 5001)
-   ```
-   These are shell aliases that handle dependency installation, database setup, and server startup. The Streamlit app provides a unified multi-page interface with both the **AETHER Multi-Agent** system and the **Single-Agent RAG** testing interface.
+Inside the development container:
 
-   Other useful container aliases:
-   ```bash
-   deps         # Install/update Python dependencies
-   cleandeps    # Clean reinstall of dependencies
-   seeds3       # Upload data files to LocalStack S3
-   createpgdb   # Create the LangGraph PostgreSQL database
-   ```
+| Alias | Description |
+|-------|-------------|
+| `streamlit` | Install deps, create PG database, start Streamlit UI (port 8501) |
+| `flask` | Install deps, create PG database, start Flask API (port 5001) |
+| `deps` | Install/update Python dependencies |
+| `cleandeps` | Clean reinstall of dependencies |
+| `seeds3` | Upload data files to LocalStack S3 |
+| `createpgdb` | Create the LangGraph PostgreSQL database |
 
-7. **Access the Application**
-   - **Streamlit UI**: http://localhost:8501 (AETHER at `/aether`, Single-Agent RAG at `/bili`)
-   - **Flask API**: http://localhost:5001
+### Code Quality
+
+All code must pass formatters and linting before committing (enforced via pre-commit hooks):
+
+```bash
+./run_python_formatters.sh       # Run all formatters (Black, Autoflake, Isort)
+pylint bili/ --fail-under=9      # Lint check (must score 9+/10)
+```
+
+### Running Tests
+
+```bash
+# Inside the container
+pytest bili/iris/                  # IRIS unit tests
+pytest bili/aether/tests/          # AETHER unit tests
+pytest bili/aegis/tests/test_*.py  # AEGIS unit tests
+```
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and fill in your API keys. Docker Compose reads this file automatically.
+
+- **AWS credentials:** `env/bili_root/.aws/`
+- **Google credentials:** `env/bili_root/.google/`
+- **API keys:** Set in `.env` (OpenAI, SerpAPI, weather APIs, etc.)
+
+---
+
+## Migration from v4.x to v5.0
+
+v5.0 reorganizes the codebase into the three-component architecture. Import paths have changed:
+
+| Old Path | New Path |
+|----------|----------|
+| `bili.loaders.*` | `bili.iris.loaders.*` |
+| `bili.nodes.*` | `bili.iris.nodes.*` |
+| `bili.graph_builder.*` | `bili.iris.graph_builder.*` |
+| `bili.config.*` | `bili.iris.config.*` |
+| `bili.tools.*` | `bili.iris.tools.*` |
+| `bili.checkpointers.*` | `bili.iris.checkpointers.*` |
+| `bili.aether.attacks.*` | `bili.aegis.attacks.*` |
+| `bili.aether.evaluator.*` | `bili.aegis.evaluator.*` |
+| `bili.aether.security.*` | `bili.aegis.security.*` |
+| `bili.aether.tests.injection.*` | `bili.aegis.tests.injection.*` |
+| *(other attack suites)* | `bili.aegis.tests.<suite>.*` |
+
+**Unchanged paths:** `bili.aether.*` (schema, compiler, runtime, config, UI), `bili.auth.*`, `bili.utils.*`, `bili.prompts.*`
+
+All functionality is preserved — only the locations changed.
+
+---
+
+## Component Documentation
+
+- **IRIS:** See `bili/iris/` source code and inline documentation
+- **AETHER:** [`bili/aether/README.md`](bili/aether/README.md) — comprehensive MAS documentation
+- **AEGIS:** [`bili/aegis/docs/security-testing-quickstart.md`](bili/aegis/docs/security-testing-quickstart.md) — security testing guide
+
+---
 
 ## Acknowledgments
 
 This research is supported by the [National Science Foundation (NSF) (Grant No. 2318730)](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2318730) and the [National Artificial Intelligence Research Resource (NAIRR) Pilot](https://nairrpilot.org/projects/awarded?_requestNumber=NAIRR240197). Their support has been instrumental in advancing AI accessibility and fostering innovation in sustainability-focused applications.
 
-For more information, please visit the [Sustainability Hub Website](https://sustainabilityhub.co/).
+For more information, visit the [Sustainability Hub Website](https://sustainabilityhub.co/).
