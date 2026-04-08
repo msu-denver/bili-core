@@ -57,13 +57,18 @@ async def async_mongo_client():
     client = MongoClient(_MONGO_URI)
     db = client[_TEST_DB_NAME]
 
-    # Clean up before test (sync pymongo operations)
+    # Clean up before test — drop all checkpoint collections to prevent
+    # test pollution across runs regardless of collection naming.
+    db.checkpoints.delete_many({})
+    db.checkpoint_writes.delete_many({})
     db.checkpoints_aio.delete_many({})
     db.checkpoint_writes_aio.delete_many({})
 
     yield client
 
     # Clean up after test
+    db.checkpoints.delete_many({})
+    db.checkpoint_writes.delete_many({})
     db.checkpoints_aio.delete_many({})
     db.checkpoint_writes_aio.delete_many({})
     client.close()
