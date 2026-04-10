@@ -9,7 +9,7 @@ generating and verifying JSON Web Tokens (JWT).
 Classes:
 --------
 - SQLiteAuthProvider:
-    Handles operations for managing user authentication and credentials stored in an SQLite database.
+    Handles user authentication and credentials stored in an SQLite database.
 
 Methods:
 --------
@@ -53,13 +53,14 @@ Dependencies:
 -------------
 - datetime: Provides classes for manipulating dates and times.
 - os: Provides a way of using operating system dependent functionality.
-- sqlite3: Provides a SQL interface compliant with the DB-API 2.0 specification described by PEP 249.
+- sqlite3: DB-API 2.0 SQL interface (PEP 249).
 - uuid: Provides functions for generating universally unique identifiers.
 - jwt: Provides functions for encoding and decoding JSON Web Tokens.
 
 Usage:
 ------
-To use the SQLiteAuthProvider, create an instance of the class and call its methods to manage user authentication and credentials in the SQLite database.
+Create an instance of SQLiteAuthProvider and call its methods to manage
+user authentication and credentials.
 
 Example:
 --------
@@ -199,6 +200,11 @@ class SQLiteAuthProvider(AuthProvider):
             }
             token = self.create_jwt_token(profile)
             profile["token"] = token["token"]
+            # Generate a refresh token (longer-lived) for Flask cookie auth.
+            # Matches the Firebase provider's response shape.
+            refresh_payload = {"uid": user[0], "email": user[1], "type": "refresh"}
+            refresh_token = self.create_jwt_token(refresh_payload)
+            profile["refreshToken"] = refresh_token["token"]
             return profile
 
     def get_account_info(self, uid: str):
@@ -296,8 +302,8 @@ class SQLiteAuthProvider(AuthProvider):
                     (uid, email, password),
                 )
                 conn.commit()
-            except sqlite3.IntegrityError:
-                raise ValueError("Email already exists")
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("Email already exists") from exc
         profile = {
             "uid": uid,
             "email": email,
@@ -349,7 +355,7 @@ class SQLiteAuthProvider(AuthProvider):
 
         :param token: The JWT in string format to be verified.
         :type token: str
-        :return: A dictionary containing the decoded payload of the JWT if verification is successful.
+        :return: Decoded JWT payload dictionary if verification succeeds.
         :rtype: dict
         :raises ValueError: If the token is expired.
         :raises ValueError: If the token is invalid.
@@ -357,10 +363,10 @@ class SQLiteAuthProvider(AuthProvider):
         secret_key = os.getenv("JWT_SECRET_KEY")
         try:
             return jwt.decode(token, secret_key, algorithms=["HS256"])
-        except jwt.ExpiredSignatureError:
-            raise ValueError("Token expired.")
-        except jwt.InvalidTokenError:
-            raise ValueError("Invalid token.")
+        except jwt.ExpiredSignatureError as exc:
+            raise ValueError("Token expired.") from exc
+        except jwt.InvalidTokenError as exc:
+            raise ValueError("Invalid token.") from exc
 
     def refresh_jwt_token(self, refresh_token: str) -> dict:
         """
