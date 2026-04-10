@@ -22,22 +22,20 @@ _FM = {
 
 def test_chat_area_no_config_shows_info():
     """Without a config the chat area shows an info prompt."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            ca._render_chat_area()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca._render_chat_area()
+"""
+    )
     at.run()
     assert not at.exception
     assert "Select a YAML" in " ".join(m.value for m in at.info)
@@ -45,25 +43,22 @@ def test_chat_area_no_config_shows_info():
 
 def test_chat_area_load_error_shows_error():
     """When a load error exists the chat area shows an error."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        st.session_state.chat_load_error = "Bad config"
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            ca._render_chat_area()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+st.session_state.chat_load_error = "Bad config"
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca._render_chat_area()
+"""
+    )
     at.run()
     assert not at.exception
     assert "Bad config" in " ".join(m.value for m in at.error)
@@ -71,45 +66,41 @@ def test_chat_area_load_error_shows_error():
 
 def test_render_main_no_config_no_exception():
     """render_main() runs without exception when no config loaded."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            ca.render_main()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca.render_main()
+"""
+    )
     at.run()
     assert not at.exception
 
 
 def test_sidebar_missing_examples_dir_shows_error():
     """When examples_dir does not exist the sidebar shows an error."""
-
-    def _app():
-        from pathlib import Path
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            ca.render_sidebar_content(examples_dir=Path("/nonexistent/dir"))
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from pathlib import Path
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca.render_sidebar_content(examples_dir=Path("/nonexistent/dir"))
+"""
+    )
     at.run()
     assert not at.exception
     assert "not found" in " ".join(m.value for m in at.error)
@@ -117,26 +108,24 @@ def test_sidebar_missing_examples_dir_shows_error():
 
 def test_sidebar_empty_dir_shows_warning():
     """When examples dir is empty and no uploads, a warning is shown."""
-
-    def _app():
-        from pathlib import Path
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        mock_dir = _Mock(spec=Path)
-        mock_dir.exists.return_value = True
-        mock_dir.glob.return_value = []
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            ca.render_sidebar_content(examples_dir=mock_dir)
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from pathlib import Path
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+mock_dir = _Mock(spec=Path)
+mock_dir.exists.return_value = True
+mock_dir.glob.return_value = []
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca.render_sidebar_content(examples_dir=mock_dir)
+"""
+    )
     at.run()
     assert not at.exception
     assert "No YAML" in " ".join(m.value for m in at.warning)
@@ -144,27 +133,24 @@ def test_sidebar_empty_dir_shows_warning():
 
 def test_new_thread_creates_entry():
     """_new_thread creates a thread in session state."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            tid = ca._new_thread("test_mas")
-            threads = st.session_state.get("chat_threads", {})
-            st.markdown(f"created:{tid in threads}")
-            st.markdown(f"active:{st.session_state.get('chat_thread_id') == tid}")
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    tid = ca._new_thread("test_mas")
+    threads = st.session_state.get("chat_threads", {})
+    st.markdown(f"created:{tid in threads}")
+    st.markdown(f"active:{st.session_state.get('chat_thread_id') == tid}")
+"""
+    )
     at.run()
     assert not at.exception
     all_md = " ".join(m.value for m in at.markdown)
@@ -174,26 +160,23 @@ def test_new_thread_creates_entry():
 
 def test_delete_thread_removes_entry():
     """_delete_thread removes a thread from session state."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            tid = ca._new_thread("test_mas")
-            ca._delete_thread(tid)
-            st.markdown(f"gone:{tid not in st.session_state.get('chat_threads', {})}")
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    tid = ca._new_thread("test_mas")
+    ca._delete_thread(tid)
+    st.markdown(f"gone:{tid not in st.session_state.get('chat_threads', {})}")
+"""
+    )
     at.run()
     assert not at.exception
     assert "gone:True" in " ".join(m.value for m in at.markdown)
@@ -201,24 +184,21 @@ def test_delete_thread_removes_entry():
 
 def test_active_messages_or_empty_returns_list():
     """_active_messages_or_empty returns [] when no thread is active."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            st.markdown(f"empty:{len(ca._active_messages_or_empty()) == 0}")
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    st.markdown(f"empty:{len(ca._active_messages_or_empty()) == 0}")
+"""
+    )
     at.run()
     assert not at.exception
     assert "empty:True" in " ".join(m.value for m in at.markdown)
@@ -226,25 +206,22 @@ def test_active_messages_or_empty_returns_list():
 
 def test_ensure_active_thread_creates_when_missing():
     """_ensure_active_thread creates a thread if none exists."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui import chat_app as ca
-
-            ca._ensure_active_thread("test_mas")
-            st.markdown(f"has:{st.session_state.get('chat_thread_id') is not None}")
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca._ensure_active_thread("test_mas")
+    st.markdown(f"has:{st.session_state.get('chat_thread_id') is not None}")
+"""
+    )
     at.run()
     assert not at.exception
     assert "has:True" in " ".join(m.value for m in at.markdown)

@@ -13,18 +13,16 @@ from bili.aether.ui import results_page as rp_mod
 
 def test_empty_state_shows_info_message():
     """When no baseline results exist the page shows an info message."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import results_page as rp
-
-        with patch.object(rp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(rp, "_load_baseline_results", return_value=[]):
-                rp._render_main()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import results_page as rp
+with patch.object(rp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(rp, "_load_baseline_results", return_value=[]):
+        rp._render_main()
+"""
+    )
     at.run()
     assert not at.exception
     assert "No baseline results" in " ".join(m.value for m in at.info)
@@ -32,18 +30,16 @@ def test_empty_state_shows_info_message():
 
 def test_main_renders_aegis_heading():
     """The main area renders the AEGIS Baseline Results heading."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import results_page as rp
-
-        with patch.object(rp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(rp, "_load_baseline_results", return_value=[]):
-                rp._render_main()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import results_page as rp
+with patch.object(rp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(rp, "_load_baseline_results", return_value=[]):
+        rp._render_main()
+"""
+    )
     at.run()
     assert not at.exception
     assert "AEGIS Baseline Results" in " ".join(m.value for m in at.markdown)
@@ -51,20 +47,17 @@ def test_main_renders_aegis_heading():
 
 def test_sidebar_renders_aegis_heading():
     """The sidebar contains the AEGIS heading."""
-
-    def _app():
-        from unittest.mock import patch
-
-        import streamlit as st
-
-        from bili.aether.ui import results_page as rp
-
-        with st.sidebar:
-            with patch.object(rp, "LOGO_PATH") as lp:
-                lp.exists.return_value = False
-                rp._render_sidebar()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.aether.ui import results_page as rp
+with st.sidebar:
+    with patch.object(rp, "LOGO_PATH") as lp:
+        lp.exists.return_value = False
+        rp._render_sidebar()
+"""
+    )
     at.run()
     assert not at.exception
     assert "AEGIS" in " ".join(m.value for m in at.sidebar.markdown)
@@ -72,20 +65,17 @@ def test_sidebar_renders_aegis_heading():
 
 def test_sidebar_shows_runner_commands():
     """The sidebar shows baseline runner command examples."""
-
-    def _app():
-        from unittest.mock import patch
-
-        import streamlit as st
-
-        from bili.aether.ui import results_page as rp
-
-        with st.sidebar:
-            with patch.object(rp, "LOGO_PATH") as lp:
-                lp.exists.return_value = False
-                rp._render_sidebar()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.aether.ui import results_page as rp
+with st.sidebar:
+    with patch.object(rp, "LOGO_PATH") as lp:
+        lp.exists.return_value = False
+        rp._render_sidebar()
+"""
+    )
     at.run()
     assert not at.exception
     assert "run_baseline.py" in " ".join(m.value for m in at.sidebar.markdown)
@@ -93,18 +83,16 @@ def test_sidebar_shows_runner_commands():
 
 def test_render_results_page_no_exception():
     """The full render_results_page runs without exception."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import results_page as rp
-
-        with patch.object(rp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(rp, "_load_baseline_results", return_value=[]):
-                rp.render_results_page()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import results_page as rp
+with patch.object(rp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(rp, "_load_baseline_results", return_value=[]):
+        rp.render_results_page()
+"""
+    )
     at.run()
     assert not at.exception
 

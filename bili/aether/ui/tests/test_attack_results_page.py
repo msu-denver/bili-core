@@ -13,18 +13,16 @@ from bili.aether.ui import attack_results_page as arp_mod
 
 def test_empty_state_shows_info_message():
     """When no attack results exist the page shows an info message."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import attack_results_page as arp
-
-        with patch.object(arp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(arp, "_load_suite_results", return_value=[]):
-                arp._render_main("All Suites", [])
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import attack_results_page as arp
+with patch.object(arp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(arp, "_load_suite_results", return_value=[]):
+        arp._render_main("All Suites", [])
+"""
+    )
     at.run()
     assert not at.exception
     assert "No results found" in " ".join(m.value for m in at.info)
@@ -32,18 +30,16 @@ def test_empty_state_shows_info_message():
 
 def test_empty_state_single_suite():
     """Empty state for a single suite names the suite."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import attack_results_page as arp
-
-        with patch.object(arp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(arp, "_load_suite_results", return_value=[]):
-                arp._render_main("Injection", [])
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import attack_results_page as arp
+with patch.object(arp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(arp, "_load_suite_results", return_value=[]):
+        arp._render_main("Injection", [])
+"""
+    )
     at.run()
     assert not at.exception
     assert "Injection" in " ".join(m.value for m in at.info)
@@ -51,18 +47,16 @@ def test_empty_state_single_suite():
 
 def test_main_renders_aegis_heading():
     """The main area renders the AEGIS Attack Results heading."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import attack_results_page as arp
-
-        with patch.object(arp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(arp, "_load_suite_results", return_value=[]):
-                arp._render_main("All Suites", [])
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import attack_results_page as arp
+with patch.object(arp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(arp, "_load_suite_results", return_value=[]):
+        arp._render_main("All Suites", [])
+"""
+    )
     at.run()
     assert not at.exception
     assert "AEGIS Attack Results" in " ".join(m.value for m in at.markdown)
@@ -70,20 +64,17 @@ def test_main_renders_aegis_heading():
 
 def test_sidebar_renders_heading_and_suite_selector():
     """The sidebar contains the AEGIS heading and a suite selectbox."""
-
-    def _app():
-        from unittest.mock import patch
-
-        import streamlit as st
-
-        from bili.aether.ui import attack_results_page as arp
-
-        with st.sidebar:
-            with patch.object(arp, "LOGO_PATH") as lp:
-                lp.exists.return_value = False
-                arp._render_sidebar()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.aether.ui import attack_results_page as arp
+with st.sidebar:
+    with patch.object(arp, "LOGO_PATH") as lp:
+        lp.exists.return_value = False
+        arp._render_sidebar()
+"""
+    )
     at.run()
     assert not at.exception
     assert "AEGIS" in " ".join(m.value for m in at.sidebar.markdown)
@@ -92,18 +83,16 @@ def test_sidebar_renders_heading_and_suite_selector():
 
 def test_render_attack_results_page_no_exception():
     """The full render_attack_results_page runs without exception."""
-
-    def _app():
-        from unittest.mock import patch
-
-        from bili.aether.ui import attack_results_page as arp
-
-        with patch.object(arp, "LOGO_PATH") as lp:
-            lp.exists.return_value = False
-            with patch.object(arp, "_load_suite_results", return_value=[]):
-                arp.render_attack_results_page()
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.aether.ui import attack_results_page as arp
+with patch.object(arp, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(arp, "_load_suite_results", return_value=[]):
+        arp.render_attack_results_page()
+"""
+    )
     at.run()
     assert not at.exception
 

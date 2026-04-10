@@ -20,76 +20,66 @@ _FM = {
 
 def test_metadata_bar_shows_agent_count():
     """The metadata bar shows the correct agent count."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        from bili.aether.ui.tests.conftest import make_test_config as mk
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            gv.render_metadata_bar(mk(num_agents=3))
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    gv.render_metadata_bar(mk(num_agents=3))
+"""
+    )
     at.run()
     assert not at.exception
 
 
 def test_metadata_bar_shows_workflow_type():
     """The metadata bar shows the workflow type."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        from bili.aether.ui.tests.conftest import make_test_config as mk
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            gv.render_metadata_bar(mk())
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    gv.render_metadata_bar(mk())
+"""
+    )
     at.run()
     assert not at.exception
 
 
 def test_apply_overrides_returns_unchanged_when_empty():
     """With no overrides the config is returned as-is."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        from bili.aether.ui.tests.conftest import make_test_config as mk
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            cfg = mk()
-            result = gv.apply_agent_overrides(cfg)
-            st.markdown(f"same:{result.mas_id == cfg.mas_id}")
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    cfg = mk()
+    result = gv.apply_agent_overrides(cfg)
+    st.markdown(f"same:{result.mas_id == cfg.mas_id}")
+"""
+    )
     at.run()
     assert not at.exception
     assert "same:True" in " ".join(m.value for m in at.markdown)
@@ -97,31 +87,27 @@ def test_apply_overrides_returns_unchanged_when_empty():
 
 def test_apply_overrides_with_system_prompt():
     """apply_agent_overrides applies a system_prompt override."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        import streamlit as st
-
-        from bili.aether.ui.tests.conftest import make_test_config as mk
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            cfg = mk(mas_id="sp_test")
-            key = gv._overrides_key(cfg.mas_id)
-            st.session_state[key] = {"agent_0": {"system_prompt": "Test."}}
-            result = gv.apply_agent_overrides(cfg)
-            a0 = next(a for a in result.agents if a.agent_id == "agent_0")
-            st.markdown(f"sp:{a0.system_prompt}")
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    cfg = mk(mas_id="sp_test")
+    key = gv._overrides_key(cfg.mas_id)
+    st.session_state[key] = {"agent_0": {"system_prompt": "Test."}}
+    result = gv.apply_agent_overrides(cfg)
+    a0 = next(a for a in result.agents if a.agent_id == "agent_0")
+    st.markdown(f"sp:{a0.system_prompt}")
+"""
+    )
     at.run()
     assert not at.exception
     assert "sp:Test." in " ".join(m.value for m in at.markdown)
@@ -145,25 +131,22 @@ def test_keep_sentinel_value():
 
 def test_properties_panel_no_selection():
     """With no selected node the panel shows a hint."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        from bili.aether.ui.tests.conftest import make_test_config as mk
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            cfg = mk()
-            gv._render_properties_panel(cfg, None, [], cfg.mas_id)
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    cfg = mk()
+    gv._render_properties_panel(cfg, None, [], cfg.mas_id)
+"""
+    )
     at.run()
     assert not at.exception
     assert "Click a node" in " ".join(c.value for c in at.caption)
@@ -171,25 +154,22 @@ def test_properties_panel_no_selection():
 
 def test_properties_panel_unknown_id():
     """With an unknown selected_id the panel shows No details."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        from bili.aether.ui.tests.conftest import make_test_config as mk
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            cfg = mk()
-            gv._render_properties_panel(cfg, "unknown_id", [], cfg.mas_id)
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    cfg = mk()
+    gv._render_properties_panel(cfg, "unknown_id", [], cfg.mas_id)
+"""
+    )
     at.run()
     assert not at.exception
     assert "No details" in " ".join(c.value for c in at.caption)
@@ -197,22 +177,20 @@ def test_properties_panel_unknown_id():
 
 def test_render_list_section():
     """_render_list_section renders a title and items."""
-
-    def _app():
-        from unittest.mock import MagicMock as _Mock
-        from unittest.mock import patch as _patch
-
-        fm = {
-            "streamlit_flow": _Mock(),
-            "streamlit_flow.elements": _Mock(),
-            "streamlit_flow.state": _Mock(),
-        }
-        with _patch.dict("sys.modules", fm):
-            from bili.aether.ui.components import graph_viewer as gv
-
-            gv._render_list_section("Caps", ["cap_a", "cap_b"])
-
-    at = AppTest.from_function(_app)
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    gv._render_list_section("Caps", ["cap_a", "cap_b"])
+"""
+    )
     at.run()
     assert not at.exception
     all_md = " ".join(m.value for m in at.markdown)
