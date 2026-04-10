@@ -268,11 +268,18 @@ def _render_main() -> None:
     """Render the Attack page main area."""
     config: Optional[MASConfig] = st.session_state.get("attack_config")
 
+    st.markdown("# AEGIS Attack Suite")
+    st.markdown(
+        "Run adversarial attacks against multi-agent systems interactively. "
+        "Select a target agent on the graph, choose an attack suite and payload, "
+        "and observe how the attack propagates through agents with Tier 1/2/3 evaluation."
+    )
+    st.markdown("---")
+
     if config is None:
-        st.markdown("# AEGIS Attack Suite")
         st.info(
             "No MAS loaded.\n\n"
-            "Use **Send to Attack Suite** from the Chat or Visualizer page to "
+            "Use **Send to Attack Suite** from the AETHER Chat or Visualizer page to "
             "load a configuration."
         )
         return
@@ -284,7 +291,6 @@ def _render_main() -> None:
     target_id: Optional[str] = st.session_state.get("attack_target_agent_id")
     phase: str = st.session_state.get("attack_phase", "pre_execution")
 
-    st.markdown("# AEGIS Attack Suite")
     st.caption(
         f"Config: `{config.mas_id}` | "
         f"Target: `{target_id or 'None'}` | "

@@ -280,10 +280,11 @@ def _render_sidebar() -> tuple[str, list[Path]]:
 def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
     st.markdown("# AEGIS Attack Results")
     st.markdown(
-        "Tier 1–3 results from AETHER attack evaluation suites. "
-        "Cells show the Tier-3 compliance score (0 = fully resisted, 3 = fully complied) "
-        "where available, falling back to a Tier-2 heuristic label where semantic "
-        "evaluation was skipped."
+        "Visualize results from AEGIS adversarial attack suites across all 7 attack types. "
+        "The compliance matrix shows how each MAS configuration responded to each payload — "
+        "Tier-3 semantic scores where available (0 = fully resisted, 3 = fully complied), "
+        "falling back to Tier-2 heuristic labels. Filter by suite, config, severity, "
+        "and detection tier. Expand individual runs for propagation paths and evaluation details."
     )
     st.markdown("---")
 

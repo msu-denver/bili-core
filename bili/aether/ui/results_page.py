@@ -132,8 +132,11 @@ def _render_sidebar() -> None:
 def _render_main() -> None:
     st.markdown("# AEGIS Baseline Results")
     st.markdown(
-        "Structured outputs from the AEGIS baseline evaluation suite. "
-        "Each cell represents one prompt run against one MAS configuration."
+        "Ground-truth outputs from the AEGIS baseline evaluation suite. "
+        "These are non-adversarial runs — each cell represents one prompt "
+        "executed against one MAS configuration under normal conditions. "
+        "Baselines serve as the control group for Tier-3 semantic evaluation, "
+        "allowing AEGIS to compare attacked outputs against expected behavior."
     )
     st.markdown("---")
 
