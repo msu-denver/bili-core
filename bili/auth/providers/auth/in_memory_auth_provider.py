@@ -108,7 +108,17 @@ class InMemoryAuthProvider(AuthProvider):
         :raises ValueError: If the email is not found or the password does not match.
         """
         if email in self.users and self.users[email]["password"] == password:
-            return self.users[email]
+            user = dict(self.users[email])
+            token = self.create_jwt_token(dict(user))
+            user["token"] = token["token"]
+            refresh_payload = {
+                "uid": user["uid"],
+                "email": user["email"],
+                "type": "refresh",
+            }
+            refresh_token = self.create_jwt_token(refresh_payload)
+            user["refreshToken"] = refresh_token["token"]
+            return user
         raise ValueError("Invalid credentials")
 
     def get_account_info(self, uid):
