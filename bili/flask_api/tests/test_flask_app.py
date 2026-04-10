@@ -5,7 +5,10 @@ and temporary database to test all routes including login,
 protected endpoints, and LLM-related routes.
 """
 
+# pylint: disable=attribute-defined-outside-init
+
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -492,6 +495,91 @@ class TestNovaStreamRoute:
         assert "event: token" in body
         assert "event: done" in body
         assert "world" in body
+
+
+class TestActualFlaskAppModule:
+    """Tests that import the real flask_app module and verify routes.
+
+    These tests reload flask_app.py with all heavy dependencies
+    mocked so that no real LLM, DB, or API key is needed.
+    """
+
+    def _reload_flask_app(self):
+        """Reload flask_app with all external deps mocked."""
+        patches = {
+            "bili.iris.checkpointers.pg_checkpointer": MagicMock(),
+            "bili.iris.loaders.llm_loader": MagicMock(),
+            "bili.iris.loaders.tools_loader": MagicMock(),
+            "bili.iris.loaders.langchain_loader": MagicMock(),
+            "bili.iris.config.tool_config": MagicMock(),
+            "bili.utils.file_utils": MagicMock(),
+            "bili.utils.langgraph_utils": MagicMock(),
+        }
+        # Mock tool config TOOLS dict
+        patches["bili.iris.config.tool_config"].TOOLS = {
+            "weather_api_tool": {"default_prompt": "weather"},
+            "serp_api_tool": {"default_prompt": "search"},
+        }
+        # Mock langchain_loader module attrs
+        patches["bili.iris.loaders.langchain_loader"].DEFAULT_GRAPH_DEFINITION = []
+        patches["bili.iris.loaders.langchain_loader"].build_agent_graph.return_value = (
+            MagicMock()
+        )
+        # Mock load_from_json
+        patches["bili.utils.file_utils"].load_from_json.return_value = {
+            "default": {"persona": "You are helpful."}
+        }
+        # Mock State
+        patches["bili.utils.langgraph_utils"].State = dict
+
+        saved = {}
+        for mod_name, mock_mod in patches.items():
+            saved[mod_name] = sys.modules.get(mod_name)
+            sys.modules[mod_name] = mock_mod
+
+        # Also patch get_auth_manager and checkpointer
+        with patch(
+            "bili.auth.auth_manager.get_auth_manager",
+            return_value=MagicMock(),
+        ):
+            if "bili.flask_app" in sys.modules:
+                del sys.modules["bili.flask_app"]
+
+            import bili.flask_app as flask_app_mod  # pylint: disable=import-outside-toplevel
+
+        # Restore modules
+        for mod_name, orig in saved.items():
+            if orig is None:
+                sys.modules.pop(mod_name, None)
+            else:
+                sys.modules[mod_name] = orig
+
+        return flask_app_mod
+
+    def test_app_has_all_routes(self):
+        """The real flask_app.app registers all 5 expected routes."""
+        flask_app_mod = self._reload_flask_app()
+        rules = [r.rule for r in flask_app_mod.app.url_map.iter_rules()]
+        assert "/login" in rules
+        assert "/me" in rules
+        assert "/nova_global" in rules
+        assert "/nova_per_user" in rules
+        assert "/nova_stream" in rules
+
+    def test_app_is_flask_instance(self):
+        """The app object is a Flask instance."""
+        flask_app_mod = self._reload_flask_app()
+        assert isinstance(flask_app_mod.app, Flask)
+
+    def test_route_methods(self):
+        """Routes accept the correct HTTP methods."""
+        flask_app_mod = self._reload_flask_app()
+        rules = {r.rule: r.methods for r in flask_app_mod.app.url_map.iter_rules()}
+        assert "POST" in rules["/login"]
+        assert "GET" in rules["/me"]
+        assert "GET" in rules["/nova_global"]
+        assert "GET" in rules["/nova_per_user"]
+        assert "POST" in rules["/nova_stream"]
 
 
 class TestRoleAuthorization:

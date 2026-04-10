@@ -322,7 +322,7 @@ def test_close_shuts_down_thread_pool():
     injector.close()
     # Submitting to a shut-down pool raises RuntimeError
     with pytest.raises(RuntimeError):
-        injector._thread_pool.submit(lambda: None)
+        injector.thread_pool.submit(lambda: None)
 
 
 def test_context_manager_calls_close_on_exit():
@@ -412,4 +412,153 @@ def test_run_with_mid_execution_raises_when_target_not_reached():
             payload=_PAYLOAD,
             tracker=tracker,
             invoke_config={"configurable": {"thread_id": "test-thread"}},
+        )
+
+
+# =========================================================================
+# Mid-execution via AttackInjector._run_mid_execution
+# =========================================================================
+
+
+def test_mid_execution_calls_compile_mas_and_run(tmp_path):
+    """_run_mid_execution compiles a fresh graph and delegates to mid_execution strategy."""
+    config = _seq_config()
+    injector = _make_injector(config, log_path=tmp_path / "log.ndjson")
+
+    with patch("bili.aether.compiler.compile_mas") as mock_compile:
+        mock_compiled = MagicMock()
+        mock_compile.return_value = mock_compiled
+
+        with patch(
+            "bili.aegis.attacks.strategies.mid_execution"
+            ".run_with_mid_execution_injection"
+        ) as mock_mid:
+            mock_mid.return_value = {"messages": []}
+            result = injector.inject_attack(
+                agent_id="agent_a",
+                attack_type=AttackType.PROMPT_INJECTION,
+                payload=_PAYLOAD,
+                injection_phase=InjectionPhase.MID_EXECUTION,
+            )
+
+    mock_compile.assert_called_once_with(config)
+    mock_mid.assert_called_once()
+    assert result.success is True
+
+
+# =========================================================================
+# Non-blocking (fire-and-forget) completion
+# =========================================================================
+
+
+def test_non_blocking_completes_in_background(tmp_path):
+    """Non-blocking attack completes in background thread."""
+    config = _seq_config()
+    log_path = tmp_path / "log.ndjson"
+    injector = _make_injector(config, log_path=log_path)
+
+    with patch.object(
+        injector,
+        "_run_attack",
+        return_value=AttackResult(
+            attack_id="bg-id",
+            mas_id="test_mas",
+            target_agent_id="agent_a",
+            attack_type=AttackType.PROMPT_INJECTION,
+            injection_phase=InjectionPhase.PRE_EXECUTION,
+            payload=_PAYLOAD,
+            injected_at=datetime.datetime.now(datetime.timezone.utc),
+            completed_at=datetime.datetime.now(datetime.timezone.utc),
+            success=True,
+        ),
+    ):
+        skeleton = injector.inject_attack(
+            agent_id="agent_a",
+            attack_type=AttackType.PROMPT_INJECTION,
+            payload=_PAYLOAD,
+            blocking=False,
+        )
+
+    # Skeleton is returned immediately with no completed_at
+    assert skeleton.completed_at is None
+    # Let the background thread finish
+    injector.close()
+
+
+# =========================================================================
+# Error handling in _run_attack
+# =========================================================================
+
+
+def test_run_attack_captures_exception_as_error(tmp_path):
+    """_run_attack captures exceptions and records them in result.error."""
+    config = _seq_config()
+    injector = _make_injector(config, log_path=tmp_path / "log.ndjson")
+
+    with patch(
+        "bili.aether.compiler.compile_mas",
+        side_effect=RuntimeError("compile boom"),
+    ):
+        result = injector.inject_attack(
+            agent_id="agent_a",
+            attack_type=AttackType.PROMPT_INJECTION,
+            payload=_PAYLOAD,
+            injection_phase=InjectionPhase.MID_EXECUTION,
+        )
+
+    assert result.success is False
+    assert "compile boom" in (result.error or "")
+    assert result.completed_at is not None
+
+
+def test_run_attack_with_security_detector(tmp_path):
+    """_run_attack calls security_detector.detect when configured."""
+    config = _seq_config()
+    executor = MagicMock()
+    mock_detector = MagicMock()
+    injector = AttackInjector(
+        config=config,
+        executor=executor,
+        log_path=tmp_path / "log.ndjson",
+        security_detector=mock_detector,
+    )
+
+    with patch("bili.aether.runtime.executor.MASExecutor") as mock_cls:
+        mock_instance = mock_cls.return_value
+        mock_instance.run.return_value = _canned_result(config)
+        with patch(
+            "bili.aegis.attacks.strategies.pre_execution.inject_prompt_injection",
+            return_value=config,
+        ):
+            injector.inject_attack(
+                agent_id="agent_a",
+                attack_type=AttackType.PROMPT_INJECTION,
+                payload=_PAYLOAD,
+            )
+
+    mock_detector.detect.assert_called_once()
+
+
+def test_log_future_exception_logs_error():
+    """_log_future_exception logs exceptions from background threads."""
+    config = _seq_config()
+    injector = _make_injector(config)
+    mock_future = MagicMock()
+    mock_future.exception.return_value = RuntimeError("bg error")
+
+    # Should not raise; just logs
+    injector.log_future_exception(mock_future)
+
+
+def test_invalid_injection_phase_raises(tmp_path):
+    """inject_attack raises ValueError for unrecognised injection_phase."""
+    config = _seq_config()
+    injector = _make_injector(config, log_path=tmp_path / "log.ndjson")
+
+    with pytest.raises(ValueError, match="Unknown injection_phase"):
+        injector.inject_attack(
+            agent_id="agent_a",
+            attack_type=AttackType.PROMPT_INJECTION,
+            payload=_PAYLOAD,
+            injection_phase="not_a_phase",
         )

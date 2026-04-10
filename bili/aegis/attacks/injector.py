@@ -83,6 +83,11 @@ class AttackInjector:
         self._security_detector = security_detector
         self._thread_pool = ThreadPoolExecutor(max_workers=max_workers)
 
+    @property
+    def thread_pool(self) -> ThreadPoolExecutor:
+        """Return the internal thread pool (useful for testing lifecycle)."""
+        return self._thread_pool
+
     def inject_attack(
         self,
         agent_id: str,
@@ -163,7 +168,7 @@ class AttackInjector:
                 now,
                 track_propagation,
             )
-            future.add_done_callback(self._log_future_exception)
+            future.add_done_callback(self.log_future_exception)
             LOGGER.info(
                 "AttackInjector: submitted non-blocking attack %s for agent '%s'",
                 attack_id,
@@ -493,7 +498,7 @@ class AttackInjector:
             attack_type=attack_type.value,
         )
 
-    def _log_future_exception(self, future: Future) -> None:
+    def log_future_exception(self, future: Future) -> None:
         """Done-callback: log any exception raised by a background attack thread."""
         exc = future.exception()
         if exc:
