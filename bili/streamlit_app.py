@@ -53,8 +53,8 @@ def main():
             "IRIS": [
                 st.Page(
                     _run_bilicore_page,
-                    title="Single-Agent RAG",
-                    url_path="bili",
+                    title="IRIS",
+                    url_path="iris",
                     icon=":material/chat:",
                 ),
             ],
@@ -93,11 +93,12 @@ def main():
 
 
 def _run_bilicore_page():
-    """Render the Single-Agent RAG configuration and chat page."""
+    """Render the IRIS single-agent configuration and chat page."""
     with st.sidebar:
         if LOGO_PATH.exists():
             st.image(str(LOGO_PATH), width=80)
-        st.markdown("## Single-Agent RAG")
+        st.markdown("## IRIS")
+        st.caption("Interactive Reasoning and Integration Services")
         st.markdown("---")
         st.markdown("#### Quick Navigation")
         st.markdown(
@@ -115,47 +116,26 @@ def _run_bilicore_page():
     logo = Image.open(LOGO_PATH.as_posix())
     st.image(logo, width=100)
 
+    st.markdown("# IRIS")
+    st.caption("Interactive Reasoning and Integration Services")
     st.markdown(
-        """<h1>Single-Agent RAG</h1>
-        <h2><a href="https://github.com/msu-denver/bili-core">
-        BiliCore on GitHub</a></h2>""",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "The Single-Agent RAG interface is designed for rapid, side-by-side "
-        "comparison of Large Language Models across real-world tasks. "
-        "Researchers can swap models, tools, prompts, and middleware "
-        "without changing a single line of code, making it easy to evaluate "
-        "how different LLMs handle domain-specific questions under identical "
-        "conditions."
+        "IRIS is BiliCore's single-agent orchestration system. It bridges "
+        "users to LLMs, tools, and data sources through a composable "
+        "node-based pipeline. Swap models mid-conversation, configure tools "
+        "on the fly, and persist state across sessions."
     )
     st.markdown(
         "Select a model from any supported provider (AWS Bedrock, Google "
-        "Vertex AI, Azure OpenAI, OpenAI, or a local model), then attach "
-        "Retrieval-Augmented Generation (RAG) tools like FAISS vector search "
-        "or OpenSearch alongside web search, weather APIs, and other "
-        "capabilities. Every conversation is checkpointed with shared history "
-        "and tool chains, so you can ask the same questions across different "
-        "configurations and directly compare how each model responds."
+        "Vertex AI, Azure OpenAI, OpenAI, Ollama, or a local model), then "
+        "attach RAG tools like FAISS vector search or OpenSearch alongside "
+        "web search, weather APIs, and other capabilities. Every "
+        "conversation is checkpointed, so you can compare how different "
+        "models respond under identical conditions."
     )
     st.markdown(
         "Use the configuration panels below to customize the agent, then "
         'click **"Load Configuration"** to apply your changes and start '
-        "chatting. Import and export configurations to share setups across "
-        "team members, or iterate quickly by adjusting a single parameter "
-        "and reloading."
-    )
-    st.markdown(
-        "This research is supported by the National Science Foundation (NSF) "
-        "and the National Artificial Intelligence Research Resource (NAIRR) "
-        "Pilot, as part of the "
-        "[Sustainability Hub](https://sustainabilityhub.co) research project "
-        "at Metropolitan State University of Denver."
-    )
-    st.markdown(
-        "**Note:** Refreshing the page will restart your session. "
-        "For multi-agent workflows, switch to the "
-        "**AETHER Multi-Agent** page."
+        "chatting."
     )
     st.markdown("---")
 

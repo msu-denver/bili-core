@@ -154,8 +154,10 @@ def _render_sidebar() -> None:
     """Render the Attack page sidebar."""
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
-    st.markdown("## Attack Suite")
+    st.markdown("## AEGIS")
+    st.caption("Adversarial Evaluation and Guarding of Intelligent Systems")
     st.markdown("---")
+    st.markdown("#### Attack Suite")
 
     config: Optional[MASConfig] = st.session_state.get("attack_config")
     if config is None:
@@ -267,7 +269,7 @@ def _render_main() -> None:
     config: Optional[MASConfig] = st.session_state.get("attack_config")
 
     if config is None:
-        st.markdown("# Attack Suite")
+        st.markdown("# AEGIS Attack Suite")
         st.info(
             "No MAS loaded.\n\n"
             "Use **Send to Attack Suite** from the Chat or Visualizer page to "
@@ -282,7 +284,7 @@ def _render_main() -> None:
     target_id: Optional[str] = st.session_state.get("attack_target_agent_id")
     phase: str = st.session_state.get("attack_phase", "pre_execution")
 
-    st.markdown("# Attack Suite")
+    st.markdown("# AEGIS Attack Suite")
     st.caption(
         f"Config: `{config.mas_id}` | "
         f"Target: `{target_id or 'None'}` | "

@@ -111,9 +111,10 @@ def render_results_page() -> None:
 def _render_sidebar() -> None:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
-    st.markdown("## AETHER Results")
+    st.markdown("## AEGIS")
+    st.caption("Adversarial Evaluation and Guarding of Intelligent Systems")
     st.markdown("---")
-    st.caption("Baseline Evaluation Viewer")
+    st.markdown("#### Baseline Results")
     st.markdown(
         "Generate results by running the baseline suite:\n\n"
         "```\n# Stub mode (no LLM calls)\n"
@@ -129,9 +130,9 @@ def _render_sidebar() -> None:
 
 
 def _render_main() -> None:
-    st.markdown("# Baseline Results")
+    st.markdown("# AEGIS Baseline Results")
     st.markdown(
-        "Structured outputs from the AETHER baseline evaluation suite. "
+        "Structured outputs from the AEGIS baseline evaluation suite. "
         "Each cell represents one prompt run against one MAS configuration."
     )
     st.markdown("---")

@@ -222,8 +222,10 @@ def _render_sidebar() -> tuple[str, list[Path]]:
     """
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=80)
-    st.markdown("## Attack Results")
+    st.markdown("## AEGIS")
+    st.caption("Adversarial Evaluation and Guarding of Intelligent Systems")
     st.markdown("---")
+    st.markdown("#### Attack Results")
 
     suite_options = [_ALL_SUITES] + list(_SUITE_REGISTRY)
     selected = st.selectbox(
@@ -276,7 +278,7 @@ def _render_sidebar() -> tuple[str, list[Path]]:
 
 
 def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
-    st.markdown("# Attack Results")
+    st.markdown("# AEGIS Attack Results")
     st.markdown(
         "Tier 1–3 results from AETHER attack evaluation suites. "
         "Cells show the Tier-3 compliance score (0 = fully resisted, 3 = fully complied) "

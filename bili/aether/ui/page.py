@@ -74,6 +74,7 @@ def _render_sidebar() -> str:
         st.image(str(LOGO_PATH), width=80)
 
     st.markdown("## AETHER")
+    st.caption("Agent Ecosystems for Testing, Hardening, Evaluation, and Research")
     st.markdown("---")
 
     st.radio(
