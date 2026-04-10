@@ -95,29 +95,52 @@ def _synthetic_persistence_result() -> dict:
     }
 
 
+def _ensure_synthetic_files() -> None:
+    """Create synthetic result files so structural tests always run.
+
+    When no real result files exist (e.g. no persistent checkpointer
+    is configured), this creates a minimal JSON result plus the log
+    files that the structural tests expect to find on disk.
+    """
+    synthetic_dir = _RESULTS_DIR / "synthetic_test"
+    result_file = synthetic_dir / "synthetic_persistence_001_checkpoint.json"
+    if result_file.exists():
+        return
+    synthetic_dir.mkdir(parents=True, exist_ok=True)
+    result_file.write_text(
+        json.dumps(_synthetic_persistence_result()), encoding="utf-8"
+    )
+    (synthetic_dir / "attack_log.ndjson").write_text(
+        json.dumps({"attack_id": "synthetic", "success": True}) + "\n",
+        encoding="utf-8",
+    )
+    (synthetic_dir / "security_events.ndjson").write_text(
+        json.dumps({"event_type": "ATTACK_DETECTED", "severity": "low"}) + "\n",
+        encoding="utf-8",
+    )
+
+
+_ensure_synthetic_files()
+
+
 def _collect_result_files() -> list:
-    """Return result file paths, or a synthetic param when none exist."""
+    """Return all JSON result file paths under results/."""
     if not _RESULTS_DIR.exists():
-        return ["__synthetic__"]
+        return []
     files = sorted(_RESULTS_DIR.glob("**/*.json"))
-    if not files:
-        return ["__synthetic__"]
     return files
 
 
 @pytest.fixture(
     params=_collect_result_files(),
-    ids=lambda p: p.stem if hasattr(p, "stem") else "synthetic",
+    ids=lambda p: p.stem,
 )
 def persistence_result(request) -> dict:
     """Load one persistence result JSON file.
 
-    Parametrized over all result files present at collection time.
-    When no files exist, a synthetic result dict is provided so
-    structural tests still validate the expected schema shape.
+    Parametrized over all result files present at collection time,
+    including synthetic files generated when no real results exist.
     """
-    if request.param == "__synthetic__":
-        return _synthetic_persistence_result()
     return json.loads(request.param.read_text(encoding="utf-8"))
 
 
