@@ -270,9 +270,19 @@ def _render_main() -> None:
 
     st.markdown("# AEGIS Attack Suite")
     st.markdown(
-        "Run adversarial attacks against multi-agent systems interactively. "
-        "Select a target agent on the graph, choose an attack suite and payload, "
-        "and observe how the attack propagates through agents with Tier 1/2/3 evaluation."
+        "Multi-agent systems introduce new attack surfaces that don't exist in "
+        "single-agent setups — a compromised agent can influence downstream agents "
+        "through shared state, fabricated context, or manipulated communication "
+        "channels. The Attack Suite lets you explore these risks interactively."
+    )
+    st.markdown(
+        "Load a MAS configuration from AETHER, select a target agent on the graph, "
+        "choose from 5 attack types (prompt injection, jailbreak, memory poisoning, "
+        "bias inheritance, agent impersonation), and run the attack. AEGIS injects "
+        "the adversarial payload, streams the execution, tracks how the payload "
+        "propagates across agents, and evaluates each agent's response using a "
+        "3-tier detection system: structural validation (Tier 1), heuristic "
+        "propagation tracking (Tier 2), and LLM-based semantic scoring (Tier 3)."
     )
     st.markdown("---")
 

@@ -280,11 +280,22 @@ def _render_sidebar() -> tuple[str, list[Path]]:
 def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
     st.markdown("# AEGIS Attack Results")
     st.markdown(
-        "Visualize results from AEGIS adversarial attack suites across all 7 attack types. "
-        "The compliance matrix shows how each MAS configuration responded to each payload — "
-        "Tier-3 semantic scores where available (0 = fully resisted, 3 = fully complied), "
-        "falling back to Tier-2 heuristic labels. Filter by suite, config, severity, "
-        "and detection tier. Expand individual runs for propagation paths and evaluation details."
+        "Understanding how multi-agent systems respond to adversarial payloads "
+        "requires looking at results across many configurations, attack types, "
+        "and severity levels. This page aggregates results from all 7 AEGIS "
+        "attack suites — prompt injection, jailbreak, memory poisoning, bias "
+        "inheritance, agent impersonation, persistence, and cross-model "
+        "transferability — into a single unified view."
+    )
+    st.markdown(
+        "The compliance matrix shows how each MAS configuration responded to "
+        "each payload. Cells display Tier-3 semantic scores where available "
+        "(0 = fully resisted, 3 = fully complied), falling back to Tier-2 "
+        "heuristic labels when semantic evaluation was skipped. Use the "
+        "filters to drill into specific suites, severity levels, or detection "
+        "tiers. Expand individual runs to see propagation paths, per-agent "
+        "observations, and Tier-2/Tier-3 disagreement warnings that highlight "
+        "where heuristic and semantic detection diverge."
     )
     st.markdown("---")
 

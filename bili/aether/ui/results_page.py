@@ -132,11 +132,20 @@ def _render_sidebar() -> None:
 def _render_main() -> None:
     st.markdown("# AEGIS Baseline Results")
     st.markdown(
-        "Ground-truth outputs from the AEGIS baseline evaluation suite. "
-        "These are non-adversarial runs — each cell represents one prompt "
-        "executed against one MAS configuration under normal conditions. "
-        "Baselines serve as the control group for Tier-3 semantic evaluation, "
-        "allowing AEGIS to compare attacked outputs against expected behavior."
+        "Meaningful security evaluation requires a control group. Before "
+        "testing how a multi-agent system responds to adversarial payloads, "
+        "you need to know how it responds under normal conditions. The "
+        "baseline suite runs a set of benign, edge-case, and policy-violating "
+        "prompts against each MAS configuration without any attack injection, "
+        "establishing ground-truth outputs for every agent in the system."
+    )
+    st.markdown(
+        "These baselines serve as the reference point for Tier-3 semantic "
+        "evaluation — when AEGIS scores an attacked run, it compares each "
+        "agent's output against the corresponding baseline to determine "
+        "whether the agent's behavior actually changed. Without baselines, "
+        "there's no way to distinguish a genuinely influenced agent from one "
+        "that would have produced the same output anyway."
     )
     st.markdown("---")
 
