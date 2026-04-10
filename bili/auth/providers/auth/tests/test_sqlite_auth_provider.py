@@ -109,7 +109,7 @@ class TestGetAccountInfo:
     def test_get_account_info_nonexistent_raises(self, tmp_path):
         """Verify nonexistent uid raises ValueError."""
         prov = _make_provider(tmp_path)
-        with pytest.raises(ValueError, match="User not found"):
+        with pytest.raises(ValueError, match="Invalid id token"):
             prov.get_account_info("nonexistent-uid")
 
 
