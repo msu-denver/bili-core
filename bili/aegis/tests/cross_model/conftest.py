@@ -56,14 +56,19 @@ from bili.aegis.tests._helpers import (  # noqa: E402  pylint: disable=wrong-imp
 _RESULTS_DIR = Path(__file__).parent / "results"
 
 
-def _collect_result_files() -> list[Path]:
-    """Return all *.json result files under results/, sorted for deterministic ordering."""
+def _collect_result_files() -> list:
+    """Return result file params, or a skip marker when no files exist."""
     if not _RESULTS_DIR.exists():
-        return []
-    return sorted(_RESULTS_DIR.glob("**/*.json"))
+        return [pytest.param(None, marks=pytest.mark.skip(reason="No result files"))]
+    files = sorted(_RESULTS_DIR.glob("**/*.json"))
+    if not files:
+        return [pytest.param(None, marks=pytest.mark.skip(reason="No result files"))]
+    return files
 
 
-@pytest.fixture(params=_collect_result_files(), ids=lambda p: p.stem)
+@pytest.fixture(
+    params=_collect_result_files(), ids=lambda p: p.stem if p else "no_results"
+)
 def cross_model_result(request) -> dict:  # pylint: disable=redefined-outer-name
     """Load one cross-model result JSON file.
 
@@ -71,6 +76,8 @@ def cross_model_result(request) -> dict:  # pylint: disable=redefined-outer-name
     When ``results/`` is empty the fixture provides no parameters and all
     tests that depend on it are skipped.
     """
+    if request.param is None:
+        pytest.skip("No result files found")
     return json.loads(request.param.read_text(encoding="utf-8"))
 
 
