@@ -53,7 +53,7 @@ def main():
             "IRIS": [
                 st.Page(
                     _run_bilicore_page,
-                    title="IRIS",
+                    title="Single-Agent System",
                     url_path="iris",
                     icon=":material/chat:",
                 ),
