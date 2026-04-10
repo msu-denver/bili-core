@@ -1,13 +1,18 @@
 """Tests for bili.iris.loaders.langchain_loader public API."""
 
+import copy
+from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph.state import CompiledStateGraph
 
 from bili.iris.graph_builder.classes.node import Node
 from bili.iris.loaders.langchain_loader import (
     DEFAULT_GRAPH_DEFINITION,
     GRAPH_NODE_REGISTRY,
+    build_agent_graph,
     register_node,
     unregister_node,
     wrap_node,
@@ -162,3 +167,112 @@ class TestWrapNode:
         original = MagicMock(return_value=expected)
         wrapped = wrap_node(original, "test_node")
         assert wrapped({}) == expected
+
+    def test_wrap_compiled_state_graph_uses_invoke(self):
+        """Verify CompiledStateGraph nodes use .invoke() method."""
+        mock_graph = MagicMock(spec=CompiledStateGraph)
+        mock_graph.invoke.return_value = {"messages": []}
+        wrapped = wrap_node(mock_graph, "subgraph")
+        state = {"messages": []}
+        result = wrapped(state)
+        mock_graph.invoke.assert_called_once_with(state)
+        assert result == {"messages": []}
+
+
+# ---------------------------------------------------------------------------
+# build_agent_graph
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAgentGraph:
+    """Test build_agent_graph with mocked checkpointer and node_kwargs."""
+
+    @staticmethod
+    def _default_node_kwargs():
+        """Build minimal node_kwargs that satisfy all node builders."""
+        return {
+            "persona": "You are a test assistant",
+            "llm_model": MagicMock(),
+            "tools": [],
+        }
+
+    def test_returns_compiled_state_graph(self):
+        """Verify build_agent_graph returns a CompiledStateGraph."""
+        agent = build_agent_graph(node_kwargs=self._default_node_kwargs())
+        assert isinstance(agent, CompiledStateGraph)
+
+    def test_uses_memory_saver_by_default(self):
+        """Verify default checkpointer is MemorySaver."""
+        agent = build_agent_graph(node_kwargs=self._default_node_kwargs())
+        assert agent.checkpointer is not None
+
+    def test_custom_checkpointer_is_used(self):
+        """Verify custom checkpointer is passed through."""
+        custom_saver = MemorySaver()
+        agent = build_agent_graph(
+            checkpoint_saver=custom_saver,
+            node_kwargs=self._default_node_kwargs(),
+        )
+        assert agent.checkpointer is custom_saver
+
+    def test_invalid_node_in_definition_raises_value_error(self):
+        """Verify ValueError for unregistered node names."""
+        bad_definition = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
+        bad_definition[0].name = "totally_bogus_node"
+        with pytest.raises(ValueError, match="not defined"):
+            build_agent_graph(
+                graph_definition=bad_definition,
+                node_kwargs=self._default_node_kwargs(),
+            )
+
+    def test_custom_node_registry_extends_default(self):
+        """Verify custom_node_registry merges with default."""
+
+        def build_custom(**_kwargs):
+            """Build a passthrough node function."""
+
+            def _execute(state):
+                return state
+
+            return _execute
+
+        custom_node = partial(Node, "custom_passthrough", build_custom)
+
+        custom_def = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
+        custom_node_instance = custom_node()
+        custom_node_instance.is_entry = False
+        custom_node_instance.routes_to_end = False
+
+        last_node = custom_def[-1]
+        second_last = custom_def[-2]
+        second_last.edges = ["custom_passthrough"]
+        custom_node_instance.edges.append(last_node.name)
+        custom_def.insert(-1, custom_node_instance)
+
+        agent = build_agent_graph(
+            graph_definition=custom_def,
+            custom_node_registry={
+                "custom_passthrough": custom_node,
+            },
+            node_kwargs=self._default_node_kwargs(),
+        )
+        assert isinstance(agent, CompiledStateGraph)
+
+    def test_node_kwargs_are_forwarded(self):
+        """Verify node_kwargs are passed to node builders."""
+        agent = build_agent_graph(node_kwargs=self._default_node_kwargs())
+        assert isinstance(agent, CompiledStateGraph)
+
+    def test_mixed_entry_and_conditional_raises(self):
+        """Verify mixing is_entry and conditional_entry raises."""
+        bad_def = copy.deepcopy(DEFAULT_GRAPH_DEFINITION)
+        mock_cond = MagicMock()
+        mock_cond.routing_function = lambda x: "some_node"
+        mock_cond.path_map = {"some_node": "some_node"}
+        bad_def[1].conditional_entry = mock_cond
+
+        with pytest.raises(ValueError, match="Cannot mix"):
+            build_agent_graph(
+                graph_definition=bad_def,
+                node_kwargs=self._default_node_kwargs(),
+            )
