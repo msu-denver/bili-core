@@ -174,16 +174,17 @@ def _render_intro() -> None:
         "user-defined topologies"
     )
     st.markdown(
-        "Each agent can be configured with its own LLM model from any "
-        "provider BiliCore supports (AWS Bedrock, Google Vertex AI, Azure "
-        "OpenAI, OpenAI, or local models), along with independent temperature "
-        "settings, system prompts, tools, and middleware. Different agents in "
-        "the same system can use different providers and models. Agents "
-        "communicate through six typed channel protocols: direct, broadcast, "
-        "request-response, pub-sub, competitive debate, and peer consensus. "
-        "Rich agent sub-graphs (pipelines) allow individual agents to execute "
-        "multi-node internal workflows with custom state fields and "
-        "conditional branching."
+        "Under the hood, each agent in an AETHER system is powered by "
+        "**IRIS**, BiliCore's single-agent orchestration layer. This means "
+        "every agent inherits access to 60+ LLM models across 6 providers "
+        "(AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local), "
+        "along with independent temperature settings, system prompts, tools, "
+        "and middleware. Different agents in the same system can use different "
+        "providers and models. Agents communicate through six typed channel "
+        "protocols: direct, broadcast, request-response, pub-sub, competitive "
+        "debate, and peer consensus. Rich agent sub-graphs (pipelines) allow "
+        "individual agents to execute multi-node internal workflows with "
+        "custom state fields and conditional branching."
     )
     st.markdown(
         "Use the **Visualizer** below to explore YAML configurations as "
@@ -202,8 +203,8 @@ def _render_intro() -> None:
     )
     st.markdown(
         "**Note:** Refreshing the page will restart your session. "
-        "For single-agent testing, switch to the "
-        "**Single-Agent RAG** page."
+        "For single-agent testing, switch to **IRIS**. "
+        "For adversarial security testing, see **AEGIS**."
     )
     st.markdown("---")
 

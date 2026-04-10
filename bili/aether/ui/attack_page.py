@@ -270,19 +270,28 @@ def _render_main() -> None:
 
     st.markdown("# AEGIS Attack Suite")
     st.markdown(
-        "Multi-agent systems introduce new attack surfaces that don't exist in "
-        "single-agent setups — a compromised agent can influence downstream agents "
-        "through shared state, fabricated context, or manipulated communication "
-        "channels. The Attack Suite lets you explore these risks interactively."
+        "**AEGIS** (Adversarial Evaluation and Guarding of Intelligent Systems) "
+        "is BiliCore's security testing framework for multi-agent systems built "
+        "with **AETHER**. It provides systematic adversarial evaluation: inject "
+        "attacks, track how they propagate through agent networks, and measure "
+        "each agent's resilience using a 3-tier detection pipeline."
     )
     st.markdown(
-        "Load a MAS configuration from AETHER, select a target agent on the graph, "
-        "choose from 5 attack types (prompt injection, jailbreak, memory poisoning, "
-        "bias inheritance, agent impersonation), and run the attack. AEGIS injects "
-        "the adversarial payload, streams the execution, tracks how the payload "
-        "propagates across agents, and evaluates each agent's response using a "
-        "3-tier detection system: structural validation (Tier 1), heuristic "
-        "propagation tracking (Tier 2), and LLM-based semantic scoring (Tier 3)."
+        "Multi-agent systems introduce attack surfaces that don't exist in "
+        "single-agent setups. A compromised agent can influence downstream "
+        "agents through shared state, fabricated context, or manipulated "
+        "communication channels. The Attack Suite lets you explore these "
+        "risks interactively."
+    )
+    st.markdown(
+        "Load a MAS configuration from AETHER, select a target agent on "
+        "the graph, and choose from 5 attack types (prompt injection, "
+        "jailbreak, memory poisoning, bias inheritance, agent impersonation). "
+        "AEGIS injects the adversarial payload, streams the execution, "
+        "tracks propagation across agents, and evaluates each agent's "
+        "response through structural validation (Tier 1), heuristic "
+        "propagation tracking (Tier 2), and LLM-based semantic scoring "
+        "(Tier 3)."
     )
     st.markdown("---")
 

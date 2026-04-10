@@ -280,12 +280,19 @@ def _render_sidebar() -> tuple[str, list[Path]]:
 def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
     st.markdown("# AEGIS Attack Results")
     st.markdown(
+        "**AEGIS** (Adversarial Evaluation and Guarding of Intelligent Systems) "
+        "is BiliCore's security testing framework for multi-agent systems built "
+        "with **AETHER**. It provides systematic adversarial evaluation: inject "
+        "attacks, track how they propagate through agent networks, and measure "
+        "each agent's resilience using a 3-tier detection pipeline."
+    )
+    st.markdown(
         "Understanding how multi-agent systems respond to adversarial payloads "
         "requires looking at results across many configurations, attack types, "
         "and severity levels. This page aggregates results from all 7 AEGIS "
-        "attack suites — prompt injection, jailbreak, memory poisoning, bias "
+        "attack suites (prompt injection, jailbreak, memory poisoning, bias "
         "inheritance, agent impersonation, persistence, and cross-model "
-        "transferability — into a single unified view."
+        "transferability) into a single unified view."
     )
     st.markdown(
         "The compliance matrix shows how each MAS configuration responded to "
