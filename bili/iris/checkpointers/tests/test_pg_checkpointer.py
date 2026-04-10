@@ -315,3 +315,285 @@ class TestGetThreadMessages:
         result = saver.get_thread_messages("t1", message_types=["HumanMessage"])
         assert len(result) == 1
         assert result[0]["role"] == "user"
+
+
+# =========================================================================
+# get_user_threads
+# =========================================================================
+
+
+class TestGetUserThreads:
+    """Tests for get_user_threads method."""
+
+    def test_returns_empty_when_no_threads(self):
+        """Returns empty list when no checkpoint rows match."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = []
+        _attach_fake_cursor(saver, mock_cur)
+        saver.get_tuple = MagicMock(return_value=None)
+        result = saver.get_user_threads("user@example.com")
+        assert result == []
+
+    def test_returns_thread_with_expected_keys(self):
+        """Each thread dict has the required keys."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+
+        # First fetchall returns thread metadata
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "alice_conv1",
+                "last_checkpoint_id": "cp5",
+                "checkpoint_count": 3,
+            }
+        ]
+        # fetchone for latest checkpoint
+        mock_cur.fetchone.return_value = {
+            "checkpoint": {
+                "ts": "2026-01-01T00:00:00",
+                "channel_values": {
+                    "messages": [],
+                    "title": "Test Chat",
+                    "tags": ["tag1"],
+                },
+            }
+        }
+        _attach_fake_cursor(saver, mock_cur)
+
+        # Mock get_tuple for message extraction
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": []}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("alice")
+        assert len(threads) == 1
+        t = threads[0]
+        assert t["thread_id"] == "alice_conv1"
+        assert t["conversation_id"] == "conv1"
+        assert t["checkpoint_count"] == 3
+        assert t["title"] == "Test Chat"
+
+    def test_default_conversation_id(self):
+        """Thread without underscore gets conversation_id 'default'."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "user123",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+        saver.get_tuple = MagicMock(return_value=None)
+
+        threads = saver.get_user_threads("user123")
+        assert threads[0]["conversation_id"] == "default"
+
+    def test_pagination_params_in_query(self):
+        """Offset and limit are appended to the SQL query."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = []
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver.get_user_threads("u", limit=5, offset=10)
+
+        query = mock_cur.execute.call_args_list[0][0][0]
+        assert "OFFSET" in query
+        assert "LIMIT" in query
+
+    def test_extracts_messages_from_checkpoint(self):
+        """Extracts first and last HumanMessage content."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_c1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+
+        human1 = MagicMock()
+        human1.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+        human1.__class__.__name__ = "HumanMessage"
+        human1.content = "First question"
+
+        human2 = MagicMock()
+        human2.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+        human2.__class__.__name__ = "HumanMessage"
+        human2.content = "Second question"
+
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": [human1, human2]}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "First question"
+        assert threads[0]["last_message"] == "Second question"
+        assert threads[0]["message_count"] == 2
+
+
+# =========================================================================
+# _strip_thinking_blocks
+# =========================================================================
+
+
+class TestStripThinkingBlocks:
+    """Tests for _strip_thinking_blocks method."""
+
+    def test_removes_thinking_tags(self):
+        """Strips <thinking>...</thinking> blocks."""
+        saver = _make_saver()
+        content = "<thinking>internal reasoning</thinking>" "Visible answer"
+        result = saver._strip_thinking_blocks(content)
+        assert "internal reasoning" not in result
+        assert "Visible answer" in result
+
+    def test_removes_think_tags(self):
+        """Strips <think>...</think> blocks."""
+        saver = _make_saver()
+        content = "<think>thoughts</think>Output text"
+        result = saver._strip_thinking_blocks(content)
+        assert "thoughts" not in result
+        assert "Output text" in result
+
+    def test_removes_reasoning_tags(self):
+        """Strips <reasoning>...</reasoning> blocks."""
+        saver = _make_saver()
+        content = "<reasoning>step by step</reasoning>Final"
+        result = saver._strip_thinking_blocks(content)
+        assert "step by step" not in result
+        assert "Final" in result
+
+    def test_removes_internal_tags(self):
+        """Strips <internal>...</internal> blocks."""
+        saver = _make_saver()
+        content = "<internal>private</internal>Public"
+        result = saver._strip_thinking_blocks(content)
+        assert "private" not in result
+        assert "Public" in result
+
+    def test_handles_empty_content(self):
+        """Returns empty string unchanged."""
+        saver = _make_saver()
+        assert saver._strip_thinking_blocks("") == ""
+
+    def test_handles_none_content(self):
+        """Returns None unchanged."""
+        saver = _make_saver()
+        assert saver._strip_thinking_blocks(None) is None
+
+    def test_multiline_thinking_block(self):
+        """Strips multiline thinking blocks."""
+        saver = _make_saver()
+        content = "<thinking>\nline1\nline2\n</thinking>\n" "Answer here"
+        result = saver._strip_thinking_blocks(content)
+        assert "line1" not in result
+        assert "Answer here" in result
+
+    def test_case_insensitive(self):
+        """Strips thinking blocks regardless of case."""
+        saver = _make_saver()
+        content = "<THINKING>Loud thoughts</THINKING>Result"
+        result = saver._strip_thinking_blocks(content)
+        assert "Loud thoughts" not in result
+        assert "Result" in result
+
+    def test_cleans_extra_whitespace(self):
+        """Collapses excessive newlines after stripping."""
+        saver = _make_saver()
+        content = "Before\n\n\n\n\nAfter"
+        result = saver._strip_thinking_blocks(content)
+        assert "\n\n\n" not in result
+
+
+# =========================================================================
+# ensure_indexes
+# =========================================================================
+
+
+class TestEnsureIndexes:
+    """Tests for ensure_indexes method."""
+
+    def test_creates_three_indexes(self):
+        """Creates indexes for checkpoints, blobs, and writes."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver.ensure_indexes()
+
+        assert mock_cur.execute.call_count == 3
+        calls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        assert any("idx_checkpoints_thread_id" in c for c in calls)
+        assert any("idx_blobs_thread_id" in c for c in calls)
+        assert any("idx_writes_thread_id" in c for c in calls)
+
+
+# =========================================================================
+# put with user_id and pruning
+# =========================================================================
+
+
+class TestPutMethod:
+    """Tests for the put method with user_id and pruning."""
+
+    def test_put_adds_format_version(self):
+        """Put adds format_version to metadata."""
+        saver = _make_saver(keep_last_n=-1, user_id=None)
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        config = {"configurable": {"thread_id": "t1"}}
+        checkpoint = MagicMock()
+        metadata = {"step": 1}
+        new_versions = MagicMock()
+
+        with patch(
+            "langgraph.checkpoint.postgres.PostgresSaver.put",
+            return_value=config,
+        ):
+            result = saver.put(config, checkpoint, metadata, new_versions)
+
+        assert result == config
+
+    def test_put_triggers_pruning(self):
+        """Put triggers pruning when keep_last_n is set."""
+        saver = _make_saver(keep_last_n=2, user_id=None)
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [{"checkpoint_id": "old1"}]
+        _attach_fake_cursor(saver, mock_cur)
+
+        config = {"configurable": {"thread_id": "t1"}}
+
+        with patch(
+            "langgraph.checkpoint.postgres.PostgresSaver.put",
+            return_value=config,
+        ):
+            saver.put(config, MagicMock(), {}, MagicMock())
+
+        # SELECT + 2 DELETEs for the old checkpoint
+        assert mock_cur.execute.call_count == 3
+
+    def test_put_skips_pruning_when_negative(self):
+        """Put does not prune when keep_last_n is negative."""
+        saver = _make_saver(keep_last_n=-1, user_id=None)
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        config = {"configurable": {"thread_id": "t1"}}
+
+        with patch(
+            "langgraph.checkpoint.postgres.PostgresSaver.put",
+            return_value=config,
+        ):
+            saver.put(config, MagicMock(), {}, MagicMock())
+
+        # No prune SELECT should have been made
+        mock_cur.fetchall.assert_not_called()

@@ -1,6 +1,8 @@
 """Tests for the AETHER-to-LangGraph compiler."""
 
 import os
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +15,7 @@ from langgraph.graph.state import CompiledStateGraph  # pylint: disable=import-e
 
 from bili.aether.compiler import CompiledMAS, compile_mas
 from bili.aether.compiler.agent_generator import generate_agent_node
+from bili.aether.compiler.llm_resolver import resolve_model
 from bili.aether.compiler.state_generator import generate_state_schema
 from bili.aether.config.loader import load_mas_from_yaml
 from bili.aether.schema import (
@@ -635,10 +638,6 @@ def test_llm_agent_forwards_state_messages():
 
 def test_resolve_model_by_model_id():
     """resolve_model finds provider by model_id match."""
-    from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
-        resolve_model,
-    )
-
     # Mock LLM_MODELS with a known entry
     mock_models = {
         "remote_openai": {
@@ -661,10 +660,6 @@ def test_resolve_model_by_model_id():
 
 def test_resolve_model_by_display_name():
     """resolve_model maps display name to model_id."""
-    from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
-        resolve_model,
-    )
-
     mock_models = {
         "remote_openai": {
             "models": [
@@ -680,10 +675,6 @@ def test_resolve_model_by_display_name():
 
 def test_resolve_model_heuristic_fallback():
     """resolve_model uses heuristic when LLM_MODELS has no match."""
-    from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
-        resolve_model,
-    )
-
     # Empty LLM_MODELS so lookup fails
     with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
         provider, model_id = resolve_model("gpt-4o-mini")
@@ -694,10 +685,6 @@ def test_resolve_model_heuristic_fallback():
 
 def test_resolve_model_bedrock_claude():
     """resolve_model detects Bedrock-hosted Claude by model_id prefix."""
-    from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
-        resolve_model,
-    )
-
     with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
         provider, _model_id = resolve_model("anthropic.claude-3-sonnet-20240229-v1:0")
         assert provider == "remote_aws_bedrock"
@@ -705,10 +692,6 @@ def test_resolve_model_bedrock_claude():
 
 def test_resolve_model_unknown_raises():
     """resolve_model raises ValueError for unknown model names."""
-    from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
-        resolve_model,
-    )
-
     with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
         with pytest.raises(ValueError, match="Cannot resolve model"):
             resolve_model("totally-unknown-model-xyz")
@@ -721,9 +704,6 @@ def test_resolve_model_unknown_raises():
 
 def test_tool_agent_uses_create_agent():
     """Agent with tools uses create_agent() for tool-enabled execution."""
-    import sys  # pylint: disable=import-outside-toplevel
-    import types  # pylint: disable=import-outside-toplevel
-
     agent = _agent("tool_agent", model_name="gpt-4o", tools=["mock_tool"])
 
     mock_tool = MagicMock()

@@ -403,3 +403,262 @@ class TestPutWithPruning:
 
         saver.checkpoint_collection.delete_one.assert_called_once()
         saver.writes_collection.delete_many.assert_called_once()
+
+    def test_pruning_deletes_multiple_excess(self):
+        """Deletes all checkpoints beyond keep_last_n threshold."""
+        saver = _make_saver(keep_last_n=1)
+
+        config = {"configurable": {"thread_id": "t1"}}
+        docs = [
+            {"checkpoint_id": "cp3"},
+            {"checkpoint_id": "cp2"},
+            {"checkpoint_id": "cp1"},
+        ]
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = docs
+        saver.checkpoint_collection.find.return_value = mock_cursor
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.put",
+            return_value=config,
+        ):
+            saver.put(config, MagicMock(), {}, MagicMock())
+
+        # 2 excess checkpoints should be deleted
+        assert saver.checkpoint_collection.delete_one.call_count == 2
+        assert saver.writes_collection.delete_many.call_count == 2
+
+    def test_put_no_pruning_when_under_limit(self):
+        """No deletes when checkpoint count is within limit."""
+        saver = _make_saver(keep_last_n=5)
+
+        config = {"configurable": {"thread_id": "t1"}}
+        docs = [
+            {"checkpoint_id": "cp2"},
+            {"checkpoint_id": "cp1"},
+        ]
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = docs
+        saver.checkpoint_collection.find.return_value = mock_cursor
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.put",
+            return_value=config,
+        ):
+            saver.put(config, MagicMock(), {}, MagicMock())
+
+        saver.checkpoint_collection.delete_one.assert_not_called()
+
+    def test_put_sets_user_id_when_configured(self):
+        """Put updates user_id field when user_id is set."""
+        saver = _make_saver(user_id="alice", keep_last_n=-1)
+
+        config = {"configurable": {"thread_id": "alice_conv1"}}
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.put",
+            return_value=config,
+        ):
+            saver.put(config, MagicMock(), {}, MagicMock())
+
+        saver.checkpoint_collection.update_many.assert_called_once_with(
+            {"thread_id": "alice_conv1"},
+            {"$set": {"user_id": "alice"}},
+        )
+
+    def test_put_adds_format_version_to_metadata(self):
+        """Put embeds format_version in checkpoint metadata."""
+        saver = _make_saver(keep_last_n=-1)
+
+        config = {"configurable": {"thread_id": "t1"}}
+        metadata = {"step": 1}
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.put",
+            return_value=config,
+        ) as mock_put:
+            saver.put(config, MagicMock(), metadata, MagicMock())
+
+        # The metadata passed to super().put should have format_version
+        call_metadata = mock_put.call_args[0][2]
+        assert "format_version" in call_metadata
+
+
+# =========================================================================
+# _ensure_indexes
+# =========================================================================
+
+
+class TestEnsureIndexes:
+    """Tests for _ensure_indexes method."""
+
+    def test_creates_required_indexes(self):
+        """Creates checkpoint, exact-match, and writes indexes."""
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = PruningMongoDBSaver.__new__(PruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = None
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+
+            # Reset mock call counts then call _ensure_indexes
+            saver.checkpoint_collection.reset_mock()
+            saver.writes_collection.reset_mock()
+            saver._ensure_indexes()
+
+        # At least 2 indexes on checkpoint_collection
+        assert saver.checkpoint_collection.create_index.call_count >= 2
+        # At least 1 index on writes_collection
+        assert saver.writes_collection.create_index.call_count >= 1
+
+    def test_creates_user_id_index_when_configured(self):
+        """Creates user_id index when user_id is set."""
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = PruningMongoDBSaver.__new__(PruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = "alice"
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+            saver._ensure_indexes()
+
+        # Find the user_id index creation call
+        calls = saver.checkpoint_collection.create_index.call_args_list
+        user_idx_calls = [c for c in calls if c[1].get("name") == "idx_user_thread"]
+        assert len(user_idx_calls) == 1
+
+
+# =========================================================================
+# _drop_conflicting_indexes
+# =========================================================================
+
+
+class TestDropConflictingIndexes:
+    """Tests for _drop_conflicting_indexes static method."""
+
+    def test_drops_conflicting_index(self):
+        """Drops index with same keys but different name."""
+        collection = MagicMock()
+        collection.index_information.return_value = {
+            "_id_": {"key": [("_id", 1)]},
+            "old_name": {"key": [("thread_id", 1), ("checkpoint_id", -1)]},
+        }
+
+        PruningMongoDBSaver._drop_conflicting_indexes(
+            collection,
+            [("thread_id", 1), ("checkpoint_id", -1)],
+            "new_name",
+        )
+
+        collection.drop_index.assert_called_once_with("old_name")
+
+    def test_skips_same_name_index(self):
+        """Does not drop index with the desired name."""
+        collection = MagicMock()
+        collection.index_information.return_value = {
+            "_id_": {"key": [("_id", 1)]},
+            "desired_name": {"key": [("thread_id", 1)]},
+        }
+
+        PruningMongoDBSaver._drop_conflicting_indexes(
+            collection,
+            [("thread_id", 1)],
+            "desired_name",
+        )
+
+        collection.drop_index.assert_not_called()
+
+    def test_skips_different_key_pattern(self):
+        """Does not drop index with different key pattern."""
+        collection = MagicMock()
+        collection.index_information.return_value = {
+            "_id_": {"key": [("_id", 1)]},
+            "other_idx": {"key": [("other_field", 1)]},
+        }
+
+        PruningMongoDBSaver._drop_conflicting_indexes(
+            collection,
+            [("thread_id", 1)],
+            "my_idx",
+        )
+
+        collection.drop_index.assert_not_called()
+
+
+# =========================================================================
+# _strip_thinking_blocks (via get_thread_messages)
+# =========================================================================
+
+
+class TestStripThinkingBlocks:
+    """Tests for _strip_thinking_blocks in mongo context."""
+
+    def test_strips_thinking_from_ai_messages(self):
+        """AI message content has thinking tags removed."""
+        saver = _make_saver()
+        ai = _ai_msg("<thinking>reasoning</thinking>Answer")
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": [ai]}},
+        }
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 1
+        assert "reasoning" not in msgs[0]["content"]
+        assert "Answer" in msgs[0]["content"]
+
+    def test_does_not_strip_from_human_messages(self):
+        """Human message content is not processed for thinking."""
+        saver = _make_saver()
+        human = _human_msg("<thinking>my thoughts</thinking>Q")
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": [human]}},
+        }
+
+        msgs = saver.get_thread_messages("t1")
+        # Human messages are not stripped
+        assert "<thinking>" in msgs[0]["content"]
+
+
+# =========================================================================
+# Async sync query methods
+# =========================================================================
+
+
+class TestAsyncPruningSyncMethods:
+    """Tests for sync query methods on PruningMongoDBSaver."""
+
+    def test_thread_exists_calls_count_documents(self):
+        """thread_exists uses count_documents with limit=1."""
+        saver = _make_saver()
+        saver.checkpoint_collection.count_documents.return_value = 1
+        result = saver.thread_exists("t1")
+        assert result is True
+        saver.checkpoint_collection.count_documents.assert_called_once()
+
+    def test_get_user_stats_with_threads(self):
+        """get_user_stats computes stats from aggregation results."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 3, 15, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 4,
+            }
+        ]
+        stats = saver.get_user_stats("u")
+        assert stats["total_threads"] == 1
+        assert stats["total_checkpoints"] == 4
