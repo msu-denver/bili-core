@@ -1,9 +1,10 @@
 """Tests for bili.iris.loaders.middleware_loader public API."""
 
+from unittest.mock import patch
+
 import pytest
 
 from bili.iris.loaders.middleware_loader import (
-    LANGCHAIN_MIDDLEWARE_AVAILABLE,
     MIDDLEWARE_REGISTRY,
     initialize_middleware,
 )
@@ -20,19 +21,11 @@ class TestMiddlewareRegistry:
         """Verify MIDDLEWARE_REGISTRY is a dictionary."""
         assert isinstance(MIDDLEWARE_REGISTRY, dict)
 
-    @pytest.mark.skipif(
-        not LANGCHAIN_MIDDLEWARE_AVAILABLE,
-        reason="LangChain middleware not installed",
-    )
-    def test_registry_has_expected_keys_when_available(self):
-        """Verify expected middleware keys are present when available."""
+    def test_registry_has_expected_keys(self):
+        """Verify expected middleware keys are present."""
         assert "summarization" in MIDDLEWARE_REGISTRY
         assert "model_call_limit" in MIDDLEWARE_REGISTRY
 
-    @pytest.mark.skipif(
-        not LANGCHAIN_MIDDLEWARE_AVAILABLE,
-        reason="LangChain middleware not installed",
-    )
     def test_registry_values_are_callable(self):
         """Verify all registry values are callable factories."""
         for name, factory in MIDDLEWARE_REGISTRY.items():
@@ -65,10 +58,6 @@ class TestInitializeMiddleware:
         result = initialize_middleware(active_middleware=[])
         assert isinstance(result, list)
 
-    @pytest.mark.skipif(
-        not LANGCHAIN_MIDDLEWARE_AVAILABLE,
-        reason="LangChain middleware not installed",
-    )
     def test_initializes_known_middleware(self):
         """Verify known middleware is initialized and returned."""
         result = initialize_middleware(
@@ -78,11 +67,11 @@ class TestInitializeMiddleware:
         assert isinstance(result, list)
         assert len(result) == 1
 
-    @pytest.mark.skipif(
-        LANGCHAIN_MIDDLEWARE_AVAILABLE,
-        reason="Only applies when middleware is unavailable",
-    )
     def test_returns_empty_when_middleware_unavailable(self):
-        """When langchain middleware is not installed, should return empty list."""
-        result = initialize_middleware(active_middleware=["summarization"])
-        assert not result
+        """When middleware is unavailable, should return empty list."""
+        with patch(
+            "bili.iris.loaders.middleware_loader" ".LANGCHAIN_MIDDLEWARE_AVAILABLE",
+            False,
+        ):
+            result = initialize_middleware(active_middleware=["summarization"])
+            assert not result
