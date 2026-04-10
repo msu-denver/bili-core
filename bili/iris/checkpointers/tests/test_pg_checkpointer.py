@@ -597,3 +597,334 @@ class TestPutMethod:
 
         # No prune SELECT should have been made
         mock_cur.fetchall.assert_not_called()
+
+    def test_put_sets_format_version_in_metadata(self):
+        """Put embeds format_version in metadata passed to parent."""
+        saver = _make_saver(keep_last_n=-1, user_id=None)
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        config = {"configurable": {"thread_id": "t1"}}
+        metadata = {"step": 1}
+
+        with patch(
+            "langgraph.checkpoint.postgres.PostgresSaver.put",
+            return_value=config,
+        ) as mock_parent_put:
+            saver.put(config, MagicMock(), metadata, MagicMock())
+
+        call_metadata = mock_parent_put.call_args[0][2]
+        assert "format_version" in call_metadata
+
+    def test_put_with_user_id_validates_ownership(self):
+        """Put raises PermissionError for wrong user."""
+        saver = _make_saver(keep_last_n=-1, user_id="alice")
+        config = {"configurable": {"thread_id": "bob_conv1"}}
+        with pytest.raises(PermissionError, match="Access denied"):
+            saver.put(config, MagicMock(), {}, MagicMock())
+
+
+# =========================================================================
+# get_user_threads — extended coverage
+# =========================================================================
+
+
+class TestGetUserThreadsExtended:
+    """Extended tests for get_user_threads method."""
+
+    def test_multimodal_content_extraction(self):
+        """Extracts text from multimodal list content."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_c1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+
+        human = MagicMock()
+        human.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+        human.__class__.__name__ = "HumanMessage"
+        human.content = [
+            {"type": "text", "text": "Describe this image"},
+            {"type": "image_url", "image_url": "http://x.png"},
+        ]
+
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": [human]}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "Describe this image"
+
+    def test_title_and_tags_from_checkpoint(self):
+        """Extracts title and tags from checkpoint data."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_c1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 2,
+            }
+        ]
+        mock_cur.fetchone.return_value = {
+            "checkpoint": {
+                "ts": "2026-03-01T00:00:00",
+                "channel_values": {
+                    "messages": [],
+                    "title": "My Chat",
+                    "tags": ["research", "ai"],
+                },
+            }
+        }
+        _attach_fake_cursor(saver, mock_cur)
+
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": []}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["title"] == "My Chat"
+        assert threads[0]["tags"] == ["research", "ai"]
+
+    def test_get_tuple_failure_returns_zero_messages(self):
+        """Thread still returned when get_tuple raises."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_c1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver.get_tuple = MagicMock(side_effect=RuntimeError("db error"))
+
+        threads = saver.get_user_threads("u")
+        assert len(threads) == 1
+        assert threads[0]["message_count"] == 0
+        assert threads[0]["first_message"] is None
+
+
+# =========================================================================
+# get_thread_messages — extended coverage
+# =========================================================================
+
+
+class TestGetThreadMessagesExtended:
+    """Extended tests for get_thread_messages method."""
+
+    def test_multimodal_content_handling(self):
+        """Handles multimodal list content in messages."""
+        saver = _make_saver()
+
+        human = MagicMock()
+        human.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+        human.__class__.__name__ = "HumanMessage"
+        human.content = [
+            {"type": "text", "text": "Look at this"},
+            {"type": "image_url", "image_url": "http://x.png"},
+        ]
+
+        checkpoint = {"channel_values": {"messages": [human]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 1
+        assert "Look at this" in msgs[0]["content"]
+
+    def test_skips_empty_ai_messages(self):
+        """Empty AI messages after stripping are excluded."""
+        saver = _make_saver()
+
+        ai = MagicMock()
+        ai.__class__ = type("AIMessage", (), {"__name__": "AIMessage"})
+        ai.__class__.__name__ = "AIMessage"
+        ai.content = "<thinking>only thinking</thinking>"
+
+        checkpoint = {"channel_values": {"messages": [ai]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 0
+
+    def test_system_message_mapped_correctly(self):
+        """SystemMessage is mapped to system role."""
+        saver = _make_saver()
+
+        sys_msg = MagicMock()
+        sys_msg.__class__ = type("SystemMessage", (), {"__name__": "SystemMessage"})
+        sys_msg.__class__.__name__ = "SystemMessage"
+        sys_msg.content = "You are a helpful assistant"
+
+        checkpoint = {"channel_values": {"messages": [sys_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "system"
+
+    def test_tool_message_mapped_correctly(self):
+        """ToolMessage is mapped to tool role."""
+        saver = _make_saver()
+
+        tool_msg = MagicMock()
+        tool_msg.__class__ = type("ToolMessage", (), {"__name__": "ToolMessage"})
+        tool_msg.__class__.__name__ = "ToolMessage"
+        tool_msg.content = "Weather: 72F"
+
+        checkpoint = {"channel_values": {"messages": [tool_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "tool"
+
+    def test_limit_without_offset(self):
+        """Limit alone caps the result set."""
+        saver = _make_saver()
+        messages = []
+        for i in range(5):
+            m = MagicMock()
+            m.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+            m.__class__.__name__ = "HumanMessage"
+            m.content = f"msg_{i}"
+            messages.append(m)
+
+        checkpoint = {"channel_values": {"messages": messages}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1", limit=2)
+        assert len(result) == 2
+        assert result[0]["content"] == "msg_0"
+
+
+# =========================================================================
+# _strip_thinking_blocks — extended edge cases
+# =========================================================================
+
+
+class TestStripThinkingBlocksExtended:
+    """Extended edge case tests for _strip_thinking_blocks."""
+
+    def test_multiple_thinking_blocks(self):
+        """Strips multiple thinking blocks in same content."""
+        saver = _make_saver()
+        content = "<thinking>first</thinking>Middle" "<thinking>second</thinking>End"
+        result = saver._strip_thinking_blocks(content)
+        assert "first" not in result
+        assert "second" not in result
+        assert "Middle" in result
+        assert "End" in result
+
+    def test_nested_tags_not_supported(self):
+        """Nested tags are stripped greedily."""
+        saver = _make_saver()
+        content = "<think>outer<think>inner</think></think>Out"
+        result = saver._strip_thinking_blocks(content)
+        assert "Out" in result
+
+    def test_non_string_content_passthrough(self):
+        """Non-string types are returned unchanged."""
+        saver = _make_saver()
+        assert saver._strip_thinking_blocks(0) == 0
+
+    def test_mixed_tag_types(self):
+        """Different tag types in same content are all stripped."""
+        saver = _make_saver()
+        content = (
+            "<thinking>a</thinking>"
+            "<reasoning>b</reasoning>"
+            "<internal>c</internal>"
+            "Visible"
+        )
+        result = saver._strip_thinking_blocks(content)
+        assert result == "Visible"
+
+
+# =========================================================================
+# _ensure_indexes — extended
+# =========================================================================
+
+
+class TestEnsureIndexesExtended:
+    """Extended tests for ensure_indexes method."""
+
+    def test_index_sql_uses_create_if_not_exists(self):
+        """All index SQL uses IF NOT EXISTS."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver.ensure_indexes()
+
+        calls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        for sql in calls:
+            assert "IF NOT EXISTS" in sql
+
+
+# =========================================================================
+# AsyncPruningPostgresSaver
+# =========================================================================
+
+
+class TestAsyncPruningPostgresSaver:
+    """Tests for AsyncPruningPostgresSaver init and attributes."""
+
+    def test_init_sets_keep_last_n(self):
+        """Constructor stores keep_last_n."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock(), keep_last_n=3)
+            assert saver.keep_last_n == 3
+
+    def test_init_sets_user_id(self):
+        """Constructor stores user_id."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock(), user_id="alice")
+            assert saver.user_id == "alice"
+
+    def test_init_defaults(self):
+        """Default keep_last_n is -1 and user_id is None."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock())
+            assert saver.keep_last_n == -1
+            assert saver.user_id is None

@@ -81,3 +81,13 @@ def make_agent():
             agent = make_agent("my_agent", role="reviewer")
     """
     return _agent
+
+
+@pytest.fixture(autouse=True)
+def _executor_temp_log_dir(tmp_path, monkeypatch):
+    """Redirect MASExecutor log_dir to a temp directory.
+
+    Prevents executor tests from writing ``test_seq_*.json`` files
+    into the working directory.
+    """
+    monkeypatch.setattr("os.getcwd", lambda: str(tmp_path))

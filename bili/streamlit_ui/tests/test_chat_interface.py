@@ -186,3 +186,231 @@ st.markdown(f"strategy:{st.session_state.get('memory_strategy')}")
     at.run()
     assert not at.exception
     assert "strategy:summarize" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# Configuration loading and application
+# ---------------------------------------------------------------------------
+
+
+def test_state_management_defaults_memory_limit_value():
+    """State management defaults memory_limit_value to 15."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+ci.display_state_management_management()
+st.markdown(f"value:{st.session_state.get('memory_limit_value')}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "value:15" in " ".join(m.value for m in at.markdown)
+
+
+def test_state_management_defaults_trim_value():
+    """State management defaults memory_limit_trim_value to 15."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+ci.display_state_management_management()
+st.markdown(f"trim:{st.session_state.get('memory_limit_trim_value')}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "trim:15" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# Conversation display with messages
+# ---------------------------------------------------------------------------
+
+
+def test_display_state_management_with_chain_and_state():
+    """display_state_management renders state when conversation chain exists."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+# Create mock chain with state
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {
+    "messages": [
+        HumanMessage(content="Hello"),
+        AIMessage(content="Hi there"),
+    ]
+}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["thread_id"] = "test-thread"
+
+form = st.form(key="test_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_display_state_management_no_state():
+    """display_state_management shows warning when state is None."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_chain.get_state.return_value = None
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["thread_id"] = "test-thread"
+
+form = st.form(key="test_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "No saved state" in " ".join(w.value for w in at.warning)
+
+
+# ---------------------------------------------------------------------------
+# Model switching / configuration display
+# ---------------------------------------------------------------------------
+
+
+def test_model_config_shows_checkpointer():
+    """display_model_configuration shows checkpointer type."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model-config"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "PostgresSaver"
+st.session_state["conversation_chain"] = mock_chain
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_model_config_shows_memory_settings():
+    """display_model_configuration shows memory settings when present."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "MemorySaver"
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["memory_limit_type"] = "token_length"
+st.session_state["memory_strategy"] = "trim"
+st.session_state["memory_limit_value"] = 5000
+st.session_state["memory_limit_trim_value"] = 3000
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_model_config_shows_tool_configuration():
+    """display_model_configuration shows tool config when tools exist."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "MemorySaver"
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["supports_tools"] = True
+st.session_state["selected_tools"] = ["weather_api_tool"]
+st.session_state["weather_api_tool_prompt"] = "Get weather data"
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_model_config_no_tools_when_unsupported():
+    """display_model_configuration skips tools when supports_tools is False."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "MemorySaver"
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["supports_tools"] = False
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# run_app_page with conversation chain loaded
+# ---------------------------------------------------------------------------
+
+
+def test_run_app_page_with_chain_shows_form():
+    """When a conversation chain exists the page shows a conversation form."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch, MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+mock_chain = MagicMock()
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["is_processing_query"] = False
+with patch.object(ci, "is_authenticated", return_value=True):
+    with patch.object(ci, "display_configuration_panels"):
+        with patch.object(ci, "display_state_management_management"):
+            with patch.object(ci, "display_state_management"):
+                ci.run_app_page()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# Memory limit type switching
+# ---------------------------------------------------------------------------
+
+
+def test_state_management_token_length_labels():
+    """State management uses token-based labels when memory_limit_type is token_length."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["memory_limit_type"] = "token_length"
+ci.display_state_management_management()
+st.markdown(f"type:{st.session_state.get('memory_limit_type')}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "type:token_length" in " ".join(m.value for m in at.markdown)

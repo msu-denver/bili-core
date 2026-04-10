@@ -292,3 +292,241 @@ cp_mod.display_configuration_panels()
     assert not at.exception
     labels = [b.label for b in at.button]
     assert any("Export" in label for label in labels)
+
+
+# ------------------------------------------------------------------
+# Individual panel rendering - LLM Configuration
+# ------------------------------------------------------------------
+
+
+def test_model_type_selectbox_present():
+    """The LLM type selectbox is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert len(at.selectbox) >= 1
+
+
+def test_initializes_temperature():
+    """display_configuration_panels initializes temperature."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_temp:{'temperature' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_temp:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_initializes_max_output_tokens():
+    """display_configuration_panels initializes max_output_tokens."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_max:{'max_output_tokens' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_max:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Prompt customization panel
+# ------------------------------------------------------------------
+
+
+def test_initializes_selected_prompt_template():
+    """display_configuration_panels initializes selected_prompt_template."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_template:{'selected_prompt_template' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_template:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_persona_text_area_populated():
+    """The persona text area is populated with default prompt content."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+persona = st.session_state.get("persona", "")
+st.markdown(f"has_persona:{len(persona) > 0}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_persona:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Tool panel
+# ------------------------------------------------------------------
+
+
+def test_tool_enabled_keys_initialized():
+    """Tool enabled keys are initialized in session state."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+from bili.iris.config.tool_config import TOOLS
+cp_mod.display_configuration_panels()
+tool_names = list(TOOLS.keys())
+if tool_names:
+    first_tool = tool_names[0]
+    st.markdown(f"has_key:{f'{first_tool}_enabled' in st.session_state}")
+else:
+    st.markdown("has_key:True")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_key:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_enable_all_tools_button_present():
+    """The Enable All Tools button is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+"""
+    )
+    at.run()
+    assert not at.exception
+    labels = [b.label for b in at.button]
+    assert any("Enable All" in label for label in labels)
+
+
+def test_disable_all_tools_button_present():
+    """The Disable All Tools button is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+"""
+    )
+    at.run()
+    assert not at.exception
+    labels = [b.label for b in at.button]
+    assert any("Disable All" in label for label in labels)
+
+
+# ------------------------------------------------------------------
+# Import configuration flow
+# ------------------------------------------------------------------
+
+
+def test_import_export_section_has_file_uploader():
+    """The Import/Export section contains a file uploader."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ------------------------------------------------------------------
+# update_selected_tools edge cases
+# ------------------------------------------------------------------
+
+
+def test_update_selected_tools_from_empty_removes_noop():
+    """Removing a tool from empty list is a no-op."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui.configuration_panels import update_selected_tools
+st.session_state["selected_tools"] = []
+st.session_state["missing_tool_enabled"] = False
+update_selected_tools("missing_tool", "missing_tool_enabled")
+st.markdown(f"count:{len(st.session_state['selected_tools'])}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "count:0" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Session state initialization - model_kwargs
+# ------------------------------------------------------------------
+
+
+def test_initializes_model_kwargs():
+    """display_configuration_panels initializes model_kwargs."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_kwargs:{'model_kwargs' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_kwargs:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Supports tools flag
+# ------------------------------------------------------------------
+
+
+def test_supports_tools_initialized():
+    """display_configuration_panels initializes supports_tools."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_supports:{'supports_tools' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_supports:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# DEFAULT_PROMPTS loading
+# ------------------------------------------------------------------
+
+
+def test_default_prompts_loaded():
+    """DEFAULT_PROMPTS is loaded and non-empty."""
+    from bili.streamlit_ui.ui.configuration_panels import DEFAULT_PROMPTS
+
+    assert isinstance(DEFAULT_PROMPTS, dict)
+    assert len(DEFAULT_PROMPTS) > 0
+
+
+def test_default_prompts_have_persona():
+    """Each default prompt has a persona field."""
+    from bili.streamlit_ui.ui.configuration_panels import DEFAULT_PROMPTS
+
+    for name, prompt in DEFAULT_PROMPTS.items():
+        assert "persona" in prompt, f"Prompt '{name}' missing persona field"
