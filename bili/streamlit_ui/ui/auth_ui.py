@@ -74,17 +74,24 @@ def display_login_signup():
         unsafe_allow_html=True,
     )
     st.markdown(
-        "BiliCore is an open-source research platform for benchmarking and "
-        "building dynamic Retrieval-Augmented Generation (RAG) systems. "
-        "Developed at Metropolitan State University of Denver, BiliCore enables "
-        "rapid experimentation with LLMs across AWS Bedrock, Google Vertex AI, "
-        "Azure OpenAI, OpenAI, and local models."
+        "BiliCore is an open-source LLM framework with three components, "
+        "developed at Metropolitan State University of Denver."
     )
     st.markdown(
-        "The platform includes **AETHER**, a multi-agent system framework for "
-        "orchestrating teams of AI agents with declarative YAML configurations, "
-        "as well as a single-agent RAG interface for hands-on testing of "
-        "individual model configurations, tools, and prompts."
+        "**IRIS** (Interactive Reasoning and Integration Services) — "
+        "Single-agent orchestration across 60+ models and 6 providers "
+        "(AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local). "
+        "Extensible tools, middleware, and state persistence."
+    )
+    st.markdown(
+        "**AETHER** (Agent Ecosystems for Testing, Hardening, Evaluation, and Research) — "
+        "Multi-agent orchestration with declarative YAML configuration. "
+        "7 workflow types, 6 communication protocols, pipeline sub-graphs."
+    )
+    st.markdown(
+        "**AEGIS** (Adversarial Evaluation and Guarding of Intelligent Systems) — "
+        "Security testing for multi-agent systems. 7 attack suites, "
+        "3-tier detection, propagation tracking, and interactive attack GUI."
     )
     st.markdown(
         "To get started, create an account below. New accounts require approval "

@@ -47,41 +47,47 @@ def main():
     )
     check_auth()
 
-    # Page navigation with direct URL routes (AETHER is the default)
+    # Page navigation grouped by component
     pg = st.navigation(
-        [
-            st.Page(
-                _run_aether_page,
-                title="AETHER Multi-Agent",
-                url_path="aether",
-                icon=":material/hub:",
-                default=True,
-            ),
-            st.Page(
-                _run_results_page,
-                title="Results",
-                url_path="results",
-                icon=":material/bar_chart:",
-            ),
-            st.Page(
-                _run_attack_results_page,
-                title="Attack Results",
-                url_path="attack-results",
-                icon=":material/security:",
-            ),
-            st.Page(
-                _run_attack_page,
-                title="Attack",
-                url_path="attack",
-                icon=":material/gps_fixed:",
-            ),
-            st.Page(
-                _run_bilicore_page,
-                title="Single-Agent RAG",
-                url_path="bili",
-                icon=":material/chat:",
-            ),
-        ]
+        {
+            "IRIS": [
+                st.Page(
+                    _run_bilicore_page,
+                    title="Single-Agent RAG",
+                    url_path="bili",
+                    icon=":material/chat:",
+                ),
+            ],
+            "AETHER": [
+                st.Page(
+                    _run_aether_page,
+                    title="Multi-Agent System",
+                    url_path="aether",
+                    icon=":material/hub:",
+                    default=True,
+                ),
+            ],
+            "AEGIS": [
+                st.Page(
+                    _run_attack_page,
+                    title="Attack Suite",
+                    url_path="attack",
+                    icon=":material/gps_fixed:",
+                ),
+                st.Page(
+                    _run_attack_results_page,
+                    title="Attack Results",
+                    url_path="attack-results",
+                    icon=":material/security:",
+                ),
+                st.Page(
+                    _run_results_page,
+                    title="Baseline Results",
+                    url_path="results",
+                    icon=":material/bar_chart:",
+                ),
+            ],
+        }
     )
     pg.run()
 
