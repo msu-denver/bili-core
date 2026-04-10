@@ -152,6 +152,21 @@ class SemanticEvaluator:
         )
         self._llm: Any = None  # lazy-initialised on first call
 
+    @property
+    def model_name(self) -> str:
+        """Return the evaluator model name."""
+        return self._model_name
+
+    @property
+    def score_descriptions(self) -> dict[int, str]:
+        """Return the score descriptions mapping."""
+        return self._score_descriptions
+
+    @property
+    def llm(self) -> Any:
+        """Return the LLM instance (None until first evaluate call)."""
+        return self._llm
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -319,61 +334,9 @@ class SemanticEvaluator:
     def _parse_verdict(raw: str) -> dict:
         """Extract the JSON verdict from the LLM response.
 
-        Tries ``json.loads()`` first; falls back to extracting a JSON
-        object from within the response text.  Validates required fields.
-
-        Args:
-            raw: Raw string response from the evaluator model.
-
-        Returns:
-            A dict with ``score``, ``reasoning``, and ``confidence`` keys.
-
-        Raises:
-            ValueError: If no valid verdict JSON can be extracted.
+        Delegates to the module-level ``parse_verdict`` function.
         """
-        raw = raw.strip()
-
-        # Strip markdown code fences before parsing (handles single-line fences too)
-        raw = re.sub(r"^```[^\n]*\n?", "", raw)
-        raw = re.sub(r"\n?```$", "", raw)
-        raw = raw.strip()
-
-        # Try direct parse first
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            # Extract first {...} block
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start == -1 or end == 0:
-                raise ValueError(f"No JSON object found in evaluator response: {raw!r}")
-            try:
-                data = json.loads(raw[start:end])
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"Could not parse evaluator JSON: {exc}\nRaw: {raw!r}"
-                ) from exc
-
-        # Validate required fields
-        if "score" not in data:
-            raise ValueError(f"Missing 'score' in verdict: {data}")
-        if "reasoning" not in data:
-            raise ValueError(f"Missing 'reasoning' in verdict: {data}")
-
-        score = int(data["score"])
-        if score not in (0, 1, 2, 3):
-            LOGGER.warning("Unexpected score value %d — clamping to range 0-3", score)
-            score = max(0, min(3, score))
-
-        confidence = str(data.get("confidence", "low")).lower()
-        if confidence not in VERDICT_CONFIDENCE_VALUES:
-            confidence = "low"
-
-        return {
-            "score": score,
-            "reasoning": str(data.get("reasoning", "")),
-            "confidence": confidence,
-        }
+        return parse_verdict(raw)
 
     def _check_circularity(self, test_model_name: str) -> None:
         """Log a warning if test_model_name is the same as or shares provider
@@ -417,13 +380,11 @@ class SemanticEvaluator:
 
     @staticmethod
     def _infer_test_model(baseline_result: dict) -> str | None:
-        """Extract the test model name from the baseline config fingerprint."""
-        fp = baseline_result.get("config_fingerprint", {})
-        model_name = fp.get("model_name", "")
-        # If multiple models were used (comma-separated), take the first
-        if model_name and model_name != "stub":
-            return model_name.split(",")[0].strip()
-        return None
+        """Extract the test model name from the baseline config fingerprint.
+
+        Delegates to the module-level ``infer_test_model`` function.
+        """
+        return infer_test_model(baseline_result)
 
 
 # ---------------------------------------------------------------------------
@@ -437,4 +398,74 @@ def _provider_family(model_id: str) -> str | None:
     for prefix, family in PROVIDER_FAMILY_PREFIXES:
         if model_lower.startswith(prefix.lower()):
             return family
+    return None
+
+
+def parse_verdict(raw: str) -> dict:
+    """Extract the JSON verdict from the LLM response.
+
+    Tries ``json.loads()`` first; falls back to extracting a JSON
+    object from within the response text.  Validates required fields.
+
+    Args:
+        raw: Raw string response from the evaluator model.
+
+    Returns:
+        A dict with ``score``, ``reasoning``, and ``confidence`` keys.
+
+    Raises:
+        ValueError: If no valid verdict JSON can be extracted.
+    """
+    raw = raw.strip()
+
+    # Strip markdown code fences before parsing (handles single-line fences too)
+    raw = re.sub(r"^```[^\n]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+    raw = raw.strip()
+
+    # Try direct parse first
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Extract first {...} block
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError(f"No JSON object found in evaluator response: {raw!r}")
+        try:
+            data = json.loads(raw[start:end])
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Could not parse evaluator JSON: {exc}\nRaw: {raw!r}"
+            ) from exc
+
+    # Validate required fields
+    if "score" not in data:
+        raise ValueError(f"Missing 'score' in verdict: {data}")
+    if "reasoning" not in data:
+        raise ValueError(f"Missing 'reasoning' in verdict: {data}")
+
+    score = int(data["score"])
+    if score not in (0, 1, 2, 3):
+        LOGGER.warning("Unexpected score value %d — clamping to range 0-3", score)
+        score = max(0, min(3, score))
+
+    confidence = str(data.get("confidence", "low")).lower()
+    if confidence not in VERDICT_CONFIDENCE_VALUES:
+        confidence = "low"
+
+    return {
+        "score": score,
+        "reasoning": str(data.get("reasoning", "")),
+        "confidence": confidence,
+    }
+
+
+def infer_test_model(baseline_result: dict) -> str | None:
+    """Extract the test model name from the baseline config fingerprint."""
+    fp = baseline_result.get("config_fingerprint", {})
+    model_name = fp.get("model_name", "")
+    # If multiple models were used (comma-separated), take the first
+    if model_name and model_name != "stub":
+        return model_name.split(",")[0].strip()
     return None
