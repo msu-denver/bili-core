@@ -928,3 +928,339 @@ class TestAsyncPruningPostgresSaver:
             saver = AsyncPruningPostgresSaver(MagicMock())
             assert saver.keep_last_n == -1
             assert saver.user_id is None
+
+
+# =========================================================================
+# get_user_threads — realistic cursor data
+# =========================================================================
+
+
+class TestGetUserThreadsRealisticData:
+    """Tests with more realistic checkpoint data shapes."""
+
+    def test_thread_with_title_tags_from_cursor(self):
+        """Extracts title and tags from fetchone checkpoint data."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_conv1",
+                "last_checkpoint_id": "cp10",
+                "checkpoint_count": 5,
+            }
+        ]
+        # fetchone is called for latest checkpoint, then for tags
+        # First call: latest checkpoint with title and tags
+        mock_cur.fetchone.return_value = {
+            "checkpoint": {
+                "ts": "2026-03-15T12:00:00",
+                "channel_values": {
+                    "messages": [],
+                    "title": "Research Session",
+                    "tags": ["ml", "nlp"],
+                },
+            }
+        }
+        _attach_fake_cursor(saver, mock_cur)
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": []}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["title"] == "Research Session"
+        assert threads[0]["tags"] == ["ml", "nlp"]
+
+    def test_thread_no_checkpoint_data(self):
+        """Thread without checkpoint data gets None defaults."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_c1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+        saver.get_tuple = MagicMock(return_value=None)
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["title"] is None
+        assert threads[0]["tags"] == []
+
+    def test_multiple_threads_ordering(self):
+        """Multiple threads are returned from SQL results."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_conv2",
+                "last_checkpoint_id": "cp5",
+                "checkpoint_count": 3,
+            },
+            {
+                "thread_id": "u_conv1",
+                "last_checkpoint_id": "cp2",
+                "checkpoint_count": 1,
+            },
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+        saver.get_tuple = MagicMock(return_value=None)
+
+        threads = saver.get_user_threads("u")
+        assert len(threads) == 2
+        assert threads[0]["conversation_id"] == "conv2"
+        assert threads[1]["conversation_id"] == "conv1"
+
+
+# =========================================================================
+# get_thread_messages — extended role mapping
+# =========================================================================
+
+
+class TestGetThreadMessagesRoleMapping:
+    """Tests for additional role mapping in get_thread_messages."""
+
+    def test_system_message_role(self):
+        """SystemMessage is mapped to system role."""
+        saver = _make_saver()
+        sys_msg = MagicMock()
+        sys_msg.__class__ = type("SystemMessage", (), {"__name__": "SystemMessage"})
+        sys_msg.__class__.__name__ = "SystemMessage"
+        sys_msg.content = "You are a helpful assistant"
+
+        checkpoint = {"channel_values": {"messages": [sys_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "system"
+
+    def test_tool_message_role(self):
+        """ToolMessage is mapped to tool role."""
+        saver = _make_saver()
+        tool_msg = MagicMock()
+        tool_msg.__class__ = type("ToolMessage", (), {"__name__": "ToolMessage"})
+        tool_msg.__class__.__name__ = "ToolMessage"
+        tool_msg.content = "Search results: 42"
+
+        checkpoint = {"channel_values": {"messages": [tool_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        msgs = saver.get_thread_messages("t1")
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "tool"
+
+    def test_mixed_message_types(self):
+        """All message types are correctly mapped."""
+        saver = _make_saver()
+
+        def _make_msg(cls_name, content):
+            """Create a mock message with given class name."""
+            m = MagicMock()
+            m.__class__ = type(cls_name, (), {"__name__": cls_name})
+            m.__class__.__name__ = cls_name
+            m.content = content
+            return m
+
+        msgs = [
+            _make_msg("HumanMessage", "Question"),
+            _make_msg("AIMessage", "Answer"),
+            _make_msg("SystemMessage", "System prompt"),
+            _make_msg("ToolMessage", "Tool output"),
+        ]
+
+        checkpoint = {"channel_values": {"messages": msgs}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        roles = [m["role"] for m in result]
+        assert roles == ["user", "assistant", "system", "tool"]
+
+
+# =========================================================================
+# _strip_thinking_blocks — full coverage
+# =========================================================================
+
+
+class TestStripThinkingBlocksFull:
+    """Additional _strip_thinking_blocks tests for full coverage."""
+
+    def test_content_with_no_tags(self):
+        """Normal content without tags is returned unchanged."""
+        saver = _make_saver()
+        content = "Just a normal answer"
+        result = saver._strip_thinking_blocks(content)
+        assert result == "Just a normal answer"
+
+    def test_only_thinking_block(self):
+        """Content that is only a thinking block returns empty."""
+        saver = _make_saver()
+        content = "<thinking>all internal</thinking>"
+        result = saver._strip_thinking_blocks(content)
+        assert "all internal" not in result
+
+    def test_whitespace_after_strip(self):
+        """Leading/trailing whitespace is cleaned after strip."""
+        saver = _make_saver()
+        content = "  <thinking>stuff</thinking>  Answer  "
+        result = saver._strip_thinking_blocks(content)
+        assert "Answer" in result
+
+    def test_mixed_case_reasoning_tag(self):
+        """Mixed-case reasoning tags are stripped."""
+        saver = _make_saver()
+        content = "<Reasoning>thoughts</Reasoning>Output"
+        result = saver._strip_thinking_blocks(content)
+        assert "thoughts" not in result
+        assert "Output" in result
+
+
+# =========================================================================
+# _get_raw_checkpoint and _replace_raw_checkpoint
+# =========================================================================
+
+
+class TestRawCheckpointMethods:
+    """Tests for versioned mixin raw checkpoint methods."""
+
+    def test_get_raw_checkpoint_returns_row(self):
+        """_get_raw_checkpoint returns formatted row data."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "thread_id": "t1",
+            "checkpoint_ns": "",
+            "checkpoint_id": "cp1",
+            "checkpoint": b"data",
+            "metadata": b"meta",
+        }
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._get_raw_checkpoint("t1")
+        assert result["thread_id"] == "t1"
+        assert result["checkpoint_id"] == "cp1"
+
+    def test_get_raw_checkpoint_returns_none(self):
+        """_get_raw_checkpoint returns None when no row."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+
+        assert saver._get_raw_checkpoint("missing") is None
+
+    def test_replace_raw_checkpoint_success(self):
+        """_replace_raw_checkpoint returns True on update."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.rowcount = 1
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._replace_raw_checkpoint(
+            "t1",
+            {
+                "checkpoint_id": "cp1",
+                "checkpoint": b"new",
+                "metadata": b"meta",
+            },
+        )
+        assert result is True
+
+    def test_replace_raw_checkpoint_no_id(self):
+        """_replace_raw_checkpoint returns False without id."""
+        saver = _make_saver()
+        result = saver._replace_raw_checkpoint("t1", {"checkpoint": b"data"})
+        assert result is False
+
+    def test_replace_raw_checkpoint_no_match(self):
+        """_replace_raw_checkpoint returns False when no row matched."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.rowcount = 0
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._replace_raw_checkpoint(
+            "t1",
+            {"checkpoint_id": "cp_gone", "checkpoint": b"x"},
+        )
+        assert result is False
+
+
+# =========================================================================
+# _archive_checkpoint
+# =========================================================================
+
+
+class TestArchiveCheckpoint:
+    """Tests for _archive_checkpoint method."""
+
+    def test_archive_inserts_and_deletes(self):
+        """Archive creates table, inserts, and deletes original."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        doc = {
+            "checkpoint_ns": "",
+            "checkpoint_id": "cp1",
+            "checkpoint": b"data",
+            "metadata": b"meta",
+        }
+        saver._archive_checkpoint("t1", doc, ValueError("bad"))
+        # CREATE TABLE + INSERT + DELETE = 3 calls
+        assert mock_cur.execute.call_count == 3
+
+    def test_archive_without_checkpoint_id(self):
+        """Archive skips DELETE when no checkpoint_id."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        doc = {"checkpoint_ns": "", "checkpoint": b"data"}
+        saver._archive_checkpoint("t1", doc, ValueError("bad"))
+        # CREATE TABLE + INSERT only
+        assert mock_cur.execute.call_count == 2
+
+
+# =========================================================================
+# AsyncPruningPostgresSaver — extended
+# =========================================================================
+
+
+class TestAsyncPruningPostgresSaverExtended:
+    """Extended tests for async saver attributes."""
+
+    def test_has_checkpointer_type(self):
+        """AsyncPruningPostgresSaver has pg checkpointer_type."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock())
+            assert saver.checkpointer_type == "pg"
+
+    def test_format_version_set(self):
+        """AsyncPruningPostgresSaver has format_version."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock())
+            assert saver.format_version >= 1

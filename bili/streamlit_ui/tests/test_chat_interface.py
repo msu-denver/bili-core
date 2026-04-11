@@ -414,3 +414,128 @@ st.markdown(f"type:{st.session_state.get('memory_limit_type')}")
     at.run()
     assert not at.exception
     assert "type:token_length" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# Configuration panel interactions
+# ---------------------------------------------------------------------------
+
+
+def test_display_model_config_with_tools_list():
+    """display_model_configuration shows multiple tools."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "MemorySaver"
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["supports_tools"] = True
+st.session_state["selected_tools"] = [
+    "weather_api_tool", "serp_api_tool"
+]
+st.session_state["weather_api_tool_prompt"] = "Get weather"
+st.session_state["serp_api_tool_prompt"] = "Search web"
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_display_model_config_with_middleware():
+    """display_model_configuration shows middleware settings."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "MemorySaver"
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["supports_tools"] = False
+st.session_state["memory_limit_type"] = "message_count"
+st.session_state["memory_strategy"] = "trim"
+st.session_state["memory_limit_value"] = 10
+st.session_state["memory_limit_trim_value"] = 8
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_display_state_management_with_messages():
+    """display_state_management renders messages inside a form."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {
+    "messages": [
+        HumanMessage(content="What is AI?"),
+        AIMessage(content="AI stands for Artificial Intelligence"),
+        HumanMessage(content="Tell me more"),
+        AIMessage(content="It encompasses many fields"),
+    ]
+}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["thread_id"] = "test"
+
+form = st.form(key="test_form2")
+with patch.object(
+    ci, "get_state_config",
+    return_value={"configurable": {"thread_id": "t"}}
+):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_run_app_page_processing_query_state():
+    """run_app_page handles is_processing_query = True."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch, MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+mock_chain = MagicMock()
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["is_processing_query"] = True
+with patch.object(ci, "is_authenticated", return_value=True):
+    with patch.object(ci, "display_configuration_panels"):
+        with patch.object(ci, "display_state_management_management"):
+            with patch.object(ci, "display_state_management"):
+                ci.run_app_page()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_display_state_mgmt_no_thread_id():
+    """display_state_management_management with no thread_id set."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state.pop("thread_id", None)
+ci.display_state_management_management()
+st.markdown(f"ran:True")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "ran:True" in " ".join(m.value for m in at.markdown)

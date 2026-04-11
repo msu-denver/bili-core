@@ -973,3 +973,383 @@ class TestAsyncPruningMongoDBSaverSyncMethods:
         raw = b"binary"
         result = saver._deserialize_checkpoint_data({"checkpoint": raw, "type": "json"})
         assert result == expected
+
+
+# =========================================================================
+# PruningMongoDBSaver.get_user_threads — message extraction
+# =========================================================================
+
+
+class TestGetUserThreadsMessageExtraction:
+    """Tests for message extraction from checkpoints."""
+
+    def test_extracts_first_last_human_messages(self):
+        """Extracts first and last HumanMessage content."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 3, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 3,
+            }
+        ]
+
+        h1 = _human_msg("First question")
+        h2 = _human_msg("Second question")
+        a1 = _ai_msg("Answer")
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "u_c1",
+            "checkpoint": {
+                "channel_values": {
+                    "messages": [h1, a1, h2],
+                }
+            },
+        }
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "First question"
+        assert threads[0]["last_message"] == "Second question"
+        assert threads[0]["message_count"] == 3
+
+    def test_extracts_title_and_tags(self):
+        """Title and tags are extracted from checkpoint state."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 3, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 1,
+            }
+        ]
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "u_c1",
+            "checkpoint": {
+                "channel_values": {
+                    "messages": [],
+                    "title": "Research Chat",
+                    "tags": ["nlp", "ml"],
+                }
+            },
+        }
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["title"] == "Research Chat"
+        assert threads[0]["tags"] == ["nlp", "ml"]
+
+    def test_multimodal_content_extraction(self):
+        """Extracts text from multimodal list content."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 3, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 1,
+            }
+        ]
+
+        h = _human_msg("placeholder")
+        h.content = [
+            {"type": "text", "text": "Describe this image"},
+            {"type": "image_url", "image_url": "http://x.png"},
+        ]
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "u_c1",
+            "checkpoint": {"channel_values": {"messages": [h]}},
+        }
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "Describe this image"
+
+    def test_no_checkpoint_key_defaults(self):
+        """Thread defaults to empty messages when no checkpoint."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 1,
+            }
+        ]
+        saver.checkpoint_collection.find_one.return_value = None
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] is None
+        assert threads[0]["message_count"] == 0
+
+    def test_bytes_checkpoint_deserialized(self):
+        """Bytes checkpoint data is deserialized correctly."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 1,
+            }
+        ]
+
+        saver.serde.loads_typed.return_value = {
+            "channel_values": {"messages": [_human_msg("Deserialized msg")]}
+        }
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "u_c1",
+            "checkpoint": b"binary_data",
+            "type": "msgpack",
+        }
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "Deserialized msg"
+
+
+# =========================================================================
+# get_thread_messages — multimodal and stripping
+# =========================================================================
+
+
+class TestGetThreadMessagesMultimodal:
+    """Tests for multimodal message handling."""
+
+    def test_multimodal_content_in_messages(self):
+        """Multimodal list content is joined as text."""
+        saver = _make_saver()
+        h = _human_msg("placeholder")
+        h.content = [
+            {"type": "text", "text": "Look at"},
+            {"type": "text", "text": "this"},
+            {"type": "image_url", "image_url": "http://x.png"},
+        ]
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": [h]}},
+        }
+        msgs = saver.get_thread_messages("t1")
+        assert "Look at" in msgs[0]["content"]
+        assert "this" in msgs[0]["content"]
+
+    def test_ai_message_thinking_stripped(self):
+        """AI messages have thinking blocks stripped."""
+        saver = _make_saver()
+        ai = _ai_msg("<thinking>internal</thinking>Visible answer")
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": [ai]}},
+        }
+        msgs = saver.get_thread_messages("t1")
+        assert "internal" not in msgs[0]["content"]
+        assert "Visible answer" in msgs[0]["content"]
+
+
+# =========================================================================
+# AsyncPruningMongoDBSaver — remaining sync wrappers
+# =========================================================================
+
+
+class TestAsyncPruningSyncMethodsExtended:
+    """Extended tests for async saver's sync query methods."""
+
+    def _make_async_saver(self, user_id=None):
+        """Build an AsyncPruningMongoDBSaver with mocked MongoDB."""
+        from bili.iris.checkpointers.mongo_checkpointer import AsyncPruningMongoDBSaver
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = AsyncPruningMongoDBSaver.__new__(AsyncPruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = user_id
+            saver._indexes_ensured = True
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+        return saver
+
+    def test_delete_thread_returns_false(self):
+        """delete_thread returns False when nothing deleted."""
+        saver = self._make_async_saver()
+        mock_result = MagicMock()
+        mock_result.deleted_count = 0
+        saver.checkpoint_collection.delete_many.return_value = mock_result
+        assert saver.delete_thread("nonexistent") is False
+
+    def test_get_thread_messages_empty(self):
+        """get_thread_messages returns [] with no checkpoint."""
+        saver = self._make_async_saver()
+        saver.checkpoint_collection.find_one.return_value = None
+        msgs = saver.get_thread_messages("missing_thread")
+        assert msgs == []
+
+    def test_get_user_threads_pagination(self):
+        """get_user_threads uses $skip/$limit in pipeline."""
+        saver = self._make_async_saver()
+        saver.checkpoint_collection.aggregate.return_value = []
+        saver.get_user_threads("u", limit=10, offset=5)
+        pipeline = saver.checkpoint_collection.aggregate.call_args[0][0]
+        stage_types = [list(s.keys())[0] for s in pipeline]
+        assert "$skip" in stage_types
+        assert "$limit" in stage_types
+
+    def test_get_user_stats_aggregates(self):
+        """get_user_stats aggregates checkpoint counts."""
+        saver = self._make_async_saver()
+        ts = datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 5,
+            },
+            {
+                "_id": "u_c2",
+                "last_updated": ts,
+                "checkpoint_count": 3,
+            },
+        ]
+        stats = saver.get_user_stats("u")
+        assert stats["total_threads"] == 2
+        assert stats["total_checkpoints"] == 8
+
+
+# =========================================================================
+# _ensure_indexes async variant
+# =========================================================================
+
+
+class TestAsyncEnsureIndexes:
+    """Tests for AsyncPruningMongoDBSaver._ensure_indexes."""
+
+    def test_ensure_indexes_creates_required_indexes(self):
+        """_ensure_indexes creates checkpoint and writes indexes."""
+        from bili.iris.checkpointers.mongo_checkpointer import AsyncPruningMongoDBSaver
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = AsyncPruningMongoDBSaver.__new__(AsyncPruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = None
+            saver._indexes_ensured = False
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+
+            saver._ensure_indexes()
+
+        assert saver.checkpoint_collection.create_index.call_count >= 2
+        assert saver.writes_collection.create_index.call_count >= 1
+
+    def test_ensure_indexes_with_user_id(self):
+        """_ensure_indexes creates user_id index when configured."""
+        from bili.iris.checkpointers.mongo_checkpointer import AsyncPruningMongoDBSaver
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = AsyncPruningMongoDBSaver.__new__(AsyncPruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = "alice"
+            saver._indexes_ensured = False
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+
+            saver._ensure_indexes()
+
+        calls = saver.checkpoint_collection.create_index.call_args_list
+        user_calls = [c for c in calls if c[1].get("name") == "idx_user_thread"]
+        assert len(user_calls) == 1
+
+
+# =========================================================================
+# _create_index_safe retry behavior
+# =========================================================================
+
+
+class TestCreateIndexSafe:
+    """Tests for _create_index_safe retry/conflict handling."""
+
+    def test_successful_creation(self):
+        """Index is created on first attempt."""
+
+        collection = MagicMock()
+        PruningMongoDBSaver._create_index_safe(
+            collection, [("thread_id", 1)], "idx_test"
+        )
+        collection.create_index.assert_called_once()
+
+    def test_retries_on_build_in_progress(self):
+        """Retries when another index build is in progress."""
+        from pymongo.errors import OperationFailure
+
+        collection = MagicMock()
+        exc = OperationFailure("build in progress")
+        exc._OperationFailure__code = 40333
+        type(exc).code = property(lambda s: 40333)
+        collection.create_index.side_effect = [exc, None]
+
+        with patch("time.sleep"):
+            PruningMongoDBSaver._create_index_safe(
+                collection, [("thread_id", 1)], "idx_test"
+            )
+        assert collection.create_index.call_count == 2
+
+
+# =========================================================================
+# VersionedCheckpointerMixin methods on Mongo
+# =========================================================================
+
+
+class TestMongoVersionedMixin:
+    """Tests for versioned mixin methods on PruningMongoDBSaver."""
+
+    def test_get_raw_checkpoint_returns_doc(self):
+        """_get_raw_checkpoint queries by thread_id."""
+        saver = _make_saver()
+        expected = {"thread_id": "t1", "checkpoint": {}}
+        saver.checkpoint_collection.find_one.return_value = expected
+        result = saver._get_raw_checkpoint("t1")
+        assert result == expected
+
+    def test_get_raw_checkpoint_returns_none(self):
+        """_get_raw_checkpoint returns None when not found."""
+        saver = _make_saver()
+        saver.checkpoint_collection.find_one.return_value = None
+        assert saver._get_raw_checkpoint("missing") is None
+
+    def test_replace_raw_checkpoint_success(self):
+        """_replace_raw_checkpoint returns True on match."""
+        saver = _make_saver()
+        mock_result = MagicMock()
+        mock_result.matched_count = 1
+        saver.checkpoint_collection.replace_one.return_value = mock_result
+        result = saver._replace_raw_checkpoint("t1", {"_id": "abc", "checkpoint": {}})
+        assert result is True
+
+    def test_replace_raw_checkpoint_no_id(self):
+        """_replace_raw_checkpoint returns False without _id."""
+        saver = _make_saver()
+        result = saver._replace_raw_checkpoint("t1", {"checkpoint": {}})
+        assert result is False
+
+    def test_replace_raw_checkpoint_no_match(self):
+        """_replace_raw_checkpoint returns False on no match."""
+        saver = _make_saver()
+        mock_result = MagicMock()
+        mock_result.matched_count = 0
+        saver.checkpoint_collection.replace_one.return_value = mock_result
+        result = saver._replace_raw_checkpoint("t1", {"_id": "abc", "checkpoint": {}})
+        assert result is False

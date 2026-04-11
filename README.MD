@@ -100,8 +100,8 @@ cp .env.example .env
 
 ```bash
 cd scripts/development
-./start-container.sh    # Linux/macOS (.bat on Windows)
-./attach-container.sh   # Attach to the running container
+./start-container.sh
+./attach-container.sh
 ```
 
 This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases.

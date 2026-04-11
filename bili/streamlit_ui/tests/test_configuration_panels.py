@@ -530,3 +530,142 @@ def test_default_prompts_have_persona():
 
     for name, prompt in DEFAULT_PROMPTS.items():
         assert "persona" in prompt, f"Prompt '{name}' missing persona field"
+
+
+# ------------------------------------------------------------------
+# Individual panel rendering details
+# ------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------
+# update_selected_tools — multiple operations
+# ------------------------------------------------------------------
+
+
+def test_update_selected_tools_add_multiple():
+    """update_selected_tools handles adding multiple tools."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui.configuration_panels import (
+    update_selected_tools,
+)
+st.session_state["selected_tools"] = ["tool_a"]
+st.session_state["tool_b_enabled"] = True
+update_selected_tools("tool_b", "tool_b_enabled")
+st.markdown(f"count:{len(st.session_state['selected_tools'])}")
+st.markdown(f"has_b:{'tool_b' in st.session_state['selected_tools']}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "count:2" in all_md
+    assert "has_b:True" in all_md
+
+
+def test_update_selected_tools_add_then_remove():
+    """Adding then removing a tool leaves list unchanged."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui.configuration_panels import (
+    update_selected_tools,
+)
+st.session_state["selected_tools"] = []
+st.session_state["tool_x_enabled"] = True
+update_selected_tools("tool_x", "tool_x_enabled")
+st.session_state["tool_x_enabled"] = False
+update_selected_tools("tool_x", "tool_x_enabled")
+st.markdown(f"count:{len(st.session_state['selected_tools'])}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "count:0" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# update_prompt_state — additional cases
+# ------------------------------------------------------------------
+
+
+def test_update_prompt_state_missing_key():
+    """update_prompt_state handles missing key gracefully."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui.configuration_panels import (
+    update_prompt_state,
+)
+update_prompt_state("nonexistent_key")
+st.markdown("done:True")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "done:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# DEFAULT_PROMPTS structure validation
+# ------------------------------------------------------------------
+
+
+def test_default_prompts_persona_is_string():
+    """Each prompt's persona is a non-empty string."""
+    from bili.streamlit_ui.ui.configuration_panels import DEFAULT_PROMPTS
+
+    for name, prompt in DEFAULT_PROMPTS.items():
+        assert isinstance(prompt["persona"], str), f"'{name}' persona not a string"
+        assert len(prompt["persona"]) > 0, f"'{name}' persona is empty"
+
+
+def test_default_prompts_keys_are_strings():
+    """All DEFAULT_PROMPTS keys are strings."""
+    from bili.streamlit_ui.ui.configuration_panels import DEFAULT_PROMPTS
+
+    for key in DEFAULT_PROMPTS:
+        assert isinstance(key, str)
+
+
+# ------------------------------------------------------------------
+# LLM_MODELS integration
+# ------------------------------------------------------------------
+
+
+def test_llm_models_contains_entries():
+    """LLM_MODELS has at least one provider."""
+    from bili.iris.config.llm_config import LLM_MODELS
+
+    assert len(LLM_MODELS) > 0
+
+
+def test_llm_models_providers_have_models():
+    """Each LLM_MODELS provider has at least one model."""
+    from bili.iris.config.llm_config import LLM_MODELS
+
+    for key, info in LLM_MODELS.items():
+        assert "models" in info, f"Provider '{key}' missing models"
+        assert len(info["models"]) > 0, f"Provider '{key}' has no models"
+
+
+# ------------------------------------------------------------------
+# TOOLS integration
+# ------------------------------------------------------------------
+
+
+def test_tools_config_non_empty():
+    """TOOLS config is a non-empty dict."""
+    from bili.iris.config.tool_config import TOOLS
+
+    assert isinstance(TOOLS, dict)
+    assert len(TOOLS) > 0
+
+
+def test_tools_have_default_prompt():
+    """Each tool has a default_prompt configuration key."""
+    from bili.iris.config.tool_config import TOOLS
+
+    for name, config in TOOLS.items():
+        assert "default_prompt" in config, f"Tool '{name}' missing 'default_prompt'"

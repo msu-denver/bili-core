@@ -16,7 +16,7 @@ BiliCore is an open-source framework for benchmarking and building dynamic RAG (
 ```bash
 # Start development environment
 cd scripts/development
-./start-container.sh  # or .bat on Windows
+./start-container.sh
 
 # Attach to container
 ./attach-container.sh

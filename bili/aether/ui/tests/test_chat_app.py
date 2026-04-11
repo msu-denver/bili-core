@@ -1183,3 +1183,673 @@ def test_google_provider_available_with_project():
 
         with patch.dict("os.environ", {"GOOGLE_CLOUD_PROJECT": "proj"}):
             assert ca._is_provider_available("remote_google_vertex") is True
+
+
+# ---------------------------------------------------------------------------
+# _render_stored_turn — additional structures
+# ---------------------------------------------------------------------------
+
+
+def test_render_stored_turn_no_agent_trace():
+    """_render_stored_turn handles turns with empty agent_trace."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk()
+    st.session_state.chat_config = cfg
+    turn = {
+        "content": "No agents ran",
+        "turn_index": 0,
+        "agent_trace": [],
+    }
+    ca._render_stored_turn(turn)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "No agents ran" in all_md
+
+
+def test_render_stored_turn_multiple_agents():
+    """_render_stored_turn renders panels for multiple agents."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(num_agents=3)
+    st.session_state.chat_config = cfg
+    turn = {
+        "content": "Multi-agent question",
+        "turn_index": 0,
+        "agent_trace": [
+            {
+                "agent_id": "agent_0",
+                "output": {
+                    "agent_outputs": {
+                        "agent_0": {"message": "First agent"}
+                    }
+                },
+            },
+            {
+                "agent_id": "agent_1",
+                "output": {
+                    "agent_outputs": {
+                        "agent_1": {"message": "Second agent"}
+                    }
+                },
+            },
+        ],
+    }
+    ca._render_stored_turn(turn)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Multi-agent question" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_agent_panel — additional output formats
+# ---------------------------------------------------------------------------
+
+
+def test_render_agent_panel_with_parsed_json():
+    """_render_agent_panel renders parsed JSON output."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    output = {
+        "agent_outputs": {
+            "a0": {
+                "message": "Parsed output",
+                "parsed": {"key": "value"},
+            }
+        }
+    }
+    ca._render_agent_panel("a0", output, expanded=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Parsed output" in all_md
+
+
+def test_render_agent_panel_extra_fields():
+    """_render_agent_panel renders extra fields not in skip set."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    output = {
+        "agent_outputs": {
+            "a0": {
+                "message": "Main text",
+                "confidence": 0.95,
+            }
+        }
+    }
+    ca._render_agent_panel("a0", output, expanded=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "confidence" in all_md
+
+
+def test_render_agent_panel_raw_output_fallback():
+    """_render_agent_panel falls back to raw JSON when no messages."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    output = {"custom_field": "custom_value"}
+    ca._render_agent_panel("a0", output, expanded=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_render_agent_panel_no_expander():
+    """_render_agent_panel uses container when use_expander=False."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    output = {
+        "agent_outputs": {
+            "a0": {"message": "Container mode"}
+        }
+    }
+    ca._render_agent_panel(
+        "a0", output, expanded=True, use_expander=False
+    )
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "a0" in all_md
+
+
+def test_render_agent_panel_metadata_caption():
+    """_render_agent_panel shows role and status as caption."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    output = {
+        "agent_outputs": {
+            "a0": {
+                "message": "Response",
+                "role": "analyst",
+                "status": "complete",
+            }
+        }
+    }
+    ca._render_agent_panel("a0", output, expanded=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_captions = " ".join(c.value for c in at.caption)
+    assert "analyst" in all_captions
+
+
+# ---------------------------------------------------------------------------
+# _warn_explanation — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_warn_explanation_reverse_channel_pattern():
+    """_warn_explanation matches the reverse channel warning."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        result = ca._warn_explanation("channel X has a separate reverse channel")
+        assert result is not None
+        assert "bidirectional" in result
+
+
+def test_warn_explanation_outgoing_edges_pattern():
+    """_warn_explanation matches the outgoing edges warning."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        result = ca._warn_explanation(
+            "agent X has 3 outgoing edges (expected 1 for a linear chain)"
+        )
+        assert result is not None
+        assert "sequential" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# _is_stub_config — additional variations
+# ---------------------------------------------------------------------------
+
+
+def test_is_stub_config_mixed_agents():
+    """_is_stub_config returns True when any agent lacks model_name."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.schema.agent_spec import AgentSpec
+        from bili.aether.schema.enums import WorkflowType
+        from bili.aether.schema.mas_config import MASConfig
+        from bili.aether.ui import chat_app as ca
+
+        agents = [
+            AgentSpec(
+                agent_id="a0",
+                role="a0",
+                objective="Perform task zero analysis",
+                model_name="gpt-4o",
+            ),
+            AgentSpec(
+                agent_id="a1",
+                role="a1",
+                objective="Perform task one analysis",
+                model_name=None,
+            ),
+        ]
+        config = MASConfig(
+            mas_id="mixed",
+            name="Mixed",
+            description="Mixed agents",
+            agents=agents,
+            channels=[],
+            workflow_type=WorkflowType.SEQUENTIAL,
+        )
+        assert ca._is_stub_config(config) is True
+
+
+def test_is_stub_config_single_agent_with_model():
+    """_is_stub_config returns False with one model-equipped agent."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        config = make_test_config(num_agents=1, model_name="gpt-4o")
+        assert ca._is_stub_config(config) is False
+
+
+# ---------------------------------------------------------------------------
+# _extract_content — additional cases
+# ---------------------------------------------------------------------------
+
+
+def test_extract_content_messages_with_basemessage():
+    """_extract_content handles BaseMessage objects in messages."""
+    with patch.dict("sys.modules", _FM):
+        from langchain_core.messages import AIMessage
+
+        from bili.aether.ui import chat_app as ca
+
+        output = {"messages": [AIMessage(content="AI response")]}
+        assert "AI response" in ca._extract_content(output)
+
+
+def test_extract_content_agent_outputs_no_message_no_id():
+    """_extract_content renders k:v when no message or agent_id."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        output = {"agent_outputs": {"a0": {"result": "success", "count": 5}}}
+        content = ca._extract_content(output)
+        assert "result" in content
+
+
+def test_extract_content_empty_agent_outputs():
+    """_extract_content handles empty agent_outputs dict."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        output = {"agent_outputs": {}}
+        result = ca._extract_content(output)
+        assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# _build_role_map — additional variations
+# ---------------------------------------------------------------------------
+
+
+def test_build_role_map_all_different_roles():
+    """_build_role_map includes all agents with different roles."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.schema.agent_spec import AgentSpec
+        from bili.aether.schema.enums import WorkflowType
+        from bili.aether.schema.mas_config import MASConfig
+        from bili.aether.ui import chat_app as ca
+
+        agents = [
+            AgentSpec(
+                agent_id="a0",
+                role="writer",
+                objective="Write tasks",
+            ),
+            AgentSpec(
+                agent_id="a1",
+                role="editor",
+                objective="Edit tasks",
+            ),
+        ]
+        config = MASConfig(
+            mas_id="t",
+            name="t",
+            description="t",
+            agents=agents,
+            channels=[],
+            workflow_type=WorkflowType.SEQUENTIAL,
+        )
+        role_map = ca._build_role_map(config)
+        assert role_map == {"a0": "writer", "a1": "editor"}
+
+
+def test_build_role_map_all_same_roles():
+    """_build_role_map returns empty dict when all roles match ids."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        config = make_test_config(num_agents=1)
+        # Override role to match agent_id
+        config.agents[0].role = config.agents[0].agent_id
+        assert ca._build_role_map(config) == {}
+
+
+# ---------------------------------------------------------------------------
+# _serialize_state_update — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_serialize_state_update_list_of_messages():
+    """_serialize_state_update handles a list of mixed types."""
+    with patch.dict("sys.modules", _FM):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from bili.aether.ui import chat_app as ca
+
+        result = ca._serialize_state_update(
+            {
+                "messages": [
+                    HumanMessage(content="q"),
+                    AIMessage(content="a"),
+                    "plain string",
+                ]
+            }
+        )
+        assert result["messages"][0]["content"] == "q"
+        assert result["messages"][1]["content"] == "a"
+        assert result["messages"][2] == "plain string"
+
+
+def test_serialize_state_update_empty_dict():
+    """_serialize_state_update handles empty dict."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        assert ca._serialize_state_update({}) == {}
+
+
+# ---------------------------------------------------------------------------
+# _render_timeline
+# ---------------------------------------------------------------------------
+
+
+def test_render_timeline_empty_nodes():
+    """_render_timeline returns early for empty node list."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ph = st.empty()
+    ca._render_timeline(
+        ph, completed=[], active=None, all_nodes=[],
+        key_prefix="test_empty",
+    )
+    st.markdown("done:True")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "done:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_render_timeline_with_nodes():
+    """_render_timeline renders chips for all nodes."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ph = st.empty()
+    ca._render_timeline(
+        ph,
+        completed=["a0"],
+        active="a1",
+        all_nodes=["a0", "a1", "a2"],
+        key_prefix="test_nodes",
+    )
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_render_timeline_with_status_text():
+    """_render_timeline renders a status caption when given."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ph = st.empty()
+    ca._render_timeline(
+        ph,
+        completed=[],
+        active="a0",
+        all_nodes=["a0"],
+        key_prefix="test_status",
+        status_text="Running agent...",
+    )
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _is_provider_available — AWS Bedrock
+# ---------------------------------------------------------------------------
+
+
+def test_aws_bedrock_available_with_profile():
+    """remote_aws_bedrock available when AWS_PROFILE is set."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        with patch.dict("os.environ", {"AWS_PROFILE": "default"}, clear=True):
+            assert ca._is_provider_available("remote_aws_bedrock") is True
+
+
+def test_aws_bedrock_unavailable_no_creds():
+    """remote_aws_bedrock unavailable without credentials."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=False):
+                assert ca._is_provider_available("remote_aws_bedrock") is False
+
+
+# ---------------------------------------------------------------------------
+# _validate_config display — warnings
+# ---------------------------------------------------------------------------
+
+
+def test_validate_config_with_warnings():
+    """_validate_config shows success with warnings message."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.validation import validate_mas
+    from unittest.mock import MagicMock
+
+    # Mock validate_mas to return warnings
+    mock_result = MagicMock()
+    mock_result.errors = []
+    mock_result.warnings = ["some unknown warning text"]
+    mock_result.valid = True
+    with _patch.object(ca, "validate_mas", return_value=mock_result):
+        result = ca._validate_config(mk())
+    st.markdown(f"valid:{result}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "valid:True" in all_md
+
+
+# ---------------------------------------------------------------------------
+# Diagram renderers
+# ---------------------------------------------------------------------------
+
+
+def test_render_hierarchical_diagram():
+    """_render_hierarchical_diagram renders tiered agents."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    import importlib
+    import bili.aether.ui.chat_app
+    importlib.reload(bili.aether.ui.chat_app)
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.schema.agent_spec import AgentSpec
+    from bili.aether.schema.mas_config import MASConfig
+    from bili.aether.schema.enums import WorkflowType
+    agents = [
+        AgentSpec(
+            agent_id="root", role="root",
+            objective="Root node for orchestration", tier=1,
+        ),
+        AgentSpec(
+            agent_id="child1", role="child1",
+            objective="First child worker node", tier=2,
+        ),
+        AgentSpec(
+            agent_id="child2", role="child2",
+            objective="Second child worker node", tier=2,
+        ),
+    ]
+    cfg = MASConfig(
+        mas_id="hier", name="t", description="t",
+        agents=agents, channels=[],
+        workflow_type=WorkflowType.HIERARCHICAL,
+    )
+    ca._render_hierarchical_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_render_supervisor_diagram():
+    """_render_supervisor_diagram renders hub-and-spoke."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    import importlib
+    import bili.aether.ui.chat_app
+    importlib.reload(bili.aether.ui.chat_app)
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.schema.agent_spec import AgentSpec
+    from bili.aether.schema.mas_config import MASConfig
+    from bili.aether.schema.enums import WorkflowType
+    agents = [
+        AgentSpec(
+            agent_id="supervisor", role="supervisor",
+            objective="Supervise workers",
+        ),
+        AgentSpec(
+            agent_id="worker1", role="worker",
+            objective="Perform work task one",
+        ),
+        AgentSpec(
+            agent_id="worker2", role="worker",
+            objective="Perform work task two",
+        ),
+    ]
+    cfg = MASConfig(
+        mas_id="sup", name="t", description="t",
+        agents=agents, channels=[],
+        workflow_type=WorkflowType.SUPERVISOR,
+        entry_point="supervisor",
+    )
+    ca._render_supervisor_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
