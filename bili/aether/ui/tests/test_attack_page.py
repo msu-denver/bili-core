@@ -694,3 +694,311 @@ _render_observation(obs)
     )
     at.run()
     assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_sidebar with config and payload library
+# ---------------------------------------------------------------------------
+
+
+def test_sidebar_with_config_payload_preview():
+    """Sidebar shows payload preview when library payload selected."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch, MagicMock
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+cfg = mk(mas_id="preview_test")
+st.session_state.attack_config = cfg
+mock_payload = MagicMock()
+mock_payload.payload = "Adversarial text here"
+mock_payload.notes = "Test notes for payload"
+with st.sidebar:
+    with patch.object(ap, "LOGO_PATH") as lp:
+        lp.exists.return_value = False
+        with patch.object(
+            ap, "_load_payload_library",
+            return_value={"p1": mock_payload}
+        ):
+            ap._render_sidebar()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_sidebar_custom_payload_source():
+    """Sidebar shows custom payload text area when Custom selected."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch, MagicMock
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+cfg = mk(mas_id="custom_test")
+st.session_state.attack_config = cfg
+st.session_state.attack_payload_source = "Custom"
+with st.sidebar:
+    with patch.object(ap, "LOGO_PATH") as lp:
+        lp.exists.return_value = False
+        ap._render_sidebar()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_results with full attack result dict
+# ---------------------------------------------------------------------------
+
+
+def test_render_results_with_full_observations():
+    """_render_results renders multiple observations with propagation metrics."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+config = mk(num_agents=3)
+result_dict = {
+    "success": True,
+    "agent_observations": [
+        {"agent_id": "agent_0", "influenced": True, "resisted": False,
+         "received_payload": True, "output_excerpt": "I comply", "role": "role_0"},
+        {"agent_id": "agent_1", "influenced": False, "resisted": True,
+         "received_payload": True, "output_excerpt": "I refuse", "role": "role_1"},
+        {"agent_id": "agent_2", "influenced": False, "resisted": False,
+         "received_payload": False, "output_excerpt": "", "role": "role_2"},
+    ],
+    "propagation_path": ["agent_0", "agent_1"],
+    "influenced_agents": ["agent_0"],
+    "resistant_agents": ["agent_1"],
+}
+with patch.object(ap, "_is_stub_mode", return_value=True):
+    ap._render_results(config, result_dict)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Tier 2" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_results with tier 3 non-stub, no baseline
+# ---------------------------------------------------------------------------
+
+
+def test_render_results_tier3_no_baseline():
+    """_render_results shows info when no baseline found for Tier 3."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+config = mk(model_name="gpt-4o")
+result_dict = {
+    "success": True,
+    "agent_observations": [],
+    "propagation_path": [],
+    "influenced_agents": [],
+    "resistant_agents": [],
+}
+with patch.object(ap, "_is_stub_mode", return_value=False):
+    with patch.object(ap, "_load_baseline_result", return_value=None):
+        ap._render_results(config, result_dict)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_info = " ".join(m.value for m in at.info)
+    assert "baseline" in all_info.lower()
+
+
+# ---------------------------------------------------------------------------
+# _render_results with tier 3 circularity warning
+# ---------------------------------------------------------------------------
+
+
+def test_render_results_tier3_circularity_warning():
+    """_render_results shows circularity warning when providers match."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch, MagicMock
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+config = mk(model_name="gpt-4o")
+result_dict = {
+    "success": True,
+    "agent_observations": [],
+    "propagation_path": [],
+    "influenced_agents": [],
+    "resistant_agents": [],
+}
+with patch.object(ap, "_is_stub_mode", return_value=False):
+    with patch.object(ap, "_load_baseline_result", return_value=None):
+        with patch.object(ap, "_get_evaluator_model", return_value="gpt-4o-mini"):
+            ap._render_results(config, result_dict)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_warn = " ".join(w.value for w in at.warning)
+    assert "circular" in all_warn.lower()
+
+
+# ---------------------------------------------------------------------------
+# _render_observation without output excerpt
+# ---------------------------------------------------------------------------
+
+
+def test_render_observation_no_excerpt():
+    """_render_observation shows 'no output recorded' when excerpt is empty."""
+    at = AppTest.from_string(
+        """
+from bili.aether.ui.attack_page import _render_observation
+obs = {
+    "agent_id": "a4",
+    "influenced": False,
+    "resisted": False,
+    "received_payload": False,
+    "output_excerpt": "",
+    "role": "test_role",
+}
+_render_observation(obs)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _same_provider_family additional cases
+# ---------------------------------------------------------------------------
+
+
+def test_same_provider_family_anthropic():
+    """_same_provider_family identifies Anthropic models."""
+    assert ap_mod._same_provider_family("claude-3-opus", "claude-3-haiku") is True
+
+
+def test_get_provider_family_anthropic():
+    """_get_provider_family returns anthropic family for Claude models."""
+    result = ap_mod._get_provider_family("claude-3-opus")
+    assert result is not None
+    assert "anthropic" in result
+
+
+# ---------------------------------------------------------------------------
+# _resolve_payload library with missing payload
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_payload_library_missing_pid_in_library():
+    """_resolve_payload returns None when pid not in library."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch
+from bili.aether.ui import attack_page as ap
+st.session_state["attack_payload_source"] = "Library"
+st.session_state["attack_suite"] = "injection"
+st.session_state["attack_payload_id"] = "nonexistent_pid"
+with patch.object(ap, "_load_payload_library", return_value={"p1": None}):
+    result = ap._resolve_payload()
+st.markdown(f"none:{result is None}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "none:True" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _render_main with node click
+# ---------------------------------------------------------------------------
+
+
+def test_render_main_initializes_target():
+    """_render_main initializes target to first agent when not set."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch, MagicMock
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+cfg = mk(mas_id="init_target_test")
+st.session_state.attack_config = cfg
+st.session_state.pop("attack_target_agent_id", None)
+with patch.object(ap, "LOGO_PATH") as lp:
+    lp.exists.return_value = False
+    with patch.object(ap, "render_attack_graph", return_value=None):
+        ap._render_main()
+st.markdown(f"target:{st.session_state.get('attack_target_agent_id')}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "target:agent_0" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# push_config_to_attack_state with no agents
+# ---------------------------------------------------------------------------
+
+
+def test_push_config_multiple_agents():
+    """push_config_to_attack_state sets target to first agent."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.aether.ui.attack_page import push_config_to_attack_state
+from bili.aether.ui.tests.conftest import make_test_config as mk
+cfg = mk(num_agents=3, mas_id="multi_agent_push")
+push_config_to_attack_state(cfg)
+st.markdown(f"config_set:{st.session_state.get('attack_config') is not None}")
+st.markdown(f"target:{st.session_state.get('attack_target_agent_id')}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "config_set:True" in all_md
+    assert "target:agent_0" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_results with error in result dict
+# ---------------------------------------------------------------------------
+
+
+def test_render_results_tier1_error_message():
+    """_render_results displays the error message from result dict."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from unittest.mock import patch
+from bili.aether.ui import attack_page as ap
+from bili.aether.ui.tests.conftest import make_test_config as mk
+config = mk()
+result_dict = {
+    "success": False,
+    "error": "Connection refused",
+    "agent_observations": [],
+    "propagation_path": [],
+    "influenced_agents": [],
+    "resistant_agents": [],
+}
+with patch.object(ap, "_is_stub_mode", return_value=True):
+    ap._render_results(config, result_dict)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_err = " ".join(m.value for m in at.error)
+    assert "Connection refused" in all_err

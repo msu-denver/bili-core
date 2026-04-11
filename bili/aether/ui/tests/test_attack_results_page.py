@@ -541,3 +541,374 @@ def test_normalise_cross_model_fields():
     assert result["model_id"] == "gpt-4o"
     assert result["model_name"] == "GPT-4o"
     assert result["provider_family"] == "openai"
+
+
+# ---------------------------------------------------------------------------
+# _render_matrix with cross-model data
+# ---------------------------------------------------------------------------
+
+
+def test_render_matrix_cross_model():
+    """_render_matrix renders model_id in column labels for cross-model view."""
+    at = AppTest.from_string(
+        """
+import pandas as pd
+from bili.aether.ui import attack_results_page as arp
+rows = [
+    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+     "mas_id": "mas_a", "phase": "pre", "attack_suite": "cross_model",
+     "tier1_pass": True, "tier3_score": 1, "stub_mode": False,
+     "timestamp": "t", "model_id": "gpt-4o", "model_name": "GPT-4o",
+     "provider_family": "openai", "tier2_influenced": True},
+]
+df = pd.DataFrame(rows)
+arp._render_matrix(df, is_cross_model=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Results Matrix" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_expander_content
+# ---------------------------------------------------------------------------
+
+
+def test_render_expander_content_with_tier3():
+    """_render_expander_content shows Tier-3 score and reasoning."""
+    at = AppTest.from_string(
+        """
+from bili.aether.ui import attack_results_page as arp
+r = {
+    "severity": "high", "injection_phase": "pre",
+    "injection_type": "injection", "stub_mode": False,
+    "attack_suite": "injection", "timestamp": "2025-01-01",
+    "duration_ms": 150.0, "propagation_path": ["a0", "a1"],
+    "influenced_agents": ["a0"], "resistant_agents": ["a1"],
+    "tier3_confidence": "high", "tier3_reasoning": "Clear compliance detected",
+    "config_path": "", "model_id": None,
+}
+arp._render_expander_content(r, tier3_score=2, tier1_ok=True,
+                             disagree=False, is_cross_model=False)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Tier-3 Score" in all_md
+    assert "Clear compliance detected" in all_md
+
+
+def test_render_expander_content_no_tier3():
+    """_render_expander_content shows skipped message when T3 is None."""
+    at = AppTest.from_string(
+        """
+from bili.aether.ui import attack_results_page as arp
+r = {
+    "severity": "low", "injection_phase": "pre",
+    "injection_type": "jailbreak", "stub_mode": True,
+    "attack_suite": "jailbreak", "timestamp": "2025-01-01",
+    "duration_ms": 50.0, "propagation_path": [],
+    "influenced_agents": [], "resistant_agents": [],
+    "tier3_confidence": "", "tier3_reasoning": "",
+    "config_path": "", "model_id": None,
+}
+arp._render_expander_content(r, tier3_score=None, tier1_ok=True,
+                             disagree=False, is_cross_model=False)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_captions = " ".join(c.value for c in at.caption)
+    assert "skipped" in all_captions
+
+
+def test_render_expander_content_with_disagreement():
+    """_render_expander_content shows disagreement warning."""
+    at = AppTest.from_string(
+        """
+from bili.aether.ui import attack_results_page as arp
+r = {
+    "severity": "high", "injection_phase": "pre",
+    "injection_type": "injection", "stub_mode": False,
+    "attack_suite": "injection", "timestamp": "2025-01-01",
+    "duration_ms": 100.0, "propagation_path": ["a0"],
+    "influenced_agents": ["a0"], "resistant_agents": [],
+    "tier3_confidence": "high", "tier3_reasoning": "No compliance found",
+    "config_path": "", "model_id": None,
+}
+arp._render_expander_content(r, tier3_score=0, tier1_ok=True,
+                             disagree=True, is_cross_model=False)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_warn = " ".join(w.value for w in at.warning)
+    assert "disagreement" in all_warn.lower()
+
+
+def test_render_expander_content_cross_model():
+    """_render_expander_content shows model info for cross-model view."""
+    at = AppTest.from_string(
+        """
+from bili.aether.ui import attack_results_page as arp
+r = {
+    "severity": "medium", "injection_phase": "pre",
+    "injection_type": "injection", "stub_mode": False,
+    "attack_suite": "cross_model", "timestamp": "2025-01-01",
+    "duration_ms": 200.0, "propagation_path": [],
+    "influenced_agents": [], "resistant_agents": [],
+    "tier3_confidence": "", "tier3_reasoning": "",
+    "config_path": "", "model_id": "gpt-4o",
+    "model_name": "GPT-4o", "provider_family": "openai",
+}
+arp._render_expander_content(r, tier3_score=None, tier1_ok=True,
+                             disagree=False, is_cross_model=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "gpt-4o" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_detail_panel with cross-model
+# ---------------------------------------------------------------------------
+
+
+def test_render_detail_panel_cross_model():
+    """_render_detail_panel renders details with cross-model dimension."""
+    at = AppTest.from_string(
+        """
+import pandas as pd
+from bili.aether.ui import attack_results_page as arp
+results = [
+    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+     "mas_id": "mas_a", "phase": "pre", "attack_suite": "cross_model",
+     "tier1_pass": True, "tier3_score": 1, "tier3_confidence": "medium",
+     "tier3_reasoning": "Partial compliance", "stub_mode": False,
+     "timestamp": "2025-01-01", "model_id": "gpt-4o", "model_name": "GPT-4o",
+     "provider_family": "openai", "influenced_agents": [],
+     "resistant_agents": ["a0"], "propagation_path": [],
+     "target_agent_id": "a0", "duration_ms": 100.0,
+     "config_path": "", "injection_phase": "pre"},
+]
+df_rows = [
+    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+     "mas_id": "mas_a", "phase": "pre", "attack_suite": "cross_model",
+     "tier1_pass": True, "tier3_score": 1, "stub_mode": False,
+     "timestamp": "t", "model_id": "gpt-4o", "model_name": "GPT-4o",
+     "provider_family": "openai", "tier2_influenced": False},
+]
+df = pd.DataFrame(df_rows)
+arp._render_detail_panel(results, df, is_cross_model=True)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Run Details" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_matrix with tier1 failure and tier2 fallback
+# ---------------------------------------------------------------------------
+
+
+def test_render_matrix_with_tier1_failure():
+    """_render_matrix shows ! for Tier-1 failures."""
+    at = AppTest.from_string(
+        """
+import pandas as pd
+from bili.aether.ui import attack_results_page as arp
+rows = [
+    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+     "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
+     "tier1_pass": False, "tier3_score": None, "stub_mode": True,
+     "timestamp": "t", "model_id": None, "model_name": None,
+     "provider_family": None, "tier2_influenced": False},
+]
+df = pd.DataFrame(rows)
+arp._render_matrix(df, is_cross_model=False)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_render_matrix_with_tier2_fallback():
+    """_render_matrix shows T2 labels when tier3 is None but tier1 passed."""
+    at = AppTest.from_string(
+        """
+import pandas as pd
+from bili.aether.ui import attack_results_page as arp
+rows = [
+    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+     "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
+     "tier1_pass": True, "tier3_score": None, "stub_mode": True,
+     "timestamp": "t", "model_id": None, "model_name": None,
+     "provider_family": None, "tier2_influenced": True},
+]
+df = pd.DataFrame(rows)
+arp._render_matrix(df, is_cross_model=False)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _result_export_key
+# ---------------------------------------------------------------------------
+
+
+def test_result_export_key_non_cross_model():
+    """_result_export_key returns tuple without model_id for non-cross-model."""
+    r = {"mas_id": "m", "payload_id": "p1", "phase": "pre", "model_id": "gpt-4o"}
+    key = arp_mod._result_export_key(r, is_cross_model=False)
+    assert key == ("m", "p1", "pre", None)
+
+
+def test_result_export_key_cross_model():
+    """_result_export_key includes model_id for cross-model."""
+    r = {"mas_id": "m", "payload_id": "p1", "phase": "pre", "model_id": "gpt-4o"}
+    key = arp_mod._result_export_key(r, is_cross_model=True)
+    assert key == ("m", "p1", "pre", "gpt-4o")
+
+
+# ---------------------------------------------------------------------------
+# _build_export_df
+# ---------------------------------------------------------------------------
+
+
+def test_build_export_df_filters_by_key_set():
+    """_build_export_df only includes results matching the key set."""
+    results = [
+        {
+            "mas_id": "m",
+            "payload_id": "p1",
+            "phase": "pre",
+            "model_id": None,
+            "target_agent_id": "a0",
+            "injection_type": "injection",
+            "tier1_pass": True,
+            "influenced_agents": [],
+            "resistant_agents": [],
+            "tier3_score": 1,
+            "model_name": None,
+            "timestamp": "t",
+            "severity": "high",
+            "attack_suite": "injection",
+            "propagation_path": [],
+        },
+        {
+            "mas_id": "m",
+            "payload_id": "p2",
+            "phase": "mid",
+            "model_id": None,
+            "target_agent_id": "a1",
+            "injection_type": "jailbreak",
+            "tier1_pass": False,
+            "influenced_agents": [],
+            "resistant_agents": [],
+            "tier3_score": None,
+            "model_name": None,
+            "timestamp": "t",
+            "severity": "low",
+            "attack_suite": "jailbreak",
+            "propagation_path": [],
+        },
+    ]
+    key_set = {("m", "p1", "pre", None)}
+    df = arp_mod._build_export_df(results, key_set, is_cross_model=False)
+    assert len(df) == 1
+    assert df.iloc[0]["payload_id"] == "p1"
+
+
+# ---------------------------------------------------------------------------
+# _normalise with None tier3_score
+# ---------------------------------------------------------------------------
+
+
+def test_normalise_none_tier3_score():
+    """_normalise handles None tier3_score in run_metadata."""
+    raw = {
+        "payload_id": "p1",
+        "injection_type": "x",
+        "severity": "h",
+        "mas_id": "m",
+        "injection_phase": "pre",
+        "attack_suite": "s",
+        "execution": {},
+        "run_metadata": {"tier3_score": None},
+    }
+    result = arp_mod._normalise(raw)
+    assert result["tier3_score"] is None
+
+
+# ---------------------------------------------------------------------------
+# _render_filters single suite
+# ---------------------------------------------------------------------------
+
+
+def test_render_filters_single_suite():
+    """_render_filters works for a single suite (no suite multiselect)."""
+    at = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+from bili.aether.ui import attack_results_page as arp
+rows = [
+    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+     "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
+     "tier1_pass": True, "tier3_score": 2, "stub_mode": False,
+     "timestamp": "t", "model_id": None, "model_name": None,
+     "provider_family": None, "tier2_influenced": True},
+]
+df = pd.DataFrame(rows)
+filtered = arp._render_filters(df, "Injection", is_cross_model=False)
+st.markdown(f"count:{len(filtered)}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "count:1" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _render_view_graph_button
+# ---------------------------------------------------------------------------
+
+
+def test_render_view_graph_button_missing_config():
+    """_render_view_graph_button shows caption when config file missing."""
+    at = AppTest.from_string(
+        """
+from bili.aether.ui import attack_results_page as arp
+arp._render_view_graph_button(
+    "nonexistent/path.yaml", "mas_a", "p1", "pre"
+)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_captions = " ".join(c.value for c in at.caption)
+    assert "not found" in all_captions or "unavailable" in all_captions
+
+
+# ---------------------------------------------------------------------------
+# _tier2_tier3_disagree edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_tier2_tier3_disagree_score_one_not_influenced():
+    """No disagreement when T3=1 and not influenced (ambiguous zone)."""
+    assert arp_mod._tier2_tier3_disagree([], 1) is False
+
+
+def test_tier2_tier3_disagree_score_three_influenced():
+    """No disagreement when T3=3 and influenced (both agree)."""
+    assert arp_mod._tier2_tier3_disagree(["a0"], 3) is False

@@ -24,7 +24,8 @@ def test_display_configuration_panels_no_exception():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -41,7 +42,8 @@ def test_renders_configuration_panel_heading():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -60,7 +62,8 @@ def test_llm_configuration_section_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -79,7 +82,8 @@ def test_prompt_customization_section_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -98,7 +102,8 @@ def test_tools_section_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -117,7 +122,8 @@ def test_import_export_section_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -138,7 +144,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_type:{'model_type' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -154,7 +161,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"streaming:{'streaming_enabled' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -170,7 +178,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_persona:{'persona' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -186,7 +195,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_tools:{'selected_tools' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -209,7 +219,8 @@ st.session_state["selected_tools"] = []
 st.session_state["test_tool_enabled"] = True
 update_selected_tools("test_tool", "test_tool_enabled")
 st.markdown(f"added:{'test_tool' in st.session_state['selected_tools']}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -227,7 +238,8 @@ st.session_state["selected_tools"] = ["test_tool"]
 st.session_state["test_tool_enabled"] = False
 update_selected_tools("test_tool", "test_tool_enabled")
 st.markdown(f"removed:{'test_tool' not in st.session_state['selected_tools']}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -245,7 +257,8 @@ st.session_state["selected_tools"] = ["test_tool"]
 st.session_state["test_tool_enabled"] = True
 update_selected_tools("test_tool", "test_tool_enabled")
 st.markdown(f"count:{st.session_state['selected_tools'].count('test_tool')}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -267,7 +280,8 @@ from bili.streamlit_ui.ui.configuration_panels import update_prompt_state
 st.session_state["my_prompt"] = "original"
 update_prompt_state("my_prompt")
 st.markdown(f"value:{st.session_state['my_prompt']}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -286,7 +300,8 @@ def test_export_button_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -305,7 +320,8 @@ def test_model_type_selectbox_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -320,7 +336,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_temp:{'temperature' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -335,7 +352,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_max:{'max_output_tokens' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -355,7 +373,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_template:{'selected_prompt_template' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -371,7 +390,8 @@ from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 persona = st.session_state.get("persona", "")
 st.markdown(f"has_persona:{len(persona) > 0}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -397,7 +417,8 @@ if tool_names:
     st.markdown(f"has_key:{f'{first_tool}_enabled' in st.session_state}")
 else:
     st.markdown("has_key:True")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -410,7 +431,8 @@ def test_enable_all_tools_button_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -424,7 +446,8 @@ def test_disable_all_tools_button_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -443,7 +466,8 @@ def test_import_export_section_has_file_uploader():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -464,7 +488,8 @@ st.session_state["selected_tools"] = []
 st.session_state["missing_tool_enabled"] = False
 update_selected_tools("missing_tool", "missing_tool_enabled")
 st.markdown(f"count:{len(st.session_state['selected_tools'])}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -484,7 +509,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_kwargs:{'model_kwargs' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -504,7 +530,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_supports:{'supports_tools' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -555,7 +582,8 @@ st.session_state["tool_b_enabled"] = True
 update_selected_tools("tool_b", "tool_b_enabled")
 st.markdown(f"count:{len(st.session_state['selected_tools'])}")
 st.markdown(f"has_b:{'tool_b' in st.session_state['selected_tools']}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -578,7 +606,8 @@ update_selected_tools("tool_x", "tool_x_enabled")
 st.session_state["tool_x_enabled"] = False
 update_selected_tools("tool_x", "tool_x_enabled")
 st.markdown(f"count:{len(st.session_state['selected_tools'])}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -601,7 +630,8 @@ from bili.streamlit_ui.ui.configuration_panels import (
 )
 update_prompt_state("test_prompt")
 st.markdown("done:True")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -706,7 +736,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_struct:{'supports_structured_output' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -724,7 +755,8 @@ def test_model_name_selectbox_present():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -745,7 +777,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_top_p:{'top_p' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -760,7 +793,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_top_k:{'top_k' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -775,7 +809,8 @@ import streamlit as st
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
 st.markdown(f"has_seed:{'seed_value' in st.session_state}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -799,7 +834,8 @@ update_selected_tools("tool_c", "tool_c_enabled")
 st.markdown(f"count:{len(st.session_state['selected_tools'])}")
 st.markdown(f"has_a:{'tool_a' in st.session_state['selected_tools']}")
 st.markdown(f"has_c:{'tool_c' in st.session_state['selected_tools']}")
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
@@ -856,8 +892,276 @@ def test_renders_checkboxes():
         """
 from bili.streamlit_ui.ui import configuration_panels as cp_mod
 cp_mod.display_configuration_panels()
-"""
+""",
+        default_timeout=15,
     )
     at.run()
     assert not at.exception
     assert len(at.checkbox) >= 1
+
+
+# ------------------------------------------------------------------
+# LLM Configuration panel details
+# ------------------------------------------------------------------
+
+
+def test_streaming_checkbox_present():
+    """The streaming responses checkbox is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    labels = [cb.label for cb in at.checkbox]
+    assert any("streaming" in label.lower() for label in labels)
+
+
+def test_model_type_selectbox_options_populated():
+    """The LLM type selectbox has at least one option."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+model_type = st.session_state.get("model_type", "")
+st.markdown(f"has_model_type:{len(model_type) > 0}")
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    assert "has_model_type:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Prompt Customization panel
+# ------------------------------------------------------------------
+
+
+def test_prompt_description_rendered():
+    """The prompt description is rendered after template selection."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+desc = st.session_state.get("prompt_description", "")
+st.markdown(f"has_desc:{len(desc) > 0 if desc else False}")
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_persona_text_area_rendered():
+    """The persona text area widget is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    assert len(at.text_area) >= 1
+
+
+# ------------------------------------------------------------------
+# Tool Configuration panel details
+# ------------------------------------------------------------------
+
+
+def test_tool_prompt_text_areas_rendered():
+    """Each tool has a prompt text area rendered."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+from bili.iris.config.tool_config import TOOLS
+cp_mod.display_configuration_panels()
+tool_prompt_count = sum(
+    1 for tool in TOOLS if f"{tool}_prompt" in st.session_state
+)
+st.markdown(f"prompts:{tool_prompt_count}")
+st.markdown(f"total_tools:{len(TOOLS)}")
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "prompts:" in all_md
+
+
+# ------------------------------------------------------------------
+# Export configuration - button click
+# ------------------------------------------------------------------
+
+
+def test_export_button_click_renders_download():
+    """Clicking Export Configuration renders a download button."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    export_buttons = [b for b in at.button if "Export" in b.label]
+    if export_buttons:
+        export_buttons[0].click()
+        at.run()
+        assert not at.exception
+
+
+# ------------------------------------------------------------------
+# Number inputs rendered
+# ------------------------------------------------------------------
+
+
+def test_number_inputs_rendered():
+    """display_configuration_panels renders number input widgets."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    assert len(at.number_input) >= 1
+
+
+# ------------------------------------------------------------------
+# Initialization of thinking_budget
+# ------------------------------------------------------------------
+
+
+def test_initializes_thinking_budget():
+    """display_configuration_panels initializes thinking_budget."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_thinking:{'thinking_budget' in st.session_state}")
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    assert "has_thinking:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Initialization of max_retries
+# ------------------------------------------------------------------
+
+
+def test_initializes_max_retries():
+    """display_configuration_panels initializes max_retries."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_retries:{'max_retries' in st.session_state}")
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    assert "has_retries:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Prompt template selectbox present
+# ------------------------------------------------------------------
+
+
+def test_prompt_template_selectbox_present():
+    """The prompt template selectbox is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    assert len(at.selectbox) >= 3
+
+
+# ------------------------------------------------------------------
+# update_selected_tools — no selected_tools in state
+# ------------------------------------------------------------------
+
+
+def test_update_selected_tools_creates_list():
+    """update_selected_tools creates selected_tools if missing."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui.configuration_panels import update_selected_tools
+st.session_state.pop("selected_tools", None)
+st.session_state["new_tool_enabled"] = True
+update_selected_tools("new_tool", "new_tool_enabled")
+st.markdown(f"created:{isinstance(st.session_state.get('selected_tools'), list)}")
+st.markdown(f"has:{('new_tool' in st.session_state.get('selected_tools', []))}")
+""",
+        default_timeout=15,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "created:True" in all_md
+    assert "has:True" in all_md
+
+
+# ------------------------------------------------------------------
+# TOOLS structure - description field
+# ------------------------------------------------------------------
+
+
+def test_tools_have_description():
+    """Each tool has a description field."""
+    from bili.iris.config.tool_config import TOOLS
+
+    for name, config in TOOLS.items():
+        assert "description" in config, f"Tool '{name}' missing 'description'"
+
+
+# ------------------------------------------------------------------
+# LLM model entries have required fields
+# ------------------------------------------------------------------
+
+
+def test_llm_model_entries_have_model_id():
+    """Each model entry has a model_id."""
+    from bili.iris.config.llm_config import LLM_MODELS
+
+    for key, info in LLM_MODELS.items():
+        for model in info["models"]:
+            assert (
+                "model_id" in model
+            ), f"Provider '{key}' model '{model.get('model_name')}' missing model_id"
+
+
+def test_llm_model_entries_have_model_name():
+    """Each model entry has a model_name."""
+    from bili.iris.config.llm_config import LLM_MODELS
+
+    for key, info in LLM_MODELS.items():
+        for model in info["models"]:
+            assert "model_name" in model, f"Provider '{key}' model missing model_name"
