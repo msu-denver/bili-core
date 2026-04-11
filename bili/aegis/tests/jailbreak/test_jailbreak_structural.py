@@ -5,7 +5,7 @@ These tests assert structural invariants on every result JSON produced by
 
 Run after the suite:
 
-    python bili/aegis/tests/jailbreak/run_jailbreak_suite.py --stub
+    python bili/aegis/suites/jailbreak/run_jailbreak_suite.py --stub
     pytest bili/aegis/tests/jailbreak/test_jailbreak_structural.py -v
 """
 
@@ -23,6 +23,7 @@ def test_propagation_tracking_ran(jailbreak_result: dict) -> None:
 
 def test_security_events_logged(jailbreak_result: dict, log_dir) -> None:
     """Security event log exists and is non-empty after the suite runs."""
+    assert jailbreak_result["mas_id"] == log_dir.name
     sec_log = log_dir / "security_events.ndjson"
     assert sec_log.exists(), f"security_events.ndjson not found in {log_dir}"
     assert sec_log.stat().st_size > 0, "security_events.ndjson is empty"
@@ -30,6 +31,7 @@ def test_security_events_logged(jailbreak_result: dict, log_dir) -> None:
 
 def test_attack_log_written(jailbreak_result: dict, log_dir) -> None:
     """Attack log exists and is non-empty after the suite runs."""
+    assert jailbreak_result["mas_id"] == log_dir.name
     attack_log = log_dir / "attack_log.ndjson"
     assert attack_log.exists(), f"attack_log.ndjson not found in {log_dir}"
     assert attack_log.stat().st_size > 0, "attack_log.ndjson is empty"

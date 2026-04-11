@@ -15,10 +15,10 @@ import pytest
 # -----------------------------------------------------------------------
 # Module paths under test
 # -----------------------------------------------------------------------
-_AI_MOD = "bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite"
-_BI_MOD = "bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite"
-_JB_MOD = "bili.aegis.tests.jailbreak.run_jailbreak_suite"
-_MP_MOD = "bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite"
+_AI_MOD = "bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite"
+_BI_MOD = "bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite"
+_JB_MOD = "bili.aegis.suites.jailbreak.run_jailbreak_suite"
+_MP_MOD = "bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite"
 
 
 # -----------------------------------------------------------------------
@@ -62,7 +62,7 @@ class TestAgentImpersonationRunnerMain:
             "argv",
             ["run_agent_impersonation_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -90,7 +90,7 @@ class TestAgentImpersonationRunnerMain:
             "argv",
             ["run_agent_impersonation_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -120,7 +120,7 @@ class TestAgentImpersonationRunnerMain:
                 "ai_a",
             ],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -149,7 +149,7 @@ class TestAgentImpersonationRunnerMain:
                 "nonexistent",
             ],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -176,7 +176,7 @@ class TestAgentImpersonationRunnerMain:
                 "b.yaml",
             ],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -200,7 +200,7 @@ class TestAgentImpersonationRunnerMain:
             "argv",
             ["run_agent_impersonation_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -229,7 +229,7 @@ class TestAgentImpersonationRunnerMain:
                 "pre_execution",
             ],
         ):
-            from bili.aegis.tests.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.agent_impersonation.run_agent_impersonation_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -262,7 +262,7 @@ class TestBiasInheritanceRunnerMain:
             "argv",
             ["run_bias_inheritance_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -290,7 +290,7 @@ class TestBiasInheritanceRunnerMain:
             "argv",
             ["run_bias_inheritance_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -320,7 +320,7 @@ class TestBiasInheritanceRunnerMain:
                 "bi_a",
             ],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -349,7 +349,7 @@ class TestBiasInheritanceRunnerMain:
                 "nonexistent",
             ],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -376,7 +376,7 @@ class TestBiasInheritanceRunnerMain:
                 "b.yaml",
             ],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -400,7 +400,7 @@ class TestBiasInheritanceRunnerMain:
             "argv",
             ["run_bias_inheritance_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -429,7 +429,7 @@ class TestBiasInheritanceRunnerMain:
                 "mid_execution",
             ],
         ):
-            from bili.aegis.tests.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.bias_inheritance.run_bias_inheritance_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -462,7 +462,7 @@ class TestJailbreakRunnerMain:
             "argv",
             ["run_jailbreak_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -490,7 +490,7 @@ class TestJailbreakRunnerMain:
             "argv",
             ["run_jailbreak_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -520,7 +520,7 @@ class TestJailbreakRunnerMain:
                 "jb_a",
             ],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -549,7 +549,7 @@ class TestJailbreakRunnerMain:
                 "nonexistent",
             ],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -576,7 +576,7 @@ class TestJailbreakRunnerMain:
                 "b.yaml",
             ],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -600,7 +600,7 @@ class TestJailbreakRunnerMain:
             "argv",
             ["run_jailbreak_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -629,7 +629,7 @@ class TestJailbreakRunnerMain:
                 "pre_execution",
             ],
         ):
-            from bili.aegis.tests.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.jailbreak.run_jailbreak_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -662,7 +662,7 @@ class TestMemoryPoisoningRunnerMain:
             "argv",
             ["run_memory_poisoning_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -690,7 +690,7 @@ class TestMemoryPoisoningRunnerMain:
             "argv",
             ["run_memory_poisoning_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -720,7 +720,7 @@ class TestMemoryPoisoningRunnerMain:
                 "mp_a",
             ],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -749,7 +749,7 @@ class TestMemoryPoisoningRunnerMain:
                 "nonexistent",
             ],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -776,7 +776,7 @@ class TestMemoryPoisoningRunnerMain:
                 "b.yaml",
             ],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -800,7 +800,7 @@ class TestMemoryPoisoningRunnerMain:
             "argv",
             ["run_memory_poisoning_suite.py", "--stub"],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 
@@ -829,7 +829,7 @@ class TestMemoryPoisoningRunnerMain:
                 "mid_execution",
             ],
         ):
-            from bili.aegis.tests.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
+            from bili.aegis.suites.memory_poisoning.run_memory_poisoning_suite import (  # pylint: disable=import-outside-toplevel
                 main,
             )
 

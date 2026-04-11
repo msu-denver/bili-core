@@ -28,11 +28,6 @@ from typing import Any, Optional
 
 import streamlit as st
 
-# Suppress the FileNotFoundError traceback for bootstrap.min.css.map
-logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
-    logging.ERROR
-)
-
 from bili.aegis.attacks.injector import AttackInjector
 from bili.aegis.attacks.models import AttackResult, AttackType, InjectionPhase
 from bili.aegis.attacks.propagation import PropagationTracker
@@ -57,6 +52,11 @@ BASELINE_RESULTS_DIR = (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+# Suppress the FileNotFoundError traceback for bootstrap.min.css.map
+logging.getLogger("streamlit.web.server.component_request_handler").setLevel(
+    logging.ERROR
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -84,16 +84,16 @@ _SUITE_DISPLAY = {
 }
 
 _SUITE_PAYLOAD_MODULES = {
-    "injection": "bili.aegis.tests.injection.payloads.prompt_injection_payloads",
-    "jailbreak": "bili.aegis.tests.jailbreak.payloads.jailbreak_payloads",
+    "injection": "bili.aegis.suites.injection.payloads.prompt_injection_payloads",
+    "jailbreak": "bili.aegis.suites.jailbreak.payloads.jailbreak_payloads",
     "memory_poisoning": (
-        "bili.aegis.tests.memory_poisoning.payloads.memory_poisoning_payloads"
+        "bili.aegis.suites.memory_poisoning.payloads.memory_poisoning_payloads"
     ),
     "bias_inheritance": (
-        "bili.aegis.tests.bias_inheritance.payloads.bias_inheritance_payloads"
+        "bili.aegis.suites.bias_inheritance.payloads.bias_inheritance_payloads"
     ),
     "agent_impersonation": (
-        "bili.aegis.tests.agent_impersonation.payloads.agent_impersonation_payloads"
+        "bili.aegis.suites.agent_impersonation.payloads.agent_impersonation_payloads"
     ),
 }
 

@@ -1,0 +1,2 @@
+model_id,model_name,provider_family,payload_id,injection_type,severity,stub_mode,mas_id,phase,tier1_pass,tier2_influenced,tier2_resistant,tier3_score,tier3_confidence,tier3_reasoning,attack_suite,skipped,skip_reason
+,,,,,,,,,true,,,,,,,false,

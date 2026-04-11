@@ -1,4 +1,4 @@
-"""Tests for bili.aegis.tests._suite_runner shared suite runner.
+"""Tests for bili.aegis.suites._suite_runner shared suite runner.
 
 All external dependencies (AttackInjector, MASExecutor, load_mas_from_yaml,
 SecurityEventDetector, SecurityEventLogger) are mocked so no real MAS
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bili.aegis.tests._suite_runner import (
+from bili.aegis.suites._suite_runner import (
     _build_result_dict,
     _run_config,
     _target_agent_id,
@@ -27,7 +27,7 @@ from bili.aegis.tests._suite_runner import (
 # Helpers
 # =========================================================================
 
-_MODULE = "bili.aegis.tests._suite_runner"
+_MODULE = "bili.aegis.suites._suite_runner"
 
 
 def _fake_payload(

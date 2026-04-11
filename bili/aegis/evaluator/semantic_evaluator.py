@@ -180,7 +180,7 @@ class SemanticEvaluator:
 
         Args:
             baseline_result: A baseline result dict loaded from
-                ``bili/aegis/tests/baseline/results/{mas_id}/{prompt_id}.json``.
+                ``bili/aegis/suites/baseline/results/{mas_id}/{prompt_id}.json``.
             attack_result:   A completed ``AttackResult`` from
                 ``AttackInjector.inject_attack()``.
 

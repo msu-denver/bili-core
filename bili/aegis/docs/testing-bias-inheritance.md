@@ -84,9 +84,9 @@ adoption.
 ### Stub mode (no LLM calls — Tier 1 and Tier 2 only)
 
 ```bash
-python bili/aegis/tests/bias_inheritance/run_bias_inheritance_suite.py --stub
+python bili/aegis/suites/bias_inheritance/run_bias_inheritance_suite.py --stub
 
-pytest bili/aegis/tests/bias_inheritance/test_bias_inheritance_structural.py -v
+pytest bili/aegis/suites/bias_inheritance/test_bias_inheritance_structural.py -v
 ```
 
 ### Real LLM mode (Tier 3 enabled)
@@ -95,14 +95,14 @@ Tier 3 is particularly important for this suite — Tier 2 results alone should 
 treated as conclusive for bias inheritance.
 
 ```bash
-python bili/aegis/tests/bias_inheritance/run_bias_inheritance_suite.py \
-    --baseline-results bili/aegis/tests/baseline/results
+python bili/aegis/suites/bias_inheritance/run_bias_inheritance_suite.py \
+    --baseline-results bili/aegis/suites/baseline/results
 ```
 
 ### Filtered run
 
 ```bash
-python bili/aegis/tests/bias_inheritance/run_bias_inheritance_suite.py --stub \
+python bili/aegis/suites/bias_inheritance/run_bias_inheritance_suite.py --stub \
     --payloads bi_political_slant_001 bi_outcome_bias_002 \
     --phases pre_execution \
     --configs bili/aether/config/examples/simple_chain.yaml
@@ -175,7 +175,7 @@ argument for semantic evaluation necessity on subtle attacks.
 
 ## Results
 
-Results are written to `bili/aegis/tests/bias_inheritance/results/`:
+Results are written to `bili/aegis/suites/bias_inheritance/results/`:
 
 ```
 results/
@@ -211,7 +211,7 @@ results/
 ### Adding payloads
 
 Add a new `BiasInheritancePayload` entry to `BIAS_INHERITANCE_PAYLOADS` in
-`bili/aegis/tests/bias_inheritance/payloads/bias_inheritance_payloads.py`:
+`bili/aegis/suites/bias_inheritance/payloads/bias_inheritance_payloads.py`:
 
 ```python
 BiasInheritancePayload(
@@ -226,10 +226,10 @@ BiasInheritancePayload(
 ### Changing which configs are tested
 
 Pass `--configs` to the runner, or edit `CONFIG_PATHS` in
-`bili/aegis/tests/_helpers.py` to change the default set for all suites:
+`bili/aegis/suites/_helpers.py` to change the default set for all suites:
 
 ```bash
-python bili/aegis/tests/bias_inheritance/run_bias_inheritance_suite.py --stub \
+python bili/aegis/suites/bias_inheritance/run_bias_inheritance_suite.py --stub \
     --configs bili/aether/config/examples/consensus_network.yaml
 ```
 
@@ -251,7 +251,7 @@ Modify `BIAS_INHERITANCE_JUDGE_PROMPT` and `BIAS_INHERITANCE_SCORE_DESCRIPTIONS`
 ## Directory structure
 
 ```
-bili/aegis/tests/bias_inheritance/
+bili/aegis/suites/bias_inheritance/
 ├── __init__.py
 ├── conftest.py                               # pytest fixtures
 ├── pytest.ini                                # isolates this suite

@@ -66,7 +66,7 @@ content — use this to verify the framework wiring before spending API credits.
 
 ```bash
 # Pick any suite — all follow the same pattern
-python bili/aegis/tests/injection/run_injection_suite.py --stub
+python bili/aegis/suites/injection/run_injection_suite.py --stub
 ```
 
 You will see output like:
@@ -85,7 +85,7 @@ Prompt Injection Suite Summary
   Tier 2 influenced: 0 cases had ≥1 influenced agent
 ============================================================
 
-Results matrix written to: bili/aegis/tests/injection/results/injection_results_matrix.csv
+Results matrix written to: bili/aegis/suites/injection/results/injection_results_matrix.csv
 ```
 
 In stub mode, `influenced` will always be 0 — stub agents produce placeholder output
@@ -94,7 +94,7 @@ that does not contain compliance markers. This is expected.
 Then run the structural assertions against the results:
 
 ```bash
-pytest bili/aegis/tests/injection/test_injection_structural.py -v
+pytest bili/aegis/suites/injection/test_injection_structural.py -v
 ```
 
 All four tests should pass. If `results/` is empty, they are automatically skipped.
@@ -109,11 +109,11 @@ for your attack runs.
 
 ```bash
 # Real LLM mode — requires API credentials in .env
-python bili/aegis/tests/baseline/run_baseline.py
+python bili/aegis/suites/baseline/run_baseline.py
 ```
 
 This runs 20 prompts × 5 MAS configs = 100 executions and writes results to
-`bili/aegis/tests/baseline/results/`. See [testing-baseline.md](testing-baseline.md)
+`bili/aegis/suites/baseline/results/`. See [testing-baseline.md](testing-baseline.md)
 for reproducibility requirements and the result file format.
 
 > **Important**: Set `model_name` and `temperature` consistently in all five MAS
@@ -126,8 +126,8 @@ for reproducibility requirements and the result file format.
 ## 5. Run a suite in real LLM mode (with Tier 3)
 
 ```bash
-python bili/aegis/tests/injection/run_injection_suite.py \
-    --baseline-results bili/aegis/tests/baseline/results
+python bili/aegis/suites/injection/run_injection_suite.py \
+    --baseline-results bili/aegis/suites/baseline/results
 ```
 
 The runner will call `SemanticEvaluator` for each test case, which in turn calls the
@@ -173,7 +173,7 @@ for analysis:
 ```python
 import pandas as pd
 
-df = pd.read_csv("bili/aegis/tests/injection/results/injection_results_matrix.csv")
+df = pd.read_csv("bili/aegis/suites/injection/results/injection_results_matrix.csv")
 
 # Tier 1 pass rate by severity
 df.groupby("severity")["tier1_pass"].value_counts()
@@ -196,7 +196,7 @@ profiles:
 ```python
 import pandas as pd, glob
 
-dfs = [pd.read_csv(f) for f in glob.glob("bili/aegis/tests/*/results/*_results_matrix.csv")]
+dfs = [pd.read_csv(f) for f in glob.glob("bili/aegis/suites/*/results/*_results_matrix.csv")]
 combined = pd.concat(dfs, ignore_index=True)
 
 # Compare Tier 3 scores across attack types
@@ -210,23 +210,23 @@ combined.groupby("attack_suite")["tier3_score"].describe()
 Run each suite sequentially against the same baseline and collect all results:
 
 ```bash
-BASELINE="--baseline-results bili/aegis/tests/baseline/results"
+BASELINE="--baseline-results bili/aegis/suites/baseline/results"
 
-python bili/aegis/tests/injection/run_injection_suite.py $BASELINE
-python bili/aegis/tests/jailbreak/run_jailbreak_suite.py $BASELINE
-python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py $BASELINE
-python bili/aegis/tests/bias_inheritance/run_bias_inheritance_suite.py $BASELINE
-python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py $BASELINE
+python bili/aegis/suites/injection/run_injection_suite.py $BASELINE
+python bili/aegis/suites/jailbreak/run_jailbreak_suite.py $BASELINE
+python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py $BASELINE
+python bili/aegis/suites/bias_inheritance/run_bias_inheritance_suite.py $BASELINE
+python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py $BASELINE
 ```
 
 Run all structural test suites after:
 
 ```bash
-pytest bili/aegis/tests/injection/test_injection_structural.py \
-       bili/aegis/tests/jailbreak/test_jailbreak_structural.py \
-       bili/aegis/tests/memory_poisoning/test_memory_poisoning_structural.py \
-       bili/aegis/tests/bias_inheritance/test_bias_inheritance_structural.py \
-       bili/aegis/tests/agent_impersonation/test_agent_impersonation_structural.py \
+pytest bili/aegis/suites/injection/test_injection_structural.py \
+       bili/aegis/suites/jailbreak/test_jailbreak_structural.py \
+       bili/aegis/suites/memory_poisoning/test_memory_poisoning_structural.py \
+       bili/aegis/suites/bias_inheritance/test_bias_inheritance_structural.py \
+       bili/aegis/suites/agent_impersonation/test_agent_impersonation_structural.py \
        -v
 ```
 
@@ -240,7 +240,7 @@ Each suite has a payload library file in `payloads/`. Add a new dataclass entry 
 re-run the suite — no other changes are required.
 
 ```python
-# bili/aegis/tests/injection/payloads/prompt_injection_payloads.py
+# bili/aegis/suites/injection/payloads/prompt_injection_payloads.py
 
 InjectionPayload(
     payload_id="pi_direct_003",
@@ -268,7 +268,7 @@ Every runner accepts `--payloads`, `--phases`, and `--configs` flags:
 
 ```bash
 # Run two specific payloads, one phase, one config
-python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py --stub \
+python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py --stub \
     --payloads mp_credential_001 mp_authority_001 \
     --phases pre_execution \
     --configs bili/aether/config/examples/supervisor_moderation.yaml
@@ -276,12 +276,12 @@ python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py --stub \
 
 ### Changing the default config set
 
-Edit `CONFIG_PATHS` in `bili/aegis/tests/_helpers.py` to change which MAS configs
+Edit `CONFIG_PATHS` in `bili/aegis/suites/_helpers.py` to change which MAS configs
 all suites run against by default. This is the single source of truth for the config
 list — changing it here affects all five suites simultaneously.
 
 ```python
-# bili/aegis/tests/_helpers.py
+# bili/aegis/suites/_helpers.py
 CONFIG_PATHS: list[str] = [
     "bili/aether/config/examples/simple_chain.yaml",
     "bili/aether/config/examples/supervisor_moderation.yaml",
@@ -294,7 +294,7 @@ CONFIG_PATHS: list[str] = [
 Point any runner at a custom YAML config:
 
 ```bash
-python bili/aegis/tests/injection/run_injection_suite.py --stub \
+python bili/aegis/suites/injection/run_injection_suite.py --stub \
     --configs path/to/your/config.yaml
 ```
 

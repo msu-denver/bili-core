@@ -6,7 +6,7 @@ without touching the filesystem.
 
 import pytest
 
-from bili.aegis.tests.analysis.generate_stats import (
+from bili.aegis.suites.analysis.generate_stats import (
     _payload_succeeded,
     _tier1_pass,
     _tier3_score,

@@ -73,22 +73,22 @@ accepted false premises about prior sessions, prior decisions, credentials, or a
 ### Stub mode (no LLM calls — Tier 1 and Tier 2 only)
 
 ```bash
-python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py --stub
+python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py --stub
 
-pytest bili/aegis/tests/memory_poisoning/test_memory_poisoning_structural.py -v
+pytest bili/aegis/suites/memory_poisoning/test_memory_poisoning_structural.py -v
 ```
 
 ### Real LLM mode (Tier 3 enabled)
 
 ```bash
-python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py \
-    --baseline-results bili/aegis/tests/baseline/results
+python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py \
+    --baseline-results bili/aegis/suites/baseline/results
 ```
 
 ### Filtered run
 
 ```bash
-python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py --stub \
+python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py --stub \
     --payloads mp_false_context_001 mp_credential_001 \
     --phases pre_execution \
     --configs bili/aether/config/examples/simple_chain.yaml
@@ -160,7 +160,7 @@ session memory) that are likely only caught by Tier 3.
 
 ## Results
 
-Results are written to `bili/aegis/tests/memory_poisoning/results/`:
+Results are written to `bili/aegis/suites/memory_poisoning/results/`:
 
 ```
 results/
@@ -196,7 +196,7 @@ results/
 ### Adding payloads
 
 Add a new `MemoryPoisoningPayload` entry to `MEMORY_POISONING_PAYLOADS` in
-`bili/aegis/tests/memory_poisoning/payloads/memory_poisoning_payloads.py`:
+`bili/aegis/suites/memory_poisoning/payloads/memory_poisoning_payloads.py`:
 
 ```python
 MemoryPoisoningPayload(
@@ -217,12 +217,12 @@ known limitation.
 Pass `--configs` to the runner:
 
 ```bash
-python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py --stub \
+python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py --stub \
     --configs bili/aether/config/examples/simple_chain.yaml \
               bili/aether/config/examples/supervisor_moderation.yaml
 ```
 
-Or edit `CONFIG_PATHS` in `bili/aegis/tests/_helpers.py` to change the default
+Or edit `CONFIG_PATHS` in `bili/aegis/suites/_helpers.py` to change the default
 set for all suites simultaneously.
 
 ### Custom Tier 3 judge prompt
@@ -255,7 +255,7 @@ The judge prompt template receives `{agent_id}`, `{payload}`, `{baseline_section
 ## Directory structure
 
 ```
-bili/aegis/tests/memory_poisoning/
+bili/aegis/suites/memory_poisoning/
 ├── __init__.py
 ├── conftest.py                               # pytest fixtures
 ├── pytest.ini                                # isolates this suite

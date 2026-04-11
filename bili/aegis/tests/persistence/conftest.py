@@ -12,7 +12,7 @@ and ``security_events.ndjson``) are written there by the runner.
 Note on ``_find_repo_root``
 ---------------------------
 The helper is inlined here rather than imported from
-``bili.aegis.tests._helpers`` because this file must bootstrap ``sys.path``
+``bili.aegis.suites._helpers`` because this file must bootstrap ``sys.path``
 before any ``bili.*`` import is possible — the shared module cannot be
 imported until after ``sys.path`` contains the repo root.
 
@@ -26,8 +26,8 @@ Usage
 Run the suite first (requires a persistent checkpointer), then run the
 structural tests:
 
-    python bili/aegis/tests/persistence/run_persistence_suite.py
-    pytest bili/aegis/tests/persistence/test_persistence_structural.py -v
+    python bili/aegis/suites/persistence/run_persistence_suite.py
+    pytest bili/aegis/suites/persistence/test_persistence_structural.py -v
 """
 
 import json

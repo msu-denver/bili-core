@@ -278,29 +278,29 @@ secrets
 coverage.json
 
 # AETHER test results (collected at runtime — not committed)
-bili/aegis/tests/baseline/results/**/*.json
-bili/aegis/tests/baseline/results/**/*.csv
-bili/aegis/tests/injection/results/**/*.json
-bili/aegis/tests/injection/results/**/*.csv
-bili/aegis/tests/injection/results/**/*.ndjson
-bili/aegis/tests/jailbreak/results/**/*.json
-bili/aegis/tests/jailbreak/results/**/*.csv
-bili/aegis/tests/jailbreak/results/**/*.ndjson
-bili/aegis/tests/memory_poisoning/results/**/*.json
-bili/aegis/tests/memory_poisoning/results/**/*.csv
-bili/aegis/tests/memory_poisoning/results/**/*.ndjson
-bili/aegis/tests/bias_inheritance/results/**/*.json
-bili/aegis/tests/bias_inheritance/results/**/*.csv
-bili/aegis/tests/bias_inheritance/results/**/*.ndjson
-bili/aegis/tests/agent_impersonation/results/**/*.json
-bili/aegis/tests/agent_impersonation/results/**/*.csv
-bili/aegis/tests/agent_impersonation/results/**/*.ndjson
-bili/aegis/tests/persistence/results/**/*.json
-bili/aegis/tests/persistence/results/**/*.csv
-bili/aegis/tests/persistence/results/**/*.ndjson
-bili/aegis/tests/cross_model/results/**/*.json
-bili/aegis/tests/cross_model/results/**/*.csv
-bili/aegis/tests/cross_model/results/**/*.ndjson
+bili/aegis/suites/baseline/results/**/*.json
+bili/aegis/suites/baseline/results/**/*.csv
+bili/aegis/suites/injection/results/**/*.json
+bili/aegis/suites/injection/results/**/*.csv
+bili/aegis/suites/injection/results/**/*.ndjson
+bili/aegis/suites/jailbreak/results/**/*.json
+bili/aegis/suites/jailbreak/results/**/*.csv
+bili/aegis/suites/jailbreak/results/**/*.ndjson
+bili/aegis/suites/memory_poisoning/results/**/*.json
+bili/aegis/suites/memory_poisoning/results/**/*.csv
+bili/aegis/suites/memory_poisoning/results/**/*.ndjson
+bili/aegis/suites/bias_inheritance/results/**/*.json
+bili/aegis/suites/bias_inheritance/results/**/*.csv
+bili/aegis/suites/bias_inheritance/results/**/*.ndjson
+bili/aegis/suites/agent_impersonation/results/**/*.json
+bili/aegis/suites/agent_impersonation/results/**/*.csv
+bili/aegis/suites/agent_impersonation/results/**/*.ndjson
+bili/aegis/suites/persistence/results/**/*.json
+bili/aegis/suites/persistence/results/**/*.csv
+bili/aegis/suites/persistence/results/**/*.ndjson
+bili/aegis/suites/cross_model/results/**/*.json
+bili/aegis/suites/cross_model/results/**/*.csv
+bili/aegis/suites/cross_model/results/**/*.ndjson
 
 # Stray MASExecutor result files (root-level, from runs with save_results=True and no log_dir)
 # Pattern matches {mas_id}_{8-hex-chars}.json produced by MASExecutor's default naming.

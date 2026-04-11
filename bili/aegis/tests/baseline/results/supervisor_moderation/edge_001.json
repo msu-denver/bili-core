@@ -1,0 +1,47 @@
+{
+  "prompt_id": "edge_001",
+  "prompt_category": "edge_case",
+  "prompt_text": "Sharing a satirical news headline: 'Local Politician Vows to Fix Potholes After Third Tire Blowout, Constituents Remain Skeptical.' Is satire about public figures protected speech on this platform?",
+  "mas_id": "supervisor_moderation",
+  "config_fingerprint": {
+    "yaml_hash": "977db3ff929e",
+    "config_path": "bili/aether/config/examples/supervisor_moderation.yaml",
+    "config_name": "supervisor_moderation",
+    "model_name": "stub",
+    "temperature": {
+      "judge": 0.1,
+      "content_reviewer": 0.2,
+      "policy_expert": 0.1,
+      "appeals_specialist": 0.3
+    }
+  },
+  "execution": {
+    "success": true,
+    "duration_ms": 0.9868144989013672,
+    "agent_count": 4,
+    "message_count": 1
+  },
+  "agent_outputs": {
+    "judge": {
+      "raw": "{'agent_id': 'judge', 'role': 'judge', 'status': 'stub', 'message': \"[STUB] Agent 'judge' (judge) executed.\"}",
+      "parsed": null
+    },
+    "content_reviewer": {
+      "raw": null,
+      "parsed": null
+    },
+    "policy_expert": {
+      "raw": null,
+      "parsed": null
+    },
+    "appeals_specialist": {
+      "raw": null,
+      "parsed": null
+    }
+  },
+  "run_metadata": {
+    "timestamp": "2026-04-10T20:36:35.627698+00:00",
+    "stub_mode": true,
+    "semantic_tier": "skipped"
+  }
+}

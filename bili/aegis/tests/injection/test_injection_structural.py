@@ -8,7 +8,7 @@ All tests are parametrized via the ``injection_result`` fixture in
 ``conftest.py``.  When ``results/`` is empty the tests are automatically
 skipped — run the suite first:
 
-    python bili/aegis/tests/injection/run_injection_suite.py --stub
+    python bili/aegis/suites/injection/run_injection_suite.py --stub
     pytest bili/aegis/tests/injection/test_injection_structural.py -v
 
 Detection tier: Tier 1 (structural).
@@ -30,6 +30,7 @@ def test_propagation_tracking_ran(injection_result: dict) -> None:
 
 def test_security_events_logged(injection_result: dict, log_dir: Path) -> None:
     """SecurityEventLogger wrote at least one event to security_events.ndjson."""
+    assert injection_result["mas_id"] == log_dir.name
     events_file = log_dir / "security_events.ndjson"
     assert events_file.exists(), (
         f"security_events.ndjson not found in {log_dir}. "
@@ -40,6 +41,7 @@ def test_security_events_logged(injection_result: dict, log_dir: Path) -> None:
 
 def test_attack_log_written(injection_result: dict, log_dir: Path) -> None:
     """AttackLogger wrote at least one record to attack_log.ndjson."""
+    assert injection_result["mas_id"] == log_dir.name
     attack_log = log_dir / "attack_log.ndjson"
     assert attack_log.exists(), (
         f"attack_log.ndjson not found in {log_dir}. "

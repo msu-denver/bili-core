@@ -216,13 +216,13 @@ for event in executor.stream(input_data):
 
 ```bash
 # Stub mode (no LLM calls — validates framework execution)
-python bili/aegis/tests/injection/run_injection_suite.py --stub
+python bili/aegis/suites/injection/run_injection_suite.py --stub
 
 # Full run (requires API credentials)
-python bili/aegis/tests/injection/run_injection_suite.py
+python bili/aegis/suites/injection/run_injection_suite.py
 
 # Generate statistics report
-python bili/aegis/tests/analysis/generate_stats.py
+python bili/aegis/suites/analysis/generate_stats.py
 ```
 
 ---
@@ -271,7 +271,7 @@ pylint bili/ --fail-under=9      # Lint check (must score 9+/10)
 # Inside the container
 pytest bili/iris/                  # IRIS unit tests
 pytest bili/aether/tests/          # AETHER unit tests
-pytest bili/aegis/tests/test_*.py  # AEGIS unit tests
+pytest bili/aegis/suites/test_*.py  # AEGIS unit tests
 ```
 
 ### Environment Variables
@@ -299,8 +299,8 @@ v5.0 reorganizes the codebase into the three-component architecture. Import path
 | `bili.aether.attacks.*` | `bili.aegis.attacks.*` |
 | `bili.aether.evaluator.*` | `bili.aegis.evaluator.*` |
 | `bili.aether.security.*` | `bili.aegis.security.*` |
-| `bili.aether.tests.injection.*` | `bili.aegis.tests.injection.*` |
-| *(other attack suites)* | `bili.aegis.tests.<suite>.*` |
+| `bili.aether.tests.injection.*` | `bili.aegis.suites.injection.*` |
+| *(other attack suites)* | `bili.aegis.suites.<suite>.*` |
 
 **Unchanged paths:** `bili.aether.*` (schema, compiler, runtime, config, UI), `bili.auth.*`, `bili.utils.*`, `bili.prompts.*`
 

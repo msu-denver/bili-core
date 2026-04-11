@@ -4,6 +4,9 @@ Covers run_verification cycle, _create_checkpointer factory,
 and main() CLI parsing. All external dependencies are mocked.
 """
 
+# Tests exercise private helpers (_create_checkpointer, _REPO_ROOT, etc.)
+# pylint: disable=protected-access
+
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -14,7 +17,7 @@ import pytest
 def _import_module():
     """Import the verify_persistence module."""
     # pylint: disable=import-outside-toplevel
-    from bili.aegis.tests.persistence import verify_persistence as mod
+    from bili.aegis.suites.persistence import verify_persistence as mod
 
     return mod
 
@@ -32,26 +35,26 @@ class TestCreateCheckpointer:
         """Memory backend returns (MemorySaver, False)."""
         mod = _import_module()
         mock_ms.return_value = MagicMock()
-        cp, persistent = mod._create_checkpointer("memory")
+        _saver, persistent = mod._create_checkpointer("memory")
         assert persistent is False
         mock_ms.assert_called_once()
 
-    @patch("bili.iris.checkpointers.pg_checkpointer" ".PruningPostgresSaver")
+    @patch("bili.iris.checkpointers.pg_checkpointer.PruningPostgresSaver")
     @patch.dict("os.environ", {"POSTGRES_CONNECTION_STRING": "pg://"})
     def test_postgres_backend(self, mock_pg):
         """Postgres backend returns (saver, True)."""
         mod = _import_module()
         mock_pg.from_conn_string_sync.return_value = MagicMock()
-        cp, persistent = mod._create_checkpointer("postgres")
+        _saver, persistent = mod._create_checkpointer("postgres")
         assert persistent is True
 
-    @patch("bili.iris.checkpointers.mongo_checkpointer" ".PruningMongoDBSaver")
+    @patch("bili.iris.checkpointers.mongo_checkpointer.PruningMongoDBSaver")
     @patch.dict("os.environ", {"MONGO_CONNECTION_STRING": "mongo://"})
     def test_mongo_backend(self, mock_mongo):
         """Mongo backend returns (saver, True)."""
         mod = _import_module()
         mock_mongo.from_conn_string_sync.return_value = MagicMock()
-        cp, persistent = mod._create_checkpointer("mongo")
+        _saver, persistent = mod._create_checkpointer("mongo")
         assert persistent is True
 
     def test_unknown_backend_raises(self):
@@ -69,10 +72,10 @@ class TestCreateCheckpointer:
 class TestRunVerification:
     """Tests for the run_verification cycle."""
 
-    @patch("bili.aegis.tests.persistence.verify_persistence" ".compile_mas")
-    @patch("bili.aegis.tests.persistence.verify_persistence" ".load_mas_from_yaml")
-    @patch("bili.aegis.tests.persistence.verify_persistence" "._create_checkpointer")
-    @patch("bili.aegis.tests.persistence.verify_persistence" ".inject_persistence")
+    @patch("bili.aegis.suites.persistence.verify_persistence.compile_mas")
+    @patch("bili.aegis.suites.persistence.verify_persistence.load_mas_from_yaml")
+    @patch("bili.aegis.suites.persistence.verify_persistence._create_checkpointer")
+    @patch("bili.aegis.suites.persistence.verify_persistence.inject_persistence")
     def test_full_cycle_in_process(self, mock_inject, mock_cp, mock_load, mock_compile):
         """Full cycle with MemorySaver returns IN_PROCESS_ONLY."""
         mod = _import_module()
@@ -137,10 +140,9 @@ class TestMain:
     """Tests for main() CLI entry point."""
 
     @patch(
-        "bili.aegis.tests.persistence.verify_persistence"
-        ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.persistence.verify_persistence.argparse.ArgumentParser.parse_args"
     )
-    @patch("bili.aegis.tests.persistence.verify_persistence" ".run_verification")
+    @patch("bili.aegis.suites.persistence.verify_persistence.run_verification")
     def test_writes_report_and_exits_zero(self, mock_verify, mock_args, tmp_path):
         """Writes JSON report for successful verification."""
         mod = _import_module()
@@ -167,11 +169,10 @@ class TestMain:
         assert data["verdict"] == "IN_PROCESS_ONLY"
 
     @patch(
-        "bili.aegis.tests.persistence.verify_persistence"
-        ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.persistence.verify_persistence.argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.persistence.verify_persistence" ".run_verification",
+        "bili.aegis.suites.persistence.verify_persistence.run_verification",
         side_effect=FileNotFoundError("nope"),
     )
     def test_error_exits_one(self, _mock_verify, mock_args):
@@ -191,11 +192,10 @@ class TestMain:
         assert exc_info.value.code == 1
 
     @patch(
-        "bili.aegis.tests.persistence.verify_persistence"
-        ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.persistence.verify_persistence.argparse.ArgumentParser.parse_args"
     )
-    @patch("bili.aegis.tests.persistence.verify_persistence" ".run_verification")
-    @patch("bili.aegis.tests.persistence.verify_persistence" ".PERSISTENCE_PAYLOADS")
+    @patch("bili.aegis.suites.persistence.verify_persistence.run_verification")
+    @patch("bili.aegis.suites.persistence.verify_persistence.PERSISTENCE_PAYLOADS")
     def test_payload_id_lookup(self, mock_payloads, mock_verify, mock_args, tmp_path):
         """--payload-id resolves from the payload library."""
         mod = _import_module()
@@ -223,11 +223,10 @@ class TestMain:
         assert call_kwargs["payload"] == "injected text"
 
     @patch(
-        "bili.aegis.tests.persistence.verify_persistence"
-        ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.persistence.verify_persistence.argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.persistence.verify_persistence" ".PERSISTENCE_PAYLOADS",
+        "bili.aegis.suites.persistence.verify_persistence.PERSISTENCE_PAYLOADS",
         [],
     )
     def test_unknown_payload_id_exits(self, mock_args):

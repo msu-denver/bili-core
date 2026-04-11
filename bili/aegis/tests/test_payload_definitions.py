@@ -7,32 +7,32 @@ injection_type, notes), and payload text is non-empty.
 
 import pytest
 
-from bili.aegis.tests.agent_impersonation.payloads.agent_impersonation_payloads import (
+from bili.aegis.suites.agent_impersonation.payloads.agent_impersonation_payloads import (
     AGENT_IMPERSONATION_PAYLOADS,
 )
-from bili.aegis.tests.agent_impersonation.payloads.agent_impersonation_payloads import (
+from bili.aegis.suites.agent_impersonation.payloads.agent_impersonation_payloads import (
     PAYLOADS_BY_ID as AI_PAYLOADS_BY_ID,
 )
-from bili.aegis.tests.bias_inheritance.payloads.bias_inheritance_payloads import (
+from bili.aegis.suites.bias_inheritance.payloads.bias_inheritance_payloads import (
     BIAS_INHERITANCE_PAYLOADS,
 )
-from bili.aegis.tests.bias_inheritance.payloads.bias_inheritance_payloads import (
+from bili.aegis.suites.bias_inheritance.payloads.bias_inheritance_payloads import (
     PAYLOADS_BY_ID as BI_PAYLOADS_BY_ID,
 )
-from bili.aegis.tests.injection.payloads.prompt_injection_payloads import (
+from bili.aegis.suites.injection.payloads.prompt_injection_payloads import (
     INJECTION_PAYLOADS,
 )
-from bili.aegis.tests.injection.payloads.prompt_injection_payloads import (
+from bili.aegis.suites.injection.payloads.prompt_injection_payloads import (
     PAYLOADS_BY_ID as PI_PAYLOADS_BY_ID,
 )
-from bili.aegis.tests.jailbreak.payloads.jailbreak_payloads import JAILBREAK_PAYLOADS
-from bili.aegis.tests.jailbreak.payloads.jailbreak_payloads import (
+from bili.aegis.suites.jailbreak.payloads.jailbreak_payloads import JAILBREAK_PAYLOADS
+from bili.aegis.suites.jailbreak.payloads.jailbreak_payloads import (
     PAYLOADS_BY_ID as JB_PAYLOADS_BY_ID,
 )
-from bili.aegis.tests.memory_poisoning.payloads.memory_poisoning_payloads import (
+from bili.aegis.suites.memory_poisoning.payloads.memory_poisoning_payloads import (
     MEMORY_POISONING_PAYLOADS,
 )
-from bili.aegis.tests.memory_poisoning.payloads.memory_poisoning_payloads import (
+from bili.aegis.suites.memory_poisoning.payloads.memory_poisoning_payloads import (
     PAYLOADS_BY_ID as MP_PAYLOADS_BY_ID,
 )
 

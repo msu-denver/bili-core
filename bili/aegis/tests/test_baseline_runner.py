@@ -14,7 +14,7 @@ import pytest
 def _import_module():
     """Import the baseline runner module."""
     # pylint: disable=import-outside-toplevel
-    from bili.aegis.tests.baseline import run_baseline as mod
+    from bili.aegis.suites.baseline import run_baseline as mod
 
     return mod
 
@@ -78,7 +78,7 @@ class TestPrintSummary:
 class TestRunOne:
     """Tests for _run_one helper."""
 
-    @patch("bili.aegis.tests.baseline.run_baseline.MASExecutor")
+    @patch("bili.aegis.suites.baseline.run_baseline.MASExecutor")
     def test_returns_result_dict(self, mock_executor_cls):
         """Returns a well-formed result dictionary."""
         mod = _import_module()
@@ -129,11 +129,11 @@ class TestMain:
     """Tests for main() CLI entry point."""
 
     @patch(
-        "bili.aegis.tests.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
     )
-    @patch("bili.aegis.tests.baseline.run_baseline.load_mas_from_yaml")
-    @patch("bili.aegis.tests.baseline.run_baseline._run_one")
-    @patch("bili.aegis.tests.baseline.run_baseline._write_result")
+    @patch("bili.aegis.suites.baseline.run_baseline.load_mas_from_yaml")
+    @patch("bili.aegis.suites.baseline.run_baseline._run_one")
+    @patch("bili.aegis.suites.baseline.run_baseline._write_result")
     def test_stub_mode_runs_all_configs(
         self,
         mock_write,
@@ -187,10 +187,10 @@ class TestMain:
         assert agent.model_name is None
 
     @patch(
-        "bili.aegis.tests.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.baseline.run_baseline.BASELINE_PROMPTS",
+        "bili.aegis.suites.baseline.run_baseline.BASELINE_PROMPTS",
         [],
     )
     def test_no_matching_prompts_exits(self, mock_args):
@@ -207,14 +207,14 @@ class TestMain:
         assert exc_info.value.code == 1
 
     @patch(
-        "bili.aegis.tests.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
+        "bili.aegis.suites.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
     )
-    @patch("bili.aegis.tests.baseline.run_baseline.load_mas_from_yaml")
+    @patch("bili.aegis.suites.baseline.run_baseline.load_mas_from_yaml")
     @patch(
-        "bili.aegis.tests.baseline.run_baseline._run_one",
+        "bili.aegis.suites.baseline.run_baseline._run_one",
         side_effect=RuntimeError("boom"),
     )
-    @patch("bili.aegis.tests.baseline.run_baseline._write_result")
+    @patch("bili.aegis.suites.baseline.run_baseline._write_result")
     def test_run_one_error_writes_failed_result(
         self, mock_write, mock_run, mock_load, mock_args, tmp_path
     ):

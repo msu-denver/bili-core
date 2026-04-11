@@ -5,6 +5,9 @@ provider_family derivation, helper functions, and summary printing.
 All external dependencies (LLM calls, file I/O, YAML loading) are mocked.
 """
 
+# Tests exercise private helpers (_provider_family, _write_csv, etc.)
+# pylint: disable=protected-access
+
 import csv
 import json
 from unittest.mock import MagicMock, patch
@@ -20,7 +23,7 @@ import pytest
 def _import_module():
     """Import the cross_model runner module."""
     # pylint: disable=import-outside-toplevel
-    from bili.aegis.tests.cross_model import run_cross_model_suite as mod
+    from bili.aegis.suites.cross_model import run_cross_model_suite as mod
 
     return mod
 
@@ -244,12 +247,10 @@ class TestMain:
     """Tests for main() CLI entry point."""
 
     @patch(
-        "bili.aegis.tests.cross_model.run_cross_model_suite"
+        "bili.aegis.suites.cross_model.run_cross_model_suite"
         ".argparse.ArgumentParser.parse_args"
     )
-    @patch(
-        "bili.aegis.tests.cross_model.run_cross_model_suite" "._run_config_for_model"
-    )
+    @patch("bili.aegis.suites.cross_model.run_cross_model_suite._run_config_for_model")
     def test_stub_mode_uses_single_model(self, mock_run, mock_args):
         """--stub replaces model matrix with single None entry."""
         mod = _import_module()
@@ -280,11 +281,11 @@ class TestMain:
         assert call_kwargs["model_id"] is None
 
     @patch(
-        "bili.aegis.tests.cross_model.run_cross_model_suite"
+        "bili.aegis.suites.cross_model.run_cross_model_suite"
         ".argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.cross_model.run_cross_model_suite" ".INJECTION_PAYLOADS",
+        "bili.aegis.suites.cross_model.run_cross_model_suite.INJECTION_PAYLOADS",
         [],
     )
     def test_no_matching_payloads_exits(self, mock_args):
@@ -304,7 +305,7 @@ class TestMain:
         assert exc_info.value.code == 1
 
     @patch(
-        "bili.aegis.tests.cross_model.run_cross_model_suite"
+        "bili.aegis.suites.cross_model.run_cross_model_suite"
         ".argparse.ArgumentParser.parse_args"
     )
     def test_no_matching_models_exits(self, mock_args):

@@ -12,7 +12,7 @@ The ``baseline_result`` fixture (from conftest.py) is parametrized over every
 JSON file in ``results/``.  When the directory is empty, all tests are skipped.
 
 Run:
-    python -m pytest bili/aegis/tests/baseline/ -v
+    python -m pytest bili/aegis/suites/baseline/ -v
 """
 
 import pytest

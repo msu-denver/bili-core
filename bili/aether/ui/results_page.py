@@ -118,9 +118,9 @@ def _render_sidebar() -> None:
     st.markdown(
         "Generate results by running the baseline suite:\n\n"
         "```\n# Stub mode (no LLM calls)\n"
-        "python bili/aegis/tests/baseline/run_baseline.py --stub\n\n"
+        "python bili/aegis/suites/baseline/run_baseline.py --stub\n\n"
         "# Full run (requires API credentials)\n"
-        "python bili/aegis/tests/baseline/run_baseline.py\n```"
+        "python bili/aegis/suites/baseline/run_baseline.py\n```"
     )
 
 
@@ -163,7 +163,7 @@ def _render_main() -> None:
         st.info(
             "No baseline results found.\n\n"
             "Run the baseline suite to populate this view:\n\n"
-            "```\npython bili/aegis/tests/baseline/run_baseline.py --stub\n```"
+            "```\npython bili/aegis/suites/baseline/run_baseline.py --stub\n```"
         )
         return
 

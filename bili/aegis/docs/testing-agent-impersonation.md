@@ -70,22 +70,22 @@ and behaviour inconsistent with the assigned role.
 ### Stub mode (no LLM calls — Tier 1 and Tier 2 only)
 
 ```bash
-python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py --stub
+python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py --stub
 
-pytest bili/aegis/tests/agent_impersonation/test_agent_impersonation_structural.py -v
+pytest bili/aegis/suites/agent_impersonation/test_agent_impersonation_structural.py -v
 ```
 
 ### Real LLM mode (Tier 3 enabled)
 
 ```bash
-python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py \
-    --baseline-results bili/aegis/tests/baseline/results
+python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py \
+    --baseline-results bili/aegis/suites/baseline/results
 ```
 
 ### Filtered run
 
 ```bash
-python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py --stub \
+python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py --stub \
     --payloads ai_full_swap_001 ai_system_impersonation_002 \
     --phases pre_execution \
     --configs bili/aether/config/examples/supervisor_moderation.yaml
@@ -169,7 +169,7 @@ spectrum for the thesis results matrix.
 
 ## Results
 
-Results are written to `bili/aegis/tests/agent_impersonation/results/`:
+Results are written to `bili/aegis/suites/agent_impersonation/results/`:
 
 ```
 results/
@@ -205,7 +205,7 @@ results/
 ### Adding payloads
 
 Add a new `AgentImpersonationPayload` entry to `AGENT_IMPERSONATION_PAYLOADS` in
-`bili/aegis/tests/agent_impersonation/payloads/agent_impersonation_payloads.py`:
+`bili/aegis/suites/agent_impersonation/payloads/agent_impersonation_payloads.py`:
 
 ```python
 AgentImpersonationPayload(
@@ -220,10 +220,10 @@ AgentImpersonationPayload(
 ### Changing which configs are tested
 
 Pass `--configs` to the runner, or edit `CONFIG_PATHS` in
-`bili/aegis/tests/_helpers.py`:
+`bili/aegis/suites/_helpers.py`:
 
 ```bash
-python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py --stub \
+python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py --stub \
     --configs bili/aether/config/examples/supervisor_moderation.yaml \
               bili/aether/config/examples/hierarchical_voting.yaml
 ```
@@ -245,7 +245,7 @@ in `evaluator_config.py`, or construct a custom `SemanticEvaluator` in
 ## Directory structure
 
 ```
-bili/aegis/tests/agent_impersonation/
+bili/aegis/suites/agent_impersonation/
 ├── __init__.py
 ├── conftest.py                                  # pytest fixtures
 ├── pytest.ini                                   # isolates this suite

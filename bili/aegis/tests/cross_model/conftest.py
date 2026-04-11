@@ -13,7 +13,7 @@ the runner.
 Note on ``_find_repo_root``
 ---------------------------
 The helper is inlined here rather than imported from
-``bili.aegis.tests._helpers`` because this file must bootstrap ``sys.path``
+``bili.aegis.suites._helpers`` because this file must bootstrap ``sys.path``
 before any ``bili.*`` import is possible — the shared module cannot be
 imported until after ``sys.path`` contains the repo root.
 
@@ -21,8 +21,8 @@ Usage
 -----
 Run the suite first, then run the structural tests:
 
-    python bili/aegis/tests/cross_model/run_cross_model_suite.py --stub
-    pytest bili/aegis/tests/cross_model/test_cross_model_structural.py -v
+    python bili/aegis/suites/cross_model/run_cross_model_suite.py --stub
+    pytest bili/aegis/suites/cross_model/test_cross_model_structural.py -v
 """
 
 import json
@@ -49,7 +49,7 @@ _REPO_ROOT = _find_repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from bili.aegis.tests._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
+from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     model_id_safe as _model_id_safe,
 )
 

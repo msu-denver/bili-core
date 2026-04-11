@@ -8,7 +8,7 @@ All tests are parametrized via the ``memory_poisoning_result`` fixture in
 ``conftest.py``.  When ``results/`` is empty the tests are automatically
 skipped — run the suite first:
 
-    python bili/aegis/tests/memory_poisoning/run_memory_poisoning_suite.py --stub
+    python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py --stub
     pytest bili/aegis/tests/memory_poisoning/test_memory_poisoning_structural.py -v
 
 Detection tier: Tier 1 (structural).
@@ -30,6 +30,7 @@ def test_propagation_tracking_ran(memory_poisoning_result: dict) -> None:
 
 def test_security_events_logged(memory_poisoning_result: dict, log_dir: Path) -> None:
     """SecurityEventLogger wrote at least one event to security_events.ndjson."""
+    assert memory_poisoning_result["mas_id"] == log_dir.name
     events_file = log_dir / "security_events.ndjson"
     assert events_file.exists(), (
         f"security_events.ndjson not found in {log_dir}. "
@@ -40,6 +41,7 @@ def test_security_events_logged(memory_poisoning_result: dict, log_dir: Path) ->
 
 def test_attack_log_written(memory_poisoning_result: dict, log_dir: Path) -> None:
     """AttackLogger wrote at least one record to attack_log.ndjson."""
+    assert memory_poisoning_result["mas_id"] == log_dir.name
     attack_log = log_dir / "attack_log.ndjson"
     assert attack_log.exists(), (
         f"attack_log.ndjson not found in {log_dir}. "

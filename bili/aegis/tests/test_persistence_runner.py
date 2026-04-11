@@ -15,7 +15,7 @@ import pytest
 def _import_module():
     """Import the persistence suite runner module."""
     # pylint: disable=import-outside-toplevel
-    from bili.aegis.tests.persistence import run_persistence_suite as mod
+    from bili.aegis.suites.persistence import run_persistence_suite as mod
 
     return mod
 
@@ -210,11 +210,11 @@ class TestMain:
     """Tests for main() CLI entry point."""
 
     @patch(
-        "bili.aegis.tests.persistence.run_persistence_suite"
+        "bili.aegis.suites.persistence.run_persistence_suite"
         ".argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.persistence.run_persistence_suite" "._run_persistence_config"
+        "bili.aegis.suites.persistence.run_persistence_suite" "._run_persistence_config"
     )
     def test_stub_mode_runs_configs(self, mock_run, mock_args):
         """--stub mode calls _run_persistence_config per config."""
@@ -243,11 +243,11 @@ class TestMain:
         assert mock_run.call_count == 2
 
     @patch(
-        "bili.aegis.tests.persistence.run_persistence_suite"
+        "bili.aegis.suites.persistence.run_persistence_suite"
         ".argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.persistence.run_persistence_suite" ".PERSISTENCE_PAYLOADS",
+        "bili.aegis.suites.persistence.run_persistence_suite" ".PERSISTENCE_PAYLOADS",
         [],
     )
     def test_no_matching_payloads_exits(self, mock_args):
@@ -265,11 +265,11 @@ class TestMain:
         assert exc_info.value.code == 1
 
     @patch(
-        "bili.aegis.tests.persistence.run_persistence_suite"
+        "bili.aegis.suites.persistence.run_persistence_suite"
         ".argparse.ArgumentParser.parse_args"
     )
     @patch(
-        "bili.aegis.tests.persistence.run_persistence_suite" "._run_persistence_config"
+        "bili.aegis.suites.persistence.run_persistence_suite" "._run_persistence_config"
     )
     def test_all_skipped_exits_zero(self, mock_run, mock_args):
         """Exits 0 when all rows are skipped (skip is not failure)."""

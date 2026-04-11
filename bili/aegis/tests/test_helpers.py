@@ -1,11 +1,11 @@
-"""Tests for bili.aegis.tests._helpers shared utilities."""
+"""Tests for bili.aegis.suites._helpers shared utilities."""
 
 import hashlib
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-from bili.aegis.tests._helpers import (
+from bili.aegis.suites._helpers import (
     CONFIG_PATHS,
     config_fingerprint,
     model_id_safe,

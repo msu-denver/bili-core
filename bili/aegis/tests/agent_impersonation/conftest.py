@@ -12,7 +12,7 @@ and ``security_events.ndjson``) are written there by the runner.
 Note on ``_find_repo_root``
 ---------------------------
 The helper is inlined here rather than imported from
-``bili.aegis.tests._helpers`` because this file must bootstrap ``sys.path``
+``bili.aegis.suites._helpers`` because this file must bootstrap ``sys.path``
 before any ``bili.*`` import is possible — the shared module cannot be
 imported until after ``sys.path`` contains the repo root.
 
@@ -25,8 +25,8 @@ Usage
 -----
 Run the suite first, then run the structural tests:
 
-    python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py --stub
-    pytest bili/aegis/tests/agent_impersonation/test_agent_impersonation_structural.py -v
+    python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py --stub
+    pytest bili/aegis/suites/agent_impersonation/test_agent_impersonation_structural.py -v
 """
 
 import json

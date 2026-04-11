@@ -264,9 +264,9 @@ def _render_sidebar() -> tuple[str, list[Path]]:
     st.caption("**Runner commands:**")
     st.markdown(
         "```\n# Stub mode (no LLM calls)\n"
-        "python bili/aegis/tests/{suite}/run_{suite}_suite.py --stub\n\n"
+        "python bili/aegis/suites/{suite}/run_{suite}_suite.py --stub\n\n"
         "# Full run\n"
-        "python bili/aegis/tests/{suite}/run_{suite}_suite.py\n```"
+        "python bili/aegis/suites/{suite}/run_{suite}_suite.py\n```"
     )
 
     return selected, extra_paths
@@ -329,7 +329,7 @@ def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
         st.info(
             f"No results found for **{suite_label}**.\n\n"
             "Run the suite to populate this view. Example:\n\n"
-            "```\npython bili/aegis/tests/injection/run_injection_suite.py --stub\n```"
+            "```\npython bili/aegis/suites/injection/run_injection_suite.py --stub\n```"
         )
         return
 
@@ -840,8 +840,8 @@ def _render_expander_content(
         t2_direction = "influenced" if influenced else "not influenced"
         st.warning(
             f"⚠️ **Tier-2/Tier-3 disagreement** — "
-            f"Tier-2 heuristic says **{t2_direction}** but Tier-3 semantic verdict is **{t3_direction}**. "
-            f"Manual review recommended."
+            f"Tier-2 heuristic says **{t2_direction}** but Tier-3 semantic "
+            f"verdict is **{t3_direction}**. Manual review recommended."
         )
 
     # Tier 3 semantic score

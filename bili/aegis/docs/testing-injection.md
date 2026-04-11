@@ -48,10 +48,10 @@ LLM-based scoring using `SemanticEvaluator` from `bili.aegis.evaluator`:
 
 ```bash
 # From repo root
-python bili/aegis/tests/injection/run_injection_suite.py --stub
+python bili/aegis/suites/injection/run_injection_suite.py --stub
 
 # Then run structural assertions
-pytest bili/aegis/tests/injection/test_injection_structural.py -v
+pytest bili/aegis/suites/injection/test_injection_structural.py -v
 ```
 
 ### Real LLM mode (Tier 3 enabled)
@@ -59,14 +59,14 @@ pytest bili/aegis/tests/injection/test_injection_structural.py -v
 Requires API credentials configured in your environment.
 
 ```bash
-python bili/aegis/tests/injection/run_injection_suite.py \
-    --baseline-results bili/aegis/tests/baseline/results
+python bili/aegis/suites/injection/run_injection_suite.py \
+    --baseline-results bili/aegis/suites/baseline/results
 ```
 
 ### Filtered run
 
 ```bash
-python bili/aegis/tests/injection/run_injection_suite.py --stub \
+python bili/aegis/suites/injection/run_injection_suite.py --stub \
     --payloads pi_direct_001 pi_role_001 \
     --phases pre_execution \
     --configs bili/aether/config/examples/simple_chain.yaml
@@ -120,7 +120,7 @@ positional, conditional, and obfuscation-based rather than direct overrides.
 
 ## Results
 
-Results are written to `bili/aegis/tests/injection/results/`:
+Results are written to `bili/aegis/suites/injection/results/`:
 
 ```
 results/
@@ -158,7 +158,7 @@ results/
 ### Adding payloads
 
 Add a new `InjectionPayload` entry to `INJECTION_PAYLOADS` in
-`bili/aegis/tests/injection/payloads/prompt_injection_payloads.py`:
+`bili/aegis/suites/injection/payloads/prompt_injection_payloads.py`:
 
 ```python
 InjectionPayload(
@@ -179,12 +179,12 @@ used deliberately to probe detection blind spots (see `pi_length_001`).
 Pass `--configs` to the runner:
 
 ```bash
-python bili/aegis/tests/injection/run_injection_suite.py --stub \
+python bili/aegis/suites/injection/run_injection_suite.py --stub \
     --configs bili/aether/config/examples/simple_chain.yaml \
               bili/aether/config/examples/supervisor_moderation.yaml
 ```
 
-Or edit `CONFIG_PATHS` in `bili/aegis/tests/_helpers.py` to change the default
+Or edit `CONFIG_PATHS` in `bili/aegis/suites/_helpers.py` to change the default
 set for all suites simultaneously.
 
 ### Custom Tier 3 judge prompt
@@ -217,7 +217,7 @@ The judge prompt template receives `{agent_id}`, `{payload}`, `{baseline_section
 ## Directory structure
 
 ```
-bili/aegis/tests/injection/
+bili/aegis/suites/injection/
 ├── conftest.py                          # pytest fixtures
 ├── pytest.ini                           # isolates this suite
 ├── run_injection_suite.py               # standalone runner — produces results + CSV

@@ -8,7 +8,7 @@ All tests are parametrized via the ``agent_impersonation_result`` fixture in
 ``conftest.py``.  When ``results/`` is empty the tests are automatically
 skipped — run the suite first:
 
-    python bili/aegis/tests/agent_impersonation/run_agent_impersonation_suite.py --stub
+    python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py --stub
     pytest bili/aegis/tests/agent_impersonation/test_agent_impersonation_structural.py -v
 
 Detection tier: Tier 1 (structural).

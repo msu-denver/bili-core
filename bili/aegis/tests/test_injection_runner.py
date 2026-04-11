@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-_MODULE = "bili.aegis.tests.injection.run_injection_suite"
+_MODULE = "bili.aegis.suites.injection.run_injection_suite"
 
 
 def _fake_payload(
@@ -38,7 +38,7 @@ class TestInjectionRunnerMain:
     def test_stub_mode_passes_correct_args(self, mock_run_suite):
         """Stub mode passes stub=True and no evaluator."""
         with patch.object(sys, "argv", ["run_injection_suite.py", "--stub"]):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             mock_run_suite.side_effect = SystemExit(0)
             with pytest.raises(SystemExit):
@@ -58,7 +58,7 @@ class TestInjectionRunnerMain:
     def test_phases_default_to_both(self, mock_run_suite):
         """Default phases include pre_execution and mid_execution."""
         with patch.object(sys, "argv", ["run_injection_suite.py", "--stub"]):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             mock_run_suite.side_effect = SystemExit(0)
             with pytest.raises(SystemExit):
@@ -86,7 +86,7 @@ class TestInjectionRunnerMain:
                 "pi_a",
             ],
         ):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             mock_run_suite.side_effect = SystemExit(0)
             with pytest.raises(SystemExit):
@@ -111,7 +111,7 @@ class TestInjectionRunnerMain:
                 "pre_execution",
             ],
         ):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             mock_run_suite.side_effect = SystemExit(0)
             with pytest.raises(SystemExit):
@@ -134,7 +134,7 @@ class TestInjectionRunnerMain:
                 "nonexistent_id",
             ],
         ):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             with pytest.raises(SystemExit) as exc_info:
                 main()
@@ -157,7 +157,7 @@ class TestInjectionRunnerMain:
                 "custom/b.yaml",
             ],
         ):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             mock_run_suite.side_effect = SystemExit(0)
             with pytest.raises(SystemExit):
@@ -175,7 +175,7 @@ class TestInjectionRunnerMain:
     def test_results_dir_is_injection_results(self, mock_run_suite):
         """Results directory is the injection results folder."""
         with patch.object(sys, "argv", ["run_injection_suite.py", "--stub"]):
-            from bili.aegis.tests.injection.run_injection_suite import main
+            from bili.aegis.suites.injection.run_injection_suite import main
 
             mock_run_suite.side_effect = SystemExit(0)
             with pytest.raises(SystemExit):

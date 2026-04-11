@@ -8,7 +8,7 @@ All tests are parametrized via the ``persistence_result`` fixture in
 ``conftest.py``.  When ``results/`` is empty the tests are automatically
 skipped — run the suite first (requires a persistent checkpointer):
 
-    python bili/aegis/tests/persistence/run_persistence_suite.py
+    python bili/aegis/suites/persistence/run_persistence_suite.py
     pytest bili/aegis/tests/persistence/test_persistence_structural.py -v
 
 Detection tier: Tier 1 (structural).
@@ -28,10 +28,9 @@ def test_propagation_tracking_ran(persistence_result: dict) -> None:
     assert isinstance(persistence_result["propagation_path"], list)
 
 
-def test_security_events_logged(  # pylint: disable=redefined-outer-name
-    persistence_result: dict, log_dir: Path
-) -> None:
+def test_security_events_logged(persistence_result: dict, log_dir: Path) -> None:
     """SecurityEventLogger wrote at least one event to security_events.ndjson."""
+    assert persistence_result["mas_id"] == log_dir.name
     events_file = log_dir / "security_events.ndjson"
     assert events_file.exists(), (
         f"security_events.ndjson not found in {log_dir}. "
@@ -40,10 +39,9 @@ def test_security_events_logged(  # pylint: disable=redefined-outer-name
     assert events_file.stat().st_size > 0, "security_events.ndjson is empty"
 
 
-def test_attack_log_written(  # pylint: disable=redefined-outer-name
-    persistence_result: dict, log_dir: Path
-) -> None:
+def test_attack_log_written(persistence_result: dict, log_dir: Path) -> None:
     """AttackLogger wrote at least one record to attack_log.ndjson."""
+    assert persistence_result["mas_id"] == log_dir.name
     attack_log = log_dir / "attack_log.ndjson"
     assert attack_log.exists(), (
         f"attack_log.ndjson not found in {log_dir}. "

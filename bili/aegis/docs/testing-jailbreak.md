@@ -40,7 +40,7 @@ merely following a redirected instruction.
 
 Severity distribution: **6 high / 6 medium / 3 low**.
 
-See `bili/aegis/tests/jailbreak/payloads/jailbreak_payloads.py` for payload text
+See `bili/aegis/suites/jailbreak/payloads/jailbreak_payloads.py` for payload text
 and severity ratings.
 
 ---
@@ -50,14 +50,14 @@ and severity ratings.
 **Stub mode** (no LLM calls — Tier 1 and Tier 2 only):
 
 ```bash
-python bili/aegis/tests/jailbreak/run_jailbreak_suite.py --stub
+python bili/aegis/suites/jailbreak/run_jailbreak_suite.py --stub
 ```
 
 **Real LLM mode** (requires API credentials in environment):
 
 ```bash
-python bili/aegis/tests/jailbreak/run_jailbreak_suite.py \
-    --baseline-results bili/aegis/tests/baseline/results
+python bili/aegis/suites/jailbreak/run_jailbreak_suite.py \
+    --baseline-results bili/aegis/suites/baseline/results
 ```
 
 **CLI options:**
@@ -75,7 +75,7 @@ python bili/aegis/tests/jailbreak/run_jailbreak_suite.py \
 
 ## Results
 
-Results are written to `bili/aegis/tests/jailbreak/results/`:
+Results are written to `bili/aegis/suites/jailbreak/results/`:
 
 ```
 results/
@@ -116,10 +116,10 @@ Tier 1 structural tests (CI-safe, no LLM calls) assert result file invariants:
 
 ```bash
 # Run the suite first
-python bili/aegis/tests/jailbreak/run_jailbreak_suite.py --stub
+python bili/aegis/suites/jailbreak/run_jailbreak_suite.py --stub
 
 # Then run structural tests
-pytest bili/aegis/tests/jailbreak/test_jailbreak_structural.py -v
+pytest bili/aegis/suites/jailbreak/test_jailbreak_structural.py -v
 ```
 
 Tests auto-skip if `results/` is empty.
@@ -132,7 +132,7 @@ Tests auto-skip if `results/` is empty.
 
 The jailbreak suite reuses `InjectionPayload` from the injection suite — add entries
 to `JAILBREAK_PAYLOADS` in
-`bili/aegis/tests/jailbreak/payloads/jailbreak_payloads.py`:
+`bili/aegis/suites/jailbreak/payloads/jailbreak_payloads.py`:
 
 ```python
 InjectionPayload(
@@ -147,10 +147,10 @@ InjectionPayload(
 ### Changing which configs are tested
 
 Pass `--configs` to the runner, or edit `CONFIG_PATHS` in
-`bili/aegis/tests/_helpers.py`:
+`bili/aegis/suites/_helpers.py`:
 
 ```bash
-python bili/aegis/tests/jailbreak/run_jailbreak_suite.py --stub \
+python bili/aegis/suites/jailbreak/run_jailbreak_suite.py --stub \
     --configs bili/aether/config/examples/simple_chain.yaml
 ```
 
