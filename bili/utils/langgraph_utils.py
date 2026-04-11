@@ -75,6 +75,13 @@ def format_message_with_citations(message):
     if content is None:
         return str(message)
 
+    # Handle multimodal content (list of content blocks)
+    if isinstance(content, list):
+        text_parts = [
+            p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+        ]
+        content = " ".join(text_parts).strip() or str(message)
+
     if not isinstance(message, AIMessage):
         return content
 
