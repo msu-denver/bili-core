@@ -590,15 +590,16 @@ st.markdown(f"count:{len(st.session_state['selected_tools'])}")
 # ------------------------------------------------------------------
 
 
-def test_update_prompt_state_missing_key():
-    """update_prompt_state handles missing key gracefully."""
+def test_update_prompt_state_existing_key():
+    """update_prompt_state syncs an existing session state key."""
     at = AppTest.from_string(
         """
 import streamlit as st
+st.session_state["test_prompt"] = "original value"
 from bili.streamlit_ui.ui.configuration_panels import (
     update_prompt_state,
 )
-update_prompt_state("nonexistent_key")
+update_prompt_state("test_prompt")
 st.markdown("done:True")
 """
     )
