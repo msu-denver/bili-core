@@ -41,7 +41,7 @@ def test_propagation_tracking_ran(cross_model_result: dict) -> None:
 
 def test_security_events_logged(cross_model_result: dict, log_dir: Path) -> None:
     """SecurityEventLogger wrote at least one event to security_events.ndjson."""
-    assert cross_model_result["mas_id"] == log_dir.name
+    assert cross_model_result["mas_id"] == log_dir.parent.name
     events_file = log_dir / "security_events.ndjson"
     assert events_file.exists(), (
         f"security_events.ndjson not found in {log_dir}. "
@@ -52,7 +52,7 @@ def test_security_events_logged(cross_model_result: dict, log_dir: Path) -> None
 
 def test_attack_log_written(cross_model_result: dict, log_dir: Path) -> None:
     """AttackLogger wrote at least one record to attack_log.ndjson."""
-    assert cross_model_result["mas_id"] == log_dir.name
+    assert cross_model_result["mas_id"] == log_dir.parent.name
     attack_log = log_dir / "attack_log.ndjson"
     assert attack_log.exists(), (
         f"attack_log.ndjson not found in {log_dir}. "
