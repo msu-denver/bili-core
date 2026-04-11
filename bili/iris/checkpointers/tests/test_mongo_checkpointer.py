@@ -1353,3 +1353,299 @@ class TestMongoVersionedMixin:
         saver.checkpoint_collection.replace_one.return_value = mock_result
         result = saver._replace_raw_checkpoint("t1", {"_id": "abc", "checkpoint": {}})
         assert result is False
+
+
+# =========================================================================
+# async query method coverage
+# =========================================================================
+
+
+class TestAsyncPutMethod:
+    """Tests for PruningMongoDBSaver.aput method."""
+
+    def test_aput_adds_format_version(self):
+        """aput embeds format_version in metadata."""
+        import asyncio  # pylint: disable=import-outside-toplevel
+
+        saver = _make_saver(keep_last_n=-1)
+        config = {"configurable": {"thread_id": "t1"}}
+
+        async def _run():
+            with patch(
+                "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.aput",
+                return_value=config,
+            ) as mock_aput:
+                result = await saver.aput(config, MagicMock(), {"step": 1}, MagicMock())
+            return result, mock_aput
+
+        result, mock_aput = asyncio.get_event_loop().run_until_complete(_run())
+        call_metadata = mock_aput.call_args[0][2]
+        assert "format_version" in call_metadata
+        assert result == config
+
+    def test_aput_sets_user_id(self):
+        """aput updates user_id when configured."""
+        import asyncio  # pylint: disable=import-outside-toplevel
+
+        saver = _make_saver(user_id="alice", keep_last_n=-1)
+        config = {"configurable": {"thread_id": "alice_c1"}}
+
+        async def _run():
+            with patch(
+                "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.aput",
+                return_value=config,
+            ):
+                await saver.aput(config, MagicMock(), {}, MagicMock())
+
+        asyncio.get_event_loop().run_until_complete(_run())
+        saver.checkpoint_collection.update_many.assert_called_once()
+
+    def test_aput_validates_ownership(self):
+        """aput raises PermissionError for wrong user."""
+        import asyncio  # pylint: disable=import-outside-toplevel
+
+        saver = _make_saver(user_id="alice", keep_last_n=-1)
+        config = {"configurable": {"thread_id": "bob_c1"}}
+
+        async def _run():
+            await saver.aput(config, MagicMock(), {}, MagicMock())
+
+        with pytest.raises(PermissionError):
+            asyncio.get_event_loop().run_until_complete(_run())
+
+
+# =========================================================================
+# _ensure_indexes — full path with user_id
+# =========================================================================
+
+
+class TestEnsureIndexesFullPath:
+    """Tests for _ensure_indexes with all code paths."""
+
+    def test_indexes_without_user_id(self):
+        """Creates base indexes without user_id index."""
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = PruningMongoDBSaver.__new__(PruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = None
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+            saver.checkpoint_collection.reset_mock()
+            saver.writes_collection.reset_mock()
+            saver._ensure_indexes()
+
+        cp_calls = saver.checkpoint_collection.create_index.call_args_list
+        user_calls = [c for c in cp_calls if c[1].get("name") == "idx_user_thread"]
+        assert len(user_calls) == 0
+
+    def test_indexes_with_user_id(self):
+        """Creates user_id index when user_id is set."""
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer" ".MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = PruningMongoDBSaver.__new__(PruningMongoDBSaver)
+            saver.keep_last_n = -1
+            saver.user_id = "alice"
+            saver.checkpoint_collection = MagicMock()
+            saver.writes_collection = MagicMock()
+            saver.db = MagicMock()
+            saver.serde = MagicMock()
+            saver._ensure_indexes()
+
+        cp_calls = saver.checkpoint_collection.create_index.call_args_list
+        user_calls = [c for c in cp_calls if c[1].get("name") == "idx_user_thread"]
+        assert len(user_calls) == 1
+
+
+# =========================================================================
+# _create_index_safe — retry and conflict handling
+# =========================================================================
+
+
+class TestCreateIndexSafe:
+    """Tests for _create_index_safe with error handling."""
+
+    def test_creates_index_on_first_attempt(self):
+        """Index creation succeeds on first try."""
+        collection = MagicMock()
+        PruningMongoDBSaver._create_index_safe(
+            collection, [("thread_id", 1)], "test_idx"
+        )
+        collection.create_index.assert_called_once()
+
+    def test_retries_on_concurrent_build(self):
+        """Retries on code 40333 (concurrent build)."""
+        from pymongo.errors import (  # pylint: disable=import-outside-toplevel
+            OperationFailure,
+        )
+
+        collection = MagicMock()
+        exc = OperationFailure("concurrent", code=40333)
+        collection.create_index.side_effect = [exc, None]
+
+        with patch("time.sleep"):
+            PruningMongoDBSaver._create_index_safe(collection, [("a", 1)], "idx")
+
+        assert collection.create_index.call_count == 2
+
+    def test_handles_code_85_conflict(self):
+        """Handles code 85 (different options) by dropping."""
+        from pymongo.errors import (  # pylint: disable=import-outside-toplevel
+            OperationFailure,
+        )
+
+        collection = MagicMock()
+        exc = OperationFailure("options", code=85)
+        collection.create_index.side_effect = [exc, None]
+        collection.index_information.return_value = {}
+
+        with patch("time.sleep"):
+            PruningMongoDBSaver._create_index_safe(collection, [("a", 1)], "idx")
+
+        assert collection.create_index.call_count == 2
+
+    def test_handles_code_86_name_conflict(self):
+        """Handles code 86 (name conflict) by dropping name."""
+        from pymongo.errors import (  # pylint: disable=import-outside-toplevel
+            OperationFailure,
+        )
+
+        collection = MagicMock()
+        exc = OperationFailure("name conflict", code=86)
+        collection.create_index.side_effect = [exc, None]
+        collection.index_information.return_value = {}
+
+        with patch("time.sleep"):
+            PruningMongoDBSaver._create_index_safe(collection, [("a", 1)], "idx")
+
+        collection.drop_index.assert_called_with("idx")
+
+
+# =========================================================================
+# _archive_checkpoint
+# =========================================================================
+
+
+class TestArchiveCheckpoint:
+    """Tests for _archive_checkpoint method."""
+
+    def test_archives_and_removes_document(self):
+        """Archives to separate collection and removes original."""
+        saver = _make_saver()
+        archive_coll = MagicMock()
+        saver.db.__getitem__.return_value = archive_coll
+
+        doc = {
+            "_id": "abc123",
+            "thread_id": "t1",
+            "checkpoint": {"data": True},
+        }
+        saver._archive_checkpoint("t1", doc, RuntimeError("migration failed"))
+
+        archive_coll.insert_one.assert_called_once()
+        saver.checkpoint_collection.delete_one.assert_called_once()
+
+    def test_archive_handles_insert_failure(self):
+        """Logs error when archive insert fails."""
+        saver = _make_saver()
+        archive_coll = MagicMock()
+        archive_coll.insert_one.side_effect = RuntimeError("db err")
+        saver.db.__getitem__.return_value = archive_coll
+
+        doc = {"_id": "abc", "thread_id": "t1"}
+        # Should not raise
+        saver._archive_checkpoint("t1", doc, RuntimeError("err"))
+
+
+# =========================================================================
+# get_user_threads — message extraction with multimodal
+# =========================================================================
+
+
+class TestGetUserThreadsMessageExtraction:
+    """Tests for message extraction in get_user_threads."""
+
+    def test_extracts_multimodal_messages(self):
+        """Handles multimodal content in user threads."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 1,
+            }
+        ]
+
+        human = _human_msg("text content")
+        human.content = [
+            {"type": "text", "text": "Describe this image"},
+            {"type": "image_url", "url": "http://img.png"},
+        ]
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "u_c1",
+            "checkpoint": {"channel_values": {"messages": [human]}},
+        }
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "Describe this image"
+
+    def test_extracts_title_and_tags(self):
+        """Extracts title and tags from channel_values."""
+        saver = _make_saver()
+        ts = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        saver.checkpoint_collection.aggregate.return_value = [
+            {
+                "_id": "u_c1",
+                "last_updated": ts,
+                "checkpoint_count": 1,
+            }
+        ]
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "u_c1",
+            "checkpoint": {
+                "channel_values": {
+                    "messages": [],
+                    "title": "Chat Title",
+                    "tags": ["tag1"],
+                }
+            },
+        }
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["title"] == "Chat Title"
+        assert threads[0]["tags"] == ["tag1"]
+
+
+# =========================================================================
+# get_thread_messages — multimodal content
+# =========================================================================
+
+
+class TestGetThreadMessagesMultimodal:
+    """Tests for multimodal content handling in messages."""
+
+    def test_multimodal_list_content(self):
+        """Extracts text from list-format multimodal content."""
+        saver = _make_saver()
+        msg = _human_msg("placeholder")
+        msg.content = [
+            {"type": "text", "text": "Part 1"},
+            {"type": "text", "text": "Part 2"},
+        ]
+
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": [msg]}},
+        }
+
+        msgs = saver.get_thread_messages("t1")
+        assert "Part 1" in msgs[0]["content"]
+        assert "Part 2" in msgs[0]["content"]

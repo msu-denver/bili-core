@@ -1504,3 +1504,372 @@ class TestDictMessages:
         result = saver.get_thread_messages("t1")
         assert len(result) == 1
         assert result[0]["role"] == "function"
+
+
+# =========================================================================
+# get_user_threads — realistic pipeline results
+# =========================================================================
+
+
+class TestGetUserThreadsRealisticPipeline:
+    """Tests for get_user_threads with realistic query results."""
+
+    def test_extracts_title_and_tags_from_checkpoint(self):
+        """Extracts title and tags from checkpoint channel_values."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "user_conv1",
+                "last_checkpoint_id": "cp10",
+                "checkpoint_count": 5,
+            }
+        ]
+        mock_cur.fetchone.side_effect = [
+            # Latest checkpoint with title and tags
+            {
+                "checkpoint": {
+                    "ts": "2026-04-01T00:00:00",
+                    "channel_values": {
+                        "messages": [],
+                        "title": "My Chat Title",
+                        "tags": ["important", "dev"],
+                    },
+                }
+            },
+        ]
+        _attach_fake_cursor(saver, mock_cur)
+
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": []}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("user")
+        assert threads[0]["title"] == "My Chat Title"
+        assert threads[0]["tags"] == ["important", "dev"]
+
+    def test_handles_missing_checkpoint_data(self):
+        """Handles None checkpoint data gracefully."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "user_conv1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+        saver.get_tuple = MagicMock(return_value=None)
+
+        threads = saver.get_user_threads("user")
+        assert threads[0]["title"] is None
+        assert threads[0]["tags"] == []
+
+    def test_handles_get_tuple_exception(self):
+        """Logs warning and continues on get_tuple failure."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "user_conv1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+        saver.get_tuple = MagicMock(side_effect=RuntimeError("db error"))
+
+        threads = saver.get_user_threads("user")
+        assert len(threads) == 1
+        assert threads[0]["message_count"] == 0
+
+    def test_multimodal_content_extraction(self):
+        """Extracts text from multimodal message content."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [
+            {
+                "thread_id": "u_c1",
+                "last_checkpoint_id": "cp1",
+                "checkpoint_count": 1,
+            }
+        ]
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+
+        human = MagicMock()
+        human.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+        human.__class__.__name__ = "HumanMessage"
+        human.content = [
+            {"type": "text", "text": "Describe this"},
+            {"type": "image_url", "url": "http://img.png"},
+        ]
+
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = {"channel_values": {"messages": [human]}}
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        threads = saver.get_user_threads("u")
+        assert threads[0]["first_message"] == "Describe this"
+
+
+# =========================================================================
+# get_thread_messages — additional edge cases
+# =========================================================================
+
+
+class TestGetThreadMessagesEdgeCases:
+    """Additional edge cases for get_thread_messages."""
+
+    def test_dict_messages_with_type_field(self):
+        """Handles dict-style messages with type field.
+
+        Note: dicts have __class__ (dict) so they go through
+        the isinstance(msg, dict) branch only if hasattr check
+        is handled. In practice, msg.__class__.__name__ is 'dict'
+        which normalises to unknown. We verify the dict path works.
+        """
+        saver = _make_saver()
+
+        # Use a plain object without __class__ that acts as dict
+        dict_msg = {
+            "type": "human",
+            "content": "Dict message",
+        }
+        checkpoint = {"channel_values": {"messages": [dict_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert len(result) == 1
+        # dict has __class__.__name__ = 'dict', not normalised
+        assert result[0]["content"] == "Dict message"
+
+    def test_multimodal_content_in_messages(self):
+        """Handles multimodal list content in messages."""
+        saver = _make_saver()
+        msg = MagicMock()
+        msg.__class__ = type("HumanMessage", (), {"__name__": "HumanMessage"})
+        msg.__class__.__name__ = "HumanMessage"
+        msg.content = [
+            {"type": "text", "text": "Look at this"},
+            {"type": "image_url", "url": "http://img.png"},
+        ]
+
+        checkpoint = {"channel_values": {"messages": [msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert "Look at this" in result[0]["content"]
+
+    def test_empty_ai_message_skipped(self):
+        """Empty AI messages are skipped after thinking removal."""
+        saver = _make_saver()
+        ai = MagicMock()
+        ai.__class__ = type("AIMessage", (), {"__name__": "AIMessage"})
+        ai.__class__.__name__ = "AIMessage"
+        ai.content = "<thinking>only thinking</thinking>"
+
+        checkpoint = {"channel_values": {"messages": [ai]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert result == []
+
+    def test_system_message_role(self):
+        """SystemMessage maps to system role."""
+        saver = _make_saver()
+        sys_msg = MagicMock()
+        sys_msg.__class__ = type("SystemMessage", (), {"__name__": "SystemMessage"})
+        sys_msg.__class__.__name__ = "SystemMessage"
+        sys_msg.content = "System prompt"
+
+        checkpoint = {"channel_values": {"messages": [sys_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert result[0]["role"] == "system"
+
+    def test_dict_message_with_kwargs_content(self):
+        """Handles dict messages where content is in kwargs."""
+        saver = _make_saver()
+
+        dict_msg = {
+            "type": "human",
+            "kwargs": {"content": "From kwargs"},
+        }
+        checkpoint = {"channel_values": {"messages": [dict_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert result[0]["content"] == "From kwargs"
+
+
+# =========================================================================
+# _ensure_user_id_schema
+# =========================================================================
+
+
+class TestEnsureUserIdSchema:
+    """Tests for _ensure_user_id_schema method."""
+
+    def test_creates_column_and_index_when_missing(self):
+        """Creates user_id column and index if both missing."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        # Column check returns None (not exists)
+        # Index check returns None (not exists)
+        mock_cur.fetchone.side_effect = [None, None]
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver._ensure_user_id_schema()
+        # Should execute: check col, add col, check idx, create idx
+        assert mock_cur.execute.call_count == 4
+
+    def test_skips_when_column_and_index_exist(self):
+        """Skips creation when both already exist."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        # Column exists, index exists
+        mock_cur.fetchone.side_effect = [
+            {"column_name": "user_id"},
+            {"indexname": "idx_checkpoints_user_thread"},
+        ]
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver._ensure_user_id_schema()
+        # Only 2 SELECT checks, no ALTER/CREATE
+        assert mock_cur.execute.call_count == 2
+
+
+# =========================================================================
+# _cursor with transaction connection
+# =========================================================================
+
+
+class TestCursorWithTransaction:
+    """Tests for _cursor context manager reuse logic."""
+
+    def test_uses_txn_conn_when_set(self):
+        """Reuses _txn_conn instead of pool connection."""
+        saver = _make_saver()
+        mock_conn = MagicMock()
+        mock_cursor_obj = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = lambda _: mock_cursor_obj
+        mock_conn.cursor.return_value.__exit__ = lambda *_: None
+        saver._txn_conn = mock_conn
+
+        with saver._cursor() as cur:
+            assert cur is not None
+        mock_conn.cursor.assert_called_once()
+
+
+# =========================================================================
+# ensure_indexes
+# =========================================================================
+
+
+class TestEnsureIndexes:
+    """Tests for ensure_indexes method."""
+
+    def test_creates_three_indexes(self):
+        """Creates indexes on checkpoints, blobs, and writes."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver.ensure_indexes()
+        assert mock_cur.execute.call_count == 3
+
+
+# =========================================================================
+# Versioned checkpointer methods
+# =========================================================================
+
+
+class TestVersionedMethods:
+    """Tests for VersionedCheckpointerMixin PG implementations."""
+
+    def test_get_raw_checkpoint_found(self):
+        """Returns raw checkpoint data when found."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "thread_id": "t1",
+            "checkpoint_ns": "",
+            "checkpoint_id": "cp1",
+            "checkpoint": b"data",
+            "metadata": {"step": 1},
+        }
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._get_raw_checkpoint("t1")
+        assert result["checkpoint_id"] == "cp1"
+
+    def test_get_raw_checkpoint_not_found(self):
+        """Returns None when no checkpoint found."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = None
+        _attach_fake_cursor(saver, mock_cur)
+
+        assert saver._get_raw_checkpoint("t1") is None
+
+    def test_replace_raw_checkpoint_success(self):
+        """Returns True on successful update."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.rowcount = 1
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._replace_raw_checkpoint(
+            "t1", {"checkpoint_id": "cp1", "checkpoint": b"new"}
+        )
+        assert result is True
+
+    def test_replace_raw_checkpoint_no_id(self):
+        """Returns False when checkpoint_id missing."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._replace_raw_checkpoint("t1", {})
+        assert result is False
+
+    def test_replace_raw_checkpoint_no_match(self):
+        """Returns False when no row updated."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        mock_cur.rowcount = 0
+        _attach_fake_cursor(saver, mock_cur)
+
+        result = saver._replace_raw_checkpoint("t1", {"checkpoint_id": "cp1"})
+        assert result is False
+
+    def test_archive_checkpoint(self):
+        """Archives failed checkpoint to archive table."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        _attach_fake_cursor(saver, mock_cur)
+
+        doc = {
+            "checkpoint_ns": "",
+            "checkpoint_id": "cp1",
+            "checkpoint": b"data",
+            "metadata": {},
+        }
+        saver._archive_checkpoint("t1", doc, RuntimeError("bad"))
+        # CREATE TABLE + INSERT + DELETE
+        assert mock_cur.execute.call_count == 3
