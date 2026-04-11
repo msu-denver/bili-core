@@ -112,6 +112,17 @@ def login():
         # Get user details
         user_info = AUTH_MANAGER.auth_provider.get_account_info(auth_response["uid"])
 
+        # Enforce email verification
+        if not user_info.get("emailVerified", False):
+            return (
+                jsonify(
+                    {
+                        "error": "Email not verified. Please verify your email before signing in."
+                    }
+                ),
+                403,
+            )
+
         # Extract tokens
         id_token = auth_response["token"]
         refresh_token = auth_response["refreshToken"]
