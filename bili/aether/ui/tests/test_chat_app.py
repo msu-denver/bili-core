@@ -1667,6 +1667,459 @@ with _patch.dict("sys.modules", fm):
     assert not at.exception
 
 
+# ---------------------------------------------------------------------------
+# _on_send_to_attack_from_chat
+# ---------------------------------------------------------------------------
+
+
+def test_on_send_to_attack_no_config():
+    """_on_send_to_attack_from_chat does nothing when no config loaded."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca._on_send_to_attack_from_chat()
+    st.markdown(f"no_crash:True")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "no_crash:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_on_send_to_attack_with_config():
+    """_on_send_to_attack_from_chat pushes config to attack state."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="attack_push_test")
+    st.session_state.chat_config = cfg
+    ca._on_send_to_attack_from_chat()
+    st.markdown(f"pushed:{st.session_state.get('attack_config') is not None}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "pushed:True" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _base_cache_key
+# ---------------------------------------------------------------------------
+
+
+def test_base_cache_key_strips_model_suffix():
+    """_base_cache_key strips :model= suffix from cache key."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    st.session_state.chat_yaml_path = "/path/config.yaml:model=gpt-4o"
+    result = ca._base_cache_key()
+    st.markdown(f"key:{result}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "key:/path/config.yaml" in " ".join(m.value for m in at.markdown)
+
+
+def test_base_cache_key_strips_stub_suffix():
+    """_base_cache_key strips :stub suffix from cache key."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    st.session_state.chat_yaml_path = "/path/config.yaml:stub"
+    result = ca._base_cache_key()
+    st.markdown(f"key:{result}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "key:/path/config.yaml" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _render_chat_agent_details
+# ---------------------------------------------------------------------------
+
+
+def test_render_chat_agent_details():
+    """_render_chat_agent_details renders agent info."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    import importlib
+    import bili.aether.ui.chat_app
+    importlib.reload(bili.aether.ui.chat_app)
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.schema.agent_spec import AgentSpec
+    agent = AgentSpec(
+        agent_id="a0",
+        role="analyst",
+        objective="Perform deep analysis",
+        model_name="gpt-4o",
+        temperature=0.5,
+        max_tokens=1000,
+        capabilities=["inter_agent_communication"],
+        tools=["weather_api_tool"],
+    )
+    ca._render_chat_agent_details(agent)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "a0" in all_md
+    assert "gpt-4o" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _render_supervisor_diagram
+# ---------------------------------------------------------------------------
+
+
+def test_render_supervisor_diagram():
+    """_render_supervisor_diagram renders hub-and-spoke layout."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    import importlib
+    import bili.aether.ui.chat_app
+    importlib.reload(bili.aether.ui.chat_app)
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.schema.agent_spec import AgentSpec
+    from bili.aether.schema.mas_config import MASConfig
+    from bili.aether.schema.enums import WorkflowType
+    agents = [
+        AgentSpec(agent_id="supervisor", role="supervisor", objective="Coordinate agents"),
+        AgentSpec(agent_id="worker_0", role="worker_0", objective="Perform work type 0"),
+        AgentSpec(agent_id="worker_1", role="worker_1", objective="Perform work type 1"),
+    ]
+    cfg = MASConfig(
+        mas_id="sup_test", name="t", description="t",
+        agents=agents, channels=[], workflow_type=WorkflowType.SUPERVISOR,
+        entry_point="supervisor",
+    )
+    ca._render_supervisor_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_hierarchical_diagram
+# ---------------------------------------------------------------------------
+
+
+def test_render_hierarchical_diagram():
+    """_render_hierarchical_diagram renders tiered layout."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    import importlib
+    import bili.aether.ui.chat_app
+    importlib.reload(bili.aether.ui.chat_app)
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.schema.agent_spec import AgentSpec
+    from bili.aether.schema.mas_config import MASConfig
+    from bili.aether.schema.enums import WorkflowType
+    agents = [
+        AgentSpec(agent_id="root", role="root", objective="Root coordinator"),
+        AgentSpec(agent_id="child_0", role="child_0", objective="Perform child tasks"),
+    ]
+    cfg = MASConfig(
+        mas_id="hier_test", name="t", description="t",
+        agents=agents, channels=[], workflow_type=WorkflowType.HIERARCHICAL,
+    )
+    ca._render_hierarchical_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_mas_diagram dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_render_mas_diagram_sequential():
+    """_render_mas_diagram dispatches to sequential renderer."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk()
+    ca._render_mas_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_mas_structure fallback (no flow)
+# ---------------------------------------------------------------------------
+
+
+def test_render_mas_structure_fallback():
+    """_render_mas_structure renders text-based diagram when flow unavailable."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="struct_test")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_executor = _Mock()
+    # Force flow unavailable
+    with _patch.object(ca, "_FLOW_AVAILABLE", False):
+        ca._render_mas_structure(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _validate_config with warnings
+# ---------------------------------------------------------------------------
+
+
+def test_validate_config_with_warnings():
+    """_validate_config shows success with warnings when warnings present."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    mock_result = _Mock()
+    mock_result.errors = []
+    mock_result.warnings = ["unknown warning text here"]
+    mock_result.valid = True
+    with _patch.object(ca, "validate_mas", return_value=mock_result):
+        result = ca._validate_config(mk())
+    st.markdown(f"valid:{result}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "valid:True" in all_md
+    assert "warnings" in " ".join(s.value for s in at.success)
+
+
+def test_validate_config_with_errors():
+    """_validate_config returns False when errors present."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    mock_result = _Mock()
+    mock_result.errors = ["Missing entry point"]
+    mock_result.warnings = []
+    mock_result.valid = False
+    with _patch.object(ca, "validate_mas", return_value=mock_result):
+        result = ca._validate_config(mk())
+    st.markdown(f"valid:{result}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "valid:False" in all_md
+    assert "Missing entry point" in " ".join(e.value for e in at.error)
+
+
+# ---------------------------------------------------------------------------
+# _render_timeline with role_map and status_text
+# ---------------------------------------------------------------------------
+
+
+def test_render_timeline_with_role_map():
+    """_render_timeline uses role_map for chip labels."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ph = st.empty()
+    ca._render_timeline(
+        ph,
+        completed=["a0"],
+        active=None,
+        all_nodes=["a0", "a1"],
+        key_prefix="test_roles",
+        role_map={"a0": "writer", "a1": "editor"},
+        status_text="Done processing",
+    )
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_fallback_diagram with channels
+# ---------------------------------------------------------------------------
+
+
+def test_render_fallback_diagram_with_channels():
+    """_render_fallback_diagram renders channels when present."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    from bili.aether.ui.tests.conftest import make_test_config as mk
+    cfg = mk(num_agents=2)
+    ca._render_fallback_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Channels" in all_md
+
+
+# ---------------------------------------------------------------------------
+# _initialize_executor caching
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_executor_caches_on_same_key():
+    """_initialize_executor skips reinit for same cache key."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk()
+    st.session_state.chat_yaml_path = "cached_key"
+    st.session_state.chat_config = cfg
+    # Should return early without reinitializing
+    ca._initialize_executor(cfg, "cached_key")
+    st.markdown(f"still_cached:{st.session_state.get('chat_config') is not None}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "still_cached:True" in " ".join(m.value for m in at.markdown)
+
+
 def test_render_timeline_with_status_text():
     """_render_timeline renders a status caption when given."""
     at = AppTest.from_string(

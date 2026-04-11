@@ -670,3 +670,194 @@ def test_tools_have_default_prompt():
 
     for name, config in TOOLS.items():
         assert "default_prompt" in config, f"Tool '{name}' missing 'default_prompt'"
+
+
+# ------------------------------------------------------------------
+# Configuration panel state initialization - model_id
+# ------------------------------------------------------------------
+
+
+def test_initializes_model_id():
+    """display_configuration_panels initializes model_id."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_id:{'model_id' in st.session_state}")
+""",
+        default_timeout=10,
+    )
+    at.run()
+    assert not at.exception
+    assert "has_id:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Configuration panel state - supports_structured_output
+# ------------------------------------------------------------------
+
+
+def test_initializes_supports_structured_output():
+    """display_configuration_panels initializes supports_structured_output."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_struct:{'supports_structured_output' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_struct:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Multiple model selectboxes
+# ------------------------------------------------------------------
+
+
+def test_model_name_selectbox_present():
+    """The model name selectbox is rendered."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+"""
+    )
+    at.run()
+    assert not at.exception
+    # Should have at least 2 selectboxes (model type + model name)
+    assert len(at.selectbox) >= 2
+
+
+# ------------------------------------------------------------------
+# Configuration panel - top_p, top_k, seed defaults
+# ------------------------------------------------------------------
+
+
+def test_initializes_top_p_default():
+    """display_configuration_panels initializes top_p."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_top_p:{'top_p' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_top_p:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_initializes_top_k_default():
+    """display_configuration_panels initializes top_k."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_top_k:{'top_k' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_top_k:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_initializes_seed_value_default():
+    """display_configuration_panels initializes seed_value."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+st.markdown(f"has_seed:{'seed_value' in st.session_state}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "has_seed:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# update_selected_tools - preserves other tools
+# ------------------------------------------------------------------
+
+
+def test_update_selected_tools_preserves_others():
+    """Adding a tool preserves existing tools in the list."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui.configuration_panels import update_selected_tools
+st.session_state["selected_tools"] = ["tool_a", "tool_b"]
+st.session_state["tool_c_enabled"] = True
+update_selected_tools("tool_c", "tool_c_enabled")
+st.markdown(f"count:{len(st.session_state['selected_tools'])}")
+st.markdown(f"has_a:{'tool_a' in st.session_state['selected_tools']}")
+st.markdown(f"has_c:{'tool_c' in st.session_state['selected_tools']}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "count:3" in all_md
+    assert "has_a:True" in all_md
+    assert "has_c:True" in all_md
+
+
+# ------------------------------------------------------------------
+# LLM_MODELS structure validation
+# ------------------------------------------------------------------
+
+
+def test_llm_models_have_name_and_description():
+    """Each LLM_MODELS provider has name and description."""
+    from bili.iris.config.llm_config import LLM_MODELS
+
+    for key, info in LLM_MODELS.items():
+        assert "name" in info, f"Provider '{key}' missing name"
+        assert "description" in info, f"Provider '{key}' missing description"
+
+
+def test_llm_models_have_model_help():
+    """Each LLM_MODELS provider has model_help."""
+    from bili.iris.config.llm_config import LLM_MODELS
+
+    for key, info in LLM_MODELS.items():
+        assert "model_help" in info, f"Provider '{key}' missing model_help"
+
+
+# ------------------------------------------------------------------
+# TOOLS structure validation
+# ------------------------------------------------------------------
+
+
+def test_tools_have_default_prompt_field():
+    """Each tool has a default_prompt field with content."""
+    from bili.iris.config.tool_config import TOOLS
+
+    for name, tool_config in TOOLS.items():
+        prompt = tool_config.get("default_prompt", "")
+        assert len(prompt) > 0, f"Tool '{name}' has empty default_prompt"
+
+
+# ------------------------------------------------------------------
+# Configuration panel renders checkbox widgets
+# ------------------------------------------------------------------
+
+
+def test_renders_checkboxes():
+    """display_configuration_panels renders checkbox widgets."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert len(at.checkbox) >= 1

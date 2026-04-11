@@ -539,3 +539,157 @@ st.markdown(f"ran:True")
     at.run()
     assert not at.exception
     assert "ran:True" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# display_state_management with processing messages
+# ---------------------------------------------------------------------------
+
+
+def test_display_state_management_with_processing_messages():
+    """display_state_management renders intermediate steps between messages."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+# Two HumanMessages with AI responses to trigger processing messages
+mock_state.values = {
+    "messages": [
+        HumanMessage(content="What is the weather?"),
+        AIMessage(content="The weather is 72F"),
+    ]
+}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["thread_id"] = "test-processing"
+
+form = st.form(key="test_processing_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+""",
+        default_timeout=10,
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# display_model_configuration with memory settings
+# ---------------------------------------------------------------------------
+
+
+def test_display_model_config_with_all_memory_settings():
+    """display_model_configuration shows all memory settings."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["model_config"] = "test-model-v2"
+mock_chain = MagicMock()
+mock_chain.checkpointer = "MemorySaver"
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["memory_limit_type"] = "message_count"
+st.session_state["memory_strategy"] = "summarize"
+st.session_state["memory_limit_value"] = 20
+st.session_state["memory_limit_trim_value"] = 15
+st.session_state["supports_tools"] = True
+st.session_state["selected_tools"] = ["weather_api_tool", "serp_api_tool"]
+st.session_state["weather_api_tool_prompt"] = "Get weather"
+st.session_state["serp_api_tool_prompt"] = "Search web"
+ci.display_model_configuration()
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# display_state_management state cleared flag
+# ---------------------------------------------------------------------------
+
+
+def test_display_state_management_state_cleared():
+    """display_state_management shows success when state_cleared is True."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {"messages": [HumanMessage(content="Hi")]}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["thread_id"] = "test"
+st.session_state["state_cleared"] = True
+
+form = st.form(key="test_cleared_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "cleared" in " ".join(s.value for s in at.success)
+
+
+# ---------------------------------------------------------------------------
+# display_state_management_management trim labels
+# ---------------------------------------------------------------------------
+
+
+def test_state_management_trim_labels():
+    """State management uses trim-specific labels when strategy is trim."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state["memory_limit_type"] = "message_count"
+st.session_state["memory_strategy"] = "trim"
+ci.display_state_management_management()
+st.markdown(f"strategy:{st.session_state.get('memory_strategy')}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "strategy:trim" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# display_state_management with empty messages
+# ---------------------------------------------------------------------------
+
+
+def test_display_state_management_empty_messages():
+    """display_state_management handles state with no messages."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {"messages": []}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state["thread_id"] = "test-empty"
+
+form = st.form(key="test_empty_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+"""
+    )
+    at.run()
+    assert not at.exception

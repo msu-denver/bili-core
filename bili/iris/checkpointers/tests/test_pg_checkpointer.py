@@ -1264,3 +1264,243 @@ class TestAsyncPruningPostgresSaverExtended:
 
             saver = AsyncPruningPostgresSaver(MagicMock())
             assert saver.format_version >= 1
+
+    def test_async_txn_conn_initialized_none(self):
+        """Constructor initializes _async_txn_conn to None."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock())
+            assert saver._async_txn_conn is None
+
+    def test_sync_pool_initialized_none(self):
+        """Constructor initializes _sync_pool to None."""
+        with patch(
+            "langgraph.checkpoint.postgres.aio" ".AsyncPostgresSaver.__init__",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import (
+                AsyncPruningPostgresSaver,
+            )
+
+            saver = AsyncPruningPostgresSaver(MagicMock())
+            assert saver._sync_pool is None
+
+
+# =========================================================================
+# AsyncConnectionManager
+# =========================================================================
+
+
+class TestAsyncConnectionManager:
+    """Tests for AsyncConnectionManager singleton."""
+
+    def test_initial_pool_is_none(self):
+        """Pool is None before get_pool is called."""
+        from bili.iris.checkpointers.pg_checkpointer import AsyncConnectionManager
+
+        mgr = AsyncConnectionManager()
+        assert mgr._pool is None
+
+    def test_close_pool_clears_pool(self):
+        """_close_pool sets pool to None."""
+        from bili.iris.checkpointers.pg_checkpointer import AsyncConnectionManager
+
+        mgr = AsyncConnectionManager()
+        mgr._pool = MagicMock()
+        mgr._close_pool()
+        assert mgr._pool is None
+
+    def test_close_pool_noop_when_none(self):
+        """_close_pool does nothing when pool is already None."""
+        from bili.iris.checkpointers.pg_checkpointer import AsyncConnectionManager
+
+        mgr = AsyncConnectionManager()
+        mgr._close_pool()  # Should not raise
+        assert mgr._pool is None
+
+
+# =========================================================================
+# _ensure_user_id_schema
+# =========================================================================
+
+
+class TestEnsureUserIdSchema:
+    """Tests for _ensure_user_id_schema migration method."""
+
+    def test_adds_column_when_missing(self):
+        """Creates user_id column when it does not exist."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        # First fetchone: column check -> None (not exists)
+        # Second fetchone: index check -> None (not exists)
+        mock_cur.fetchone.side_effect = [None, None]
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver._ensure_user_id_schema()
+
+        calls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        # Should have: check column, add column, check index, create index
+        assert any("ADD COLUMN user_id" in c for c in calls)
+        assert any("CREATE INDEX" in c for c in calls)
+
+    def test_skips_when_exists(self):
+        """Does not add column or index when they exist."""
+        saver = _make_saver()
+        mock_cur = MagicMock()
+        # Both return a row -> exists
+        mock_cur.fetchone.side_effect = [
+            {"column_name": "user_id"},
+            {"indexname": "idx"},
+        ]
+        _attach_fake_cursor(saver, mock_cur)
+
+        saver._ensure_user_id_schema()
+
+        calls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        assert not any("ADD COLUMN" in c for c in calls)
+        assert not any("CREATE INDEX" in c for c in calls)
+
+
+# =========================================================================
+# _cursor with txn_conn
+# =========================================================================
+
+
+class TestCursorTxnConn:
+    """Tests for _cursor shared-connection transaction path."""
+
+    def test_cursor_uses_txn_conn_when_set(self):
+        """_cursor reuses _txn_conn when it is set."""
+        saver = _make_saver()
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        saver._txn_conn = mock_conn
+
+        with saver._cursor() as cur:
+            assert cur is not None
+
+        mock_conn.cursor.assert_called_once()
+
+
+# =========================================================================
+# get_pg_checkpointer / get_pg_connection_pool
+# =========================================================================
+
+
+class TestGetPgCheckpointer:
+    """Tests for get_pg_checkpointer factory."""
+
+    def test_returns_none_without_pool(self):
+        """Returns None when no connection pool available."""
+        with patch(
+            "bili.iris.checkpointers.pg_checkpointer.get_pg_connection_pool",
+            return_value=None,
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
+
+            result = get_pg_checkpointer()
+            assert result is None
+
+    def test_returns_saver_with_pool(self):
+        """Returns PruningPostgresSaver when pool available."""
+        mock_pool = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.side_effect = [
+            {"column_name": "user_id"},
+            {"indexname": "idx"},
+        ]
+        mock_pool.connection.return_value.__enter__ = MagicMock()
+        mock_pool.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch(
+            "bili.iris.checkpointers.pg_checkpointer.get_pg_connection_pool",
+            return_value=mock_pool,
+        ), patch(
+            "langgraph.checkpoint.postgres.PostgresSaver.__init__",
+            return_value=None,
+        ), patch(
+            "bili.iris.checkpointers.pg_checkpointer.PruningPostgresSaver.setup",
+        ), patch(
+            "bili.iris.checkpointers.pg_checkpointer"
+            ".PruningPostgresSaver.ensure_indexes",
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
+
+            result = get_pg_checkpointer(keep_last_n=3)
+            assert result is not None
+
+
+# =========================================================================
+# get_tuple with migration and ownership
+# =========================================================================
+
+
+class TestGetTuple:
+    """Tests for get_tuple method override."""
+
+    def test_get_tuple_validates_ownership(self):
+        """get_tuple raises PermissionError for wrong user."""
+        saver = _make_saver(user_id="alice")
+        config = {"configurable": {"thread_id": "bob_conv1", "checkpoint_ns": ""}}
+        with pytest.raises(PermissionError, match="Access denied"):
+            saver.get_tuple(config)
+
+    def test_get_tuple_returns_none_on_migration_failure(self):
+        """get_tuple returns None when migration fails."""
+        saver = _make_saver(user_id=None)
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", side_effect=RuntimeError("fail")
+        ):
+            result = saver.get_tuple(config)
+            assert result is None
+
+
+# =========================================================================
+# Dict-based messages in get_thread_messages
+# =========================================================================
+
+
+class TestDictMessages:
+    """Tests for dict-based message handling in get_thread_messages."""
+
+    def test_dict_message_falls_to_unknown(self):
+        """Dict messages get __class__.__name__ = 'dict' mapped to unknown role."""
+        saver = _make_saver()
+        msg = {"type": "human", "content": "Hello dict"}
+        checkpoint = {"channel_values": {"messages": [msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert len(result) == 1
+        assert result[0]["role"] == "unknown"
+        assert result[0]["content"] == "Hello dict"
+
+    def test_function_message_mapped(self):
+        """FunctionMessage is mapped to function role."""
+        saver = _make_saver()
+        func_msg = MagicMock()
+        func_msg.__class__ = type(
+            "FunctionMessage", (), {"__name__": "FunctionMessage"}
+        )
+        func_msg.__class__.__name__ = "FunctionMessage"
+        func_msg.content = "func result"
+
+        checkpoint = {"channel_values": {"messages": [func_msg]}}
+        tuple_mock = MagicMock()
+        tuple_mock.checkpoint = checkpoint
+        saver.get_tuple = MagicMock(return_value=tuple_mock)
+
+        result = saver.get_thread_messages("t1")
+        assert len(result) == 1
+        assert result[0]["role"] == "function"
