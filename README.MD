@@ -8,8 +8,8 @@
   <a href="https://github.com/msu-denver/bili-core/actions"><img src="https://github.com/msu-denver/bili-core/actions/workflows/ci-cd.yml/badge.svg?branch=develop" alt="CI/CD"></a>
   <a href="https://github.com/msu-denver/bili-core/releases/latest"><img src="https://img.shields.io/github/v/release/msu-denver/bili-core" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-6000%2B%20passing-brightgreen.svg" alt="Tests">
-  <img src="https://img.shields.io/badge/coverage-75%25-yellow.svg" alt="Coverage">
+  <img src="https://img.shields.io/badge/tests-6700%2B%20passing-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-89%25-brightgreen.svg" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
 
