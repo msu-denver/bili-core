@@ -1378,7 +1378,7 @@ class TestAsyncPutMethod:
                 result = await saver.aput(config, MagicMock(), {"step": 1}, MagicMock())
             return result, mock_aput
 
-        result, mock_aput = asyncio.get_event_loop().run_until_complete(_run())
+        result, mock_aput = asyncio.run(_run())
         call_metadata = mock_aput.call_args[0][2]
         assert "format_version" in call_metadata
         assert result == config
@@ -1397,7 +1397,7 @@ class TestAsyncPutMethod:
             ):
                 await saver.aput(config, MagicMock(), {}, MagicMock())
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
         saver.checkpoint_collection.update_many.assert_called_once()
 
     def test_aput_validates_ownership(self):
@@ -1411,7 +1411,7 @@ class TestAsyncPutMethod:
             await saver.aput(config, MagicMock(), {}, MagicMock())
 
         with pytest.raises(PermissionError):
-            asyncio.get_event_loop().run_until_complete(_run())
+            asyncio.run(_run())
 
 
 # =========================================================================
