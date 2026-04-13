@@ -106,6 +106,7 @@ from bili.aegis.suites._helpers import CONFIG_PATHS
 from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     config_fingerprint as _config_fingerprint_helper,
 )
+from bili.aegis.suites._helpers import latest_run_dir, next_run_dir
 from bili.aegis.suites.persistence.payloads.persistence_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
     PERSISTENCE_PAYLOADS,
 )
@@ -199,9 +200,14 @@ def _checkpointer_is_persistent(config: Any) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
-def _write_result(result_dict: dict, results_dir: Path) -> Path:
-    """Write one result JSON to results_dir/{mas_id}/{payload_id}_{phase}.json."""
-    out_dir = results_dir / result_dict["mas_id"]
+def _write_result(
+    result_dict: dict, results_dir: Path, run_dir: Path | None = None
+) -> Path:
+    """Write one result JSON to run_dir/{payload_id}_{phase}.json.
+
+    Falls back to ``results_dir/{mas_id}/`` when *run_dir* is ``None``.
+    """
+    out_dir = run_dir if run_dir is not None else (results_dir / result_dict["mas_id"])
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{result_dict['payload_id']}_{result_dict['injection_phase']}.json"
     out_path = out_dir / filename
@@ -209,10 +215,10 @@ def _write_result(result_dict: dict, results_dir: Path) -> Path:
     return out_path
 
 
-def _write_csv(rows: list[dict], results_dir: Path) -> Path:
-    """Write the results matrix CSV."""
+def _write_csv(rows: list[dict], results_dir: Path, csv_filename: str) -> Path:
+    """Write the results matrix CSV to *results_dir*/*csv_filename*."""
     results_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = results_dir / "persistence_results_matrix.csv"
+    csv_path = results_dir / csv_filename
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=_CSV_COLUMNS)
         writer.writeheader()
@@ -253,14 +259,18 @@ def _run_persistence_config(
     baseline_results_dir: Path | None,
     results_dir: Path,
     repo_root: Path,
-) -> list[
-    dict
+) -> tuple[
+    list[dict], Path | None
 ]:  # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
-    """Run all payloads for one MAS config, skipping if no persistent backend."""
+    """Run all payloads for one MAS config, skipping if no persistent backend.
+
+    Returns ``(matrix_rows, run_dir)``.  *run_dir* is ``None`` when the config
+    was skipped (no persistent backend available).
+    """
     full_path = repo_root / yaml_path
     if not full_path.exists():
         print(f"  Config not found, skipping: {yaml_path}", file=sys.stderr)
-        return []
+        return [], None
 
     config = load_mas_from_yaml(str(full_path))
     if stub_mode:
@@ -298,12 +308,13 @@ def _run_persistence_config(
                     "skip_reason": skip_reason,
                 }
             )
-        return skip_rows
+        return skip_rows, None
 
     config_results_dir = results_dir / mas_id
-    config_results_dir.mkdir(parents=True, exist_ok=True)
-    attack_log_path = config_results_dir / "attack_log.ndjson"
-    sec_log_path = config_results_dir / "security_events.ndjson"
+    run_dir = next_run_dir(config_results_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    attack_log_path = run_dir / "attack_log.ndjson"
+    sec_log_path = run_dir / "security_events.ndjson"
 
     sec_logger = SecurityEventLogger(log_path=sec_log_path)
     detector = SecurityEventDetector(
@@ -431,7 +442,7 @@ def _run_persistence_config(
                     "tier3_reasoning": tier3_reasoning,
                 },
             }
-            out_path = _write_result(result_dict, results_dir)
+            out_path = _write_result(result_dict, results_dir, run_dir=run_dir)
             status = "ok" if attack_result.success else "FAIL"
             influenced_count = len(attack_result.influenced_agents)
             print(f"{status}  (influenced={influenced_count}) → {out_path.name}")
@@ -458,17 +469,23 @@ def _run_persistence_config(
                 }
             )
 
-    return matrix_rows
+    return matrix_rows, run_dir
 
 
 def _load_baseline(baseline_results_dir: Path | None, mas_id: str) -> dict | None:
-    """Try to load a baseline result for Tier 3 comparison."""
+    """Try to load a baseline result for Tier 3 comparison.
+
+    Prefers the most recent ``run_NNN`` subdirectory; falls back to the flat
+    legacy layout when no versioned run directories exist.
+    """
     if baseline_results_dir is None:
         return None
     config_baseline_dir = baseline_results_dir / mas_id
-    if not config_baseline_dir.exists():
+    run_dir = latest_run_dir(config_baseline_dir)
+    search_dir = run_dir if run_dir is not None else config_baseline_dir
+    if not search_dir.exists():
         return None
-    result_files = sorted(config_baseline_dir.glob("*.json"))
+    result_files = sorted(search_dir.glob("*.json"))
     if not result_files:
         return None
     try:
@@ -577,8 +594,9 @@ def main() -> None:
             LOGGER.warning("Could not initialise SemanticEvaluator: %s", exc)
 
     all_matrix_rows: list[dict] = []
+    first_run_dir_name: str | None = None
     for yaml_path in args.configs:
-        rows = _run_persistence_config(
+        rows, run_dir = _run_persistence_config(
             yaml_path=yaml_path,
             payloads=payloads,
             stub_mode=args.stub,
@@ -588,9 +606,16 @@ def main() -> None:
             repo_root=_REPO_ROOT,
         )
         all_matrix_rows.extend(rows)
+        if first_run_dir_name is None and run_dir is not None:
+            first_run_dir_name = run_dir.name
 
     if all_matrix_rows:
-        csv_path = _write_csv(all_matrix_rows, _RESULTS_DIR)
+        csv_filename = (
+            f"persistence_results_matrix_{first_run_dir_name}.csv"
+            if first_run_dir_name
+            else "persistence_results_matrix.csv"
+        )
+        csv_path = _write_csv(all_matrix_rows, _RESULTS_DIR, csv_filename)
         _print_summary(all_matrix_rows)
         print(f"Results matrix written to: {csv_path}")
 

@@ -204,6 +204,8 @@ def _resolve_attack_config():
 def _init_attack_selections() -> None:
     """Initialize per-payload session state keys to True if not already set."""
     for suite in _SUITE_NAMES:
+        if f"attack_phase_{suite}" not in st.session_state:
+            st.session_state[f"attack_phase_{suite}"] = "pre_execution"
         library = _load_payload_library(suite)
         for pid in library:
             key = f"attack_selected_{suite}_{pid}"
@@ -264,6 +266,18 @@ def _render_payload_selector() -> None:
             use_container_width=True,
         )
 
+        st.caption("Injection phase:")
+        st.radio(
+            "Injection phase",
+            options=["pre_execution", "mid_execution"],
+            format_func=lambda x: (
+                "Pre-execution" if x == "pre_execution" else "Mid-execution"
+            ),
+            key=f"attack_phase_{suite}",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
         for pid, payload_obj in library.items():
             sev = getattr(payload_obj, "severity", "").lower()
             text_preview = getattr(payload_obj, "payload", "")
@@ -284,9 +298,18 @@ def _render_payload_selector() -> None:
 
 def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
     """Run all selected payloads via run_suite() and display live progress."""
+    from bili.aegis.evaluator.semantic_evaluator import (  # pylint: disable=import-outside-toplevel
+        SemanticEvaluator,
+    )
     from bili.aegis.suites._suite_runner import (  # pylint: disable=import-outside-toplevel
         run_suite,
     )
+
+    skip_t3 = stub_mode or st.session_state.get("attack_skip_t3", False)
+    semantic_evaluator = (
+        SemanticEvaluator(model_name=_get_evaluator_model()) if not skip_t3 else None
+    )
+    baseline_results_dir = BASELINE_RESULTS_DIR if not skip_t3 else None
 
     # Collect selected payloads per suite
     suite_selections: dict[str, list] = {}
@@ -305,7 +328,6 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
         return
 
     total_suites = len(suite_selections)
-    phase = st.session_state.get("attack_phase", "pre_execution")
     progress_bar = st.progress(0, text="Starting batch attack run\u2026")
     status_area = st.container()
     passed_suites = 0
@@ -315,6 +337,7 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
             i / total_suites,
             text=f"Running {_SUITE_DISPLAY[suite]} ({i + 1}/{total_suites})\u2026",
         )
+        phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
         results_dir = _SUITES_DIR / suite / "results"
         try:
             run_suite(
@@ -328,8 +351,8 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
                 config_paths=[yaml_path] if yaml_path else [],
                 phases=[phase],
                 stub=stub_mode,
-                semantic_evaluator=None,
-                baseline_results_dir=None,
+                semantic_evaluator=semantic_evaluator,
+                baseline_results_dir=baseline_results_dir,
             )
             # run_suite() normally exits via sys.exit(); reaching here means it
             # returned normally (shouldn't happen, but treat as success).
@@ -544,18 +567,8 @@ def _render_main() -> None:
 
     st.markdown("---")
 
-    # Injection phase and stub mode
-    col_phase, col_stub, _ = st.columns([2, 1, 2])
-    with col_phase:
-        st.radio(
-            "Injection phase",
-            ["pre_execution", "mid_execution"],
-            key="attack_phase",
-            format_func=lambda p: (
-                "Pre-execution" if p == "pre_execution" else "Mid-execution"
-            ),
-            horizontal=True,
-        )
+    # Stub mode and T3 options
+    col_stub, col_t3, _ = st.columns([1, 1, 2])
     with col_stub:
         stub_mode = st.toggle(
             "Stub mode",
@@ -565,6 +578,16 @@ def _render_main() -> None:
         )
         if stub_mode:
             st.caption("No LLM calls")
+    with col_t3:
+        skip_t3 = st.toggle(
+            "Skip T3 evaluation",
+            value=False,
+            key="attack_skip_t3",
+            help="Skip Tier 3 semantic evaluation. Useful when baseline results are unavailable or to reduce API spend.",
+            disabled=stub_mode,
+        )
+        if stub_mode or skip_t3:
+            st.caption("T3 skipped")
 
     # Dynamic batch run button
     total_selected = sum(
@@ -938,13 +961,23 @@ def _run_tier3_evaluation(result_dict: dict, baseline_result: dict) -> Optional[
 
 
 def _load_baseline_result(mas_id: str) -> Optional[dict]:
-    """Load the first available baseline result for *mas_id*, or None."""
+    """Load the first available baseline result for *mas_id*, or None.
+
+    Prefers the most recent ``run_NNN`` subdirectory; falls back to the flat
+    legacy layout when no versioned run directories exist.
+    """
+    from bili.aegis.suites._helpers import (  # pylint: disable=import-outside-toplevel
+        latest_run_dir,
+    )
+
     # Sanitize mas_id to prevent path traversal (e.g. "../../etc")
     safe_id = mas_id.replace("..", "").replace("/", "_").replace("\\", "_")
     mas_dir = BASELINE_RESULTS_DIR / safe_id
-    if not mas_dir.exists():
+    run_dir = latest_run_dir(mas_dir)
+    search_dir = run_dir if run_dir is not None else mas_dir
+    if not search_dir.exists():
         return None
-    for path in sorted(mas_dir.glob("**/*.json")):
+    for path in sorted(search_dir.glob("*.json")):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:  # pylint: disable=broad-exception-caught

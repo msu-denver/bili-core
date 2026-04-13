@@ -311,9 +311,19 @@ def _render_prompt_selector() -> bool:
     return stub_mode
 
 
+_BASELINE_RESULTS_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "aegis"
+    / "suites"
+    / "baseline"
+    / "results"
+)
+
+
 def _execute_run(config, yaml_path: str, stub_mode: bool) -> None:
     """Run the selected baseline prompts and display live progress."""
     # pylint: disable=import-outside-toplevel
+    from bili.aegis.suites._helpers import next_run_dir
     from bili.aegis.suites.baseline.prompts.baseline_prompts import BASELINE_PROMPTS
     from bili.aegis.suites.baseline.run_baseline import run_one, write_result
 
@@ -333,6 +343,10 @@ def _execute_run(config, yaml_path: str, stub_mode: bool) -> None:
         for agent in run_config.agents:
             agent.model_name = None
 
+    run_dir = next_run_dir(_BASELINE_RESULTS_DIR / run_config.mas_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    st.caption(f"Saving to `{run_dir.name}`")
+
     results = []
     progress_bar = st.progress(0, text="Starting baseline run\u2026")
     status_area = st.container()
@@ -347,7 +361,7 @@ def _execute_run(config, yaml_path: str, stub_mode: bool) -> None:
 
         try:
             result = run_one(run_config, yaml_path, prompt, stub_mode=stub_mode)
-            write_result(result)
+            write_result(result, run_dir=run_dir)
             success = result["execution"]["success"]
             duration = result["execution"]["duration_ms"]
         except Exception as exc:  # pylint: disable=broad-exception-caught

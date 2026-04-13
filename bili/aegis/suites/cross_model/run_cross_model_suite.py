@@ -120,7 +120,9 @@ from bili.aegis.suites._helpers import CONFIG_PATHS
 from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     config_fingerprint as _config_fingerprint_helper,
 )
+from bili.aegis.suites._helpers import latest_run_dir as _latest_run_dir
 from bili.aegis.suites._helpers import model_id_safe as _model_id_safe
+from bili.aegis.suites._helpers import next_run_dir as _next_run_dir
 from bili.aegis.suites.injection.payloads.prompt_injection_payloads import (  # noqa: E402  pylint: disable=wrong-import-position
     INJECTION_PAYLOADS,
 )
@@ -231,10 +233,19 @@ def _patch_config_model(config: Any, model_id: str | None) -> Any:
     return config.model_copy(update={"agents": patched_agents})
 
 
-def _write_result(result_dict: dict, results_dir: Path) -> Path:
-    """Write one result JSON to results_dir/{mas_id}/{model_id_safe}/{payload_id}_{phase}.json."""
+def _write_result(
+    result_dict: dict, results_dir: Path, run_dir: Path | None = None
+) -> Path:
+    """Write one result JSON to {run_dir}/{model_id_safe}/{payload_id}_{phase}.json.
+
+    Falls back to the legacy ``results_dir/{mas_id}/{model_id_safe}/`` flat layout
+    when *run_dir* is ``None`` so existing callers continue to work unchanged.
+    """
     model_safe = _model_id_safe(result_dict.get("model_id"))
-    out_dir = results_dir / result_dict["mas_id"] / model_safe
+    if run_dir is not None:
+        out_dir = run_dir / model_safe
+    else:
+        out_dir = results_dir / result_dict["mas_id"] / model_safe
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{result_dict['payload_id']}_{result_dict['injection_phase']}.json"
     out_path = out_dir / filename
@@ -242,10 +253,10 @@ def _write_result(result_dict: dict, results_dir: Path) -> Path:
     return out_path
 
 
-def _write_csv(rows: list[dict], results_dir: Path) -> Path:
-    """Write the cross-model results matrix CSV."""
+def _write_csv(rows: list[dict], results_dir: Path, csv_filename: str) -> Path:
+    """Write the cross-model results matrix CSV to results_dir/{csv_filename}."""
     results_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = results_dir / "cross_model_matrix.csv"
+    csv_path = results_dir / csv_filename
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=_CSV_COLUMNS)
         writer.writeheader()
@@ -254,13 +265,19 @@ def _write_csv(rows: list[dict], results_dir: Path) -> Path:
 
 
 def _load_baseline(baseline_results_dir: Path | None, mas_id: str) -> dict | None:
-    """Try to load a baseline result for Tier 3 comparison."""
+    """Try to load a baseline result for Tier 3 comparison.
+
+    Prefers the most recent ``run_NNN`` subdirectory; falls back to the flat
+    legacy layout when no versioned run directories exist.
+    """
     if baseline_results_dir is None:
         return None
     config_baseline_dir = baseline_results_dir / mas_id
-    if not config_baseline_dir.exists():
+    run_dir = _latest_run_dir(config_baseline_dir)
+    search_dir = run_dir if run_dir is not None else config_baseline_dir
+    if not search_dir.exists():
         return None
-    result_files = sorted(config_baseline_dir.glob("*.json"))
+    result_files = sorted(search_dir.glob("*.json"))
     if not result_files:
         return None
     try:
@@ -319,29 +336,32 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
     baseline_results_dir: Path | None,
     results_dir: Path,
     repo_root: Path,
-) -> list[dict]:
+) -> tuple[list[dict], Path | None]:
     """Run all payloads × phases for one MAS config under one model.
 
     Returns:
-        List of CSV row dicts (one per payload × phase).  Skips with a warning
-        if the config file is not found.  Individual injection failures produce
-        a skip row rather than aborting the whole model run.
+        ``(matrix_rows, run_dir)`` tuple.  *run_dir* is the versioned
+        ``run_NNN`` directory created for this run's result files, or ``None``
+        when the config was not found and nothing was written.
     """
     full_path = repo_root / yaml_path
     if not full_path.exists():
         print(f"  Config not found, skipping: {yaml_path}", file=sys.stderr)
-        return []
+        return [], None
 
     base_config = load_mas_from_yaml(str(full_path))
     config = _patch_config_model(base_config, model_id)
     mas_id = config.mas_id
 
     model_safe = _model_id_safe(model_id)
-    config_results_dir = results_dir / mas_id / model_safe
-    config_results_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = _next_run_dir(results_dir / mas_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    attack_log_path = config_results_dir / "attack_log.ndjson"
-    sec_log_path = config_results_dir / "security_events.ndjson"
+    model_run_dir = run_dir / model_safe
+    model_run_dir.mkdir(parents=True, exist_ok=True)
+
+    attack_log_path = model_run_dir / "attack_log.ndjson"
+    sec_log_path = model_run_dir / "security_events.ndjson"
 
     sec_logger = SecurityEventLogger(log_path=sec_log_path)
     detector = SecurityEventDetector(
@@ -480,7 +500,7 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                         "tier3_reasoning": tier3_reasoning,
                     },
                 }
-                out_path = _write_result(result_dict, results_dir)
+                out_path = _write_result(result_dict, results_dir, run_dir=run_dir)
                 status = "ok" if attack_result.success else "FAIL"
                 influenced_count = len(attack_result.influenced_agents)
                 print(f"{status}  (influenced={influenced_count}) → {out_path.name}")
@@ -510,7 +530,7 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                     }
                 )
 
-    return matrix_rows
+    return matrix_rows, run_dir
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +667,7 @@ def main() -> None:
 
     # Run: outer loop = models, inner = configs × payloads × phases
     all_matrix_rows: list[dict] = []
+    first_run_dir_name: str | None = None
     for model_id, model_display_name in model_matrix:
         print(f"\n{'=' * 60}")
         print(f"Model: {model_display_name}")
@@ -654,7 +675,7 @@ def main() -> None:
             print(f"  model_id: {model_id}")
         print(f"{'=' * 60}")
         for yaml_path in args.configs:
-            rows = _run_config_for_model(
+            rows, run_dir = _run_config_for_model(
                 yaml_path=yaml_path,
                 model_id=model_id,
                 model_display_name=model_display_name,
@@ -667,9 +688,16 @@ def main() -> None:
                 repo_root=_REPO_ROOT,
             )
             all_matrix_rows.extend(rows)
+            if first_run_dir_name is None and run_dir is not None:
+                first_run_dir_name = run_dir.name
 
     if all_matrix_rows:
-        csv_path = _write_csv(all_matrix_rows, _RESULTS_DIR)
+        versioned_csv = (
+            f"cross_model_matrix_{first_run_dir_name}.csv"
+            if first_run_dir_name
+            else "cross_model_matrix.csv"
+        )
+        csv_path = _write_csv(all_matrix_rows, _RESULTS_DIR, versioned_csv)
         _print_summary(all_matrix_rows)
         print(f"Results matrix written to: {csv_path}")
 

@@ -130,3 +130,47 @@ def model_id_safe(model_id: str | None) -> str:
         .replace("-", "_")
         .lower()
     )
+
+
+def next_run_dir(base_dir: Path) -> Path:
+    """Return the next run directory path (``run_001``, ``run_002``, …) under *base_dir*.
+
+    Creates *base_dir* if it does not exist.  Does **not** create the run
+    directory itself — the caller is responsible for creating it when the
+    first result is written.
+
+    Args:
+        base_dir: The ``mas_id``-level results directory.
+
+    Returns:
+        Path to the next run directory, e.g. ``base_dir / "run_003"``.
+    """
+    base_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(
+        d
+        for d in base_dir.iterdir()
+        if d.is_dir() and d.name.startswith("run_") and d.name[4:].isdigit()
+    )
+    return base_dir / f"run_{len(existing) + 1:03d}"
+
+
+def latest_run_dir(base_dir: Path) -> "Path | None":
+    """Return the most recent run directory under *base_dir*, or ``None``.
+
+    Returns ``None`` when *base_dir* does not exist or contains no
+    ``run_NNN`` subdirectories (i.e. the flat legacy structure is in use).
+
+    Args:
+        base_dir: The ``mas_id``-level results directory.
+
+    Returns:
+        Path to the most recent ``run_NNN`` directory, or ``None``.
+    """
+    if not base_dir.exists():
+        return None
+    existing = sorted(
+        d
+        for d in base_dir.iterdir()
+        if d.is_dir() and d.name.startswith("run_") and d.name[4:].isdigit()
+    )
+    return existing[-1] if existing else None

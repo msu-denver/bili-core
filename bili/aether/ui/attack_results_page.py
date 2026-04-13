@@ -82,9 +82,11 @@ def _load_suite_results(suite_dir: str) -> list[dict]:
     Cached per ``suite_dir`` with a 30-second TTL.  NDJSON logs and CSV files
     are excluded automatically (glob only matches ``*.json``).
 
-    Cross-model results live one level deeper
-    (``{mas_id}/{model_id_safe}/*.json``); the flat ``**/*.json`` glob covers
-    both layouts transparently.
+    Injects a ``run_id`` key derived from the file path into every raw dict:
+    - Versioned:  ``{mas_id}/run_NNN/{payload_file}.json``           → ``run_NNN``
+    - Cross-model versioned: ``{mas_id}/run_NNN/{model_safe}/{f}``   → ``run_NNN``
+    - Legacy flat: ``{mas_id}/{payload_file}.json``                  → ``run_000 (legacy)``
+    - Legacy cross-model: ``{mas_id}/{model_safe}/{payload_file}``   → ``run_000 (legacy)``
 
     Fields not present in the raw JSON are normalised to ``None`` so
     downstream code can use a single unified DataFrame regardless of suite.
@@ -98,6 +100,16 @@ def _load_suite_results(suite_dir: str) -> list[dict]:
     for path in sorted(results_dir.glob("**/*.json")):
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
+            # Derive run_id from path: parts[0]=mas_id, parts[1]=run_NNN or other
+            parts = path.relative_to(results_dir).parts
+            if (
+                len(parts) >= 2
+                and parts[1].startswith("run_")
+                and parts[1][4:].isdigit()
+            ):
+                raw["run_id"] = parts[1]
+            else:
+                raw["run_id"] = "run_000 (legacy)"
             results.append(_normalise(raw))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.warning("Could not parse %s: %s", path, exc)
@@ -123,6 +135,7 @@ def _normalise(r: dict) -> dict:
 
     return {
         # Core identity
+        "run_id": r.get("run_id", "run_000 (legacy)"),
         "payload_id": r.get("payload_id", "?"),
         "injection_type": r.get("injection_type", "?"),
         "severity": r.get("severity", "?"),
@@ -165,6 +178,7 @@ def _build_dataframe(results: list[dict]) -> pd.DataFrame:
         try:
             rows.append(
                 {
+                    "run_id": r["run_id"],
                     "payload_id": r["payload_id"],
                     "injection_type": r["injection_type"],
                     "severity": r["severity"],
@@ -361,6 +375,7 @@ def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
 def _result_export_key(r: dict, is_cross_model: bool) -> tuple:
     """Return the lookup key used to match normalised results to df_filtered rows."""
     return (
+        r.get("run_id", "run_000 (legacy)"),
         r.get("mas_id"),
         r.get("payload_id"),
         r.get("phase"),
@@ -383,6 +398,7 @@ def _build_export_df(
             continue
         rows.append(
             {
+                "run_id": r.get("run_id", "run_000 (legacy)"),
                 "mas_id": r.get("mas_id", ""),
                 "agent_id": r.get("target_agent_id", ""),
                 "attack_type": r.get("injection_type", ""),
@@ -486,6 +502,16 @@ def _render_filters(
 
     # Left column
     with col_left:
+        available_runs = sorted(df["run_id"].unique(), reverse=True)
+        run_options = ["All"] + available_runs
+        default_run_idx = 1 if available_runs else 0
+        selected_run = st.selectbox(
+            "Run",
+            options=run_options,
+            index=default_run_idx,
+            key="atk_filter_run",
+        )
+
         if selected_suite == _ALL_SUITES:
             suite_opts = sorted(df["attack_suite"].unique())
             suites = st.multiselect(
@@ -567,6 +593,8 @@ def _render_filters(
         & df["injection_type"].isin(inj_types)
         & df["severity"].isin(severities)
     )
+    if selected_run != "All":
+        mask &= df["run_id"] == selected_run
     if phase != "All":
         mask &= df["phase"] == phase
     if tier3_status == "Tier-3 evaluated":
@@ -700,24 +728,37 @@ def _render_detail_panel(
     # Build lookup key → (tier3_score, tier1_pass) from the parsed DataFrame
     if is_cross_model and df_filtered["model_id"].notna().any():
         score_lookup: dict = {
-            (row["mas_id"], row["payload_id"], row["phase"], row["model_id"]): row
+            (
+                row["run_id"],
+                row["mas_id"],
+                row["payload_id"],
+                row["phase"],
+                row["model_id"],
+            ): row
             for _, row in df_filtered.iterrows()
         }
     else:
         score_lookup = {
-            (row["mas_id"], row["payload_id"], row["phase"], None): row
+            (row["run_id"], row["mas_id"], row["payload_id"], row["phase"], None): row
             for _, row in df_filtered.iterrows()
         }
 
     def _result_key(r: dict) -> tuple:
         if is_cross_model:
             return (
+                r.get("run_id", "run_000 (legacy)"),
                 r.get("mas_id"),
                 r.get("payload_id"),
                 r.get("phase"),
                 r.get("model_id"),
             )
-        return (r.get("mas_id"), r.get("payload_id"), r.get("phase"), None)
+        return (
+            r.get("run_id", "run_000 (legacy)"),
+            r.get("mas_id"),
+            r.get("payload_id"),
+            r.get("phase"),
+            None,
+        )
 
     visible = [r for r in results if _result_key(r) in score_lookup]
 

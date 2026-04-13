@@ -48,13 +48,25 @@ _CATEGORY_ORDER = ["benign", "edge_case", "violating"]
 def _load_baseline_results() -> list[dict]:
     """Return all parsed JSON result dicts from the baseline results directory.
 
+    Injects a ``run_id`` key derived from the file path into every result dict:
+    - Versioned layout ``results/{mas_id}/run_NNN/{prompt}.json`` → ``run_NNN``
+    - Legacy flat layout ``results/{mas_id}/{prompt}.json`` → ``run_000 (legacy)``
+
     Cached with a 30-second TTL so new result files appear promptly without
     re-reading disk on every filter interaction or expander toggle.
     """
     results: list[dict] = []
     for path in sorted(BASELINE_RESULTS_DIR.glob("**/*.json")):
         try:
-            results.append(json.loads(path.read_text(encoding="utf-8")))
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            # Determine run_id from path structure
+            parts = path.relative_to(BASELINE_RESULTS_DIR).parts
+            # parts[0]=mas_id, parts[1]=run_NNN or prompt_file (legacy)
+            if len(parts) >= 3:
+                raw["run_id"] = parts[1]
+            else:
+                raw["run_id"] = "run_000 (legacy)"
+            results.append(raw)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.warning("Could not parse %s: %s", path, exc)
     return results
@@ -71,6 +83,7 @@ def _build_dataframe(results: list[dict]) -> pd.DataFrame:
         try:
             rows.append(
                 {
+                    "run_id": r.get("run_id", "run_000 (legacy)"),
                     "mas_id": r["mas_id"],
                     "prompt_id": r["prompt_id"],
                     "category": r["prompt_category"],
@@ -198,6 +211,7 @@ def _build_baseline_export_df(df_filtered: pd.DataFrame) -> pd.DataFrame:
     """
     renamed = df_filtered.rename(columns={"success": "tier1_success"})
     export_cols = [
+        "run_id",
         "mas_id",
         "prompt_id",
         "category",
@@ -222,9 +236,14 @@ def _render_export_buttons(results: list[dict], df_filtered: pd.DataFrame) -> No
     if df_filtered.empty:
         return
 
-    visible_keys = set(zip(df_filtered["mas_id"], df_filtered["prompt_id"]))
+    visible_keys = set(
+        zip(df_filtered["run_id"], df_filtered["mas_id"], df_filtered["prompt_id"])
+    )
     matched = [
-        r for r in results if (r.get("mas_id"), r.get("prompt_id")) in visible_keys
+        r
+        for r in results
+        if (r.get("run_id", "run_000 (legacy)"), r.get("mas_id"), r.get("prompt_id"))
+        in visible_keys
     ]
 
     unique_mas = df_filtered["mas_id"].dropna().unique()
@@ -272,12 +291,24 @@ def _render_summary_metrics(df: pd.DataFrame) -> None:
 
 def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
     """Render filter widgets and return the filtered DataFrame."""
-    col1, col2, col3 = st.columns(3)
+    col0, col1, col2, col3 = st.columns(4)
+    with col0:
+        available_runs = sorted(df["run_id"].unique(), reverse=True)
+        run_options = ["All"] + available_runs
+        # Default to the latest run (index 1) when runs exist
+        default_run_idx = 1 if len(available_runs) > 0 else 0
+        selected_run = st.selectbox(
+            "Run",
+            options=run_options,
+            index=default_run_idx,
+            key="baseline_filter_run",
+        )
     with col1:
+        run_df = df if selected_run == "All" else df[df["run_id"] == selected_run]
         configs = st.multiselect(
             "MAS Config",
-            options=sorted(df["mas_id"].unique()),
-            default=sorted(df["mas_id"].unique()),
+            options=sorted(run_df["mas_id"].unique()),
+            default=sorted(run_df["mas_id"].unique()),
             key="baseline_filter_configs",
         )
     with col2:
@@ -299,6 +330,8 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     filtered = df[df["mas_id"].isin(configs) & df["category"].isin(categories)]
+    if selected_run != "All":
+        filtered = filtered[filtered["run_id"] == selected_run]
     if status == "Passed":
         filtered = filtered[filtered["success"]]
     elif status == "Failed":
@@ -348,8 +381,15 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
     if df_filtered.empty:
         return
 
-    visible_keys = set(zip(df_filtered["mas_id"], df_filtered["prompt_id"]))
-    visible = [r for r in results if (r["mas_id"], r["prompt_id"]) in visible_keys]
+    visible_run_keys = set(
+        zip(df_filtered["run_id"], df_filtered["mas_id"], df_filtered["prompt_id"])
+    )
+    visible = [
+        r
+        for r in results
+        if (r.get("run_id", "run_000 (legacy)"), r["mas_id"], r["prompt_id"])
+        in visible_run_keys
+    ]
 
     cat_rank = {c: i for i, c in enumerate(_CATEGORY_ORDER)}
     visible.sort(
@@ -373,10 +413,11 @@ def _render_detail_panel(results: list[dict], df_filtered: pd.DataFrame) -> None
         with st.expander(label, expanded=False):
             st.markdown(f"**Prompt:** {r.get('prompt_text', '(no prompt text)')}")
 
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             c1.markdown(f"**Category:** `{r.get('prompt_category', '?')}`")
-            c2.markdown(f"**Stub:** {'Yes' if run_metadata.get('stub_mode') else 'No'}")
-            c3.markdown(f"**Agents:** {execution.get('agent_count', '?')}")
+            c2.markdown(f"**Run:** `{r.get('run_id', '?')}`")
+            c3.markdown(f"**Stub:** {'Yes' if run_metadata.get('stub_mode') else 'No'}")
+            c4.markdown(f"**Agents:** {execution.get('agent_count', '?')}")
             st.caption(f"Run at {run_metadata.get('timestamp', 'unknown')}")
 
             agent_outputs = r.get("agent_outputs", {})
