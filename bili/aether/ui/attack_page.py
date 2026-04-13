@@ -114,7 +114,7 @@ _SUITE_ATTACK_TYPE = {
     "agent_impersonation": "agent_impersonation",
 }
 
-_SEV_PREFIX = {"high": "[HIGH]", "medium": "[MED] ", "low": "[LOW] "}
+_SEV_PREFIX = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}
 
 # Strategy function name for each attack_type string
 _PRE_EXEC_STRATEGY_FN = {
@@ -181,14 +181,19 @@ def _resolve_attack_config():
 
     if selected_idx and selected_idx > 0:
         yaml_path_obj = yaml_files[selected_idx - 1]
-        try:
-            config = load_mas_from_yaml(str(yaml_path_obj))
-            st.session_state.attack_config = config
-            st.session_state.attack_yaml_path = str(yaml_path_obj)
-            if config.agents and not st.session_state.get("attack_target_agent_id"):
-                st.session_state.attack_target_agent_id = config.agents[0].agent_id
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            st.error(f"Failed to load `{yaml_path_obj.name}`: {exc}")
+        # Only reload if the selected file differs from what is currently loaded,
+        # to avoid a full disk read and target-agent reset on every render.
+        if st.session_state.get("attack_yaml_path") != str(yaml_path_obj):
+            try:
+                config = load_mas_from_yaml(str(yaml_path_obj))
+                st.session_state.attack_config = config
+                st.session_state.attack_yaml_path = str(yaml_path_obj)
+                # Always reset target to first agent of the new config so
+                # a stale agent_id from a previous config is never forwarded.
+                if config.agents:
+                    st.session_state.attack_target_agent_id = config.agents[0].agent_id
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                st.error(f"Failed to load `{yaml_path_obj.name}`: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -326,11 +331,29 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
                 semantic_evaluator=None,
                 baseline_results_dir=None,
             )
+            # run_suite() normally exits via sys.exit(); reaching here means it
+            # returned normally (shouldn't happen, but treat as success).
             passed_suites += 1
             with status_area:
                 st.markdown(
                     f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
                 )
+        except SystemExit as exc:
+            # run_suite() is a CLI tool that always calls sys.exit() after writing
+            # results to disk.  Exit code 0 = all cases passed; non-zero = failures.
+            # Results are already on disk in either case.
+            if exc.code == 0:
+                passed_suites += 1
+                with status_area:
+                    st.markdown(
+                        f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                    )
+            else:
+                with status_area:
+                    st.markdown(
+                        f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                        f"{len(payloads)} payload(s) (some cases failed)"
+                    )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.error("Batch attack failed for suite %s: %s", suite, exc)
             with status_area:

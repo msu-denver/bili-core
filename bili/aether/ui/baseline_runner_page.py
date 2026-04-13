@@ -209,14 +209,22 @@ def _resolve_config():
     )
 
     if selected_idx and selected_idx > 0:
-        # User explicitly picked a file — takes precedence over session state
+        # User explicitly picked a file — takes precedence over session state.
+        # Only reload if the selected file differs from what is currently cached
+        # to avoid a full disk read on every render.
         yaml_path_obj = yaml_files[selected_idx - 1]
-        try:
-            config = load_mas_from_yaml(str(yaml_path_obj))
-            return config, str(yaml_path_obj)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            st.error(f"Failed to load `{yaml_path_obj.name}`: {exc}")
-            return None, None
+        if st.session_state.get("baseline_yaml_path") != str(yaml_path_obj):
+            try:
+                config = load_mas_from_yaml(str(yaml_path_obj))
+                st.session_state.baseline_config = config
+                st.session_state.baseline_yaml_path = str(yaml_path_obj)
+                for key in ("baseline_run_results",):
+                    st.session_state.pop(key, None)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                st.error(f"Failed to load `{yaml_path_obj.name}`: {exc}")
+                return None, None
+        config = st.session_state.get("baseline_config")
+        return config, str(yaml_path_obj)
 
     # Fall back to session state (pushed from visualizer)
     config = st.session_state.get("baseline_config")
