@@ -241,6 +241,17 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
         else:
             messages.append(HumanMessage(content="Begin your task."))
 
+        # Some providers (e.g. Mistral on Bedrock) require the final turn to be
+        # a HumanMessage.  If the accumulated context ends with an AIMessage from
+        # a prior agent, append a synthetic HumanMessage that frames the current
+        # agent's task so the constraint is satisfied for all models.
+        if messages and isinstance(messages[-1], AIMessage):
+            task_cue = (
+                agent.objective
+                or "Please complete your task based on the context above."
+            )
+            messages.append(HumanMessage(content=task_cue))
+
         # Invoke the LLM directly
         response = llm.invoke(messages)
         content = _normalise_content_value(response.content)

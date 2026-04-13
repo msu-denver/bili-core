@@ -23,7 +23,11 @@ import streamlit as st
 LOGGER = logging.getLogger(__name__)
 
 BASELINE_RESULTS_DIR = (
-    Path(__file__).resolve().parent.parent / "tests" / "baseline" / "results"
+    Path(__file__).resolve().parent.parent.parent
+    / "aegis"
+    / "suites"
+    / "baseline"
+    / "results"
 )
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
 

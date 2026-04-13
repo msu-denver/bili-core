@@ -33,7 +33,7 @@ import streamlit as st
 LOGGER = logging.getLogger(__name__)
 
 _AETHER_DIR = Path(__file__).resolve().parent.parent
-_TESTS_DIR = _AETHER_DIR / "tests"
+_SUITES_DIR = _AETHER_DIR.parent / "aegis" / "suites"
 _REPO_ROOT = _AETHER_DIR.parent.parent
 LOGO_PATH = _AETHER_DIR.parent / "images" / "logo.png"
 
@@ -89,7 +89,7 @@ def _load_suite_results(suite_dir: str) -> list[dict]:
     Fields not present in the raw JSON are normalised to ``None`` so
     downstream code can use a single unified DataFrame regardless of suite.
     """
-    results_dir = _TESTS_DIR / suite_dir / "results"
+    results_dir = _SUITES_DIR / suite_dir / "results"
     results: list[dict] = []
 
     if not results_dir.exists():

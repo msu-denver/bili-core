@@ -48,7 +48,11 @@ from bili.aether.ui.components.attack_graph import (
 
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
 BASELINE_RESULTS_DIR = (
-    Path(__file__).resolve().parent.parent / "tests" / "baseline" / "results"
+    Path(__file__).resolve().parent.parent.parent
+    / "aegis"
+    / "suites"
+    / "baseline"
+    / "results"
 )
 
 LOGGER = logging.getLogger(__name__)
