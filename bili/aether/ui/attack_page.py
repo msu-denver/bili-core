@@ -54,6 +54,11 @@ BASELINE_RESULTS_DIR = (
     / "baseline"
     / "results"
 )
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
+
+# Batch runner paths
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SUITES_DIR = Path(__file__).resolve().parent.parent.parent / "aegis" / "suites"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -109,6 +114,8 @@ _SUITE_ATTACK_TYPE = {
     "agent_impersonation": "agent_impersonation",
 }
 
+_SEV_PREFIX = {"high": "[HIGH]", "medium": "[MED] ", "low": "[LOW] "}
+
 # Strategy function name for each attack_type string
 _PRE_EXEC_STRATEGY_FN = {
     "prompt_injection": "inject_prompt_injection",
@@ -124,18 +131,222 @@ _PRE_EXEC_STRATEGY_FN = {
 # ---------------------------------------------------------------------------
 
 
-def push_config_to_attack_state(config: MASConfig) -> None:
+def push_config_to_attack_state(config: MASConfig, yaml_path: str = "") -> None:
     """Write *config* into session state so the Attack page loads it fresh.
 
     Call this from any page that has a "Send to Attack Suite" button.  Clears
     previous attack results so the new config starts from a clean slate.
+
+    Args:
+        config:    The MASConfig to run attacks against.
+        yaml_path: Absolute or repo-relative path to the YAML file — required
+                   by ``run_suite`` for config fingerprinting.
     """
     st.session_state.attack_config = config
+    st.session_state.attack_yaml_path = yaml_path
     if config.agents:
         st.session_state.attack_target_agent_id = config.agents[0].agent_id
     for key in ("attack_result", "attack_verdict", "attack_node_states"):
         st.session_state.pop(key, None)
     st.toast("Config loaded in Attack Suite \u2713")
+
+
+# ---------------------------------------------------------------------------
+# Config resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_attack_config():
+    """Render YAML selector and sync resolved config into session state.
+
+    When a file is explicitly selected, loads it and writes the result into
+    ``attack_config`` / ``attack_yaml_path`` so that ``_render_main()`` can
+    read the correct values from session state on the same render pass.
+    """
+    from bili.aether.config.loader import (  # pylint: disable=import-outside-toplevel
+        load_mas_from_yaml,
+    )
+
+    yaml_files = sorted(EXAMPLES_DIR.glob("*.yaml")) if EXAMPLES_DIR.exists() else []
+    yaml_display = ["(use config from AETHER visualizer)"] + [
+        f.stem.replace("_", " ").title() for f in yaml_files
+    ]
+
+    selected_idx = st.selectbox(
+        "YAML Configuration",
+        range(len(yaml_display)),
+        format_func=lambda i: yaml_display[i],
+        key="attack_yaml_selector",
+    )
+
+    if selected_idx and selected_idx > 0:
+        yaml_path_obj = yaml_files[selected_idx - 1]
+        try:
+            config = load_mas_from_yaml(str(yaml_path_obj))
+            st.session_state.attack_config = config
+            st.session_state.attack_yaml_path = str(yaml_path_obj)
+            if config.agents and not st.session_state.get("attack_target_agent_id"):
+                st.session_state.attack_target_agent_id = config.agents[0].agent_id
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            st.error(f"Failed to load `{yaml_path_obj.name}`: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Payload selection helpers
+# ---------------------------------------------------------------------------
+
+
+def _init_attack_selections() -> None:
+    """Initialize per-payload session state keys to True if not already set."""
+    for suite in _SUITE_NAMES:
+        library = _load_payload_library(suite)
+        for pid in library:
+            key = f"attack_selected_{suite}_{pid}"
+            if key not in st.session_state:
+                st.session_state[key] = True
+
+
+def _on_suite_header_change(hdr_key: str, payload_ids: list) -> None:
+    """Propagate suite header checkbox state to all child payload checkboxes."""
+    new_val = st.session_state[hdr_key]
+    for pid in payload_ids:
+        st.session_state[pid] = new_val
+
+
+def _set_suite_payloads(payload_keys: list, value: bool) -> None:
+    """Set all payloads in a suite to *value* (used by Select/Deselect All)."""
+    for key in payload_keys:
+        st.session_state[key] = value
+
+
+def _render_payload_selector() -> None:
+    """Render the two-level suite/payload selection hierarchy."""
+    _init_attack_selections()
+
+    st.markdown("**Select payloads to run:**")
+
+    for suite in _SUITE_NAMES:
+        library = _load_payload_library(suite)
+        payload_keys = [f"attack_selected_{suite}_{pid}" for pid in library]
+        n_selected = sum(1 for k in payload_keys if st.session_state.get(k, True))
+        n_total = len(payload_keys)
+        all_checked = n_selected == n_total
+
+        hdr_key = f"attack_suite_hdr_{suite}"
+        st.session_state[hdr_key] = all_checked
+
+        display = _SUITE_DISPLAY[suite]
+        st.checkbox(
+            f"**{display}** ({n_selected}/{n_total})",
+            key=hdr_key,
+            on_change=_on_suite_header_change,
+            args=(hdr_key, payload_keys),
+        )
+
+        col_a, col_b, _ = st.columns([1, 1, 2])
+        col_a.button(
+            "Select All",
+            key=f"atk_sel_{suite}",
+            on_click=_set_suite_payloads,
+            args=(payload_keys, True),
+            use_container_width=True,
+        )
+        col_b.button(
+            "Deselect All",
+            key=f"atk_desel_{suite}",
+            on_click=_set_suite_payloads,
+            args=(payload_keys, False),
+            use_container_width=True,
+        )
+
+        for pid, payload_obj in library.items():
+            sev = getattr(payload_obj, "severity", "").lower()
+            text_preview = getattr(payload_obj, "payload", "")
+            preview = text_preview[:60] + ("\u2026" if len(text_preview) > 60 else "")
+            sev_badge = _SEV_PREFIX.get(sev, "[---]")
+            _, col_p = st.columns([0.05, 0.95])
+            with col_p:
+                st.checkbox(
+                    f"{sev_badge} `{pid}` \u2014 {preview}",
+                    key=f"attack_selected_{suite}_{pid}",
+                )
+
+
+# ---------------------------------------------------------------------------
+# Batch execution
+# ---------------------------------------------------------------------------
+
+
+def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
+    """Run all selected payloads via run_suite() and display live progress."""
+    from bili.aegis.suites._suite_runner import (  # pylint: disable=import-outside-toplevel
+        run_suite,
+    )
+
+    # Collect selected payloads per suite
+    suite_selections: dict[str, list] = {}
+    for suite in _SUITE_NAMES:
+        library = _load_payload_library(suite)
+        selected = [
+            obj
+            for pid, obj in library.items()
+            if st.session_state.get(f"attack_selected_{suite}_{pid}", True)
+        ]
+        if selected:
+            suite_selections[suite] = selected
+
+    if not suite_selections:
+        st.warning("No payloads selected. Enable at least one payload.")
+        return
+
+    total_suites = len(suite_selections)
+    phase = st.session_state.get("attack_phase", "pre_execution")
+    progress_bar = st.progress(0, text="Starting batch attack run\u2026")
+    status_area = st.container()
+    passed_suites = 0
+
+    for i, (suite, payloads) in enumerate(suite_selections.items()):
+        progress_bar.progress(
+            i / total_suites,
+            text=f"Running {_SUITE_DISPLAY[suite]} ({i + 1}/{total_suites})\u2026",
+        )
+        results_dir = _SUITES_DIR / suite / "results"
+        try:
+            run_suite(
+                payloads=payloads,
+                attack_suite=suite,
+                attack_type=_SUITE_ATTACK_TYPE[suite],
+                csv_filename=f"{suite}_results_matrix.csv",
+                suite_name=_SUITE_DISPLAY[suite],
+                results_dir=results_dir,
+                repo_root=_REPO_ROOT,
+                config_paths=[yaml_path] if yaml_path else [],
+                phases=[phase],
+                stub=stub_mode,
+                semantic_evaluator=None,
+                baseline_results_dir=None,
+            )
+            passed_suites += 1
+            with status_area:
+                st.markdown(
+                    f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("Batch attack failed for suite %s: %s", suite, exc)
+            with status_area:
+                st.markdown(f"\u274c **{_SUITE_DISPLAY[suite]}** — failed: {exc}")
+
+    progress_bar.progress(
+        1.0, text=f"Complete \u2014 {passed_suites}/{total_suites} suite(s) passed"
+    )
+    if passed_suites == total_suites:
+        st.success(f"All {total_suites} suite(s) completed.")
+    else:
+        st.warning(
+            f"{passed_suites}/{total_suites} suite(s) completed "
+            f"\u2014 {total_suites - passed_suites} failed."
+        )
+    st.info("Navigate to **Attack Results** in the sidebar to view your results.")
 
 
 def render_attack_page() -> None:
@@ -162,13 +373,19 @@ def _render_sidebar() -> None:
     st.caption("Adversarial Evaluation and Guarding of Intelligent Systems")
     st.markdown("---")
     st.markdown("#### Attack Suite")
+    st.markdown(
+        "Run batch attacks from the main area, or use the controls below for a "
+        "single-payload exploratory attack against a specific graph node."
+    )
+
+    _resolve_attack_config()
 
     config: Optional[MASConfig] = st.session_state.get("attack_config")
     if config is None:
-        st.caption("No MAS loaded.")
         return
 
-    st.caption(f"Config: `{config.mas_id}`")
+    st.markdown("---")
+    st.markdown("##### Single-payload exploratory attack")
 
     # Suite selector
     suite_display_names = [_SUITE_DISPLAY[s] for s in _SUITE_NAMES]
@@ -195,27 +412,26 @@ def _render_sidebar() -> None:
         payload_ids = list(library.keys())
         if not payload_ids:
             st.warning("No payloads found for this suite.")
-            return
-
-        selected_pid = st.selectbox(
-            "Payload",
-            payload_ids,
-            format_func=lambda pid: f"{pid} — {_get_notes(library[pid])[:55]}",
-            key="attack_payload_id",
-        )
-        if selected_pid:
-            payload_obj = library[selected_pid]
-            st.text_area(
-                "Payload preview",
-                value=getattr(payload_obj, "payload", ""),
-                height=100,
-                disabled=True,
-                key="attack_payload_preview",
+        else:
+            selected_pid = st.selectbox(
+                "Payload",
+                payload_ids,
+                format_func=lambda pid: f"{pid} — {_get_notes(library[pid])[:55]}",
+                key="attack_payload_id",
             )
+            if selected_pid:
+                payload_obj = library[selected_pid]
+                st.text_area(
+                    "Payload preview",
+                    value=getattr(payload_obj, "payload", ""),
+                    height=100,
+                    disabled=True,
+                    key="attack_payload_preview",
+                )
     else:
         st.text_area(
             "Custom payload",
-            placeholder="Enter adversarial payload text…",
+            placeholder="Enter adversarial payload text\u2026",
             height=120,
             max_chars=10000,
             key="attack_payload_custom",
@@ -231,8 +447,6 @@ def _render_sidebar() -> None:
         ),
         horizontal=True,
     )
-
-    st.markdown("---")
 
     target = st.session_state.get("attack_target_agent_id")
     run_disabled = target is None
@@ -271,6 +485,7 @@ def _render_sidebar() -> None:
 def _render_main() -> None:
     """Render the Attack page main area."""
     config: Optional[MASConfig] = st.session_state.get("attack_config")
+    yaml_path: str = st.session_state.get("attack_yaml_path", "")
 
     st.markdown("# AEGIS Attack Suite")
     st.markdown(
@@ -287,25 +502,95 @@ def _render_main() -> None:
         "communication channels. The Attack Suite lets you explore these "
         "risks interactively."
     )
-    st.markdown(
-        "Load a MAS configuration from AETHER, select a target agent on "
-        "the graph, and choose from 5 attack types (prompt injection, "
-        "jailbreak, memory poisoning, bias inheritance, agent impersonation). "
-        "AEGIS injects the adversarial payload, streams the execution, "
-        "tracks propagation across agents, and evaluates each agent's "
-        "response through structural validation (Tier 1), heuristic "
-        "propagation tracking (Tier 2), and LLM-based semantic scoring "
-        "(Tier 3)."
-    )
     st.markdown("---")
 
     if config is None:
         st.info(
             "No MAS loaded.\n\n"
-            "Use **Send to Attack Suite** from the AETHER Chat or Visualizer page to "
-            "load a configuration."
+            "Select a YAML file in the sidebar, or use **Send to Attack Suite** from "
+            "the AETHER Chat or Visualizer page to load a configuration."
         )
         return
+
+    st.markdown(f"**Config:** `{config.mas_id}` — {config.name}")
+    st.markdown(
+        f"**Workflow:** {config.workflow_type.value} &nbsp;|&nbsp; "
+        f"**Agents:** {len(config.agents)}"
+    )
+    st.markdown("---")
+
+    # -----------------------------------------------------------------------
+    # Batch attack — two-level payload selection
+    # -----------------------------------------------------------------------
+    st.markdown("## Batch Attack Run")
+    st.markdown(
+        "Select payloads across one or more suites and run them all at once. "
+        "Results are written to disk and visible in the **Attack Results** viewer."
+    )
+
+    _render_payload_selector()
+
+    st.markdown("---")
+
+    # Injection phase and stub mode
+    col_phase, col_stub, _ = st.columns([2, 1, 2])
+    with col_phase:
+        st.radio(
+            "Injection phase",
+            ["pre_execution", "mid_execution"],
+            key="attack_phase",
+            format_func=lambda p: (
+                "Pre-execution" if p == "pre_execution" else "Mid-execution"
+            ),
+            horizontal=True,
+        )
+    with col_stub:
+        stub_mode = st.toggle(
+            "Stub mode",
+            value=False,
+            key="attack_stub_mode",
+            help="Skip LLM calls — useful for structural verification without API spend.",
+        )
+        if stub_mode:
+            st.caption("No LLM calls")
+
+    # Dynamic batch run button
+    total_selected = sum(
+        1
+        for suite in _SUITE_NAMES
+        for pid in _load_payload_library(suite)
+        if st.session_state.get(f"attack_selected_{suite}_{pid}", True)
+    )
+    suites_with_selection = sum(
+        1
+        for suite in _SUITE_NAMES
+        if any(
+            st.session_state.get(f"attack_selected_{suite}_{pid}", True)
+            for pid in _load_payload_library(suite)
+        )
+    )
+    btn_label = (
+        f"\u25b6 Run {total_selected} attack(s) across {suites_with_selection} suite(s)"
+    )
+    if st.button(
+        btn_label,
+        type="primary",
+        use_container_width=True,
+        key="attack_batch_run_button",
+        disabled=(total_selected == 0),
+    ):
+        _execute_batch_attack(config, yaml_path, stub_mode)
+
+    st.markdown("---")
+
+    # -----------------------------------------------------------------------
+    # Single-attack graph (used by sidebar Run Attack button)
+    # -----------------------------------------------------------------------
+    st.markdown("## Single-Agent Attack")
+    st.markdown(
+        "Click a node in the graph below to target a specific agent, then use "
+        "**Run Attack** in the sidebar."
+    )
 
     # Initialize target to first agent if not yet set
     if not st.session_state.get("attack_target_agent_id") and config.agents:
@@ -314,12 +599,7 @@ def _render_main() -> None:
     target_id: Optional[str] = st.session_state.get("attack_target_agent_id")
     phase: str = st.session_state.get("attack_phase", "pre_execution")
 
-    st.caption(
-        f"Config: `{config.mas_id}` | "
-        f"Target: `{target_id or 'None'}` | "
-        f"Phase: `{phase}`"
-    )
-    st.markdown("---")
+    st.caption(f"Target: `{target_id or 'None'}` | Phase: `{phase}`")
 
     # Graph — node clicks update attack_target_agent_id
     node_states: Optional[dict] = st.session_state.get("attack_node_states")

@@ -269,7 +269,8 @@ def _on_send_to_attack() -> None:
     if config is None:
         return
     config = apply_agent_overrides(config)
-    push_config_to_attack_state(config)
+    yaml_path = st.session_state.get("current_yaml_path", "")
+    push_config_to_attack_state(config, yaml_path=yaml_path)
 
 
 def _load_config(yaml_path: Path) -> None:
