@@ -437,17 +437,6 @@ def _render_sidebar() -> None:
             key="attack_payload_custom",
         )
 
-    # Phase
-    st.radio(
-        "Injection phase",
-        ["pre_execution", "mid_execution"],
-        key="attack_phase",
-        format_func=lambda p: (
-            "Pre-execution" if p == "pre_execution" else "Mid-execution"
-        ),
-        horizontal=True,
-    )
-
     target = st.session_state.get("attack_target_agent_id")
     run_disabled = target is None
 
