@@ -98,7 +98,7 @@ _CONFIG_PATHS: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) -> dict:
+def run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) -> dict:
     """Execute a single (config, prompt) pair and return a result dict."""
     log_dir = str(_RESULTS_DIR / config.mas_id)
     executor = MASExecutor(config, log_dir=log_dir)
@@ -140,7 +140,7 @@ def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) ->
     }
 
 
-def _write_result(result_dict: dict) -> Path:
+def write_result(result_dict: dict) -> Path:
     """Write result dict to results/{mas_id}/{prompt_id}.json."""
     out_dir = _RESULTS_DIR / result_dict["mas_id"]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -243,8 +243,8 @@ def main() -> None:
         for prompt in prompts:
             print(f"  {prompt.prompt_id} ... ", end="", flush=True)
             try:
-                result = _run_one(config, yaml_path, prompt, stub_mode=args.stub)
-                out_path = _write_result(result)
+                result = run_one(config, yaml_path, prompt, stub_mode=args.stub)
+                out_path = write_result(result)
                 status = "ok" if result["execution"]["success"] else "FAIL"
                 print(
                     f"{status}  ({result['execution']['duration_ms']:.0f} ms) → {out_path}"
@@ -276,7 +276,7 @@ def main() -> None:
                         "semantic_tier": "skipped",
                     },
                 }
-                _write_result(failed)
+                write_result(failed)
                 all_results.append(failed)
                 continue
 

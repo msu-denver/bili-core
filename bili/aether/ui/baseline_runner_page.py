@@ -212,7 +212,7 @@ def _execute_run(
     """Run the selected baseline prompts and display live progress."""
     # pylint: disable=import-outside-toplevel
     from bili.aegis.suites.baseline.prompts.baseline_prompts import BASELINE_PROMPTS
-    from bili.aegis.suites.baseline.run_baseline import _run_one, _write_result
+    from bili.aegis.suites.baseline.run_baseline import run_one, write_result
 
     prompts_to_run = [p for p in BASELINE_PROMPTS if p.category in selected_categories]
 
@@ -239,8 +239,8 @@ def _execute_run(
         )
 
         try:
-            result = _run_one(run_config, yaml_path, prompt, stub_mode=stub_mode)
-            _write_result(result)
+            result = run_one(run_config, yaml_path, prompt, stub_mode=stub_mode)
+            write_result(result)
             success = result["execution"]["success"]
             duration = result["execution"]["duration_ms"]
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -274,7 +274,7 @@ def _execute_run(
         failed = total - passed
         st.warning(f"{passed}/{total} passed — {failed} failed.")
 
-    st.page_link("results", label="View Baseline Results \u2192")
+    st.info("Navigate to **Baseline Results** in the sidebar to view your results.")
 
 
 def _render_previous_results() -> None:
@@ -291,4 +291,4 @@ def _render_previous_results() -> None:
     col1.metric("Prompts Run", total)
     col2.metric("Passed", passed)
     col3.metric("Success Rate", f"{passed / total * 100:.0f}%" if total else "N/A")
-    st.page_link("results", label="View Baseline Results \u2192")
+    st.info("Navigate to **Baseline Results** in the sidebar to view your results.")

@@ -1,0 +1,261 @@
+# =============================================================================
+# Deliberative Consensus — Academic Paper Review
+# =============================================================================
+#
+# Demonstrates:
+#   - Deliberative workflow type with explicit fan-out/fan-in topology
+#   - True parallel superstep execution via workflow_edges and _add_fan_out
+#   - Independent reviewer isolation before synthesis (no peer anchoring)
+#   - All unconditional edges — safe for SafeConditionEvaluator
+#
+# Use case: Three specialist reviewers independently evaluate a research
+# manuscript from distinct expert perspectives (methodology, literature,
+# and impact), then an arbiter synthesizes their assessments into a
+# publication recommendation.
+#
+# Graph topology (_build_deliberative → _build_custom → _add_fan_out):
+#
+#   START → moderator → [reviewer_1, reviewer_2, reviewer_3]  (fan-out)
+#               reviewer_1 → arbiter → END
+#               reviewer_2 → arbiter → END
+#               reviewer_3 → arbiter → END
+#
+# LangGraph fan-in mechanics:
+#   _add_fan_out uses add_conditional_edges returning all three targets as
+#   a list, scheduling them in a single parallel superstep.  The arbiter
+#   executes in the next superstep once all three complete, receiving the
+#   accumulated state from all reviewers via the add_messages reducer.
+#
+# Isolation property:
+#   Each reviewer receives only the moderator framing, not each other's
+#   output.  This ensures independent positions are formed before synthesis,
+#   avoiding peer-anchoring bias in the arbiter's final recommendation.
+#
+# Pattern: moderator → [reviewer_1 ‖ reviewer_2 ‖ reviewer_3] → arbiter
+# =============================================================================
+
+mas_id: deliberative_consensus
+name: Deliberative Consensus
+description: >
+  A moderator frames a research manuscript for structured review, then three
+  specialist reviewers independently evaluate it from distinct perspectives
+  (methodology, related literature, and broader impact) without seeing each
+  other's reasoning.  An arbiter synthesizes all three independent assessments
+  into a final publication recommendation.  Use this pattern when independent
+  expert perspectives must be gathered before synthesis — peer-anchoring bias
+  is eliminated by design.  Suitable for any multi-perspective evaluation task:
+  paper review, grant scoring, code audits, or policy assessment.
+version: "1.0.0"
+
+workflow_type: deliberative
+entry_point: moderator
+
+agents:
+  - agent_id: moderator
+    role: moderator
+    objective: >
+      Frame the submitted manuscript for structured independent review.
+      Identify the key evaluation dimensions at stake (e.g. research question
+      clarity, methodological soundness, novelty, related-work coverage,
+      contribution significance, reproducibility).  Summarize the manuscript
+      objectively and highlight the specific elements each reviewer should
+      evaluate.  Do not make a publication recommendation — your role is to
+      structure the review so that each specialist can evaluate independently.
+      Output a JSON object with: title_and_abstract_summary (string),
+      evaluation_dimensions (list of relevant review areas),
+      key_claims (list of the manuscript's central claims),
+      review_scope (one sentence framing the central question for reviewers).
+    system_prompt: >
+      You are a senior review coordinator responsible for structuring academic
+      manuscript evaluations.  You frame submissions clearly and objectively so
+      that specialist reviewers can assess them from their own expert perspective
+      without being anchored by each other's reasoning.  You identify the
+      relevant evaluation dimensions without prejudging the outcome.  Your
+      framing sets up a rigorous, reproducible review process.
+    model_name: null  # Add model_name: gpt-4o or similar for real execution
+    temperature: 0.1
+    max_tokens: 512
+    output_format: json
+
+  - agent_id: reviewer_1
+    role: reviewer
+    objective: >
+      Review the moderator's case framing and independently evaluate the
+      manuscript's methodological soundness.  Assess the research design,
+      statistical approach, validity of experimental controls, and
+      reproducibility of results.  Do not factor in the opinions of other
+      reviewers.  Output a JSON object with: recommendation (accept/revise/reject),
+      methodology_assessment (string), strengths (list), weaknesses (list),
+      reproducibility_concerns (list, may be empty), confidence (high/medium/low).
+    system_prompt: >
+      You are an independent peer reviewer specializing in research methodology
+      and experimental design.  You evaluate manuscripts for the rigor and
+      validity of their methods: study design, statistical analysis, controls,
+      and reproducibility.  You form your position independently before any
+      synthesis occurs.  You are precise and evidence-based, grounding every
+      assessment in specific elements of the manuscript framing provided.
+    model_name: null  # Add model_name: gpt-4o or similar for real execution
+    temperature: 0.2
+    max_tokens: 768
+    output_format: json
+
+  - agent_id: reviewer_2
+    role: reviewer
+    objective: >
+      Review the moderator's case framing and independently evaluate the
+      manuscript's positioning within the existing literature.  Assess whether
+      the related-work coverage is adequate, whether the novelty claim is
+      substantiated, and whether the manuscript advances or duplicates prior
+      work.  Do not factor in the opinions of other reviewers.  Output a JSON
+      object with: recommendation (accept/revise/reject), novelty_assessment
+      (string), related_work_gaps (list, may be empty),
+      prior_work_conflicts (list, may be empty), confidence (high/medium/low).
+    system_prompt: >
+      You are an independent peer reviewer specializing in literature analysis
+      and novelty assessment.  You evaluate manuscripts for their engagement
+      with prior work, the accuracy of their novelty claims, and whether the
+      contribution advances the state of knowledge.  You form your position
+      independently before any synthesis occurs.  You are thorough and fair,
+      distinguishing incremental contributions from genuinely novel ones.
+    model_name: null  # Add model_name: gpt-4o or similar for real execution
+    temperature: 0.2
+    max_tokens: 768
+    output_format: json
+
+  - agent_id: reviewer_3
+    role: reviewer
+    objective: >
+      Review the moderator's case framing and independently evaluate the
+      manuscript's broader impact and significance.  Assess the practical
+      or theoretical importance of the contribution, the clarity of the
+      research question, and the relevance to the field.  Do not factor
+      in the opinions of other reviewers.  Output a JSON object with:
+      recommendation (accept/revise/reject), impact_assessment (string),
+      significance (high/medium/low), clarity_of_contribution (string),
+      audience_relevance (string), confidence (high/medium/low).
+    system_prompt: >
+      You are an independent peer reviewer specializing in research impact and
+      significance evaluation.  You assess manuscripts for the importance of
+      their contribution to the field, the clarity of the research question,
+      and the value the work provides to practitioners and researchers.  You
+      form your position independently before any synthesis occurs.  You weigh
+      both near-term applicability and longer-term theoretical importance.
+    model_name: null  # Add model_name: gpt-4o or similar for real execution
+    temperature: 0.2
+    max_tokens: 768
+    output_format: json
+
+  - agent_id: arbiter
+    role: arbiter
+    objective: >
+      Synthesize the three independent reviewer assessments into a final
+      publication recommendation.  Identify the degree of consensus among
+      reviewers, the strongest arguments on each side, and the deciding
+      factors.  Apply a conservative standard — significant methodological
+      or novelty concerns from any reviewer warrant a revise decision
+      unless clearly outweighed.  Output a JSON object with:
+      final_recommendation (accept/revise/reject),
+      consensus_level (unanimous/majority/split),
+      reviewer_recommendations (object mapping each reviewer to their vote),
+      deciding_factors (list of the most influential arguments),
+      required_revisions (list, may be empty if accept),
+      confidence (high/medium/low).
+    system_prompt: >
+      You are a senior editor responsible for synthesizing independent peer
+      reviewer assessments into a final, binding publication recommendation.
+      You weigh three independent perspectives covering methodology, related
+      literature, and broader impact.  You identify consensus and resolve
+      disagreements by applying a conservative editorial standard: any
+      reviewer identifying a serious methodological flaw or unsubstantiated
+      novelty claim shifts the burden of proof toward revision.  Your
+      recommendation must be fully defensible against each reviewer's reasoning.
+    model_name: null  # Add model_name: gpt-4o or similar for real execution
+    temperature: 0.0
+    max_tokens: 512
+    output_format: json
+
+channels:
+  - channel_id: moderator_to_reviewer_1
+    protocol: direct
+    source: moderator
+    target: reviewer_1
+    description: Moderator framing dispatched to methodology reviewer
+
+  - channel_id: moderator_to_reviewer_2
+    protocol: direct
+    source: moderator
+    target: reviewer_2
+    description: Moderator framing dispatched to literature reviewer
+
+  - channel_id: moderator_to_reviewer_3
+    protocol: direct
+    source: moderator
+    target: reviewer_3
+    description: Moderator framing dispatched to impact reviewer
+
+  - channel_id: reviewer_1_to_arbiter
+    protocol: direct
+    source: reviewer_1
+    target: arbiter
+    description: Methodology assessment submitted to arbiter
+
+  - channel_id: reviewer_2_to_arbiter
+    protocol: direct
+    source: reviewer_2
+    target: arbiter
+    description: Literature assessment submitted to arbiter
+
+  - channel_id: reviewer_3_to_arbiter
+    protocol: direct
+    source: reviewer_3
+    target: arbiter
+    description: Impact assessment submitted to arbiter
+
+# All edges are unconditional. SafeConditionEvaluator in graph_builder.py
+# blocks ast.Call (state.get() etc.) — unconditional fan-out is the correct
+# approach for this topology.
+# moderator → [reviewer_1, reviewer_2, reviewer_3] triggers _add_fan_out.
+# LangGraph superstep: all three reviewers run in parallel, arbiter executes
+# once in the next superstep with accumulated state from all three.
+workflow_edges:
+  - from_agent: START
+    to_agent: moderator
+    label: start
+
+  - from_agent: moderator
+    to_agent: reviewer_1
+    label: frame-to-methodology
+
+  - from_agent: moderator
+    to_agent: reviewer_2
+    label: frame-to-literature
+
+  - from_agent: moderator
+    to_agent: reviewer_3
+    label: frame-to-impact
+
+  - from_agent: reviewer_1
+    to_agent: arbiter
+    label: methodology-assessment
+
+  - from_agent: reviewer_2
+    to_agent: arbiter
+    label: literature-assessment
+
+  - from_agent: reviewer_3
+    to_agent: arbiter
+    label: impact-assessment
+
+  - from_agent: arbiter
+    to_agent: END
+    label: final-recommendation
+
+tags:
+  - academic-review
+  - deliberative
+  - fan-out
+  - independent-deliberation
+  - multi-perspective
+  - peer-review
+  - synthesis
+  - stub-compatible

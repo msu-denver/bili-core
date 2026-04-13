@@ -128,6 +128,7 @@ def _generate_tool_agent_node(
         start_time = time.time()
 
         from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
+            AIMessage,
             HumanMessage,
             SystemMessage,
         )
@@ -155,6 +156,15 @@ def _generate_tool_agent_node(
         if not any(isinstance(m, HumanMessage) for m in messages):
             messages.append(HumanMessage(content="Begin your task."))
 
+        # Some providers (e.g. Mistral on Bedrock) require the final turn to be
+        # a HumanMessage.  Same guard as _generate_direct_llm_node.
+        if messages and isinstance(messages[-1], AIMessage):
+            task_cue = (
+                agent.objective
+                or "Please complete your task based on the context above."
+            )
+            messages.append(HumanMessage(content=task_cue))
+
         # Invoke the react agent — it handles tool calls internally
         result = react_agent.invoke({"messages": messages})
 
@@ -174,10 +184,6 @@ def _generate_tool_agent_node(
         output = _build_output(agent, content)
         agent_outputs = dict(state.get("agent_outputs") or {})
         agent_outputs[agent.agent_id] = output
-
-        from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
-            AIMessage,
-        )
 
         state_update: Dict[str, Any] = {
             "messages": [AIMessage(content=content, name=agent.agent_id)],
