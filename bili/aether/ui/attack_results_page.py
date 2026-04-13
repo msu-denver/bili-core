@@ -482,13 +482,11 @@ def _render_filters(
     df: pd.DataFrame, selected_suite: str, is_cross_model: bool
 ) -> pd.DataFrame:
     """Render filter widgets and return filtered DataFrame."""
-    row1 = st.columns(4 if selected_suite != _ALL_SUITES else 5)
+    col_left, col_right = st.columns(2)
 
-    col_idx = 0
-
-    # Suite filter — only shown in All Suites view
-    if selected_suite == _ALL_SUITES:
-        with row1[col_idx]:
+    # Left column
+    with col_left:
+        if selected_suite == _ALL_SUITES:
             suite_opts = sorted(df["attack_suite"].unique())
             suites = st.multiselect(
                 "Suite",
@@ -496,29 +494,25 @@ def _render_filters(
                 default=suite_opts,
                 key="atk_filter_suite",
             )
-        col_idx += 1
-    else:
-        suites = list(df["attack_suite"].unique())
+        else:
+            suites = list(df["attack_suite"].unique())
 
-    with row1[col_idx]:
         configs = st.multiselect(
             "MAS Config",
             options=sorted(df["mas_id"].unique()),
             default=sorted(df["mas_id"].unique()),
             key="atk_filter_configs",
         )
-    col_idx += 1
 
-    with row1[col_idx]:
         inj_types = st.multiselect(
             "Attack Type",
             options=sorted(df["injection_type"].unique()),
             default=sorted(df["injection_type"].unique()),
             key="atk_filter_types",
         )
-    col_idx += 1
 
-    with row1[col_idx]:
+    # Right column
+    with col_right:
         present_sev = set(df["severity"].dropna().unique())
         ordered_sev = [s for s in _SEVERITY_ORDER if s in present_sev] + sorted(
             present_sev - set(_SEVERITY_ORDER)
@@ -529,15 +523,10 @@ def _render_filters(
             default=ordered_sev,
             key="atk_filter_severity",
         )
-    col_idx += 1
 
-    with row1[col_idx]:
         phase_opts = ["All"] + sorted(df["phase"].dropna().unique())
         phase = st.selectbox("Phase", options=phase_opts, key="atk_filter_phase")
 
-    # Second row: model_id filter for cross-model, Tier-3 score range
-    row2 = st.columns(3)
-    with row2[0]:
         tier3_status = st.selectbox(
             "Detection Tier",
             options=[
@@ -548,7 +537,7 @@ def _render_filters(
             ],
             key="atk_filter_tier",
         )
-    with row2[1]:
+
         if is_cross_model and df["model_id"].notna().any():
             model_opts = sorted(df["model_id"].dropna().unique())
             model_ids = st.multiselect(
@@ -559,7 +548,7 @@ def _render_filters(
             )
         else:
             model_ids = None
-    with row2[2]:
+
         if is_cross_model and df["provider_family"].notna().any():
             pf_opts = sorted(df["provider_family"].dropna().unique())
             provider_families = st.multiselect(
