@@ -1,6 +1,6 @@
 """Tests for the baseline runner.
 
-Covers main() CLI parsing, _run_one execution, _write_result,
+Covers main() CLI parsing, run_one execution, write_result,
 _print_summary, and error handling paths.
 All external dependencies (LLM calls, file I/O, YAML loading) are mocked.
 """
@@ -20,12 +20,12 @@ def _import_module():
 
 
 # =========================================================================
-# _write_result
+# write_result
 # =========================================================================
 
 
 class TestWriteResult:
-    """Tests for _write_result helper."""
+    """Tests for write_result helper."""
 
     def test_creates_directory_and_writes_json(self, tmp_path):
         """Creates mas_id subdirectory and writes JSON."""
@@ -35,7 +35,7 @@ class TestWriteResult:
             "prompt_id": "benign_001",
         }
         with patch.object(mod, "_RESULTS_DIR", tmp_path):
-            out = mod._write_result(result_dict)
+            out = mod.write_result(result_dict)
         assert out.exists()
         data = json.loads(out.read_text())
         assert data["prompt_id"] == "benign_001"
@@ -71,12 +71,12 @@ class TestPrintSummary:
 
 
 # =========================================================================
-# _run_one
+# run_one
 # =========================================================================
 
 
 class TestRunOne:
-    """Tests for _run_one helper."""
+    """Tests for run_one helper."""
 
     @patch("bili.aegis.suites.baseline.run_baseline.MASExecutor")
     def test_returns_result_dict(self, mock_executor_cls):
@@ -113,7 +113,7 @@ class TestRunOne:
             "_config_fingerprint",
             return_value={"yaml_hash": "abc"},
         ):
-            result = mod._run_one(config, "fake.yaml", prompt, stub_mode=True)
+            result = mod.run_one(config, "fake.yaml", prompt, stub_mode=True)
 
         assert result["prompt_id"] == "benign_001"
         assert result["execution"]["success"] is True
@@ -132,8 +132,8 @@ class TestMain:
         "bili.aegis.suites.baseline.run_baseline" ".argparse.ArgumentParser.parse_args"
     )
     @patch("bili.aegis.suites.baseline.run_baseline.load_mas_from_yaml")
-    @patch("bili.aegis.suites.baseline.run_baseline._run_one")
-    @patch("bili.aegis.suites.baseline.run_baseline._write_result")
+    @patch("bili.aegis.suites.baseline.run_baseline.run_one")
+    @patch("bili.aegis.suites.baseline.run_baseline.write_result")
     def test_stub_mode_runs_all_configs(
         self,
         mock_write,
@@ -211,14 +211,14 @@ class TestMain:
     )
     @patch("bili.aegis.suites.baseline.run_baseline.load_mas_from_yaml")
     @patch(
-        "bili.aegis.suites.baseline.run_baseline._run_one",
+        "bili.aegis.suites.baseline.run_baseline.run_one",
         side_effect=RuntimeError("boom"),
     )
-    @patch("bili.aegis.suites.baseline.run_baseline._write_result")
+    @patch("bili.aegis.suites.baseline.run_baseline.write_result")
     def test_run_one_error_writes_failed_result(
         self, mock_write, mock_run, mock_load, mock_args, tmp_path
     ):
-        """Errors in _run_one produce a failed result dict."""
+        """Errors in run_one produce a failed result dict."""
         mod = _import_module()
 
         config = MagicMock()

@@ -50,7 +50,7 @@ def push_config_to_baseline_state(config: MASConfig, yaml_path: str) -> None:
     Args:
         config:    The MASConfig to run baselines against.
         yaml_path: Absolute or repo-relative path to the YAML file — required
-                   by ``_run_one`` → ``yaml_hash`` (reads file for SHA-256).
+                   by ``run_one`` → ``yaml_hash`` (reads file for SHA-256).
     """
     st.session_state.baseline_config = config
     st.session_state.baseline_yaml_path = yaml_path
