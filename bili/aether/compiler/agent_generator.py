@@ -17,6 +17,28 @@ from bili.aether.schema import AgentSpec, OutputFormat
 LOGGER = logging.getLogger(__name__)
 
 
+def _ensure_human_last(messages: list, agent: "AgentSpec") -> None:
+    """Ensure the last message is a HumanMessage for Bedrock turn constraints.
+
+    Some providers (e.g. Mistral on Bedrock) require the conversation to
+    end with a HumanMessage. If the last message is an AIMessage (common
+    when context flows from a prior agent), append a synthetic
+    HumanMessage with the agent's objective.
+
+    Mutates *messages* in place.
+    """
+    from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
+        AIMessage,
+        HumanMessage,
+    )
+
+    if messages and isinstance(messages[-1], AIMessage):
+        task_cue = (
+            agent.objective or "Please complete your task based on the context above."
+        )
+        messages.append(HumanMessage(content=task_cue))
+
+
 def _normalise_content_value(content: Any) -> str:
     """Coerce a raw LLM content value to ``str``.
 
@@ -172,14 +194,7 @@ def _generate_tool_agent_node(
                 ),
             )
 
-        # Some providers (e.g. Mistral on Bedrock) require the final turn to be
-        # a HumanMessage.  Same guard as _generate_direct_llm_node.
-        if messages and isinstance(messages[-1], AIMessage):
-            task_cue = (
-                agent.objective
-                or "Please complete your task based on the context above."
-            )
-            messages.append(HumanMessage(content=task_cue))
+        _ensure_human_last(messages, agent)
 
         # Invoke the react agent — it handles tool calls internally
         result = react_agent.invoke({"messages": messages})
@@ -279,16 +294,7 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
                 ),
             )
 
-        # Some providers (e.g. Mistral on Bedrock) require the final turn to be
-        # a HumanMessage.  If the accumulated context ends with an AIMessage from
-        # a prior agent, append a synthetic HumanMessage that frames the current
-        # agent's task so the constraint is satisfied for all models.
-        if messages and isinstance(messages[-1], AIMessage):
-            task_cue = (
-                agent.objective
-                or "Please complete your task based on the context above."
-            )
-            messages.append(HumanMessage(content=task_cue))
+        _ensure_human_last(messages, agent)
 
         # Invoke the LLM directly
         response = llm.invoke(messages)

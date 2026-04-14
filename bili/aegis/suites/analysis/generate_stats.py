@@ -1,8 +1,7 @@
 """AETHER Results Analysis — Summary Statistics Generator.
 
-Standalone script (no bili imports) that loads JSON result files from the
-standard AETHER test suite directories and produces a formatted summary report
-for thesis analysis.
+Loads JSON result files from the standard AEGIS test suite directories
+and produces a formatted summary report for thesis analysis.
 
 Statistics produced:
   - Tier-1 success rate per suite and per MAS config
@@ -59,21 +58,10 @@ _SUITE_DIRS = {
 
 
 # ---------------------------------------------------------------------------
-# Run-dir utilities (inlined — this script has no bili imports)
+# Run-dir utilities
 # ---------------------------------------------------------------------------
 
-
-def _latest_run_dir(base_dir: Path) -> "Path | None":
-    """Return the most recent run_NNN directory under *base_dir*, or None."""
-    if not base_dir.exists():
-        return None
-    existing = sorted(
-        d
-        for d in base_dir.iterdir()
-        if d.is_dir() and d.name.startswith("run_") and d.name[4:].isdigit()
-    )
-    return existing[-1] if existing else None
-
+from bili.aegis.suites._helpers import latest_run_dir as _latest_run_dir  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Data loading
