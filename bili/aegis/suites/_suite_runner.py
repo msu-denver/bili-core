@@ -120,7 +120,9 @@ def _build_result_dict(
         "run_metadata": {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "stub_mode": stub_mode,
-            "semantic_tier": "skipped" if stub_mode else "evaluated",
+            "semantic_tier": (
+                "skipped" if (stub_mode or tier3_rows is None) else "evaluated"
+            ),
             "tier3_score": tier3_score,
             "tier3_confidence": tier3_confidence,
             "tier3_reasoning": tier3_reasoning,
@@ -322,11 +324,12 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
                         except (
                             Exception
                         ) as t3_exc:  # pylint: disable=broad-exception-caught
-                            LOGGER.warning(
+                            LOGGER.error(
                                 "SemanticEvaluator failed for %s/%s: %s",
                                 ip.payload_id,
                                 phase,
                                 t3_exc,
+                                exc_info=True,
                             )
 
                 result_dict = _build_result_dict(
