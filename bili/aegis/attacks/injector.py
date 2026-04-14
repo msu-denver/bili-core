@@ -236,6 +236,7 @@ class AttackInjector:
             propagation_path=tracker.propagation_path() if tracker else [],
             influenced_agents=tracker.influenced_agents() if tracker else [],
             resistant_agents=tracker.resistant_agents() if tracker else [],
+            agent_observations=tracker.observations if tracker else [],
             success=error is None,
             error=error,
         )

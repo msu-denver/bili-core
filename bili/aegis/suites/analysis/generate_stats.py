@@ -45,21 +45,34 @@ except StopIteration as exc:
         f"in parents of {_SCRIPT_DIR}"
     ) from exc
 
+_SUITES_BASE = _REPO_ROOT / "bili" / "aegis" / "suites"
+
 _SUITE_DIRS = {
-    "injection": _REPO_ROOT / "bili" / "aether" / "tests" / "injection" / "results",
-    "jailbreak": _REPO_ROOT / "bili" / "aether" / "tests" / "jailbreak" / "results",
-    "memory_poisoning": (
-        _REPO_ROOT / "bili" / "aether" / "tests" / "memory_poisoning" / "results"
-    ),
-    "bias_inheritance": (
-        _REPO_ROOT / "bili" / "aether" / "tests" / "bias_inheritance" / "results"
-    ),
-    "agent_impersonation": (
-        _REPO_ROOT / "bili" / "aether" / "tests" / "agent_impersonation" / "results"
-    ),
-    "persistence": _REPO_ROOT / "bili" / "aether" / "tests" / "persistence" / "results",
-    "cross_model": _REPO_ROOT / "bili" / "aether" / "tests" / "cross_model" / "results",
+    "injection": _SUITES_BASE / "injection" / "results",
+    "jailbreak": _SUITES_BASE / "jailbreak" / "results",
+    "memory_poisoning": _SUITES_BASE / "memory_poisoning" / "results",
+    "bias_inheritance": _SUITES_BASE / "bias_inheritance" / "results",
+    "agent_impersonation": _SUITES_BASE / "agent_impersonation" / "results",
+    "persistence": _SUITES_BASE / "persistence" / "results",
+    "cross_model": _SUITES_BASE / "cross_model" / "results",
 }
+
+
+# ---------------------------------------------------------------------------
+# Run-dir utilities (inlined — this script has no bili imports)
+# ---------------------------------------------------------------------------
+
+
+def _latest_run_dir(base_dir: Path) -> "Path | None":
+    """Return the most recent run_NNN directory under *base_dir*, or None."""
+    if not base_dir.exists():
+        return None
+    existing = sorted(
+        d
+        for d in base_dir.iterdir()
+        if d.is_dir() and d.name.startswith("run_") and d.name[4:].isdigit()
+    )
+    return existing[-1] if existing else None
 
 
 # ---------------------------------------------------------------------------
@@ -67,16 +80,71 @@ _SUITE_DIRS = {
 # ---------------------------------------------------------------------------
 
 
-def _load_suite(suite_dir: Path) -> list[dict]:
-    """Load all ``*.json`` result files from *suite_dir* recursively."""
+def _load_suite(
+    suite_dir: Path,
+    run: "str | None" = None,
+    all_runs: bool = False,
+) -> list[dict]:
+    """Load ``*.json`` result files from *suite_dir*.
+
+    By default loads from the latest ``run_NNN`` directory under each
+    ``mas_id`` subdirectory, falling back to the flat legacy layout when no
+    versioned directories exist.
+
+    Args:
+        suite_dir:  Root results directory for one suite.
+        run:        Specific run dir name to load (e.g. ``"run_001"``).
+                    Applied per-mas_id; skips quietly when not present.
+        all_runs:   Load from ALL run directories (and flat legacy files).
+                    Overrides *run*.  Useful for cross-run aggregation.
+
+    Returns:
+        List of parsed result dicts.  Each dict gets a ``run_id`` key
+        injected with the source run directory name (``"run_000 (legacy)"``
+        for flat legacy files).
+    """
     results: list[dict] = []
     if not suite_dir.exists():
         return results
-    for path in sorted(suite_dir.glob("**/*.json")):
-        try:
-            results.append(json.loads(path.read_text(encoding="utf-8")))
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            LOGGER.warning("Could not parse %s: %s", path, exc)
+
+    for mas_dir in sorted(suite_dir.iterdir()):
+        if not mas_dir.is_dir():
+            continue
+
+        run_dirs = sorted(
+            d
+            for d in mas_dir.iterdir()
+            if d.is_dir() and d.name.startswith("run_") and d.name[4:].isdigit()
+        )
+
+        if all_runs:
+            search_dirs = run_dirs if run_dirs else [mas_dir]
+            run_id_map = {d: d.name for d in run_dirs}
+            if not run_dirs:
+                run_id_map[mas_dir] = "run_000 (legacy)"
+        elif run:
+            target = mas_dir / run
+            search_dirs = [target] if target.exists() else []
+            run_id_map = {target: run}
+        else:
+            latest = run_dirs[-1] if run_dirs else None
+            if latest is not None:
+                search_dirs = [latest]
+                run_id_map = {latest: latest.name}
+            else:
+                search_dirs = [mas_dir]
+                run_id_map = {mas_dir: "run_000 (legacy)"}
+
+        for search_dir in search_dirs:
+            rid = run_id_map.get(search_dir, "run_000 (legacy)")
+            for path in sorted(search_dir.glob("**/*.json")):
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                    raw["run_id"] = rid
+                    results.append(raw)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    LOGGER.warning("Could not parse %s: %s", path, exc)
+
     return results
 
 
@@ -367,13 +435,32 @@ def main() -> None:
             "Excluded by default for thesis-quality analysis."
         ),
     )
+    parser.add_argument(
+        "--run",
+        metavar="RUN_DIR",
+        default=None,
+        help=(
+            "Load results from a specific run directory (e.g. run_003). "
+            "Applied per-mas_id; silently skipped for mas_ids that lack that run. "
+            "Defaults to the latest run per mas_id."
+        ),
+    )
+    parser.add_argument(
+        "--all-runs",
+        action="store_true",
+        default=False,
+        help=(
+            "Aggregate results from ALL run directories (adds run_id field to stats). "
+            "Overrides --run.  Useful for cross-run trend analysis."
+        ),
+    )
     args = parser.parse_args()
 
     all_stats: dict = {}
     total_stub_excluded = 0
 
     for suite_name, suite_dir in _SUITE_DIRS.items():
-        results = _load_suite(suite_dir)
+        results = _load_suite(suite_dir, run=args.run, all_runs=args.all_runs)
         if not args.include_stub:
             real = [
                 r for r in results if not r.get("run_metadata", {}).get("stub_mode")

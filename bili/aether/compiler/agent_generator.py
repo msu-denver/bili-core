@@ -156,6 +156,22 @@ def _generate_tool_agent_node(
         if not any(isinstance(m, HumanMessage) for m in messages):
             messages.append(HumanMessage(content="Begin your task."))
 
+        # Bedrock Converse API requires the first non-system message to be a
+        # HumanMessage.  In a sequential chain the first message in accumulated
+        # context is often an AIMessage from a prior agent — insert a synthetic
+        # task cue before it so the turn order constraint is satisfied.
+        first_non_sys = next(
+            (i for i, m in enumerate(messages) if not isinstance(m, SystemMessage)),
+            None,
+        )
+        if first_non_sys is not None and isinstance(messages[first_non_sys], AIMessage):
+            messages.insert(
+                first_non_sys,
+                HumanMessage(
+                    content="Please review the following context and complete your task."
+                ),
+            )
+
         # Some providers (e.g. Mistral on Bedrock) require the final turn to be
         # a HumanMessage.  Same guard as _generate_direct_llm_node.
         if messages and isinstance(messages[-1], AIMessage):
@@ -246,6 +262,22 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
             messages.extend(compatible)
         else:
             messages.append(HumanMessage(content="Begin your task."))
+
+        # Bedrock Converse API requires the first non-system message to be a
+        # HumanMessage.  In a sequential chain the first message in accumulated
+        # context is often an AIMessage from a prior agent — insert a synthetic
+        # task cue before it so the turn order constraint is satisfied.
+        first_non_sys = next(
+            (i for i, m in enumerate(messages) if not isinstance(m, SystemMessage)),
+            None,
+        )
+        if first_non_sys is not None and isinstance(messages[first_non_sys], AIMessage):
+            messages.insert(
+                first_non_sys,
+                HumanMessage(
+                    content="Please review the following context and complete your task."
+                ),
+            )
 
         # Some providers (e.g. Mistral on Bedrock) require the final turn to be
         # a HumanMessage.  If the accumulated context ends with an AIMessage from

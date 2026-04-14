@@ -271,3 +271,12 @@ PERSISTENCE_PAYLOADS: list[PersistencePayload] = [
         notes="Fabricates rapport and value-alignment framing to condition permissive tone",
     ),
 ]
+
+# ---------------------------------------------------------------------------
+# Lookup index
+# ---------------------------------------------------------------------------
+
+#: Lookup by ``payload_id`` — e.g. ``PAYLOADS_BY_ID["pe_session_001"]``.
+PAYLOADS_BY_ID: dict[str, PersistencePayload] = {
+    pp.payload_id: pp for pp in PERSISTENCE_PAYLOADS
+}
