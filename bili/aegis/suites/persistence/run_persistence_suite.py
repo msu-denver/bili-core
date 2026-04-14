@@ -397,11 +397,12 @@ def _run_persistence_config(
                     except (
                         Exception
                     ) as t3_exc:  # pylint: disable=broad-exception-caught
-                        LOGGER.warning(
+                        LOGGER.error(
                             "SemanticEvaluator failed for %s/%s: %s",
                             ip.payload_id,
                             _PHASE,
                             t3_exc,
+                            exc_info=True,
                         )
 
             resistant_list = sorted(attack_result.resistant_agents)
@@ -436,7 +437,9 @@ def _run_persistence_config(
                         datetime.timezone.utc
                     ).isoformat(),
                     "stub_mode": stub_mode,
-                    "semantic_tier": "skipped" if stub_mode else "evaluated",
+                    "semantic_tier": (
+                        "skipped" if (stub_mode or not tier3_score) else "evaluated"
+                    ),
                     "tier3_score": tier3_score,
                     "tier3_confidence": tier3_confidence,
                     "tier3_reasoning": tier3_reasoning,
@@ -493,6 +496,70 @@ def _load_baseline(baseline_results_dir: Path | None, mas_id: str) -> dict | Non
     except (OSError, json.JSONDecodeError) as exc:
         LOGGER.warning("Could not load baseline for %s: %s", mas_id, exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def run_persistence_suite(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    *,
+    payloads: list,
+    config_paths: list[str],
+    stub_mode: bool,
+    semantic_evaluator: Any,
+    baseline_results_dir: Path | None,
+    results_dir: Path,
+    repo_root: Path,
+) -> tuple[list[dict], str | None]:
+    """Run the persistence suite against *config_paths* and return results.
+
+    Unlike :func:`main`, this does **not** call ``sys.exit()`` — it is
+    designed to be called programmatically (e.g. from the AEGIS GUI batch
+    runner).
+
+    Args:
+        payloads:             Persistence payload objects to test.
+        config_paths:         YAML config paths relative to *repo_root*.
+        stub_mode:            If ``True``, skip LLM calls.
+        semantic_evaluator:   Pre-constructed ``SemanticEvaluator`` instance,
+                              or ``None`` to skip Tier 3.
+        baseline_results_dir: Path to baseline results for Tier 3 comparison.
+        results_dir:          Directory where results are written.
+        repo_root:            Absolute path to the repository root.
+
+    Returns:
+        ``(all_matrix_rows, first_run_dir_name)`` tuple.
+    """
+    all_matrix_rows: list[dict] = []
+    first_run_dir_name: str | None = None
+
+    for yaml_path in config_paths:
+        rows, run_dir = _run_persistence_config(
+            yaml_path=yaml_path,
+            payloads=payloads,
+            stub_mode=stub_mode,
+            semantic_evaluator=semantic_evaluator,
+            baseline_results_dir=baseline_results_dir,
+            results_dir=results_dir,
+            repo_root=repo_root,
+        )
+        all_matrix_rows.extend(rows)
+        if first_run_dir_name is None and run_dir is not None:
+            first_run_dir_name = run_dir.name
+
+    if all_matrix_rows:
+        csv_filename = (
+            f"persistence_results_matrix_{first_run_dir_name}.csv"
+            if first_run_dir_name
+            else "persistence_results_matrix.csv"
+        )
+        csv_path = _write_csv(all_matrix_rows, results_dir, csv_filename)
+        _print_summary(all_matrix_rows)
+        print(f"Results matrix written to: {csv_path}")
+
+    return all_matrix_rows, first_run_dir_name
 
 
 # ---------------------------------------------------------------------------

@@ -116,7 +116,7 @@ from bili.aegis.security.detector import (  # noqa: E402  pylint: disable=wrong-
 from bili.aegis.security.logger import (  # noqa: E402  pylint: disable=wrong-import-position
     SecurityEventLogger,
 )
-from bili.aegis.suites._helpers import CONFIG_PATHS
+from bili.aegis.suites._helpers import CONFIG_PATHS, DEFAULT_BASELINE_RESULTS_DIR
 from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     config_fingerprint as _config_fingerprint_helper,
 )
@@ -451,12 +451,13 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                         except (
                             Exception
                         ) as t3_exc:  # pylint: disable=broad-exception-caught
-                            LOGGER.warning(
+                            LOGGER.error(
                                 "SemanticEvaluator failed for %s/%s/%s: %s",
                                 model_id,
                                 ip.payload_id,
                                 phase,
                                 t3_exc,
+                                exc_info=True,
                             )
 
                 resistant_list = sorted(attack_result.resistant_agents)
@@ -494,7 +495,9 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                             datetime.timezone.utc
                         ).isoformat(),
                         "stub_mode": stub_mode,
-                        "semantic_tier": "skipped" if stub_mode else "evaluated",
+                        "semantic_tier": (
+                            "skipped" if (stub_mode or not tier3_score) else "evaluated"
+                        ),
                         "tier3_score": tier3_score,
                         "tier3_confidence": tier3_confidence,
                         "tier3_reasoning": tier3_reasoning,
@@ -531,6 +534,79 @@ def _run_config_for_model(  # pylint: disable=too-many-locals,too-many-arguments
                 )
 
     return matrix_rows, run_dir
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def run_cross_model_suite(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    *,
+    payloads: list,
+    config_paths: list[str],
+    phases: list[str],
+    model_matrix: list[tuple[str | None, str]],
+    stub_mode: bool,
+    semantic_evaluator: Any,
+    baseline_results_dir: Path | None,
+    results_dir: Path,
+    repo_root: Path,
+) -> tuple[list[dict], str | None]:
+    """Run the cross-model suite against *config_paths* and return results.
+
+    Unlike :func:`main`, this does **not** call ``sys.exit()`` — it is
+    designed to be called programmatically (e.g. from the AEGIS GUI batch
+    runner).
+
+    Args:
+        payloads:             Payload objects to test (typically injection payloads).
+        config_paths:         YAML config paths relative to *repo_root*.
+        phases:               Injection phases to run.
+        model_matrix:         List of ``(model_id, display_name)`` tuples.
+                              Pass ``[(None, "stub")]`` for stub mode.
+        stub_mode:            If ``True``, skip LLM calls.
+        semantic_evaluator:   Pre-constructed ``SemanticEvaluator`` instance,
+                              or ``None`` to skip Tier 3.
+        baseline_results_dir: Path to baseline results for Tier 3 comparison.
+        results_dir:          Directory where results are written.
+        repo_root:            Absolute path to the repository root.
+
+    Returns:
+        ``(all_matrix_rows, first_run_dir_name)`` tuple.
+    """
+    all_matrix_rows: list[dict] = []
+    first_run_dir_name: str | None = None
+
+    for model_id, model_display_name in model_matrix:
+        for yaml_path in config_paths:
+            rows, run_dir = _run_config_for_model(
+                yaml_path=yaml_path,
+                model_id=model_id,
+                model_display_name=model_display_name,
+                payloads=payloads,
+                phases=phases,
+                stub_mode=stub_mode,
+                semantic_evaluator=semantic_evaluator,
+                baseline_results_dir=baseline_results_dir,
+                results_dir=results_dir,
+                repo_root=repo_root,
+            )
+            all_matrix_rows.extend(rows)
+            if first_run_dir_name is None and run_dir is not None:
+                first_run_dir_name = run_dir.name
+
+    if all_matrix_rows:
+        versioned_csv = (
+            f"cross_model_matrix_{first_run_dir_name}.csv"
+            if first_run_dir_name
+            else "cross_model_matrix.csv"
+        )
+        csv_path = _write_csv(all_matrix_rows, results_dir, versioned_csv)
+        _print_summary(all_matrix_rows)
+        print(f"Results matrix written to: {csv_path}")
+
+    return all_matrix_rows, first_run_dir_name
 
 
 # ---------------------------------------------------------------------------
@@ -597,12 +673,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--baseline-results",
-        default=None,
+        default=DEFAULT_BASELINE_RESULTS_DIR,
         metavar="DIR",
         help=(
-            "Path to baseline results directory for Tier 3 comparison "
-            "(e.g. bili/aegis/suites/baseline/results).  "
-            "Required for real-mode Tier 3 evaluation."
+            "Path to baseline results directory for Tier 3 comparison. "
+            f"Defaults to '{DEFAULT_BASELINE_RESULTS_DIR}'. "
+            "Pass an explicit path to override."
         ),
     )
     parser.add_argument(

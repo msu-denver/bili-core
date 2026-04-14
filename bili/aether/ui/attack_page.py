@@ -82,6 +82,8 @@ _SUITE_NAMES = [
     "memory_poisoning",
     "bias_inheritance",
     "agent_impersonation",
+    "persistence",
+    "cross_model",
 ]
 
 _SUITE_DISPLAY = {
@@ -90,6 +92,8 @@ _SUITE_DISPLAY = {
     "memory_poisoning": "Memory Poisoning",
     "bias_inheritance": "Bias Inheritance",
     "agent_impersonation": "Agent Impersonation",
+    "persistence": "Persistence",
+    "cross_model": "Cross-Model Transferability",
 }
 
 _SUITE_PAYLOAD_MODULES = {
@@ -104,6 +108,9 @@ _SUITE_PAYLOAD_MODULES = {
     "agent_impersonation": (
         "bili.aegis.suites.agent_impersonation.payloads.agent_impersonation_payloads"
     ),
+    # Persistence has its own payloads; cross_model reuses the injection payload set.
+    "persistence": ("bili.aegis.suites.persistence.payloads.persistence_payloads"),
+    "cross_model": ("bili.aegis.suites.injection.payloads.prompt_injection_payloads"),
 }
 
 _SUITE_ATTACK_TYPE = {
@@ -112,7 +119,22 @@ _SUITE_ATTACK_TYPE = {
     "memory_poisoning": "memory_poisoning",
     "bias_inheritance": "bias_inheritance",
     "agent_impersonation": "agent_impersonation",
+    # persistence and cross_model use their own runners — attack_type not used
+    # by _execute_batch_attack for these suites.
+    "persistence": "persistence",
+    "cross_model": "prompt_injection",
 }
+
+# Suites that use the shared _suite_runner.run_suite() path.
+_STANDARD_SUITES = frozenset(
+    [
+        "injection",
+        "jailbreak",
+        "memory_poisoning",
+        "bias_inheritance",
+        "agent_impersonation",
+    ]
+)
 
 _SEV_PREFIX = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}
 
@@ -205,7 +227,11 @@ def _init_attack_selections() -> None:
     """Initialize per-payload session state keys to True if not already set."""
     for suite in _SUITE_NAMES:
         if f"attack_phase_{suite}" not in st.session_state:
-            st.session_state[f"attack_phase_{suite}"] = "pre_execution"
+            # Persistence uses a fixed checkpoint phase; all others default to pre_execution.
+            default_phase = (
+                "checkpoint_injection" if suite == "persistence" else "pre_execution"
+            )
+            st.session_state[f"attack_phase_{suite}"] = default_phase
         library = _load_payload_library(suite)
         for pid in library:
             key = f"attack_selected_{suite}_{pid}"
@@ -266,17 +292,30 @@ def _render_payload_selector() -> None:
             use_container_width=True,
         )
 
-        st.caption("Injection phase:")
-        st.radio(
-            "Injection phase",
-            options=["pre_execution", "mid_execution"],
-            format_func=lambda x: (
-                "Pre-execution" if x == "pre_execution" else "Mid-execution"
-            ),
-            key=f"attack_phase_{suite}",
-            horizontal=True,
-            label_visibility="collapsed",
-        )
+        if suite == "persistence":
+            st.caption("Injection phase: Checkpoint injection (only phase)")
+        else:
+            st.caption("Injection phase:")
+            st.radio(
+                "Injection phase",
+                options=["pre_execution", "mid_execution"],
+                format_func=lambda x: (
+                    "Pre-execution" if x == "pre_execution" else "Mid-execution"
+                ),
+                key=f"attack_phase_{suite}",
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+        if suite == "cross_model":
+            st.caption(
+                "Runs across 4 models: Claude 3.5 Haiku, Claude Sonnet 4, "
+                "Amazon Nova Pro, Gemini 2.0 Flash. Stub mode uses a single null model."
+            )
+        if suite == "persistence":
+            st.caption(
+                "Requires a postgres or mongo checkpointer. "
+                "Configs without a persistent backend are skipped automatically."
+            )
 
         for pid, payload_obj in library.items():
             sev = getattr(payload_obj, "severity", "").lower()
@@ -313,8 +352,9 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
     )
 
     skip_t3 = stub_mode or st.session_state.get("attack_skip_t3", False)
+    evaluator_model = _get_evaluator_model()
     semantic_evaluator = (
-        SemanticEvaluator(model_name=_get_evaluator_model()) if not skip_t3 else None
+        SemanticEvaluator(model_name=evaluator_model) if not skip_t3 else None
     )
     baseline_results_dir = BASELINE_RESULTS_DIR if not skip_t3 else None
 
@@ -347,31 +387,109 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
         phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
         results_dir = _SUITES_DIR / suite / "results"
         try:
-            run_suite(
-                payloads=payloads,
-                attack_suite=suite,
-                attack_type=_SUITE_ATTACK_TYPE[suite],
-                csv_filename=f"{suite}_results_matrix.csv",
-                suite_name=_SUITE_DISPLAY[suite],
-                results_dir=results_dir,
-                repo_root=_REPO_ROOT,
-                config_paths=[yaml_path] if yaml_path else [],
-                phases=[phase],
-                stub=stub_mode,
-                semantic_evaluator=semantic_evaluator,
-                baseline_results_dir=baseline_results_dir,
-            )
-            # run_suite() normally exits via sys.exit(); reaching here means it
-            # returned normally (shouldn't happen, but treat as success).
-            passed_suites += 1
-            with status_area:
-                st.markdown(
-                    f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+            if suite in _STANDARD_SUITES:
+                # Standard suites go through the shared _suite_runner.run_suite()
+                # which calls sys.exit() on completion — caught below.
+                run_suite(
+                    payloads=payloads,
+                    attack_suite=suite,
+                    attack_type=_SUITE_ATTACK_TYPE[suite],
+                    csv_filename=f"{suite}_results_matrix.csv",
+                    suite_name=_SUITE_DISPLAY[suite],
+                    results_dir=results_dir,
+                    repo_root=_REPO_ROOT,
+                    config_paths=[yaml_path] if yaml_path else [],
+                    phases=[phase],
+                    stub=stub_mode,
+                    semantic_evaluator=semantic_evaluator,
+                    baseline_results_dir=baseline_results_dir,
                 )
+                # run_suite() normally exits via sys.exit(); reaching here means
+                # it returned normally (treat as success).
+                passed_suites += 1
+                with status_area:
+                    st.markdown(
+                        f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                    )
+
+            elif suite == "persistence":
+                from bili.aegis.evaluator.evaluator_config import (  # pylint: disable=import-outside-toplevel
+                    PERSISTENCE_JUDGE_PROMPT,
+                    PERSISTENCE_SCORE_DESCRIPTIONS,
+                )
+                from bili.aegis.suites.persistence.run_persistence_suite import (  # pylint: disable=import-outside-toplevel
+                    run_persistence_suite,
+                )
+
+                persistence_evaluator = (
+                    SemanticEvaluator(
+                        score_descriptions=PERSISTENCE_SCORE_DESCRIPTIONS,
+                        judge_prompt_template=PERSISTENCE_JUDGE_PROMPT,
+                        model_name=evaluator_model,
+                    )
+                    if not skip_t3
+                    else None
+                )
+                matrix_rows, _ = run_persistence_suite(
+                    payloads=payloads,
+                    config_paths=[yaml_path] if yaml_path else [],
+                    stub_mode=stub_mode,
+                    semantic_evaluator=persistence_evaluator,
+                    baseline_results_dir=baseline_results_dir,
+                    results_dir=results_dir,
+                    repo_root=_REPO_ROOT,
+                )
+                ran = [r for r in matrix_rows if r.get("skipped") != "true"]
+                all_passed = all(r.get("tier1_pass") == "true" for r in ran)
+                if all_passed or not ran:
+                    passed_suites += 1
+                    with status_area:
+                        st.markdown(
+                            f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                        )
+                else:
+                    with status_area:
+                        st.markdown(
+                            f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                            f"{len(payloads)} payload(s) (some cases failed)"
+                        )
+
+            elif suite == "cross_model":
+                from bili.aegis.suites.cross_model.run_cross_model_suite import (  # pylint: disable=import-outside-toplevel
+                    _MODEL_MATRIX,
+                    run_cross_model_suite,
+                )
+
+                model_matrix = [(None, "stub")] if stub_mode else list(_MODEL_MATRIX)
+                matrix_rows, _ = run_cross_model_suite(
+                    payloads=payloads,
+                    config_paths=[yaml_path] if yaml_path else [],
+                    phases=[phase],
+                    model_matrix=model_matrix,
+                    stub_mode=stub_mode,
+                    semantic_evaluator=semantic_evaluator,
+                    baseline_results_dir=baseline_results_dir,
+                    results_dir=results_dir,
+                    repo_root=_REPO_ROOT,
+                )
+                ran = [r for r in matrix_rows if r.get("skipped") != "true"]
+                all_passed = all(r.get("tier1_pass") == "true" for r in ran)
+                if all_passed or not ran:
+                    passed_suites += 1
+                    with status_area:
+                        st.markdown(
+                            f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                        )
+                else:
+                    with status_area:
+                        st.markdown(
+                            f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                            f"{len(payloads)} payload(s) (some cases failed)"
+                        )
+
         except SystemExit as exc:
-            # run_suite() is a CLI tool that always calls sys.exit() after writing
-            # results to disk.  Exit code 0 = all cases passed; non-zero = failures.
-            # Results are already on disk in either case.
+            # run_suite() calls sys.exit() after writing results to disk.
+            # Exit code 0 = all cases passed; non-zero = failures.
             if exc.code == 0:
                 passed_suites += 1
                 with status_area:
