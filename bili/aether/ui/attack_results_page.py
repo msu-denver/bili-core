@@ -33,7 +33,7 @@ import streamlit as st
 LOGGER = logging.getLogger(__name__)
 
 _AETHER_DIR = Path(__file__).resolve().parent.parent
-_TESTS_DIR = _AETHER_DIR / "tests"
+_SUITES_DIR = _AETHER_DIR.parent / "aegis" / "suites"
 _REPO_ROOT = _AETHER_DIR.parent.parent
 LOGO_PATH = _AETHER_DIR.parent / "images" / "logo.png"
 
@@ -82,14 +82,16 @@ def _load_suite_results(suite_dir: str) -> list[dict]:
     Cached per ``suite_dir`` with a 30-second TTL.  NDJSON logs and CSV files
     are excluded automatically (glob only matches ``*.json``).
 
-    Cross-model results live one level deeper
-    (``{mas_id}/{model_id_safe}/*.json``); the flat ``**/*.json`` glob covers
-    both layouts transparently.
+    Injects a ``run_id`` key derived from the file path into every raw dict:
+    - Versioned:  ``{mas_id}/run_NNN/{payload_file}.json``           → ``run_NNN``
+    - Cross-model versioned: ``{mas_id}/run_NNN/{model_safe}/{f}``   → ``run_NNN``
+    - Legacy flat: ``{mas_id}/{payload_file}.json``                  → ``run_000 (legacy)``
+    - Legacy cross-model: ``{mas_id}/{model_safe}/{payload_file}``   → ``run_000 (legacy)``
 
     Fields not present in the raw JSON are normalised to ``None`` so
     downstream code can use a single unified DataFrame regardless of suite.
     """
-    results_dir = _TESTS_DIR / suite_dir / "results"
+    results_dir = _SUITES_DIR / suite_dir / "results"
     results: list[dict] = []
 
     if not results_dir.exists():
@@ -98,6 +100,16 @@ def _load_suite_results(suite_dir: str) -> list[dict]:
     for path in sorted(results_dir.glob("**/*.json")):
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
+            # Derive run_id from path: parts[0]=mas_id, parts[1]=run_NNN or other
+            parts = path.relative_to(results_dir).parts
+            if (
+                len(parts) >= 2
+                and parts[1].startswith("run_")
+                and parts[1][4:].isdigit()
+            ):
+                raw["run_id"] = parts[1]
+            else:
+                raw["run_id"] = "run_000 (legacy)"
             results.append(_normalise(raw))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.warning("Could not parse %s: %s", path, exc)
@@ -123,6 +135,7 @@ def _normalise(r: dict) -> dict:
 
     return {
         # Core identity
+        "run_id": r.get("run_id", "run_000 (legacy)"),
         "payload_id": r.get("payload_id", "?"),
         "injection_type": r.get("injection_type", "?"),
         "severity": r.get("severity", "?"),
@@ -165,6 +178,7 @@ def _build_dataframe(results: list[dict]) -> pd.DataFrame:
         try:
             rows.append(
                 {
+                    "run_id": r["run_id"],
                     "payload_id": r["payload_id"],
                     "injection_type": r["injection_type"],
                     "severity": r["severity"],
@@ -361,6 +375,7 @@ def _render_main(selected_suite: str, extra_paths: list[Path]) -> None:
 def _result_export_key(r: dict, is_cross_model: bool) -> tuple:
     """Return the lookup key used to match normalised results to df_filtered rows."""
     return (
+        r.get("run_id", "run_000 (legacy)"),
         r.get("mas_id"),
         r.get("payload_id"),
         r.get("phase"),
@@ -383,6 +398,7 @@ def _build_export_df(
             continue
         rows.append(
             {
+                "run_id": r.get("run_id", "run_000 (legacy)"),
                 "mas_id": r.get("mas_id", ""),
                 "agent_id": r.get("target_agent_id", ""),
                 "attack_type": r.get("injection_type", ""),
@@ -482,13 +498,21 @@ def _render_filters(
     df: pd.DataFrame, selected_suite: str, is_cross_model: bool
 ) -> pd.DataFrame:
     """Render filter widgets and return filtered DataFrame."""
-    row1 = st.columns(4 if selected_suite != _ALL_SUITES else 5)
+    col_left, col_right = st.columns(2)
 
-    col_idx = 0
+    # Left column
+    with col_left:
+        available_runs = sorted(df["run_id"].unique(), reverse=True)
+        run_options = ["All"] + available_runs
+        default_run_idx = 1 if available_runs else 0
+        selected_run = st.selectbox(
+            "Run",
+            options=run_options,
+            index=default_run_idx,
+            key="atk_filter_run",
+        )
 
-    # Suite filter — only shown in All Suites view
-    if selected_suite == _ALL_SUITES:
-        with row1[col_idx]:
+        if selected_suite == _ALL_SUITES:
             suite_opts = sorted(df["attack_suite"].unique())
             suites = st.multiselect(
                 "Suite",
@@ -496,29 +520,25 @@ def _render_filters(
                 default=suite_opts,
                 key="atk_filter_suite",
             )
-        col_idx += 1
-    else:
-        suites = list(df["attack_suite"].unique())
+        else:
+            suites = list(df["attack_suite"].unique())
 
-    with row1[col_idx]:
         configs = st.multiselect(
             "MAS Config",
             options=sorted(df["mas_id"].unique()),
             default=sorted(df["mas_id"].unique()),
             key="atk_filter_configs",
         )
-    col_idx += 1
 
-    with row1[col_idx]:
         inj_types = st.multiselect(
             "Attack Type",
             options=sorted(df["injection_type"].unique()),
             default=sorted(df["injection_type"].unique()),
             key="atk_filter_types",
         )
-    col_idx += 1
 
-    with row1[col_idx]:
+    # Right column
+    with col_right:
         present_sev = set(df["severity"].dropna().unique())
         ordered_sev = [s for s in _SEVERITY_ORDER if s in present_sev] + sorted(
             present_sev - set(_SEVERITY_ORDER)
@@ -529,15 +549,10 @@ def _render_filters(
             default=ordered_sev,
             key="atk_filter_severity",
         )
-    col_idx += 1
 
-    with row1[col_idx]:
         phase_opts = ["All"] + sorted(df["phase"].dropna().unique())
         phase = st.selectbox("Phase", options=phase_opts, key="atk_filter_phase")
 
-    # Second row: model_id filter for cross-model, Tier-3 score range
-    row2 = st.columns(3)
-    with row2[0]:
         tier3_status = st.selectbox(
             "Detection Tier",
             options=[
@@ -548,7 +563,7 @@ def _render_filters(
             ],
             key="atk_filter_tier",
         )
-    with row2[1]:
+
         if is_cross_model and df["model_id"].notna().any():
             model_opts = sorted(df["model_id"].dropna().unique())
             model_ids = st.multiselect(
@@ -559,7 +574,7 @@ def _render_filters(
             )
         else:
             model_ids = None
-    with row2[2]:
+
         if is_cross_model and df["provider_family"].notna().any():
             pf_opts = sorted(df["provider_family"].dropna().unique())
             provider_families = st.multiselect(
@@ -578,6 +593,8 @@ def _render_filters(
         & df["injection_type"].isin(inj_types)
         & df["severity"].isin(severities)
     )
+    if selected_run != "All":
+        mask &= df["run_id"] == selected_run
     if phase != "All":
         mask &= df["phase"] == phase
     if tier3_status == "Tier-3 evaluated":
@@ -711,24 +728,37 @@ def _render_detail_panel(
     # Build lookup key → (tier3_score, tier1_pass) from the parsed DataFrame
     if is_cross_model and df_filtered["model_id"].notna().any():
         score_lookup: dict = {
-            (row["mas_id"], row["payload_id"], row["phase"], row["model_id"]): row
+            (
+                row["run_id"],
+                row["mas_id"],
+                row["payload_id"],
+                row["phase"],
+                row["model_id"],
+            ): row
             for _, row in df_filtered.iterrows()
         }
     else:
         score_lookup = {
-            (row["mas_id"], row["payload_id"], row["phase"], None): row
+            (row["run_id"], row["mas_id"], row["payload_id"], row["phase"], None): row
             for _, row in df_filtered.iterrows()
         }
 
     def _result_key(r: dict) -> tuple:
         if is_cross_model:
             return (
+                r.get("run_id", "run_000 (legacy)"),
                 r.get("mas_id"),
                 r.get("payload_id"),
                 r.get("phase"),
                 r.get("model_id"),
             )
-        return (r.get("mas_id"), r.get("payload_id"), r.get("phase"), None)
+        return (
+            r.get("run_id", "run_000 (legacy)"),
+            r.get("mas_id"),
+            r.get("payload_id"),
+            r.get("phase"),
+            None,
+        )
 
     visible = [r for r in results if _result_key(r) in score_lookup]
 
@@ -866,11 +896,12 @@ def _render_expander_content(
             r.get("mas_id", ""),
             r.get("payload_id", ""),
             r.get("phase", ""),
+            r.get("run_id", "run_000"),
         )
 
 
 def _render_view_graph_button(
-    config_path: str, mas_id: str, payload_id: str, phase: str
+    config_path: str, mas_id: str, payload_id: str, phase: str, run_id: str = "run_000"
 ) -> None:
     """Render a 'View MAS graph →' button that loads the config into the visualizer."""
     st.markdown("---")
@@ -880,9 +911,7 @@ def _render_view_graph_button(
         st.caption(f"Config not found at `{config_path}` — graph view unavailable.")
         return
 
-    button_key = (
-        f"view_graph_{mas_id}_{payload_id}_{phase}_{config_path.replace('/', '_')}"
-    )
+    button_key = f"view_graph_{run_id}_{mas_id}_{payload_id}_{phase}_{config_path.replace('/', '_')}"
     if st.button("View MAS graph →", key=button_key, use_container_width=False):
         try:
             from bili.aether.config.loader import (  # pylint: disable=import-outside-toplevel

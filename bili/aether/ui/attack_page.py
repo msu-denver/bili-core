@@ -48,8 +48,17 @@ from bili.aether.ui.components.attack_graph import (
 
 LOGO_PATH = Path(__file__).resolve().parent.parent.parent / "images" / "logo.png"
 BASELINE_RESULTS_DIR = (
-    Path(__file__).resolve().parent.parent / "tests" / "baseline" / "results"
+    Path(__file__).resolve().parent.parent.parent
+    / "aegis"
+    / "suites"
+    / "baseline"
+    / "results"
 )
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "config" / "examples"
+
+# Batch runner paths
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SUITES_DIR = Path(__file__).resolve().parent.parent.parent / "aegis" / "suites"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,6 +82,8 @@ _SUITE_NAMES = [
     "memory_poisoning",
     "bias_inheritance",
     "agent_impersonation",
+    "persistence",
+    "cross_model",
 ]
 
 _SUITE_DISPLAY = {
@@ -81,6 +92,8 @@ _SUITE_DISPLAY = {
     "memory_poisoning": "Memory Poisoning",
     "bias_inheritance": "Bias Inheritance",
     "agent_impersonation": "Agent Impersonation",
+    "persistence": "Persistence",
+    "cross_model": "Cross-Model Transferability",
 }
 
 _SUITE_PAYLOAD_MODULES = {
@@ -95,6 +108,9 @@ _SUITE_PAYLOAD_MODULES = {
     "agent_impersonation": (
         "bili.aegis.suites.agent_impersonation.payloads.agent_impersonation_payloads"
     ),
+    # Persistence has its own payloads; cross_model reuses the injection payload set.
+    "persistence": ("bili.aegis.suites.persistence.payloads.persistence_payloads"),
+    "cross_model": ("bili.aegis.suites.injection.payloads.prompt_injection_payloads"),
 }
 
 _SUITE_ATTACK_TYPE = {
@@ -103,7 +119,24 @@ _SUITE_ATTACK_TYPE = {
     "memory_poisoning": "memory_poisoning",
     "bias_inheritance": "bias_inheritance",
     "agent_impersonation": "agent_impersonation",
+    # persistence and cross_model use their own runners — attack_type not used
+    # by _execute_batch_attack for these suites.
+    "persistence": "persistence",
+    "cross_model": "prompt_injection",
 }
+
+# Suites that use the shared _suite_runner.run_suite() path.
+_STANDARD_SUITES = frozenset(
+    [
+        "injection",
+        "jailbreak",
+        "memory_poisoning",
+        "bias_inheritance",
+        "agent_impersonation",
+    ]
+)
+
+_SEV_PREFIX = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}
 
 # Strategy function name for each attack_type string
 _PRE_EXEC_STRATEGY_FN = {
@@ -120,18 +153,390 @@ _PRE_EXEC_STRATEGY_FN = {
 # ---------------------------------------------------------------------------
 
 
-def push_config_to_attack_state(config: MASConfig) -> None:
+def push_config_to_attack_state(config: MASConfig, yaml_path: str = "") -> None:
     """Write *config* into session state so the Attack page loads it fresh.
 
     Call this from any page that has a "Send to Attack Suite" button.  Clears
     previous attack results so the new config starts from a clean slate.
+
+    Args:
+        config:    The MASConfig to run attacks against.
+        yaml_path: Absolute or repo-relative path to the YAML file — required
+                   by ``run_suite`` for config fingerprinting.
     """
     st.session_state.attack_config = config
+    st.session_state.attack_yaml_path = yaml_path
     if config.agents:
         st.session_state.attack_target_agent_id = config.agents[0].agent_id
     for key in ("attack_result", "attack_verdict", "attack_node_states"):
         st.session_state.pop(key, None)
     st.toast("Config loaded in Attack Suite \u2713")
+
+
+# ---------------------------------------------------------------------------
+# Config resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_attack_config():
+    """Render YAML selector and sync resolved config into session state.
+
+    When a file is explicitly selected, loads it and writes the result into
+    ``attack_config`` / ``attack_yaml_path`` so that ``_render_main()`` can
+    read the correct values from session state on the same render pass.
+    """
+    from bili.aether.config.loader import (  # pylint: disable=import-outside-toplevel
+        load_mas_from_yaml,
+    )
+
+    yaml_files = sorted(EXAMPLES_DIR.glob("*.yaml")) if EXAMPLES_DIR.exists() else []
+    yaml_display = ["(use config from AETHER visualizer)"] + [
+        f.stem.replace("_", " ").title() for f in yaml_files
+    ]
+
+    selected_idx = st.selectbox(
+        "YAML Configuration",
+        range(len(yaml_display)),
+        format_func=lambda i: yaml_display[i],
+        key="attack_yaml_selector",
+    )
+
+    if selected_idx and selected_idx > 0:
+        yaml_path_obj = yaml_files[selected_idx - 1]
+        # Only reload if the selected file differs from what is currently loaded,
+        # to avoid a full disk read and target-agent reset on every render.
+        if st.session_state.get("attack_yaml_path") != str(yaml_path_obj):
+            try:
+                config = load_mas_from_yaml(str(yaml_path_obj))
+                st.session_state.attack_config = config
+                st.session_state.attack_yaml_path = str(yaml_path_obj)
+                # Always reset target to first agent of the new config so
+                # a stale agent_id from a previous config is never forwarded.
+                if config.agents:
+                    st.session_state.attack_target_agent_id = config.agents[0].agent_id
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                st.error(f"Failed to load `{yaml_path_obj.name}`: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Payload selection helpers
+# ---------------------------------------------------------------------------
+
+
+def _init_attack_selections() -> None:
+    """Initialize per-payload session state keys to True if not already set."""
+    for suite in _SUITE_NAMES:
+        if f"attack_phase_{suite}" not in st.session_state:
+            # Persistence uses a fixed checkpoint phase; all others default to pre_execution.
+            default_phase = (
+                "checkpoint_injection" if suite == "persistence" else "pre_execution"
+            )
+            st.session_state[f"attack_phase_{suite}"] = default_phase
+        library = _load_payload_library(suite)
+        for pid in library:
+            key = f"attack_selected_{suite}_{pid}"
+            if key not in st.session_state:
+                st.session_state[key] = True
+
+
+def _on_suite_header_change(hdr_key: str, payload_keys: list) -> None:
+    """Propagate suite header checkbox state to all child payload checkboxes."""
+    new_val = st.session_state[hdr_key]
+    for pid in payload_keys:
+        st.session_state[pid] = new_val
+
+
+def _set_suite_payloads(payload_keys: list, value: bool) -> None:
+    """Set all payloads in a suite to *value* (used by Select/Deselect All)."""
+    for key in payload_keys:
+        st.session_state[key] = value
+
+
+def _render_payload_selector() -> None:
+    """Render the two-level suite/payload selection hierarchy."""
+    _init_attack_selections()
+
+    st.markdown("**Select payloads to run:**")
+
+    for suite in _SUITE_NAMES:
+        library = _load_payload_library(suite)
+        payload_keys = [f"attack_selected_{suite}_{pid}" for pid in library]
+        n_selected = sum(1 for k in payload_keys if st.session_state.get(k, True))
+        n_total = len(payload_keys)
+        all_checked = n_selected == n_total and n_total > 0
+
+        hdr_key = f"attack_suite_hdr_{suite}"
+        st.session_state[hdr_key] = all_checked
+
+        display = _SUITE_DISPLAY[suite]
+        st.checkbox(
+            f"**{display}** ({n_selected}/{n_total})",
+            key=hdr_key,
+            on_change=_on_suite_header_change,
+            args=(hdr_key, payload_keys),
+        )
+
+        col_a, col_b, _ = st.columns([1, 1, 2])
+        col_a.button(
+            "Select All",
+            key=f"atk_sel_{suite}",
+            on_click=_set_suite_payloads,
+            args=(payload_keys, True),
+            use_container_width=True,
+        )
+        col_b.button(
+            "Deselect All",
+            key=f"atk_desel_{suite}",
+            on_click=_set_suite_payloads,
+            args=(payload_keys, False),
+            use_container_width=True,
+        )
+
+        if suite == "persistence":
+            st.caption("Injection phase: Checkpoint injection (only phase)")
+        else:
+            st.caption("Injection phase:")
+            st.radio(
+                "Injection phase",
+                options=["pre_execution", "mid_execution"],
+                format_func=lambda x: (
+                    "Pre-execution" if x == "pre_execution" else "Mid-execution"
+                ),
+                key=f"attack_phase_{suite}",
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+        if suite == "cross_model":
+            st.caption(
+                "Runs across 4 models: Claude 3.5 Haiku, Claude Sonnet 4, "
+                "Amazon Nova Pro, Gemini 2.0 Flash. Stub mode uses a single null model."
+            )
+        if suite == "persistence":
+            st.caption(
+                "Requires a postgres or mongo checkpointer. "
+                "Configs without a persistent backend are skipped automatically."
+            )
+
+        for pid, payload_obj in library.items():
+            sev = getattr(payload_obj, "severity", "").lower()
+            text_preview = getattr(payload_obj, "payload", "")
+            preview = text_preview[:60] + ("\u2026" if len(text_preview) > 60 else "")
+            sev_badge = _SEV_PREFIX.get(sev, "[---]")
+            _, col_p = st.columns([0.05, 0.95])
+            with col_p:
+                st.checkbox(
+                    f"{sev_badge} `{pid}` \u2014 {preview}",
+                    key=f"attack_selected_{suite}_{pid}",
+                )
+
+
+# ---------------------------------------------------------------------------
+# Batch execution
+# ---------------------------------------------------------------------------
+
+
+def _report_suite_result(
+    matrix_rows: list[dict],
+    suite: str,
+    payloads: list,
+    status_area: Any,
+    passed_suites: int,
+) -> int:
+    """Update *status_area* with the suite outcome and return updated *passed_suites*.
+
+    Three distinct outcomes:
+    - All rows skipped (no eligible configs): shows a skip indicator — counts
+      as "not failed" so the overall run still succeeds.
+    - All ran rows passed: green checkmark.
+    - At least one ran row failed: warning indicator.
+    """
+    ran = [r for r in matrix_rows if r.get("skipped") != "true"]
+    if not ran:
+        with status_area:
+            st.markdown(
+                f"\u23ed\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                f"skipped (no eligible configs)"
+            )
+        passed_suites += 1
+    elif all(r.get("tier1_pass") == "true" for r in ran):
+        passed_suites += 1
+        with status_area:
+            st.markdown(
+                f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+            )
+    else:
+        with status_area:
+            st.markdown(
+                f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                f"{len(payloads)} payload(s) (some cases failed)"
+            )
+    return passed_suites
+
+
+def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
+    """Run all selected payloads via run_suite() and display live progress."""
+    if not yaml_path:
+        st.error(
+            "No YAML config path available. Select a YAML file in the sidebar "
+            "or use **Send to Attack Suite** from the AETHER visualizer."
+        )
+        return
+
+    from bili.aegis.evaluator.semantic_evaluator import (  # pylint: disable=import-outside-toplevel
+        SemanticEvaluator,
+    )
+    from bili.aegis.suites._suite_runner import (  # pylint: disable=import-outside-toplevel
+        run_suite,
+    )
+
+    skip_t3 = stub_mode or st.session_state.get("attack_skip_t3", False)
+    evaluator_model = _get_evaluator_model()
+    semantic_evaluator = (
+        SemanticEvaluator(model_name=evaluator_model) if not skip_t3 else None
+    )
+    baseline_results_dir = BASELINE_RESULTS_DIR if not skip_t3 else None
+
+    # Collect selected payloads per suite
+    suite_selections: dict[str, list] = {}
+    for suite in _SUITE_NAMES:
+        library = _load_payload_library(suite)
+        selected = [
+            obj
+            for pid, obj in library.items()
+            if st.session_state.get(f"attack_selected_{suite}_{pid}", True)
+        ]
+        if selected:
+            suite_selections[suite] = selected
+
+    if not suite_selections:
+        st.warning("No payloads selected. Enable at least one payload.")
+        return
+
+    total_suites = len(suite_selections)
+    progress_bar = st.progress(0, text="Starting batch attack run\u2026")
+    status_area = st.container()
+    passed_suites = 0
+
+    for i, (suite, payloads) in enumerate(suite_selections.items()):
+        progress_bar.progress(
+            i / total_suites,
+            text=f"Running {_SUITE_DISPLAY[suite]} ({i + 1}/{total_suites})\u2026",
+        )
+        results_dir = _SUITES_DIR / suite / "results"
+        try:
+            if suite in _STANDARD_SUITES:
+                # Standard suites go through the shared _suite_runner.run_suite()
+                # which calls sys.exit() on completion — caught below.
+                phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
+                run_suite(
+                    payloads=payloads,
+                    attack_suite=suite,
+                    attack_type=_SUITE_ATTACK_TYPE[suite],
+                    csv_filename=f"{suite}_results_matrix.csv",
+                    suite_name=_SUITE_DISPLAY[suite],
+                    results_dir=results_dir,
+                    repo_root=_REPO_ROOT,
+                    config_paths=[yaml_path] if yaml_path else [],
+                    phases=[phase],
+                    stub=stub_mode,
+                    semantic_evaluator=semantic_evaluator,
+                    baseline_results_dir=baseline_results_dir,
+                )
+                # run_suite() normally exits via sys.exit(); reaching here means
+                # it returned normally (treat as success).
+                passed_suites += 1
+                with status_area:
+                    st.markdown(
+                        f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                    )
+
+            elif suite == "persistence":
+                from bili.aegis.evaluator.evaluator_config import (  # pylint: disable=import-outside-toplevel
+                    PERSISTENCE_JUDGE_PROMPT,
+                    PERSISTENCE_SCORE_DESCRIPTIONS,
+                )
+                from bili.aegis.suites.persistence.run_persistence_suite import (  # pylint: disable=import-outside-toplevel
+                    run_persistence_suite,
+                )
+
+                persistence_evaluator = (
+                    SemanticEvaluator(
+                        score_descriptions=PERSISTENCE_SCORE_DESCRIPTIONS,
+                        judge_prompt_template=PERSISTENCE_JUDGE_PROMPT,
+                        model_name=evaluator_model,
+                    )
+                    if not skip_t3
+                    else None
+                )
+                # Persistence always uses the CHECKPOINT phase internally;
+                # no phase parameter is passed to run_persistence_suite().
+                matrix_rows, _ = run_persistence_suite(
+                    payloads=payloads,
+                    config_paths=[yaml_path] if yaml_path else [],
+                    stub_mode=stub_mode,
+                    semantic_evaluator=persistence_evaluator,
+                    baseline_results_dir=baseline_results_dir,
+                    results_dir=results_dir,
+                    repo_root=_REPO_ROOT,
+                )
+                passed_suites = _report_suite_result(
+                    matrix_rows, suite, payloads, status_area, passed_suites
+                )
+
+            elif suite == "cross_model":
+                from bili.aegis.suites.cross_model.run_cross_model_suite import (  # pylint: disable=import-outside-toplevel
+                    MODEL_MATRIX,
+                    run_cross_model_suite,
+                )
+
+                phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
+                model_matrix = [(None, "stub")] if stub_mode else list(MODEL_MATRIX)
+                matrix_rows, _ = run_cross_model_suite(
+                    payloads=payloads,
+                    config_paths=[yaml_path] if yaml_path else [],
+                    phases=[phase],
+                    model_matrix=model_matrix,
+                    stub_mode=stub_mode,
+                    semantic_evaluator=semantic_evaluator,
+                    baseline_results_dir=baseline_results_dir,
+                    results_dir=results_dir,
+                    repo_root=_REPO_ROOT,
+                )
+                passed_suites = _report_suite_result(
+                    matrix_rows, suite, payloads, status_area, passed_suites
+                )
+
+        except SystemExit as exc:
+            # run_suite() calls sys.exit() after writing results to disk.
+            # Exit code 0 = all cases passed; non-zero = failures.
+            if exc.code == 0:
+                passed_suites += 1
+                with status_area:
+                    st.markdown(
+                        f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+                    )
+            else:
+                with status_area:
+                    st.markdown(
+                        f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                        f"{len(payloads)} payload(s) (some cases failed)"
+                    )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("Batch attack failed for suite %s: %s", suite, exc)
+            with status_area:
+                st.markdown(f"\u274c **{_SUITE_DISPLAY[suite]}** — failed: {exc}")
+
+    progress_bar.progress(
+        1.0, text=f"Complete \u2014 {passed_suites}/{total_suites} suite(s) passed"
+    )
+    if passed_suites == total_suites:
+        st.success(f"All {total_suites} suite(s) completed.")
+    else:
+        st.warning(
+            f"{passed_suites}/{total_suites} suite(s) completed "
+            f"\u2014 {total_suites - passed_suites} failed."
+        )
+    st.info("Navigate to **Attack Results** in the sidebar to view your results.")
 
 
 def render_attack_page() -> None:
@@ -158,13 +563,19 @@ def _render_sidebar() -> None:
     st.caption("Adversarial Evaluation and Guarding of Intelligent Systems")
     st.markdown("---")
     st.markdown("#### Attack Suite")
+    st.markdown(
+        "Run batch attacks from the main area, or use the controls below for a "
+        "single-payload exploratory attack against a specific graph node."
+    )
+
+    _resolve_attack_config()
 
     config: Optional[MASConfig] = st.session_state.get("attack_config")
     if config is None:
-        st.caption("No MAS loaded.")
         return
 
-    st.caption(f"Config: `{config.mas_id}`")
+    st.markdown("---")
+    st.markdown("##### Single-payload exploratory attack")
 
     # Suite selector
     suite_display_names = [_SUITE_DISPLAY[s] for s in _SUITE_NAMES]
@@ -191,44 +602,30 @@ def _render_sidebar() -> None:
         payload_ids = list(library.keys())
         if not payload_ids:
             st.warning("No payloads found for this suite.")
-            return
-
-        selected_pid = st.selectbox(
-            "Payload",
-            payload_ids,
-            format_func=lambda pid: f"{pid} — {_get_notes(library[pid])[:55]}",
-            key="attack_payload_id",
-        )
-        if selected_pid:
-            payload_obj = library[selected_pid]
-            st.text_area(
-                "Payload preview",
-                value=getattr(payload_obj, "payload", ""),
-                height=100,
-                disabled=True,
-                key="attack_payload_preview",
+        else:
+            selected_pid = st.selectbox(
+                "Payload",
+                payload_ids,
+                format_func=lambda pid: f"{pid} — {_get_notes(library[pid])[:55]}",
+                key="attack_payload_id",
             )
+            if selected_pid:
+                payload_obj = library[selected_pid]
+                st.text_area(
+                    "Payload preview",
+                    value=getattr(payload_obj, "payload", ""),
+                    height=100,
+                    disabled=True,
+                    key="attack_payload_preview",
+                )
     else:
         st.text_area(
             "Custom payload",
-            placeholder="Enter adversarial payload text…",
+            placeholder="Enter adversarial payload text\u2026",
             height=120,
             max_chars=10000,
             key="attack_payload_custom",
         )
-
-    # Phase
-    st.radio(
-        "Injection phase",
-        ["pre_execution", "mid_execution"],
-        key="attack_phase",
-        format_func=lambda p: (
-            "Pre-execution" if p == "pre_execution" else "Mid-execution"
-        ),
-        horizontal=True,
-    )
-
-    st.markdown("---")
 
     target = st.session_state.get("attack_target_agent_id")
     run_disabled = target is None
@@ -267,6 +664,7 @@ def _render_sidebar() -> None:
 def _render_main() -> None:
     """Render the Attack page main area."""
     config: Optional[MASConfig] = st.session_state.get("attack_config")
+    yaml_path: str = st.session_state.get("attack_yaml_path", "")
 
     st.markdown("# AEGIS Attack Suite")
     st.markdown(
@@ -283,25 +681,95 @@ def _render_main() -> None:
         "communication channels. The Attack Suite lets you explore these "
         "risks interactively."
     )
-    st.markdown(
-        "Load a MAS configuration from AETHER, select a target agent on "
-        "the graph, and choose from 5 attack types (prompt injection, "
-        "jailbreak, memory poisoning, bias inheritance, agent impersonation). "
-        "AEGIS injects the adversarial payload, streams the execution, "
-        "tracks propagation across agents, and evaluates each agent's "
-        "response through structural validation (Tier 1), heuristic "
-        "propagation tracking (Tier 2), and LLM-based semantic scoring "
-        "(Tier 3)."
-    )
     st.markdown("---")
 
     if config is None:
         st.info(
             "No MAS loaded.\n\n"
-            "Use **Send to Attack Suite** from the AETHER Chat or Visualizer page to "
-            "load a configuration."
+            "Select a YAML file in the sidebar, or use **Send to Attack Suite** from "
+            "the AETHER Chat or Visualizer page to load a configuration."
         )
         return
+
+    st.markdown(f"**Config:** `{config.mas_id}` — {config.name}")
+    st.markdown(
+        f"**Workflow:** {config.workflow_type.value} &nbsp;|&nbsp; "
+        f"**Agents:** {len(config.agents)}"
+    )
+    st.markdown("---")
+
+    # -----------------------------------------------------------------------
+    # Batch attack — two-level payload selection
+    # -----------------------------------------------------------------------
+    st.markdown("## Batch Attack Run")
+    st.markdown(
+        "Select payloads across one or more suites and run them all at once. "
+        "Results are written to disk and visible in the **Attack Results** viewer."
+    )
+
+    _render_payload_selector()
+
+    st.markdown("---")
+
+    # Stub mode and T3 options
+    col_stub, col_t3, _ = st.columns([1, 1, 2])
+    with col_stub:
+        stub_mode = st.toggle(
+            "Stub mode",
+            value=False,
+            key="attack_stub_mode",
+            help="Skip LLM calls — useful for structural verification without API spend.",
+        )
+        if stub_mode:
+            st.caption("No LLM calls")
+    with col_t3:
+        skip_t3 = st.toggle(
+            "Skip T3 evaluation",
+            value=False,
+            key="attack_skip_t3",
+            help="Skip Tier 3 semantic evaluation. Useful when baseline results are unavailable or to reduce API spend.",
+            disabled=stub_mode,
+        )
+        if stub_mode or skip_t3:
+            st.caption("T3 skipped")
+
+    # Dynamic batch run button
+    total_selected = sum(
+        1
+        for suite in _SUITE_NAMES
+        for pid in _load_payload_library(suite)
+        if st.session_state.get(f"attack_selected_{suite}_{pid}", True)
+    )
+    suites_with_selection = sum(
+        1
+        for suite in _SUITE_NAMES
+        if any(
+            st.session_state.get(f"attack_selected_{suite}_{pid}", True)
+            for pid in _load_payload_library(suite)
+        )
+    )
+    btn_label = (
+        f"\u25b6 Run {total_selected} attack(s) across {suites_with_selection} suite(s)"
+    )
+    if st.button(
+        btn_label,
+        type="primary",
+        use_container_width=True,
+        key="attack_batch_run_button",
+        disabled=(total_selected == 0),
+    ):
+        _execute_batch_attack(config, yaml_path, stub_mode)
+
+    st.markdown("---")
+
+    # -----------------------------------------------------------------------
+    # Single-attack graph (used by sidebar Run Attack button)
+    # -----------------------------------------------------------------------
+    st.markdown("## Single-Agent Attack")
+    st.markdown(
+        "Click a node in the graph below to target a specific agent, then use "
+        "**Run Attack** in the sidebar."
+    )
 
     # Initialize target to first agent if not yet set
     if not st.session_state.get("attack_target_agent_id") and config.agents:
@@ -310,12 +778,7 @@ def _render_main() -> None:
     target_id: Optional[str] = st.session_state.get("attack_target_agent_id")
     phase: str = st.session_state.get("attack_phase", "pre_execution")
 
-    st.caption(
-        f"Config: `{config.mas_id}` | "
-        f"Target: `{target_id or 'None'}` | "
-        f"Phase: `{phase}`"
-    )
-    st.markdown("---")
+    st.caption(f"Target: `{target_id or 'None'}` | Phase: `{phase}`")
 
     # Graph — node clicks update attack_target_agent_id
     node_states: Optional[dict] = st.session_state.get("attack_node_states")
@@ -642,13 +1105,23 @@ def _run_tier3_evaluation(result_dict: dict, baseline_result: dict) -> Optional[
 
 
 def _load_baseline_result(mas_id: str) -> Optional[dict]:
-    """Load the first available baseline result for *mas_id*, or None."""
+    """Load the first available baseline result for *mas_id*, or None.
+
+    Prefers the most recent ``run_NNN`` subdirectory; falls back to the flat
+    legacy layout when no versioned run directories exist.
+    """
+    from bili.aegis.suites._helpers import (  # pylint: disable=import-outside-toplevel
+        latest_run_dir,
+    )
+
     # Sanitize mas_id to prevent path traversal (e.g. "../../etc")
     safe_id = mas_id.replace("..", "").replace("/", "_").replace("\\", "_")
     mas_dir = BASELINE_RESULTS_DIR / safe_id
-    if not mas_dir.exists():
+    run_dir = latest_run_dir(mas_dir)
+    search_dir = run_dir if run_dir is not None else mas_dir
+    if not search_dir.exists():
         return None
-    for path in sorted(mas_dir.glob("**/*.json")):
+    for path in sorted(search_dir.glob("*.json")):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:  # pylint: disable=broad-exception-caught

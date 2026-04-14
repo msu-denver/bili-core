@@ -32,6 +32,7 @@ except ImportError:
 
 from bili.aether.config.loader import load_mas_from_yaml
 from bili.aether.ui.attack_page import push_config_to_attack_state
+from bili.aether.ui.baseline_runner_page import push_config_to_baseline_state
 from bili.aether.ui.chat_app import render_main as render_chat_main
 from bili.aether.ui.chat_app import (
     render_sidebar_content as render_chat_sidebar_content,
@@ -252,13 +253,24 @@ def _on_send_to_chat() -> None:
     st.session_state.chat_autoload_name = name
 
 
+def _on_send_to_baseline() -> None:
+    """Button callback: push the current visualizer config to the Baseline Runner."""
+    config = st.session_state.get("mas_config")
+    if config is None:
+        return
+    config = apply_agent_overrides(config)
+    yaml_path = st.session_state.get("current_yaml_path", "")
+    push_config_to_baseline_state(config, yaml_path)
+
+
 def _on_send_to_attack() -> None:
     """Button callback: push the current visualizer config to the Attack page."""
     config = st.session_state.get("mas_config")
     if config is None:
         return
     config = apply_agent_overrides(config)
-    push_config_to_attack_state(config)
+    yaml_path = st.session_state.get("current_yaml_path", "")
+    push_config_to_attack_state(config, yaml_path=yaml_path)
 
 
 def _load_config(yaml_path: Path) -> None:
@@ -306,6 +318,13 @@ def _load_config(yaml_path: Path) -> None:
         use_container_width=True,
         on_click=_on_send_to_attack,
         key="vis_send_to_attack",
+    )
+    st.button(
+        "Send to Baseline \u2192",
+        disabled=st.session_state.get("mas_config") is None,
+        use_container_width=True,
+        on_click=_on_send_to_baseline,
+        key="vis_send_to_baseline",
     )
     st.markdown("---")
     st.markdown(f"**MAS ID:** `{config.mas_id}`")

@@ -17,6 +17,7 @@ from PIL import Image
 
 from bili.aether.ui.attack_page import render_attack_page
 from bili.aether.ui.attack_results_page import render_attack_results_page
+from bili.aether.ui.baseline_runner_page import render_baseline_runner_page
 from bili.aether.ui.page import render_aether_page
 from bili.aether.ui.results_page import render_results_page
 from bili.aether.ui.styles.bili_core_theme import CUSTOM_CSS
@@ -79,6 +80,12 @@ def main():
                     title="Attack Results",
                     url_path="attack-results",
                     icon=":material/security:",
+                ),
+                st.Page(
+                    _run_baseline_runner_page,
+                    title="Baseline Runner",
+                    url_path="baseline",
+                    icon=":material/playlist_play:",
                 ),
                 st.Page(
                     _run_results_page,
@@ -146,6 +153,11 @@ def _run_bilicore_page():
 def _run_aether_page():
     """Render the AETHER multi-agent system page."""
     render_aether_page()
+
+
+def _run_baseline_runner_page():
+    """Render the AEGIS baseline suite runner page."""
+    render_baseline_runner_page()
 
 
 def _run_results_page():

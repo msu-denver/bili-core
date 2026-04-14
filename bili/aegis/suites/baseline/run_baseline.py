@@ -58,6 +58,7 @@ from langchain_core.messages import (  # noqa: E402  pylint: disable=wrong-impor
 from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     config_fingerprint as _config_fingerprint_helper,
 )
+from bili.aegis.suites._helpers import next_run_dir
 from bili.aegis.suites.baseline.prompts.baseline_prompts import (  # noqa: E402  pylint: disable=wrong-import-position
     BASELINE_PROMPTS,
     BaselinePrompt,
@@ -98,7 +99,7 @@ _CONFIG_PATHS: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) -> dict:
+def run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) -> dict:
     """Execute a single (config, prompt) pair and return a result dict."""
     log_dir = str(_RESULTS_DIR / config.mas_id)
     executor = MASExecutor(config, log_dir=log_dir)
@@ -140,9 +141,13 @@ def _run_one(config, yaml_path: str, prompt: BaselinePrompt, stub_mode: bool) ->
     }
 
 
-def _write_result(result_dict: dict) -> Path:
-    """Write result dict to results/{mas_id}/{prompt_id}.json."""
-    out_dir = _RESULTS_DIR / result_dict["mas_id"]
+def write_result(result_dict: dict, run_dir: Path | None = None) -> Path:
+    """Write result dict to run_dir/{prompt_id}.json.
+
+    Falls back to the legacy flat layout ``results/{mas_id}/`` when
+    *run_dir* is ``None`` so direct callers continue to work unchanged.
+    """
+    out_dir = run_dir if run_dir is not None else (_RESULTS_DIR / result_dict["mas_id"])
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{result_dict['prompt_id']}.json"
     out_path.write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
@@ -238,13 +243,17 @@ def main() -> None:
             for agent in config.agents:
                 agent.model_name = None
         config_ids.append(config.mas_id)
-        print(f"\n[{config.mas_id}] Running {len(prompts)} prompts...")
+        run_dir = next_run_dir(_RESULTS_DIR / config.mas_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        print(
+            f"\n[{config.mas_id}] Running {len(prompts)} prompts... (saving to {run_dir.name})"
+        )
 
         for prompt in prompts:
             print(f"  {prompt.prompt_id} ... ", end="", flush=True)
             try:
-                result = _run_one(config, yaml_path, prompt, stub_mode=args.stub)
-                out_path = _write_result(result)
+                result = run_one(config, yaml_path, prompt, stub_mode=args.stub)
+                out_path = write_result(result, run_dir=run_dir)
                 status = "ok" if result["execution"]["success"] else "FAIL"
                 print(
                     f"{status}  ({result['execution']['duration_ms']:.0f} ms) → {out_path}"
@@ -276,7 +285,7 @@ def main() -> None:
                         "semantic_tier": "skipped",
                     },
                 }
-                _write_result(failed)
+                write_result(failed, run_dir=run_dir)
                 all_results.append(failed)
                 continue
 

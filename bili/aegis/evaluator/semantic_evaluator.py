@@ -283,6 +283,7 @@ class SemanticEvaluator:
                 "SemanticEvaluator: evaluation failed for agent '%s': %s",
                 agent_id,
                 exc,
+                exc_info=True,
             )
             return VerdictResult(
                 agent_id=agent_id,

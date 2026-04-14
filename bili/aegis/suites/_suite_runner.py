@@ -23,6 +23,7 @@ from bili.aegis.attacks.models import InjectionPhase
 from bili.aegis.security.detector import SecurityEventDetector
 from bili.aegis.security.logger import SecurityEventLogger
 from bili.aegis.suites._helpers import config_fingerprint as _config_fingerprint_helper
+from bili.aegis.suites._helpers import latest_run_dir, next_run_dir
 from bili.aether.config.loader import load_mas_from_yaml
 from bili.aether.runtime.executor import MASExecutor
 
@@ -119,7 +120,9 @@ def _build_result_dict(
         "run_metadata": {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "stub_mode": stub_mode,
-            "semantic_tier": "skipped" if stub_mode else "evaluated",
+            "semantic_tier": (
+                "skipped" if (stub_mode or tier3_rows is None) else "evaluated"
+            ),
             "tier3_score": tier3_score,
             "tier3_confidence": tier3_confidence,
             "tier3_reasoning": tier3_reasoning,
@@ -127,9 +130,16 @@ def _build_result_dict(
     }
 
 
-def _write_result(result_dict: dict, results_dir: Path) -> Path:
-    """Write one result JSON to results_dir/{mas_id}/{payload_id}_{phase}.json."""
-    out_dir = results_dir / result_dict["mas_id"]
+def _write_result(
+    result_dict: dict, results_dir: Path, run_dir: Path | None = None
+) -> Path:
+    """Write one result JSON to run_dir/{payload_id}_{phase}.json.
+
+    When *run_dir* is provided it is used directly (versioned layout).
+    Falls back to the legacy ``results_dir/{mas_id}/`` flat layout when
+    *run_dir* is ``None`` so existing callers continue to work unchanged.
+    """
+    out_dir = run_dir if run_dir is not None else (results_dir / result_dict["mas_id"])
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{result_dict['payload_id']}_{result_dict['injection_phase']}.json"
     out_path = out_dir / filename
@@ -174,15 +184,22 @@ def _load_baseline(
 ) -> dict | None:
     """Try to load a baseline result for Tier 3 comparison.
 
+    Prefers the most recent ``run_NNN`` subdirectory under
+    ``baseline_results_dir / mas_id``; falls back to the flat legacy layout
+    when no versioned run directories exist.
+
     Returns the first available baseline result for this config
-    (alphabetically), or ``None`` if no baseline is available.
+    (alphabetically within the resolved directory), or ``None`` if no
+    baseline is available.
     """
     if baseline_results_dir is None:
         return None
     config_baseline_dir = baseline_results_dir / mas_id
-    if not config_baseline_dir.exists():
+    run_dir = latest_run_dir(config_baseline_dir)
+    search_dir = run_dir if run_dir is not None else config_baseline_dir
+    if not search_dir.exists():
         return None
-    result_files = sorted(config_baseline_dir.glob("*.json"))
+    result_files = sorted(search_dir.glob("*.json"))
     if not result_files:
         return None
     try:
@@ -203,15 +220,16 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
     repo_root: Path,
     attack_suite: str,
     attack_type: str,
-) -> list[dict]:
+) -> tuple[list[dict], Path]:
     """Run all payloads × phases for one MAS config.
 
-    Returns a list of CSV matrix row dicts.
+    Returns a ``(matrix_rows, run_dir)`` tuple.  *run_dir* is the versioned
+    ``run_NNN`` directory created for this run's result files.
     """
     full_path = repo_root / yaml_path
     if not full_path.exists():
         print(f"  Config not found, skipping: {yaml_path}", file=sys.stderr)
-        return []
+        return [], None
 
     config = load_mas_from_yaml(str(full_path))
     if stub_mode:
@@ -222,9 +240,10 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
     target_id = _target_agent_id(config)
 
     config_results_dir = results_dir / mas_id
-    config_results_dir.mkdir(parents=True, exist_ok=True)
-    attack_log_path = config_results_dir / "attack_log.ndjson"
-    sec_log_path = config_results_dir / "security_events.ndjson"
+    run_dir = next_run_dir(config_results_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    attack_log_path = run_dir / "attack_log.ndjson"
+    sec_log_path = run_dir / "security_events.ndjson"
 
     sec_logger = SecurityEventLogger(log_path=sec_log_path)
     detector = SecurityEventDetector(
@@ -304,11 +323,12 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
                         except (
                             Exception
                         ) as t3_exc:  # pylint: disable=broad-exception-caught
-                            LOGGER.warning(
+                            LOGGER.error(
                                 "SemanticEvaluator failed for %s/%s: %s",
                                 ip.payload_id,
                                 phase,
                                 t3_exc,
+                                exc_info=True,
                             )
 
                 result_dict = _build_result_dict(
@@ -323,7 +343,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
                     repo_root=repo_root,
                 )
 
-                out_path = _write_result(result_dict, results_dir)
+                out_path = _write_result(result_dict, results_dir, run_dir=run_dir)
                 status = "ok" if attack_result.success else "FAIL"
                 influenced_count = len(attack_result.influenced_agents)
                 print(f"{status}  (influenced={influenced_count}) → {out_path.name}")
@@ -353,7 +373,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
                     }
                 )
 
-    return matrix_rows
+    return matrix_rows, run_dir
 
 
 # ---------------------------------------------------------------------------
@@ -396,8 +416,9 @@ def run_suite(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         baseline_results_dir: Path to baseline results for Tier 3 comparison.
     """
     all_matrix_rows: list[dict] = []
+    first_run_dir_name: str | None = None
     for yaml_path in config_paths:
-        rows = _run_config(
+        rows, run_dir = _run_config(
             yaml_path=yaml_path,
             payloads=payloads,
             phases=phases,
@@ -410,9 +431,13 @@ def run_suite(  # pylint: disable=too-many-arguments,too-many-positional-argumen
             attack_type=attack_type,
         )
         all_matrix_rows.extend(rows)
+        if first_run_dir_name is None and run_dir is not None:
+            first_run_dir_name = run_dir.name
 
     if all_matrix_rows:
-        csv_path = _write_csv(all_matrix_rows, results_dir, csv_filename)
+        csv_stem = Path(csv_filename).stem
+        versioned_csv = f"{csv_stem}_{first_run_dir_name}.csv"
+        csv_path = _write_csv(all_matrix_rows, results_dir, versioned_csv)
         _print_summary(all_matrix_rows, suite_name)
         print(f"Results matrix written to: {csv_path}")
 
