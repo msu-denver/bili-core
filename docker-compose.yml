@@ -116,7 +116,7 @@ services:
                 aliases:
                     - bili-core-localstack
         healthcheck:
-            test: [ "CMD-SHELL", "curl -s http://localhost:4566/health | grep '\"s3\": \"running\"'" ]
+            test: [ "CMD-SHELL", "curl -s http://localhost:4566/_localstack/health | grep '\"s3\": \"running\"'" ]
             interval: 10s
             retries: 5
 

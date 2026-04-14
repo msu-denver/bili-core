@@ -150,6 +150,11 @@ def next_run_dir(base_dir: Path) -> Path:
 
     Returns:
         Path to the next run directory, e.g. ``base_dir / "run_003"``.
+
+    Note:
+        This uses a non-atomic read-then-create pattern. Safe for
+        single-user local development but would need a file lock or
+        atomic mkdir for concurrent multi-user deployments.
     """
     base_dir.mkdir(parents=True, exist_ok=True)
     existing = sorted(
@@ -157,7 +162,10 @@ def next_run_dir(base_dir: Path) -> Path:
         for d in base_dir.iterdir()
         if d.is_dir() and d.name.startswith("run_") and d.name[4:].isdigit()
     )
-    return base_dir / f"run_{len(existing) + 1:03d}"
+    run_dir = base_dir / f"run_{len(existing) + 1:03d}"
+    # Create immediately to reduce race window
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def latest_run_dir(base_dir: Path) -> "Path | None":
