@@ -896,11 +896,12 @@ def _render_expander_content(
             r.get("mas_id", ""),
             r.get("payload_id", ""),
             r.get("phase", ""),
+            r.get("run_id", "run_000"),
         )
 
 
 def _render_view_graph_button(
-    config_path: str, mas_id: str, payload_id: str, phase: str
+    config_path: str, mas_id: str, payload_id: str, phase: str, run_id: str = "run_000"
 ) -> None:
     """Render a 'View MAS graph →' button that loads the config into the visualizer."""
     st.markdown("---")
@@ -910,9 +911,7 @@ def _render_view_graph_button(
         st.caption(f"Config not found at `{config_path}` — graph view unavailable.")
         return
 
-    button_key = (
-        f"view_graph_{mas_id}_{payload_id}_{phase}_{config_path.replace('/', '_')}"
-    )
+    button_key = f"view_graph_{run_id}_{mas_id}_{payload_id}_{phase}_{config_path.replace('/', '_')}"
     if st.button("View MAS graph →", key=button_key, use_container_width=False):
         try:
             from bili.aether.config.loader import (  # pylint: disable=import-outside-toplevel
