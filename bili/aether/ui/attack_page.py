@@ -213,10 +213,10 @@ def _init_attack_selections() -> None:
                 st.session_state[key] = True
 
 
-def _on_suite_header_change(hdr_key: str, payload_ids: list) -> None:
+def _on_suite_header_change(hdr_key: str, payload_keys: list) -> None:
     """Propagate suite header checkbox state to all child payload checkboxes."""
     new_val = st.session_state[hdr_key]
-    for pid in payload_ids:
+    for pid in payload_keys:
         st.session_state[pid] = new_val
 
 
@@ -237,7 +237,7 @@ def _render_payload_selector() -> None:
         payload_keys = [f"attack_selected_{suite}_{pid}" for pid in library]
         n_selected = sum(1 for k in payload_keys if st.session_state.get(k, True))
         n_total = len(payload_keys)
-        all_checked = n_selected == n_total
+        all_checked = n_selected == n_total and n_total > 0
 
         hdr_key = f"attack_suite_hdr_{suite}"
         st.session_state[hdr_key] = all_checked
