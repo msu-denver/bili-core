@@ -147,7 +147,7 @@ _ALL_PHASES: list[str] = [
 
 # Each entry: (model_id, human-readable display name).
 # model_id values must match entries in bili/iris/config/llm_config.py.
-_MODEL_MATRIX: list[tuple[str, str]] = [
+MODEL_MATRIX: list[tuple[str, str]] = [
     (
         "us.anthropic.claude-3-5-haiku-20241022-v1:0",
         "Claude 3.5 Haiku (Bedrock)",
@@ -706,17 +706,17 @@ def main() -> None:
         if args.models:
             model_ids = set(args.models)
             model_matrix = [
-                (mid, name) for mid, name in _MODEL_MATRIX if mid in model_ids
+                (mid, name) for mid, name in MODEL_MATRIX if mid in model_ids
             ]
             if not model_matrix:
                 print(
                     f"No models matched: {args.models}.  "
-                    f"Valid IDs: {[m[0] for m in _MODEL_MATRIX]}",
+                    f"Valid IDs: {[m[0] for m in MODEL_MATRIX]}",
                     file=sys.stderr,
                 )
                 sys.exit(1)
         else:
-            model_matrix = list(_MODEL_MATRIX)
+            model_matrix = list(MODEL_MATRIX)
 
     # Resolve baseline results dir
     baseline_results_dir: Path | None = None

@@ -267,7 +267,7 @@ def _render_prompt_selector() -> bool:
             if st.session_state.get(f"baseline_prompt_{p.prompt_id}", True)
         )
         n_total = len(cat_prompts)
-        all_checked = n_selected == n_total
+        all_checked = n_selected == n_total and n_total > 0
 
         # Force-sync header to match current child state (bidirectional sync)
         hdr_key = f"baseline_cat_hdr_{cat}"

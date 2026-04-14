@@ -335,6 +335,44 @@ def _render_payload_selector() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _report_suite_result(
+    matrix_rows: list[dict],
+    suite: str,
+    payloads: list,
+    status_area: Any,
+    passed_suites: int,
+) -> int:
+    """Update *status_area* with the suite outcome and return updated *passed_suites*.
+
+    Three distinct outcomes:
+    - All rows skipped (no eligible configs): shows a skip indicator — counts
+      as "not failed" so the overall run still succeeds.
+    - All ran rows passed: green checkmark.
+    - At least one ran row failed: warning indicator.
+    """
+    ran = [r for r in matrix_rows if r.get("skipped") != "true"]
+    if not ran:
+        with status_area:
+            st.markdown(
+                f"\u23ed\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                f"skipped (no eligible configs)"
+            )
+        passed_suites += 1
+    elif all(r.get("tier1_pass") == "true" for r in ran):
+        passed_suites += 1
+        with status_area:
+            st.markdown(
+                f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
+            )
+    else:
+        with status_area:
+            st.markdown(
+                f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
+                f"{len(payloads)} payload(s) (some cases failed)"
+            )
+    return passed_suites
+
+
 def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
     """Run all selected payloads via run_suite() and display live progress."""
     if not yaml_path:
@@ -384,12 +422,12 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
             i / total_suites,
             text=f"Running {_SUITE_DISPLAY[suite]} ({i + 1}/{total_suites})\u2026",
         )
-        phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
         results_dir = _SUITES_DIR / suite / "results"
         try:
             if suite in _STANDARD_SUITES:
                 # Standard suites go through the shared _suite_runner.run_suite()
                 # which calls sys.exit() on completion — caught below.
+                phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
                 run_suite(
                     payloads=payloads,
                     attack_suite=suite,
@@ -430,6 +468,8 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
                     if not skip_t3
                     else None
                 )
+                # Persistence always uses the CHECKPOINT phase internally;
+                # no phase parameter is passed to run_persistence_suite().
                 matrix_rows, _ = run_persistence_suite(
                     payloads=payloads,
                     config_paths=[yaml_path] if yaml_path else [],
@@ -439,28 +479,18 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
                     results_dir=results_dir,
                     repo_root=_REPO_ROOT,
                 )
-                ran = [r for r in matrix_rows if r.get("skipped") != "true"]
-                all_passed = all(r.get("tier1_pass") == "true" for r in ran)
-                if all_passed or not ran:
-                    passed_suites += 1
-                    with status_area:
-                        st.markdown(
-                            f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
-                        )
-                else:
-                    with status_area:
-                        st.markdown(
-                            f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
-                            f"{len(payloads)} payload(s) (some cases failed)"
-                        )
+                passed_suites = _report_suite_result(
+                    matrix_rows, suite, payloads, status_area, passed_suites
+                )
 
             elif suite == "cross_model":
                 from bili.aegis.suites.cross_model.run_cross_model_suite import (  # pylint: disable=import-outside-toplevel
-                    _MODEL_MATRIX,
+                    MODEL_MATRIX,
                     run_cross_model_suite,
                 )
 
-                model_matrix = [(None, "stub")] if stub_mode else list(_MODEL_MATRIX)
+                phase = st.session_state.get(f"attack_phase_{suite}", "pre_execution")
+                model_matrix = [(None, "stub")] if stub_mode else list(MODEL_MATRIX)
                 matrix_rows, _ = run_cross_model_suite(
                     payloads=payloads,
                     config_paths=[yaml_path] if yaml_path else [],
@@ -472,20 +502,9 @@ def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
                     results_dir=results_dir,
                     repo_root=_REPO_ROOT,
                 )
-                ran = [r for r in matrix_rows if r.get("skipped") != "true"]
-                all_passed = all(r.get("tier1_pass") == "true" for r in ran)
-                if all_passed or not ran:
-                    passed_suites += 1
-                    with status_area:
-                        st.markdown(
-                            f"\u2705 **{_SUITE_DISPLAY[suite]}** — {len(payloads)} payload(s)"
-                        )
-                else:
-                    with status_area:
-                        st.markdown(
-                            f"\u26a0\ufe0f **{_SUITE_DISPLAY[suite]}** — "
-                            f"{len(payloads)} payload(s) (some cases failed)"
-                        )
+                passed_suites = _report_suite_result(
+                    matrix_rows, suite, payloads, status_area, passed_suites
+                )
 
         except SystemExit as exc:
             # run_suite() calls sys.exit() after writing results to disk.
