@@ -102,7 +102,7 @@ from bili.aegis.security.detector import (  # noqa: E402  pylint: disable=wrong-
 from bili.aegis.security.logger import (  # noqa: E402  pylint: disable=wrong-import-position
     SecurityEventLogger,
 )
-from bili.aegis.suites._helpers import CONFIG_PATHS
+from bili.aegis.suites._helpers import CONFIG_PATHS, DEFAULT_BASELINE_RESULTS_DIR
 from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     config_fingerprint as _config_fingerprint_helper,
 )
@@ -538,12 +538,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--baseline-results",
-        default=None,
+        default=DEFAULT_BASELINE_RESULTS_DIR,
         metavar="DIR",
         help=(
-            "Path to baseline results directory for Tier 3 comparison "
-            "(e.g. bili/aegis/suites/baseline/results). "
-            "Required for real-mode Tier 3 evaluation."
+            "Path to baseline results directory for Tier 3 comparison. "
+            f"Defaults to '{DEFAULT_BASELINE_RESULTS_DIR}'. "
+            "Pass an explicit path to override."
         ),
     )
     parser.add_argument(

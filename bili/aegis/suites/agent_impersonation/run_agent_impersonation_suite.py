@@ -75,6 +75,7 @@ from bili.aegis.attacks.models import (  # noqa: E402  pylint: disable=wrong-imp
 )
 from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-import-position
     CONFIG_PATHS,
+    DEFAULT_BASELINE_RESULTS_DIR,
 )
 from bili.aegis.suites._suite_runner import (  # noqa: E402  pylint: disable=wrong-import-position
     run_suite,
@@ -137,12 +138,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--baseline-results",
-        default=None,
+        default=DEFAULT_BASELINE_RESULTS_DIR,
         metavar="DIR",
         help=(
-            "Path to baseline results directory for Tier 3 comparison "
-            "(e.g. bili/aegis/suites/baseline/results). "
-            "Required for real-mode Tier 3 evaluation."
+            "Path to baseline results directory for Tier 3 comparison. "
+            f"Defaults to '{DEFAULT_BASELINE_RESULTS_DIR}'. "
+            "Pass an explicit path to override."
         ),
     )
     parser.add_argument(

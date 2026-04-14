@@ -298,6 +298,13 @@ def _render_payload_selector() -> None:
 
 def _execute_batch_attack(config, yaml_path: str, stub_mode: bool) -> None:
     """Run all selected payloads via run_suite() and display live progress."""
+    if not yaml_path:
+        st.error(
+            "No YAML config path available. Select a YAML file in the sidebar "
+            "or use **Send to Attack Suite** from the AETHER visualizer."
+        )
+        return
+
     from bili.aegis.evaluator.semantic_evaluator import (  # pylint: disable=import-outside-toplevel
         SemanticEvaluator,
     )

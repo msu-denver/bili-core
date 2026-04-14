@@ -229,8 +229,7 @@ def _run_config(  # pylint: disable=too-many-locals,too-many-arguments,too-many-
     full_path = repo_root / yaml_path
     if not full_path.exists():
         print(f"  Config not found, skipping: {yaml_path}", file=sys.stderr)
-        fallback_dir = results_dir / Path(yaml_path).stem / "run_000"
-        return [], fallback_dir
+        return [], None
 
     config = load_mas_from_yaml(str(full_path))
     if stub_mode:
@@ -432,7 +431,7 @@ def run_suite(  # pylint: disable=too-many-arguments,too-many-positional-argumen
             attack_type=attack_type,
         )
         all_matrix_rows.extend(rows)
-        if first_run_dir_name is None:
+        if first_run_dir_name is None and run_dir is not None:
             first_run_dir_name = run_dir.name
 
     if all_matrix_rows:

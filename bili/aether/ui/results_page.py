@@ -62,7 +62,11 @@ def _load_baseline_results() -> list[dict]:
             # Determine run_id from path structure
             parts = path.relative_to(BASELINE_RESULTS_DIR).parts
             # parts[0]=mas_id, parts[1]=run_NNN or prompt_file (legacy)
-            if len(parts) >= 3:
+            if (
+                len(parts) >= 3
+                and parts[1].startswith("run_")
+                and parts[1][4:].isdigit()
+            ):
                 raw["run_id"] = parts[1]
             else:
                 raw["run_id"] = "run_000 (legacy)"

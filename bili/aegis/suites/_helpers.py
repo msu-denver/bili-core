@@ -33,6 +33,12 @@ CONFIG_PATHS: list[str] = [
     "bili/aether/config/examples/custom_escalation.yaml",
 ]
 
+#: Default path to the baseline results directory, relative to the repo root.
+#: Used by all attack suite runners as the default value for ``--baseline-results``
+#: so that Tier 3 semantic evaluation runs automatically in real mode without
+#: requiring the flag to be passed explicitly.
+DEFAULT_BASELINE_RESULTS_DIR: str = "bili/aegis/suites/baseline/results"
+
 
 def find_repo_root() -> Path:
     """Walk up from this file until a ``.git`` directory is found.
