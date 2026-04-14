@@ -44,8 +44,8 @@ with patch.object(ap, "LOGO_PATH") as lp:
     assert "AEGIS Attack Suite" in " ".join(m.value for m in at.markdown)
 
 
-def test_sidebar_no_config_shows_caption():
-    """The sidebar shows No MAS loaded when no config exists."""
+def test_sidebar_no_config_shows_yaml_selector():
+    """The sidebar shows YAML selector when no config exists."""
     at = AppTest.from_string(
         """
 from unittest.mock import patch
@@ -54,12 +54,14 @@ from bili.aether.ui import attack_page as ap
 with st.sidebar:
     with patch.object(ap, "LOGO_PATH") as lp:
         lp.exists.return_value = False
-        ap._render_sidebar()
+        with patch.object(ap, "EXAMPLES_DIR") as ed:
+            ed.exists.return_value = False
+            ap._render_sidebar()
 """
     )
     at.run()
     assert not at.exception
-    assert "No MAS loaded" in " ".join(c.value for c in at.sidebar.caption)
+    assert "AEGIS" in " ".join(m.value for m in at.sidebar.markdown)
 
 
 def test_sidebar_renders_aegis_heading():
@@ -445,7 +447,7 @@ def test_load_payload_library_missing_module():
 
 
 def test_render_main_with_config_shows_heading():
-    """_render_main with a loaded config shows the attack suite heading."""
+    """_render_main with a loaded config shows the attack suite heading and config id."""
     at = AppTest.from_string(
         """
 import streamlit as st
@@ -465,7 +467,7 @@ with patch.object(ap, "LOGO_PATH") as lp:
     assert not at.exception
     all_md = " ".join(m.value for m in at.markdown)
     assert "AEGIS Attack Suite" in all_md
-    assert "main_test" in " ".join(c.value for c in at.caption)
+    assert "main_test" in all_md
 
 
 # ---------------------------------------------------------------------------
@@ -495,8 +497,8 @@ with st.sidebar:
     assert len(at.sidebar.selectbox) >= 1
 
 
-def test_sidebar_with_config_shows_config_name():
-    """The sidebar displays the config mas_id."""
+def test_sidebar_with_config_shows_single_payload_section():
+    """The sidebar shows 'Single-payload exploratory attack' when config loaded."""
     at = AppTest.from_string(
         """
 import streamlit as st
@@ -508,13 +510,16 @@ st.session_state.attack_config = cfg
 with st.sidebar:
     with patch.object(ap, "LOGO_PATH") as lp:
         lp.exists.return_value = False
-        with patch.object(ap, "_load_payload_library", return_value={}):
-            ap._render_sidebar()
+        with patch.object(ap, "EXAMPLES_DIR") as ed:
+            ed.exists.return_value = False
+            with patch.object(ap, "_load_payload_library", return_value={}):
+                ap._render_sidebar()
 """
     )
     at.run()
     assert not at.exception
-    assert "sidebar_id_test" in " ".join(c.value for c in at.sidebar.caption)
+    all_md = " ".join(m.value for m in at.sidebar.markdown)
+    assert "Single-payload" in all_md
 
 
 # ---------------------------------------------------------------------------

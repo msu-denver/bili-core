@@ -159,6 +159,7 @@ def _sample_results():
     """Return a list of normalised result dicts for testing."""
     return [
         {
+            "run_id": "run_001",
             "payload_id": "p1",
             "injection_type": "injection",
             "severity": "high",
@@ -175,6 +176,7 @@ def _sample_results():
             "tier2_influenced": True,
         },
         {
+            "run_id": "run_001",
             "payload_id": "p2",
             "injection_type": "jailbreak",
             "severity": "low",
@@ -191,6 +193,7 @@ def _sample_results():
             "tier2_influenced": False,
         },
         {
+            "run_id": "run_001",
             "payload_id": "p3",
             "injection_type": "injection",
             "severity": "medium",
@@ -258,6 +261,7 @@ def test_build_dataframe_skips_malformed():
 
     results = [
         {
+            "run_id": "run_001",
             "payload_id": "ok",
             "injection_type": "x",
             "severity": "h",
@@ -334,7 +338,8 @@ def test_render_detail_panel_with_results():
 import pandas as pd
 from bili.aether.ui import attack_results_page as arp
 results = [
-    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+    {"run_id": "run_001", "payload_id": "p1", "injection_type": "injection",
+     "severity": "high",
      "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
      "tier1_pass": True, "tier3_score": 2, "tier3_confidence": "high",
      "tier3_reasoning": "Clear compliance", "stub_mode": False,
@@ -345,7 +350,8 @@ results = [
      "config_path": "", "injection_phase": "pre"},
 ]
 df_rows = [
-    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+    {"run_id": "run_001", "payload_id": "p1", "injection_type": "injection",
+     "severity": "high",
      "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
      "tier1_pass": True, "tier3_score": 2, "stub_mode": False,
      "timestamp": "t", "model_id": None, "model_name": None,
@@ -438,12 +444,14 @@ import pandas as pd
 import streamlit as st
 from bili.aether.ui import attack_results_page as arp
 rows = [
-    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+    {"run_id": "run_001", "payload_id": "p1", "injection_type": "injection",
+     "severity": "high",
      "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
      "tier1_pass": True, "tier3_score": 2, "stub_mode": False,
      "timestamp": "t", "model_id": None, "model_name": None,
      "provider_family": None, "tier2_influenced": True},
-    {"payload_id": "p2", "injection_type": "jailbreak", "severity": "low",
+    {"run_id": "run_001", "payload_id": "p2", "injection_type": "jailbreak",
+     "severity": "low",
      "mas_id": "mas_b", "phase": "mid", "attack_suite": "jailbreak",
      "tier1_pass": False, "tier3_score": None, "stub_mode": True,
      "timestamp": "t", "model_id": None, "model_name": None,
@@ -686,7 +694,8 @@ def test_render_detail_panel_cross_model():
 import pandas as pd
 from bili.aether.ui import attack_results_page as arp
 results = [
-    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+    {"run_id": "run_001", "payload_id": "p1", "injection_type": "injection",
+     "severity": "high",
      "mas_id": "mas_a", "phase": "pre", "attack_suite": "cross_model",
      "tier1_pass": True, "tier3_score": 1, "tier3_confidence": "medium",
      "tier3_reasoning": "Partial compliance", "stub_mode": False,
@@ -697,7 +706,8 @@ results = [
      "config_path": "", "injection_phase": "pre"},
 ]
 df_rows = [
-    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+    {"run_id": "run_001", "payload_id": "p1", "injection_type": "injection",
+     "severity": "high",
      "mas_id": "mas_a", "phase": "pre", "attack_suite": "cross_model",
      "tier1_pass": True, "tier3_score": 1, "stub_mode": False,
      "timestamp": "t", "model_id": "gpt-4o", "model_name": "GPT-4o",
@@ -766,17 +776,29 @@ arp._render_matrix(df, is_cross_model=False)
 
 
 def test_result_export_key_non_cross_model():
-    """_result_export_key returns tuple without model_id for non-cross-model."""
-    r = {"mas_id": "m", "payload_id": "p1", "phase": "pre", "model_id": "gpt-4o"}
+    """_result_export_key returns tuple with run_id but without model_id for non-cross-model."""
+    r = {
+        "run_id": "run_001",
+        "mas_id": "m",
+        "payload_id": "p1",
+        "phase": "pre",
+        "model_id": "gpt-4o",
+    }
     key = arp_mod._result_export_key(r, is_cross_model=False)
-    assert key == ("m", "p1", "pre", None)
+    assert key == ("run_001", "m", "p1", "pre", None)
 
 
 def test_result_export_key_cross_model():
-    """_result_export_key includes model_id for cross-model."""
-    r = {"mas_id": "m", "payload_id": "p1", "phase": "pre", "model_id": "gpt-4o"}
+    """_result_export_key includes run_id and model_id for cross-model."""
+    r = {
+        "run_id": "run_001",
+        "mas_id": "m",
+        "payload_id": "p1",
+        "phase": "pre",
+        "model_id": "gpt-4o",
+    }
     key = arp_mod._result_export_key(r, is_cross_model=True)
-    assert key == ("m", "p1", "pre", "gpt-4o")
+    assert key == ("run_001", "m", "p1", "pre", "gpt-4o")
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +810,7 @@ def test_build_export_df_filters_by_key_set():
     """_build_export_df only includes results matching the key set."""
     results = [
         {
+            "run_id": "run_001",
             "mas_id": "m",
             "payload_id": "p1",
             "phase": "pre",
@@ -805,6 +828,7 @@ def test_build_export_df_filters_by_key_set():
             "propagation_path": [],
         },
         {
+            "run_id": "run_001",
             "mas_id": "m",
             "payload_id": "p2",
             "phase": "mid",
@@ -822,7 +846,7 @@ def test_build_export_df_filters_by_key_set():
             "propagation_path": [],
         },
     ]
-    key_set = {("m", "p1", "pre", None)}
+    key_set = {("run_001", "m", "p1", "pre", None)}
     df = arp_mod._build_export_df(results, key_set, is_cross_model=False)
     assert len(df) == 1
     assert df.iloc[0]["payload_id"] == "p1"
@@ -862,7 +886,8 @@ import pandas as pd
 import streamlit as st
 from bili.aether.ui import attack_results_page as arp
 rows = [
-    {"payload_id": "p1", "injection_type": "injection", "severity": "high",
+    {"run_id": "run_001", "payload_id": "p1", "injection_type": "injection",
+     "severity": "high",
      "mas_id": "mas_a", "phase": "pre", "attack_suite": "injection",
      "tier1_pass": True, "tier3_score": 2, "stub_mode": False,
      "timestamp": "t", "model_id": None, "model_name": None,

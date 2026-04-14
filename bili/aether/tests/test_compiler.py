@@ -14,7 +14,7 @@ from langgraph.graph import StateGraph  # pylint: disable=import-error
 from langgraph.graph.state import CompiledStateGraph  # pylint: disable=import-error
 
 from bili.aether.compiler import CompiledMAS, compile_mas
-from bili.aether.compiler.agent_generator import generate_agent_node
+from bili.aether.compiler.agent_generator import _ensure_human_last, generate_agent_node
 from bili.aether.compiler.llm_resolver import resolve_model
 from bili.aether.compiler.state_generator import generate_state_schema
 from bili.aether.config.loader import load_mas_from_yaml
@@ -760,3 +760,55 @@ def test_agent_with_empty_tools_uses_direct_llm():
         # Should use direct LLM, not create_agent
         mock_llm.invoke.assert_called_once()
         assert result["messages"][0].content == "direct response"
+
+
+# =========================================================================
+# _ensure_human_last TESTS
+# =========================================================================
+
+
+class TestEnsureHumanLast:
+    """Tests for _ensure_human_last helper."""
+
+    def test_appends_human_when_last_is_ai(self):
+        """Appends HumanMessage when the last message is an AIMessage."""
+        agent = _agent("test", objective="Do the thing")
+        messages = [HumanMessage(content="hello"), AIMessage(content="reply")]
+        _ensure_human_last(messages, agent)
+        assert len(messages) == 3
+        assert isinstance(messages[-1], HumanMessage)
+        assert messages[-1].content == "Do the thing"
+
+    def test_noop_when_last_is_human(self):
+        """Does not append when the last message is already a HumanMessage."""
+        agent = _agent("test", objective="Do the thing")
+        messages = [HumanMessage(content="hello")]
+        _ensure_human_last(messages, agent)
+        assert len(messages) == 1
+
+    def test_noop_when_empty(self):
+        """Does not append when messages list is empty."""
+        agent = _agent("test")
+        messages = []
+        _ensure_human_last(messages, agent)
+        assert len(messages) == 0
+
+    def test_uses_fallback_when_no_objective(self):
+        """Uses fallback text when agent has no objective."""
+        agent = _agent("test")
+        # Override objective to None via direct attribute set (bypasses pydantic)
+        object.__setattr__(agent, "objective", None)
+        messages = [AIMessage(content="prior output")]
+        _ensure_human_last(messages, agent)
+        assert len(messages) == 2
+        assert isinstance(messages[-1], HumanMessage)
+        assert "complete your task" in messages[-1].content
+
+    def test_mutates_in_place(self):
+        """Mutates the original list rather than creating a new one."""
+        agent = _agent("test", objective="Complete the assigned analysis goal")
+        messages = [AIMessage(content="response")]
+        original_id = id(messages)
+        _ensure_human_last(messages, agent)
+        assert id(messages) == original_id
+        assert len(messages) == 2

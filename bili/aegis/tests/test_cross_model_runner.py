@@ -86,7 +86,7 @@ class TestWriteCsv:
         """Writes a CSV with correct headers and data."""
         mod = _import_module()
         rows = [{col: f"val_{i}" for i, col in enumerate(mod._CSV_COLUMNS)}]
-        csv_path = mod._write_csv(rows, tmp_path)
+        csv_path = mod._write_csv(rows, tmp_path, "cross_model_matrix.csv")
         assert csv_path.exists()
         with csv_path.open() as fh:
             reader = csv.DictReader(fh)
@@ -263,17 +263,20 @@ class TestMain:
             baseline_results=None,
             log_level="WARNING",
         )
-        mock_run.return_value = [
-            {
-                "skipped": "false",
-                "tier1_pass": "true",
-                **{
-                    c: ""
-                    for c in mod._CSV_COLUMNS
-                    if c not in ("skipped", "tier1_pass")
-                },
-            }
-        ]
+        mock_run.return_value = (
+            [
+                {
+                    "skipped": "false",
+                    "tier1_pass": "true",
+                    **{
+                        c: ""
+                        for c in mod._CSV_COLUMNS
+                        if c not in ("skipped", "tier1_pass")
+                    },
+                }
+            ],
+            MagicMock(name="run_001"),
+        )
         with pytest.raises(SystemExit) as exc_info:
             mod.main()
         assert exc_info.value.code == 0

@@ -249,8 +249,8 @@ class TestBuildResultDict:
 
         assert result["run_metadata"]["semantic_tier"] == "skipped"
 
-    def test_non_stub_mode_semantic_tier(self):
-        """Non-stub mode sets semantic_tier to 'evaluated'."""
+    def test_non_stub_no_tier3_rows_semantic_tier(self):
+        """Non-stub mode with no tier3 rows sets semantic_tier to 'skipped'."""
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "c.yaml").write_text("x")
@@ -263,6 +263,29 @@ class TestBuildResultDict:
                 attack_result=_fake_attack_result(),
                 stub_mode=False,
                 tier3_rows=None,
+                attack_suite="s",
+                repo_root=root,
+            )
+
+        assert result["run_metadata"]["semantic_tier"] == "skipped"
+
+    def test_non_stub_with_tier3_rows_semantic_tier(self):
+        """Non-stub mode with tier3 rows sets semantic_tier to 'evaluated'."""
+        rows = [
+            SimpleNamespace(score=0.5, confidence="medium", reasoning="r1"),
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "c.yaml").write_text("x")
+
+            result = _build_result_dict(
+                ip=_fake_payload(),
+                config=_fake_config(),
+                yaml_path="c.yaml",
+                phase="p",
+                attack_result=_fake_attack_result(),
+                stub_mode=False,
+                tier3_rows=rows,
                 attack_suite="s",
                 repo_root=root,
             )
@@ -361,9 +384,9 @@ class TestRunConfig:
     def test_skips_missing_config(
         self, mock_load, _mock_injector, _mock_detector, _mock_logger
     ):
-        """Returns empty list when YAML path does not exist."""
+        """Returns empty list and None run_dir when YAML path does not exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            rows = _run_config(
+            rows, run_dir = _run_config(
                 yaml_path="nonexistent.yaml",
                 payloads=[],
                 phases=["pre_input"],
@@ -376,6 +399,7 @@ class TestRunConfig:
                 attack_type="prompt_injection",
             )
         assert not rows
+        assert run_dir is None
         mock_load.assert_not_called()
 
     @patch(f"{_MODULE}._write_result")
@@ -391,7 +415,7 @@ class TestRunConfig:
         _mock_logger,
         mock_write,
     ):
-        """Produces one matrix row per payload x phase."""
+        """Produces one matrix row per payload x phase and a run_dir."""
         config = _fake_config()
         mock_load.return_value = config
 
@@ -408,7 +432,7 @@ class TestRunConfig:
             yaml_file = root / "test.yaml"
             yaml_file.write_text("x: 1")
 
-            rows = _run_config(
+            rows, run_dir = _run_config(
                 yaml_path="test.yaml",
                 payloads=[_fake_payload("p1"), _fake_payload("p2")],
                 phases=["pre_input"],
@@ -424,6 +448,7 @@ class TestRunConfig:
         assert len(rows) == 2
         assert rows[0]["payload_id"] == "p1"
         assert rows[1]["payload_id"] == "p2"
+        assert run_dir is not None
 
     @patch(f"{_MODULE}._write_result")
     @patch(f"{_MODULE}.SecurityEventLogger")
@@ -452,7 +477,7 @@ class TestRunConfig:
             root = Path(tmpdir)
             (root / "t.yaml").write_text("x")
 
-            rows = _run_config(
+            rows, run_dir = _run_config(
                 yaml_path="t.yaml",
                 payloads=[_fake_payload()],
                 phases=["pre_input"],
@@ -468,6 +493,7 @@ class TestRunConfig:
         assert len(rows) == 1
         assert rows[0]["tier1_pass"] == "false"
         assert "boom" in rows[0]["tier3_reasoning"]
+        assert run_dir is not None
 
 
 # =========================================================================
@@ -486,8 +512,8 @@ class TestRunSuite:
     ):
         """run_suite aggregates rows from multiple configs."""
         mock_run_config.side_effect = [
-            [{"tier1_pass": "true"}],
-            [{"tier1_pass": "false"}],
+            ([{"tier1_pass": "true"}], Path("/fake/run_001")),
+            ([{"tier1_pass": "false"}], Path("/fake/run_002")),
         ]
         mock_write_csv.return_value = Path("/fake.csv")
 
@@ -509,7 +535,7 @@ class TestRunSuite:
         assert exc_info.value.code == 1
         assert mock_run_config.call_count == 2
 
-    @patch(f"{_MODULE}._run_config", return_value=[])
+    @patch(f"{_MODULE}._run_config", return_value=([], None))
     def test_no_results_exits_zero(self, _mock_run_config):
         """run_suite exits 0 when there are no results."""
         with pytest.raises(SystemExit) as exc_info:
@@ -533,10 +559,13 @@ class TestRunSuite:
     @patch(f"{_MODULE}._run_config")
     def test_all_pass_exits_zero(self, mock_run_config, mock_write_csv, _mock_print):
         """run_suite exits 0 when all tests pass."""
-        mock_run_config.return_value = [
-            {"tier1_pass": "true"},
-            {"tier1_pass": "true"},
-        ]
+        mock_run_config.return_value = (
+            [
+                {"tier1_pass": "true"},
+                {"tier1_pass": "true"},
+            ],
+            Path("/fake/run_001"),
+        )
         mock_write_csv.return_value = Path("/fake.csv")
 
         with pytest.raises(SystemExit) as exc_info:

@@ -192,7 +192,7 @@ class TestStreamlitAppMain:
     @patch(f"{_MODULE}.initialize_auth_manager")
     @patch(f"{_MODULE}.Image")
     @patch(f"{_MODULE}.st")
-    def test_aegis_section_has_three_pages(
+    def test_aegis_section_has_four_pages(
         self,
         mock_st,
         mock_image,
@@ -200,7 +200,7 @@ class TestStreamlitAppMain:
         _mock_check_auth,
         *_mocks,
     ):
-        """AEGIS section has exactly three pages."""
+        """AEGIS section has exactly four pages (Attack Suite, Attack Results, Baseline Runner, Baseline Results)."""
         mock_st.session_state = FakeSessionState()
         mock_st.Page = MagicMock(side_effect=lambda fn, **kw: MagicMock())
         mock_st.navigation = MagicMock(return_value=MagicMock())
@@ -209,7 +209,7 @@ class TestStreamlitAppMain:
         main()
 
         nav_dict = mock_st.navigation.call_args[0][0]
-        assert len(nav_dict["AEGIS"]) == 3
+        assert len(nav_dict["AEGIS"]) == 4
 
     @patch(f"{_MODULE}.get_checkpointer")
     @patch(f"{_MODULE}.run_app_page")
