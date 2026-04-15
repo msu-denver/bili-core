@@ -110,6 +110,18 @@ max_consensus_rounds: 10
 # Purpose : Hard cap on deliberation rounds.  If consensus is not reached by
 #           this round the MAS terminates with the current state.
 
+max_iterations: 25
+# Type    : int  (optional, default 25, min 1)
+# Applies : All workflow types — most critical for supervisor and custom
+#           workflows that contain cycles.
+# Purpose : Maps directly to LangGraph's recursion_limit.  Raises
+#           GraphRecursionError if the graph executes more than this many
+#           steps, preventing runaway routing loops from exhausting memory.
+# Sizing  : For supervisor with N workers, the minimum steps for a full
+#           traversal is 2*N + 1.  Set max_iterations >= 3 * (2*N + 1)
+#           to allow legitimate re-routing while bounding worst-case loops.
+#           Example: 4-agent supervisor → min 9 steps → 25 is a safe default.
+
 consensus_detection: majority
 # Type    : str  (optional, default "majority")
 # Values  :
