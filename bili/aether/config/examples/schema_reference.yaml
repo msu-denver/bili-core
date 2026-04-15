@@ -229,7 +229,7 @@ agents:
     #           Different agents in the same MAS can use different models.
 
     temperature: 0.2
-    # Type    : float  (optional, default 0.0)
+    # Type    : float  (optional, default null → model provider's default)
     # Range   : 0.0 – 2.0
     # Guidance:
     #   0.0       — Fully deterministic; best for classification/decision agents.
