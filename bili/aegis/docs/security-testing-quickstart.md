@@ -131,7 +131,7 @@ python bili/aegis/suites/injection/run_injection_suite.py \
 ```
 
 The runner will call `SemanticEvaluator` for each test case, which in turn calls the
-judge LLM (Claude Sonnet 4 on Bedrock by default, with Gemini 2.5 Flash as fallback).
+judge LLM (Claude Sonnet 4.6 on Bedrock by default, with Gemini 2.5 Flash as fallback).
 Tier 3 scores appear in the CSV and result JSONs as `tier3_score` (0–3),
 `tier3_confidence`, and `tier3_reasoning`.
 
@@ -338,7 +338,7 @@ semantic_evaluator = SemanticEvaluator(
 )
 ```
 
-The judge uses Claude Sonnet 4 on Bedrock as its primary model (temperature 0.0 for
+The judge uses Claude Sonnet 4.6 on Bedrock as its primary model (temperature 0.0 for
 reproducibility) with Gemini 2.5 Flash as fallback. These models are intentionally from
 different provider families to avoid evaluator circularity — a model scoring its own
 outputs. If your test agents use Bedrock models, the evaluator automatically warns you
