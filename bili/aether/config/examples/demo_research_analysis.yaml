@@ -58,7 +58,7 @@ agents:
       patterns, contradictions, knowledge gaps, and key insights. Provide
       quantitative and qualitative interpretation of the evidence. Flag
       any claims that appear contested or insufficiently supported.
-    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    model_name: "us.anthropic.claude-sonnet-4-6"
     temperature: 0.2
     max_tokens: 2048
     output_format: json
@@ -75,7 +75,7 @@ agents:
       limitations, and recommendations for further investigation. Write
       for a technical but broad audience — assume domain knowledge but
       not familiarity with the specific topic.
-    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    model_name: "us.anthropic.claude-sonnet-4-6"
     temperature: 0.4
     max_tokens: 2048
     output_format: text
