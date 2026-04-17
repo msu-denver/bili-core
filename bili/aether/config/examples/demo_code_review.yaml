@@ -55,7 +55,7 @@ agents:
       (including OWASP Top 10), performance concerns, and style issues.
       Reference the triage summary from the lead_developer. Provide specific,
       actionable recommendations for each issue found.
-    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    model_name: "us.anthropic.claude-sonnet-4-6"
     temperature: 0.2
     max_tokens: 2048
     output_format: json
@@ -72,7 +72,7 @@ agents:
       code review decision. Assign an overall severity rating (critical,
       major, minor, or pass), list the top three issues, and state
       whether the submission should be approved, revised, or rejected.
-    model_name: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    model_name: "us.anthropic.claude-sonnet-4-6"
     temperature: 0.0
     max_tokens: 1024
     output_format: json

@@ -35,7 +35,7 @@ short payloads (`pi_length_001` is documented as a deliberate blind-spot test).
 
 LLM-based scoring using `SemanticEvaluator` from `bili.aegis.evaluator`:
 
-- Primary model: `anthropic.claude-sonnet-4-20250514-v1:0` (Bedrock)
+- Primary model: `us.anthropic.claude-sonnet-4-6` (Bedrock)
 - Fallback model: `gemini-2.5-flash` (Vertex)
 - A circularity warning is logged if the evaluator and the model under test share
   the same provider family.

@@ -294,8 +294,8 @@ LLM_MODELS = {
                 "top_k_max": 50,
             },
             {
-                "model_name": "Anthropic Claude Sonnet 4",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                "model_name": "Anthropic Claude Sonnet 4.6",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 64000,

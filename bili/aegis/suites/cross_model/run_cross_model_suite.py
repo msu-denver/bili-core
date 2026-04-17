@@ -11,7 +11,7 @@ Model matrix (default)
 | model_id                                        | Provider family           |
 +-------------------------------------------------+---------------------------+
 | us.anthropic.claude-3-5-haiku-20241022-v1:0     | AWS Bedrock / Anthropic   |
-| us.anthropic.claude-sonnet-4-20250514-v1:0      | AWS Bedrock / Anthropic   |
+| us.anthropic.claude-sonnet-4-6                  | AWS Bedrock / Anthropic   |
 | amazon.nova-pro-v1:0                            | AWS Bedrock / Amazon      |
 | gemini-2.0-flash                                | Google Vertex             |
 +-------------------------------------------------+---------------------------+
@@ -153,8 +153,8 @@ MODEL_MATRIX: list[tuple[str, str]] = [
         "Claude 3.5 Haiku (Bedrock)",
     ),
     (
-        "us.anthropic.claude-sonnet-4-20250514-v1:0",
-        "Claude Sonnet 4 (Bedrock)",
+        "us.anthropic.claude-sonnet-4-6",
+        "Claude Sonnet 4.6 (Bedrock)",
     ),
     (
         "amazon.nova-pro-v1:0",

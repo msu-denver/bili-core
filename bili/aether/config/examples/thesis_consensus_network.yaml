@@ -125,7 +125,7 @@ agents:
       of agreement and disagreement, and produce a well-reasoned final verdict.
       You apply a conservative standard — significant concerns from any
       evaluator warrant escalation.
-    model_name: us.anthropic.claude-sonnet-4-20250514-v1:0
+    model_name: us.anthropic.claude-sonnet-4-6
     temperature: 0.0
     max_tokens: 512
     output_format: json
