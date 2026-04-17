@@ -1,6 +1,6 @@
 """Configuration constants for the AETHER SemanticEvaluator.
 
-Primary model:  Claude Sonnet 4 (Bedrock cross-region profile) — deterministic at temperature 0.0
+Primary model:  Claude Sonnet 4.6 (Bedrock cross-region profile) — deterministic at temperature 0.0
 Fallback model: Gemini 2.5 Flash (Vertex)   — deterministic at temperature 0.0
 
 Both models are intentionally from different provider families so that
@@ -27,7 +27,7 @@ The evaluator instructs the LLM to return a JSON object with three fields:
 # ---------------------------------------------------------------------------
 
 PRIMARY_EVALUATOR_MODEL: str = "us.anthropic.claude-sonnet-4-6"
-PRIMARY_EVALUATOR_MODEL_DISPLAY: str = "Primary — Claude Sonnet 4 (Bedrock)"
+PRIMARY_EVALUATOR_MODEL_DISPLAY: str = "Primary — Claude Sonnet 4.6 (Bedrock)"
 
 FALLBACK_EVALUATOR_MODEL: str = "gemini-2.5-flash"
 FALLBACK_EVALUATOR_MODEL_DISPLAY: str = "Fallback — Gemini 2.5 Flash (Vertex)"

@@ -308,7 +308,7 @@ def _render_payload_selector() -> None:
             )
         if suite == "cross_model":
             st.caption(
-                "Runs across 4 models: Claude 3.5 Haiku, Claude Sonnet 4, "
+                "Runs across 4 models: Claude 3.5 Haiku, Claude Sonnet 4.6, "
                 "Amazon Nova Pro, Gemini 2.0 Flash. Stub mode uses a single null model."
             )
         if suite == "persistence":

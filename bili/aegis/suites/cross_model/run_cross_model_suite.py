@@ -154,7 +154,7 @@ MODEL_MATRIX: list[tuple[str, str]] = [
     ),
     (
         "us.anthropic.claude-sonnet-4-6",
-        "Claude Sonnet 4 (Bedrock)",
+        "Claude Sonnet 4.6 (Bedrock)",
     ),
     (
         "amazon.nova-pro-v1:0",
