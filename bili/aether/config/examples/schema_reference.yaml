@@ -1,0 +1,751 @@
+# =============================================================================
+# AETHER MAS Configuration — Full Schema Reference
+# =============================================================================
+#
+# This file documents every available configuration field for an AETHER
+# Multi-Agent System (MAS).  It is NOT a runnable configuration — agents
+# use stub mode (no model_name) and the field values are chosen to illustrate
+# the available options, not to form a coherent workflow.
+#
+# For runnable end-to-end examples see the other files in this directory.
+# For the prose field reference see: bili/aether/docs/configuration.md
+# For workflow types and graph topologies see: bili/aether/docs/compiler.md
+#
+# Structure of this file
+# ─────────────────────────────────────────────────────────────────────────────
+#   1. Top-level MASConfig fields
+#   2. agents  — full AgentSpec with every field annotated
+#   3. channels — full Channel field set
+#   4. workflow_edges — WorkflowEdge field set
+#   5. PipelineSpec appendix — pipeline / node / edge / state-field options
+#
+# =============================================================================
+
+
+# =============================================================================
+# 1. TOP-LEVEL MASConfig FIELDS
+# =============================================================================
+
+# ── Identity ──────────────────────────────────────────────────────────────────
+
+mas_id: schema_reference
+# Type    : str  (required)
+# Pattern : ^[a-zA-Z0-9_-]+$
+# Purpose : Machine-readable identifier; must be unique across your MAS library.
+# Examples: "content_moderation_v2", "research_pipeline", "qa_review"
+
+name: AETHER Schema Reference
+# Type    : str  (required, 1–200 chars)
+# Purpose : Human-readable display name shown in the UI and logs.
+
+description: >
+  Full schema reference documenting every MASConfig, AgentSpec, Channel,
+  WorkflowEdge, and PipelineSpec field.  Not intended to be run directly.
+# Type    : str  (optional, default "")
+# Max     : 2000 characters
+# Purpose : Free-form description of what this MAS does, its design decisions,
+#           and any caveats.  Shown in the UI detail panel.
+
+objective: >
+  This MAS-level objective is prepended as a SystemMessage at the graph entry
+  point before any agent executes.  Use it to set shared framing or constraints
+  that apply to the entire run (e.g. "You are operating under EU AI Act
+  regulations — do not speculate about personal data.").
+# Type    : str  (optional, default null, max 2000 chars)
+# Scope   : Applied once at graph entry; individual agent objectives are separate.
+
+version: "1.0.0"
+# Type    : str  (optional, default "1.0.0")
+# Purpose : Semantic version string for your config.  Not validated — free-form.
+# Examples: "1.0.0", "2.1.3", "0.9.0-beta"
+
+
+# ── Workflow Configuration ────────────────────────────────────────────────────
+
+workflow_type: custom
+# Type    : enum  (required)
+# Values  :
+#   sequential   — Linear chain: A → B → C.  Simplest pattern.
+#   hierarchical — Tiered tree with voting; agents have a `tier` field.
+#   supervisor   — Hub-and-spoke; one agent marked `is_supervisor` routes to
+#                  specialists dynamically.
+#   consensus    — Network deliberation; agents vote until `consensus_threshold`
+#                  is met or `max_consensus_rounds` is exhausted.
+#   deliberative — Fan-out / fan-in with explicit edges; supports true parallel
+#                  supersteps via `_add_fan_out`.
+#   parallel     — All agents execute in a single superstep simultaneously.
+#   custom       — Fully explicit; routing defined entirely via `workflow_edges`.
+
+entry_point: agent_a
+# Type    : str  (optional, default: first agent in the list)
+# Must    : Match an agent_id in the agents list.
+# Purpose : Which agent receives the initial user message.
+#           For supervisor workflows the entry point should be the supervisor.
+
+
+# ── Hierarchical Workflow Settings ───────────────────────────────────────────
+
+hierarchical_voting: false
+# Type    : bool  (optional, default false)
+# Context : workflow_type: hierarchical only.
+# Purpose : When true, lower-tier agents debate before the highest-tier agent
+#           decides.  Requires agents to specify a `tier` value.
+
+min_debate_rounds: 2
+# Type    : int  (optional, default 0, min 0)
+# Context : workflow_type: hierarchical with hierarchical_voting: true.
+# Purpose : Minimum number of competitive debate rounds before a verdict.
+
+
+# ── Consensus Workflow Settings ───────────────────────────────────────────────
+
+consensus_threshold: 0.66
+# Type    : float  (required when workflow_type is consensus, else optional)
+# Range   : 0.0 – 1.0
+# Purpose : Fraction of agents that must agree before consensus is declared.
+#           0.5 = simple majority, 0.66 ≈ two-thirds, 1.0 = unanimous.
+
+max_consensus_rounds: 10
+# Type    : int  (optional, default 10, min 1)
+# Purpose : Hard cap on deliberation rounds.  If consensus is not reached by
+#           this round the MAS terminates with the current state.
+
+max_iterations: 25
+# Type    : int  (optional, default 25, min 1)
+# Applies : All workflow types — most critical for supervisor and custom
+#           workflows that contain cycles.
+# Purpose : Maps directly to LangGraph's recursion_limit.  Raises
+#           GraphRecursionError if the graph executes more than this many
+#           steps, preventing runaway routing loops from exhausting memory.
+# Sizing  : For supervisor with N workers, the minimum steps for a full
+#           traversal is 2*N + 1.  Set max_iterations >= 3 * (2*N + 1)
+#           to allow legitimate re-routing while bounding worst-case loops.
+#           Example: 4-agent supervisor → min 9 steps → 25 is a safe default.
+
+consensus_detection: majority
+# Type    : str  (optional, default "majority")
+# Values  :
+#   majority    — Most common vote wins once threshold is met.
+#   similarity  — Semantic similarity between outputs determines agreement.
+#   explicit    — Agents explicitly signal agreement/disagreement in output.
+#   any         — First round where any agent agrees terminates deliberation.
+
+
+# ── Human-in-the-Loop ────────────────────────────────────────────────────────
+
+human_in_loop: true
+# Type    : bool  (optional, default false)
+# Purpose : Enables pausing graph execution for a human to review and inject
+#           input.  Any agent with `is_human: true` triggers the pause.
+
+human_escalation_condition: "state.tie_breaker_needed or state.confidence < 0.5"
+# Type    : str  (optional, default null)
+# Format  : Python expression evaluated against graph state.
+# Notes   : Function calls are blocked by SafeConditionEvaluator.
+#           Only attribute access (`state.field`) and boolean operators are safe.
+# Tip     : Set `human_in_loop: true` with a condition to avoid always pausing.
+
+
+# ── Checkpoint Configuration ──────────────────────────────────────────────────
+
+checkpoint_enabled: true
+# Type    : bool  (optional, default true)
+# Purpose : Whether to persist graph state between turns.
+#           Disable only for ephemeral, stateless pipelines.
+
+checkpoint_config:
+  type: auto
+  # Values  :
+  #   memory    — In-process dictionary; state is lost when the process exits.
+  #               Default when no external DBs are available.
+  #   postgres  — PostgreSQL backend (requires PG connection in environment).
+  #   pg        — Alias for postgres.
+  #   mongo     — MongoDB backend (requires Mongo connection in environment).
+  #   mongodb   — Alias for mongo.
+  #   auto      — Probes environment; selects postgres > mongo > memory.
+  #               Recommended for production.
+  keep_last_n: 10
+  # Type    : int  (optional)
+  # Purpose : Retain only the last N checkpoints per thread_id.
+  #           Older checkpoints are pruned automatically.
+  #           Omit to keep all checkpoints (not recommended for long runs).
+
+
+# ── Metadata ──────────────────────────────────────────────────────────────────
+
+tags:
+  - content-moderation   # Searchable labels for cataloguing MAS configurations.
+  - custom               # No validation — use any strings meaningful to your team.
+  - escalation           # Visible in the UI MAS library panel.
+  - human-in-loop
+# Type    : List[str]  (optional, default [])
+
+metadata:
+  author: trust_and_safety_team
+  environment: staging
+  jira_ticket: MAS-421
+# Type    : Dict[str, Any]  (optional, default {})
+# Purpose : Arbitrary key-value pairs.  Passed through unchanged; never
+#           interpreted by the runtime.  Use for CI tagging, audit trails, etc.
+
+
+# =============================================================================
+# 2. AGENTS — Full AgentSpec with every field
+# =============================================================================
+
+agents:
+
+  # ---------------------------------------------------------------------------
+  # Minimal agent — only the three required fields
+  # ---------------------------------------------------------------------------
+  - agent_id: agent_minimal
+    # Type    : str  (required)
+    # Pattern : ^[a-zA-Z0-9_-]+$  (1–100 chars)
+    # Must    : Unique across all agents in this MAS.
+
+    role: reviewer
+    # Type    : str  (required, 1–100 chars)
+    # Note    : Free-form — not an enum.  Any role label is valid.
+    # Examples: "researcher", "judge", "supervisor", "content_reviewer",
+    #           "policy_expert", "senior_engineer", "custom_role"
+
+    objective: >
+      Review submitted content against the platform's community standards
+      and produce a verdict with supporting reasoning.
+    # Type    : str  (required, 10–1000 chars)
+    # Purpose : Describes what this agent must accomplish within the MAS.
+    #           Used by the orchestrator for routing context; also injected
+    #           into the agent's own prompt framing.
+    # Tip     : Be specific — vague objectives lead to vague outputs.
+
+  # ---------------------------------------------------------------------------
+  # Fully-configured agent — every optional field shown
+  # ---------------------------------------------------------------------------
+  - agent_id: agent_a
+    role: content_reviewer
+    objective: >
+      Review submitted content against community guidelines.  Produce a
+      JSON verdict (decision, confidence, reasoning) for downstream agents.
+
+    # ── LLM Configuration ───────────────────────────────────────────────────
+
+    model_name: gpt-4o
+    # Type    : str  (optional, default null)
+    # Purpose : Which LLM to use.  Accepts any model_id from
+    #           bili/config/llm_config.py (74 models across AWS Bedrock,
+    #           Azure OpenAI, Google Vertex, OpenAI, local).
+    # Examples: "gpt-4o", "claude-sonnet-3-5-20241022",
+    #           "anthropic.claude-3-5-sonnet-20241022-v2:0" (Bedrock),
+    #           "gemini-1.5-pro-002" (Vertex)
+    # Note    : If omitted the agent runs in stub mode (echoes input).
+    #           Different agents in the same MAS can use different models.
+
+    temperature: 0.2
+    # Type    : float  (optional, default null → model provider's default)
+    # Range   : 0.0 – 2.0
+    # Guidance:
+    #   0.0       — Fully deterministic; best for classification/decision agents.
+    #   0.1–0.3   — Analytical; slight variation, still focused.
+    #   0.5–0.7   — Balanced; good for summarization and synthesis.
+    #   0.8–1.2   — Creative; good for brainstorming and drafting.
+    #   1.2–2.0   — Highly stochastic; rarely useful in production.
+
+    max_tokens: 2048
+    # Type    : int  (optional, default null → model's own limit)
+    # Min     : 1
+    # Purpose : Hard cap on the number of tokens in a single LLM response.
+    #           Set this to prevent runaway verbose responses.
+
+    system_prompt: >
+      You are a content moderation specialist with deep knowledge of platform
+      community standards.  Analyse the provided content carefully and return
+      a JSON object with three keys: decision (allow | remove), confidence
+      (0.0–1.0), and reasoning (string).  Cite specific policy sections.
+    # Type    : str  (optional, default null, max 10,000 chars)
+    # Purpose : Instructions for the LLM — how to behave, what format to use,
+    #           what constraints to apply.
+    # Note    : Distinct from `objective`.  See the Objective vs System Prompt
+    #           table in configuration.md for guidance.
+    # When omitted: agent inherits from bili-core (if inherit flags are set)
+    #              or uses the LLM's default behavior.
+
+    # ── Capabilities & Tools ────────────────────────────────────────────────
+
+    capabilities:
+      - rag_retrieval
+      - policy_lookup
+      - tool_calling
+      - inter_agent_communication
+      - web_search
+      - memory_access
+    # Type    : List[str]  (optional, default [])
+    # Note    : Free-form labels — not enforced by the runtime.
+    #           Used for documentation, UI display, and validation warnings
+    #           (e.g. a supervisor missing "inter_agent_communication" generates
+    #           a warning at compile time).
+    # Common  : "rag_retrieval", "policy_lookup", "tool_calling",
+    #           "inter_agent_communication", "web_search", "code_analysis",
+    #           "memory_access", "data_analysis", "reporting"
+
+    tools:
+      - faiss_retriever
+      - serp_api_tool
+    # Type    : List[str]  (optional, default [])
+    # Values  : Tool names registered in the bili-core tool registry.
+    # Built-in: "faiss_retriever" (FAISS vector search),
+    #           "serp_api_tool" (web search via SerpAPI),
+    #           "weather_api_tool", "opensearch_retriever"
+    # Note    : Tools are only active for agents that also have middleware or
+    #           are react agents; plain completion agents ignore this list.
+
+    # ── Output Configuration ─────────────────────────────────────────────────
+
+    output_format: structured
+    # Type    : enum  (optional, default "text")
+    # Values  :
+    #   text        — Plain string response.  No schema validation.
+    #   json        — JSON object.  Flexible structure; not schema-validated.
+    #                 Use `consensus_vote_field` to extract a specific key.
+    #   structured  — JSON validated against `output_schema`.
+    #                 Requires output_schema to be provided.
+
+    output_schema:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [allow, remove, escalate]
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        reasoning:
+          type: string
+      required: [decision, confidence, reasoning]
+    # Type    : Dict[str, Any]  (required when output_format is "structured")
+    # Format  : Standard JSON Schema (draft-07 compatible).
+    # Purpose : The runtime validates each agent response against this schema.
+    #           Validation failures are logged as warnings (not hard errors).
+
+    # ── Middleware ────────────────────────────────────────────────────────────
+
+    middleware:
+      - summarization
+      - model_call_limit
+    # Type    : List[str]  (optional, default [])
+    # Values  :
+    #   summarization    — Compresses conversation history once it exceeds
+    #                      max_tokens_before_summary.  Keeps the last
+    #                      messages_to_keep messages verbatim.
+    #   model_call_limit — Hard cap on the number of LLM calls this agent
+    #                      may make per run (prevents infinite tool loops).
+    # Note    : Middleware only applies to tool-using react agents.
+
+    middleware_params:
+      summarization:
+        max_tokens_before_summary: 4000
+        # int — trigger compression once history exceeds this many tokens.
+        messages_to_keep: 20
+        # int — number of recent messages to retain verbatim after compression.
+      model_call_limit:
+        run_limit: 10
+        # int — maximum LLM calls allowed; the agent halts once this is hit.
+    # Type    : Dict[str, Any]  (optional, default {})
+    # Keys    : Must match the middleware names listed in `middleware`.
+
+    # ── bili-core Inheritance ────────────────────────────────────────────────
+
+    inherit_from_bili_core: true
+    # Type    : bool  (optional, default false)
+    # Purpose : Master toggle.  When true, the agent can inherit any subset of
+    #           bili-core's runtime config (LLM, tools, prompts, memory,
+    #           checkpoints) using the flags below.
+    # When false: all inherit_* sub-flags are reset to true internally
+    #             (effectively a no-op — nothing is inherited).
+
+    inherit_llm_config: false
+    # Type    : bool  (optional, default true)
+    # Effect  : When false, uses model_name / temperature from this spec.
+    # When true: inherits the LLM configured in the running bili-core session.
+    # Requires: inherit_from_bili_core: true
+
+    inherit_tools: false
+    # Type    : bool  (optional, default true)
+    # Effect  : When false, uses the `tools` list from this spec.
+    # When true: inherits tools loaded in the running bili-core session.
+    # Requires: inherit_from_bili_core: true
+
+    inherit_system_prompt: false
+    # Type    : bool  (optional, default true)
+    # Effect  : When false, uses the `system_prompt` from this spec.
+    # When true: inherits the persona/system prompt from the bili-core session.
+    # Requires: inherit_from_bili_core: true
+
+    inherit_memory: true
+    # Type    : bool  (optional, default true)
+    # Effect  : When true, this agent's memory management is handled by
+    #           bili-core's memory node (per-user state, conversation history).
+    # Requires: inherit_from_bili_core: true
+
+    inherit_checkpoint: true
+    # Type    : bool  (optional, default true)
+    # Effect  : When true, uses bili-core's configured checkpointer for state
+    #           persistence (PostgreSQL or MongoDB from the active session).
+    # Requires: inherit_from_bili_core: true
+
+    # ── Workflow-Specific Fields ──────────────────────────────────────────────
+
+    tier: 2
+    # Type    : int  (optional, default null, min 1)
+    # Context : workflow_type: hierarchical
+    # Purpose : Agent authority tier.  Tier 1 = highest authority (final vote).
+    #           Agents with lower tier numbers override higher-tier agents.
+    #           Required on all agents when using hierarchical workflows.
+    # Example : tier 1 = managing editor; tier 2 = senior reviewer; tier 3 = reviewer
+
+    voting_weight: 1.5
+    # Type    : float  (optional, default 1.0, min 0.0)
+    # Context : hierarchical / consensus workflows
+    # Purpose : Scales this agent's vote when computing consensus or majority.
+    #           Weight 2.0 = this agent's vote counts twice.
+    #           Default 1.0 = equal weight for all agents.
+
+    is_supervisor: false
+    # Type    : bool  (optional, default false)
+    # Context : workflow_type: supervisor
+    # Purpose : Marks this agent as the hub that dynamically routes to
+    #           specialist agents.  Exactly one agent should be the supervisor;
+    #           it should also be the entry_point.
+    # Warning : A supervisor missing "inter_agent_communication" capability
+    #           generates a compile-time warning.
+
+    is_human: false
+    # Type    : bool  (optional, default false)
+    # Context : human_in_loop: true at the MAS level
+    # Purpose : When true, graph execution pauses before this node and waits
+    #           for human input (via the interrupt mechanism).
+    #           The human's response is injected as the next message.
+
+    consensus_vote_field: decision
+    # Type    : str  (optional, default null)
+    # Context : workflow_type: consensus
+    # Purpose : The key name inside the agent's JSON output that holds its vote.
+    #           The runtime extracts this field to determine consensus.
+    # Requires: output_format: json or output_format: structured
+    # Example : If output is {"decision": "allow", ...} then use "decision".
+
+    # ── Metadata ──────────────────────────────────────────────────────────────
+
+    metadata:
+      department: trust_and_safety
+      version: "2.1"
+      notes: "Handles Tier-2 content violations"
+    # Type    : Dict[str, Any]  (optional, default {})
+    # Purpose : Arbitrary annotations.  Passed through unchanged by the runtime.
+
+  # ---------------------------------------------------------------------------
+  # Supervisor agent example (hub-and-spoke pattern)
+  # ---------------------------------------------------------------------------
+  - agent_id: supervisor
+    role: supervisor
+    objective: >
+      Route each incoming request to the most appropriate specialist agent.
+      After receiving specialist outputs, synthesize a final response.
+    is_supervisor: true            # Marks this as the routing hub
+    capabilities:
+      - inter_agent_communication  # Recommended; triggers a warning if absent
+
+  # ---------------------------------------------------------------------------
+  # Human-review placeholder agent
+  # ---------------------------------------------------------------------------
+  - agent_id: human_reviewer
+    role: human_reviewer
+    objective: >
+      Provide a final human judgement on cases that could not be resolved
+      automatically.
+    is_human: true  # Graph pauses here and awaits human input
+
+  # ---------------------------------------------------------------------------
+  # Consensus agent example
+  # ---------------------------------------------------------------------------
+  - agent_id: consensus_voter
+    role: policy_reviewer
+    objective: >
+      Independently review the content and cast a vote on whether it
+      should be allowed or removed.
+    output_format: json
+    consensus_vote_field: decision   # Key in JSON output that holds the vote
+
+
+# =============================================================================
+# 3. CHANNELS — Full field set
+# =============================================================================
+
+channels:
+
+  - channel_id: reviewer_to_judge
+    # Type    : str  (required)
+    # Pattern : ^[a-zA-Z0-9_-]+$
+    # Must    : Unique across all channels in this MAS.
+
+    protocol: direct
+    # Type    : enum  (required)
+    # Values  :
+    #   direct           — Point-to-point: source → target.
+    #                      The standard handoff pattern.
+    #   broadcast        — One-to-many: source → all agents.
+    #                      Use source: "any" or target: "all" as needed.
+    #   request_response — Bidirectional consultation: A ↔ B.
+    #                      Set bidirectional: true for two-way exchange.
+    #   pubsub           — Publish-subscribe (event-driven).
+    #                      ⚠ Falls back to DirectChannel — full impl planned.
+    #   competitive      — Adversarial debate pattern.
+    #                      ⚠ Falls back to DirectChannel — full impl planned.
+    #   consensus        — Peer deliberation toward agreement.
+    #                      ⚠ Falls back to DirectChannel — full impl planned.
+
+    source: agent_a
+    # Type    : str  (required)
+    # Must    : Match an agent_id in the agents list, or the literal "any".
+    # "any"   : Used with broadcast protocol to accept messages from any agent.
+
+    target: agent_minimal
+    # Type    : str  (required)
+    # Must    : Match an agent_id in the agents list, or the literal "all".
+    # "all"   : Used with broadcast protocol to deliver to every agent.
+
+    description: Reviewed content verdict forwarded to the judge for final ruling.
+    # Type    : str  (optional, default "")
+    # Purpose : Human-readable annotation.  Shown in the UI graph edge tooltip.
+
+    bidirectional: false
+    # Type    : bool  (optional, default false)
+    # Purpose : When true, messages can flow in both directions on this channel.
+    #           Primarily meaningful for request_response protocol.
+    # Warning : Setting bidirectional: true and also defining a reverse channel
+    #           generates a compile-time warning (redundant).
+
+  - channel_id: supervisor_to_specialist
+    protocol: request_response
+    source: supervisor
+    target: agent_a
+    bidirectional: true   # Supervisor sends request; specialist sends response back
+
+  - channel_id: announcer_to_all
+    protocol: broadcast
+    source: supervisor
+    target: all           # Delivered to every agent in the MAS
+    description: Supervisor broadcasts shared context to all reviewers before deliberation
+
+
+# =============================================================================
+# 4. WORKFLOW EDGES — WorkflowEdge field set
+# =============================================================================
+#
+# workflow_edges are required for workflow_type: custom and workflow_type:
+# deliberative.  They are optional (and usually ignored) for the other types
+# whose topology is derived automatically.
+#
+# Special sentinel values: START (graph entry), END (graph exit).
+
+workflow_edges:
+
+  - from_agent: START
+    # Type    : str  (required)
+    # Values  : Any agent_id in the agents list, or "START".
+    to_agent: agent_a
+    # Type    : str  (required)
+    # Values  : Any agent_id in the agents list, or "END".
+    label: begin
+    # Type    : str  (optional, default "")
+    # Purpose : Displayed on the edge in the UI graph.  No runtime effect.
+
+  - from_agent: agent_a
+    to_agent: agent_minimal
+    condition: "state.confidence >= 0.7"
+    # Type    : str  (optional, default null)
+    # Format  : Python expression evaluated against graph state.
+    # Safe    : Only attribute access (state.field) and boolean / comparison
+    #           operators are permitted.  Function calls (len(), .get(), etc.)
+    #           are blocked by SafeConditionEvaluator.
+    # Notes   : Conditional edges are compiled as add_conditional_edges in
+    #           LangGraph.  When multiple outgoing edges from the same agent
+    #           have conditions, ONLY the first truthy one is taken.
+    #           Unconditional edges (no condition) always route.
+    # Example conditions:
+    #   "state.confidence >= 0.7"          — numeric comparison
+    #   "state.decision == 'escalate'"     — string equality
+    #   "state.needs_escalation == True"   — boolean check
+    #   "state.tie_breaker_needed"         — truthy check
+    label: high-confidence
+
+  - from_agent: agent_a
+    to_agent: human_reviewer
+    condition: "state.confidence < 0.7"
+    label: escalate-to-human
+
+  - from_agent: agent_minimal
+    to_agent: END
+    label: complete
+    # No condition — this edge is always taken when agent_minimal finishes.
+
+  # Fan-out example (deliberative pattern): one source → multiple targets
+  # in the same superstep triggers _add_fan_out and parallel execution.
+  - from_agent: supervisor
+    to_agent: agent_a
+    label: dispatch-reviewer
+  - from_agent: supervisor
+    to_agent: consensus_voter
+    label: dispatch-voter
+  # Both agent_a and consensus_voter execute in parallel after supervisor.
+
+  - from_agent: agent_a
+    to_agent: human_reviewer
+    label: reviewer-done
+  - from_agent: consensus_voter
+    to_agent: human_reviewer
+    label: voter-done
+  # human_reviewer executes once BOTH parallel agents finish (fan-in).
+
+  - from_agent: human_reviewer
+    to_agent: END
+    label: final
+
+
+# =============================================================================
+# 5. PIPELINE APPENDIX — PipelineSpec, PipelineNodeSpec, PipelineEdgeSpec,
+#                         PipelineStateField
+# =============================================================================
+#
+# A `pipeline` block inside an AgentSpec replaces the default single react-
+# agent node with a multi-node sub-graph.  The sub-graph is compiled as a
+# LangGraph CompiledStateGraph and embedded inside the outer MAS graph.
+#
+# When to use pipelines:
+#   - You need to inject persona/datetime context before the react agent runs.
+#   - You need conditional branching *within* a single agent's processing.
+#   - You want to reuse bili-core registry nodes (persona, datetime, etc.)
+#     inside a MAS agent without inheriting the full bili-core pipeline.
+#
+# Agents without a `pipeline` block continue to work exactly as before
+# (backwards-compatible).  Maximum nesting depth is 3.
+#
+# The pipeline inner state always has these built-in fields:
+#   messages       — Accumulated message list (add_messages reducer).
+#   current_agent  — Name of the currently executing agent.
+#   agent_outputs  — Dict mapping agent_id → last output string.
+# Custom fields are added via `state_fields` below.
+#
+# Example (inline inside an agent):
+#
+# agents:
+#   - agent_id: rich_researcher
+#     role: researcher
+#     objective: Perform deep research with persona and datetime context.
+#
+#     pipeline:
+#
+#       entry_point: persona          # optional; defaults to first node
+#
+#       nodes:
+#
+#         - node_id: persona
+#           # Type    : str  (required, ^[a-zA-Z0-9_-]+$, 1–100 chars)
+#           # Must    : Unique within this pipeline.
+#
+#           node_type: add_persona_and_summary
+#           # Type    : str  (required)
+#           # Values  : Any key in GRAPH_NODE_REGISTRY  (bili-core registry nodes)
+#           #             or the literal "agent" (inline agent node).
+#           # Registry nodes (partial list):
+#           #   "add_persona_and_summary" — Injects persona system prompt.
+#           #   "inject_current_datetime" — Adds current timestamp to context.
+#           #   "per_user_state"          — Loads per-user preferences from DB.
+#           #   "normalize_output"        — Post-processes agent output.
+#
+#           config:
+#             persona: >
+#               You are an expert researcher with a focus on AI safety.
+#             # Type    : Dict[str, Any]  (optional, default {})
+#             # Purpose : Kwargs passed to the node builder function.
+#             #           Available keys depend on the node_type.
+#
+#         - node_id: datetime
+#           node_type: inject_current_datetime
+#           # No config needed; node uses no additional kwargs.
+#
+#         - node_id: sub_agent
+#           node_type: agent
+#           # Use "agent" to embed an inline AgentSpec as a pipeline node.
+#
+#           agent_spec:
+#             agent_id: inner_researcher
+#             role: researcher
+#             objective: Research the topic and return structured findings.
+#             temperature: 0.4
+#             tools:
+#               - serp_api_tool
+#           # Type    : Dict[str, Any]  (required when node_type is "agent")
+#           # Notes   : Parsed as a full AgentSpec at compile time.
+#           #           agent_id must still be unique within the pipeline's scope.
+#
+#       edges:
+#
+#         - from_node: persona
+#           # Type    : str  (required) — must match a node_id in this pipeline.
+#           to_node: datetime
+#           # Type    : str  (required) — must match a node_id or "END".
+#
+#         - from_node: datetime
+#           to_node: sub_agent
+#
+#         - from_node: sub_agent
+#           to_node: END
+#           # "END" terminates the pipeline; control returns to the outer MAS.
+#
+#           condition: null
+#           # Type    : str  (optional, default null)
+#           # Same SafeConditionEvaluator rules as MAS workflow_edges.
+#           # State fields available: messages, current_agent, agent_outputs,
+#           # plus any custom fields defined in state_fields below.
+#
+#           label: research-complete
+#           # Type    : str  (optional, default "")
+#
+#       state_fields:
+#         # Custom state fields extend the pipeline's inner TypedDict.
+#         # Built-in fields (messages, current_agent, agent_outputs) cannot
+#         # be overridden.
+#
+#         - name: search_queries_used
+#           # Type    : str  (required, ^[a-zA-Z_][a-zA-Z0-9_]*$, 1–100 chars)
+#           # Must    : Valid Python identifier; unique in this pipeline.
+#
+#           type: "List[str]"
+#           # Type    : str  (optional, default "Any")
+#           # Values  :
+#           #   Primitives : "str", "int", "float", "bool"
+#           #   Collections: "list", "dict",
+#           #                "List[str]", "List[int]", "List[float]", "List[dict]"
+#           #                "Dict[str, Any]", "Dict[str, str]"
+#           #   Optional   : "Optional[str]", "Optional[int]",
+#           #                "Optional[float]", "Optional[bool]"
+#           #   Fallback   : "Any"
+#
+#           default: []
+#           # Type    : Any  (optional, default null)
+#           # Purpose : Value assigned when the field is absent from the outer
+#           #           MAS state at pipeline entry.
+#
+#           reducer: append
+#           # Type    : str  (optional, default null)
+#           # Values  :
+#           #   null / omitted — Standard assignment (last writer wins).
+#           #   "replace"      — Explicit last-writer-wins (same as null).
+#           #   "append"       — List concatenation across parallel branches.
+#           #                    Use with List[*] types in fan-out pipelines.
+#
+#         - name: confidence_score
+#           type: "Optional[float]"
+#           default: null
+#           reducer: null            # null = replace (standard assignment)

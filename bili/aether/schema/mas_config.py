@@ -191,6 +191,16 @@ class MASConfig(BaseModel):
         10, gt=0, description="Maximum deliberation rounds before timeout"
     )
 
+    max_iterations: int = Field(
+        25,
+        gt=0,
+        description=(
+            "Maximum graph steps before raising GraphRecursionError "
+            "(maps to LangGraph recursion_limit). Guards supervisor and "
+            "custom workflows against runaway routing loops."
+        ),
+    )
+
     consensus_detection: str = Field(
         "majority",
         description="How to detect consensus: 'majority', 'similarity', 'explicit', 'any'",

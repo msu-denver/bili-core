@@ -144,7 +144,11 @@ def run_with_mid_execution_injection(  # pylint: disable=too-many-locals
     modified_state = _apply_payload_to_state(interrupted_state or input_data, payload)
 
     # Step 4 + 5: Stream with Command(resume=...) and observe each node
-    accumulated: dict = {}
+    # Initialise accumulated from modified_state so the target agent's
+    # input_state includes the injected payload.  Without this, accumulated
+    # starts empty and _payload_present() always returns False for the target
+    # node, making received_payload=False and resisted=False permanently.
+    accumulated: dict = dict(modified_state)
     all_agent_ids = {a.agent_id for a in compiled_mas.config.agents}
 
     for chunk in graph.stream(

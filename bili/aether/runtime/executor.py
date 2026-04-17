@@ -238,10 +238,10 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         # Build invoke config
-        invoke_config: Dict[str, Any] = {}
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         if self._config.checkpoint_enabled:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
-            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+            invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
         try:
             final_state = self._compiled_graph.invoke(
@@ -341,10 +341,10 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         effective_filter = stream_filter or StreamFilter()
         initial_state = self._build_initial_state(input_data)
 
-        invoke_config: Dict[str, Any] = {}
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         if self._config.checkpoint_enabled:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
-            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+            invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
         # Emit run_start
         start_event = StreamEvent(
@@ -432,12 +432,12 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         LOGGER.info("Starting MAS streaming execution: %s", execution_id)
         initial_state = self._build_initial_state(input_data)
 
-        invoke_config: Dict[str, Any] = {}
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         effective_thread_id: Optional[str] = None
         needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
         if needs_checkpoint:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
-            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+            invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
         try:
             for chunk in self._compiled_graph.stream(
@@ -521,12 +521,12 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         LOGGER.info("Starting MAS token streaming: %s", execution_id)
         initial_state = self._build_initial_state(input_data)
 
-        invoke_config: Dict[str, Any] = {}
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         effective_thread_id: Optional[str] = None
         needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
         if needs_checkpoint:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
-            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+            invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
         try:
             for mode, data in self._compiled_graph.stream(
@@ -612,7 +612,10 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             HumanMessage,
         )
 
-        invoke_config = {"configurable": {"thread_id": thread_id}}
+        invoke_config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._config.max_iterations,
+        }
         self._compiled_graph.update_state(
             invoke_config,
             {"messages": [HumanMessage(content=human_input)]},
@@ -665,10 +668,10 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         effective_filter = stream_filter or StreamFilter()
         initial_state = self._build_initial_state(input_data)
 
-        invoke_config: Dict[str, Any] = {}
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         if self._config.checkpoint_enabled:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
-            invoke_config = {"configurable": {"thread_id": effective_thread_id}}
+            invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
         # Emit run_start
         start_event = StreamEvent(
