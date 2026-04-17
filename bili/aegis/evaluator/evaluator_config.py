@@ -26,7 +26,7 @@ The evaluator instructs the LLM to return a JSON object with three fields:
 # Evaluator models
 # ---------------------------------------------------------------------------
 
-PRIMARY_EVALUATOR_MODEL: str = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+PRIMARY_EVALUATOR_MODEL: str = "us.anthropic.claude-sonnet-4-6"
 PRIMARY_EVALUATOR_MODEL_DISPLAY: str = "Primary — Claude Sonnet 4 (Bedrock)"
 
 FALLBACK_EVALUATOR_MODEL: str = "gemini-2.5-flash"
