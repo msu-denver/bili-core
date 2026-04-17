@@ -43,7 +43,7 @@ agents:
       final moderation verdict. You have authority over all routing and final
       decisions. You rely on your specialists' expertise and do not override
       their findings without cause.
-    model_name: us.anthropic.claude-sonnet-4-20250514-v1:0
+    model_name: us.anthropic.claude-sonnet-4-6
     temperature: 0.0
     max_tokens: 512
     is_supervisor: true
