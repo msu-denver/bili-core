@@ -302,6 +302,12 @@ bili/aegis/suites/cross_model/results/**/*.json
 bili/aegis/suites/cross_model/results/**/*.csv
 bili/aegis/suites/cross_model/results/**/*.ndjson
 
+# AEGIS unit-test structural-run outputs (collected at runtime — not committed)
+bili/aegis/tests/*/results/**/*.json
+bili/aegis/tests/*/results/**/*.csv
+bili/aegis/tests/*/results/**/*.ndjson
+bili/aegis/tests/*/results/**/*.html
+
 # Stray MASExecutor result files (root-level, from runs with save_results=True and no log_dir)
 # Pattern matches {mas_id}_{8-hex-chars}.json produced by MASExecutor's default naming.
 *_????????.json
