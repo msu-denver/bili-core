@@ -1,9 +1,14 @@
 name: Bili Core CI/CD Pipeline
 
 on:
+    # Run on PRs against any branch (gates merges via branch protection's
+    # required status check), and on direct pushes to the protected branches
+    # main and develop (covers post-merge runs and admin-bypass pushes).
+    # Feature-branch pushes do not double-trigger CI; the pull_request
+    # event covers them once a PR is open.
+    pull_request:
     push:
-        branches:
-            - '*'  # Trigger on any branch
+        branches: [main, develop]
 
 jobs:
     # Build the application on any branch commit
