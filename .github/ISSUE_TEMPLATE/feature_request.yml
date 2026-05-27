@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a new feature or enhancement for bili-core
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of bili-core would this affect?
+      options:
+        - IRIS (single-agent RAG)
+        - AETHER (multi-agent orchestration)
+        - AEGIS (security and adversarial evaluation)
+        - Authentication (bili/auth)
+        - Flask API
+        - Streamlit UI
+        - Container / build / deploy
+        - Cross-cutting / new component
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this feature solve? Who is the user, and what are they trying to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: A clear description of the feature and how it should behave.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed and why you preferred this one.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Mockups, links to related issues, references to upstream literature, or anything else useful.

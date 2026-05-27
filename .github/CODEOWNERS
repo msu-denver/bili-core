@@ -1,0 +1,38 @@
+# Code owners for sensitive paths in bili-core.
+#
+# CODEOWNERS enforces required reviews on the listed paths via branch protection.
+# Anyone listed here must be a direct collaborator on this repository (inherited
+# permissions silently fail to enforce CODEOWNERS rules).
+#
+# Format: <path-pattern> <@owner1> <@owner2> ...
+
+# Default owner for everything not matched below
+*                                 @daniel-pittman
+
+# CI/CD workflows can exfiltrate secrets or weaken the deploy pipeline
+/.github/                         @daniel-pittman
+/.github/workflows/               @daniel-pittman
+/.github/dependabot.yml           @daniel-pittman
+/.github/CODEOWNERS               @daniel-pittman
+
+# Build, packaging, and dependency manifests cross the supply chain
+/setup.py                         @daniel-pittman
+/requirements.txt                 @daniel-pittman
+/Dockerfile                       @daniel-pittman
+/docker-compose.yml               @daniel-pittman
+/run_python_formatters.sh         @daniel-pittman
+/.pre-commit-config.yaml          @daniel-pittman
+/.pylintrc                        @daniel-pittman
+
+# Project governance documents
+/SECURITY.md                      @daniel-pittman
+/CONTRIBUTING.md                  @daniel-pittman
+/LICENSE                          @daniel-pittman
+/CLAUDE.md                        @daniel-pittman
+
+# Authentication and authorization paths
+/bili/auth/                       @daniel-pittman
+/bili/flask_api/                  @daniel-pittman
+
+# AEGIS security framework
+/bili/aegis/                      @daniel-pittman
