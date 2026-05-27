@@ -5,30 +5,10 @@
 # BiliCore: An Open-Source LLM Framework
 
 <p align="center">
-  <a href="https://github.com/msu-denver/bili-core/actions"><img src="https://github.com/msu-denver/bili-core/actions/workflows/ci-cd.yml/badge.svg?branch=develop" alt="CI/CD"></a>
+  <a href="https://github.com/msu-denver/bili-core/actions/workflows/ci-cd.yml"><img src="https://github.com/msu-denver/bili-core/actions/workflows/ci-cd.yml/badge.svg?branch=develop" alt="CI/CD"></a>
   <a href="https://github.com/msu-denver/bili-core/releases/latest"><img src="https://img.shields.io/github/v/release/msu-denver/bili-core" alt="Latest Release"></a>
-  <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-6900%2B%20passing-brightgreen.svg" alt="6900+ Tests">
-  <img src="https://img.shields.io/badge/coverage-90%25-brightgreen.svg" alt="Coverage">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/LangChain-framework-orange.svg" alt="LangChain">
-  <img src="https://img.shields.io/badge/LangGraph-orchestration-orange.svg" alt="LangGraph">
-  <img src="https://img.shields.io/badge/Streamlit-UI-red.svg" alt="Streamlit">
-  <img src="https://img.shields.io/badge/Flask-API-lightgrey.svg" alt="Flask">
-  <img src="https://img.shields.io/badge/Docker-containerized-blue.svg" alt="Docker">
-  <img src="https://img.shields.io/badge/PostgreSQL-state-336791.svg" alt="PostgreSQL">
-  <img src="https://img.shields.io/badge/MongoDB-state-47A248.svg" alt="MongoDB">
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/AWS_Bedrock-supported-FF9900.svg" alt="AWS Bedrock">
-  <img src="https://img.shields.io/badge/Google_Vertex_AI-supported-4285F4.svg" alt="Google Vertex AI">
-  <img src="https://img.shields.io/badge/Azure_OpenAI-supported-0078D4.svg" alt="Azure OpenAI">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991.svg" alt="OpenAI">
-  <img src="https://img.shields.io/badge/Ollama-supported-000000.svg" alt="Ollama">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
 **BiliCore** is an open-source, domain-agnostic framework for building and testing LLM-powered applications. It provides single-agent orchestration, multi-agent system creation, and adversarial security testing in one modular package.
