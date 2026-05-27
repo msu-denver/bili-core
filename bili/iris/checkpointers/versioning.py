@@ -357,6 +357,21 @@ class VersionedCheckpointerMixin(ABC):
 
         # Check version
         doc_version = self._get_document_version(document)
+
+        # If the document version is HIGHER than the current format version,
+        # the schema was likely downgraded intentionally (e.g. as a workaround
+        # for an upstream serializer bug). Skip migration and use the document
+        # as-is rather than entering a migration loop that the registry cannot
+        # resolve.
+        if doc_version > self.format_version:
+            LOGGER.debug(
+                "Document version %d > current format version %d. "
+                "Skipping migration (likely intentional downgrade).",
+                doc_version,
+                self.format_version,
+            )
+            return False
+
         if doc_version < self.format_version:
             return True
 
