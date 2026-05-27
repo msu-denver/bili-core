@@ -13,9 +13,11 @@ Run with any Python that has Pillow installed:
 
     python scripts/generate_social_preview.py
 
-The script tries Avenir Next, Helvetica, then DejaVu Sans, then Pillow's
-built-in default. macOS will land on Avenir Next; Linux will land on
-DejaVu Sans. Output is byte-stable for a given Pillow + font combo.
+The script tries Avenir Next, Helvetica Neue, Helvetica, then DejaVu Sans,
+then Pillow's built-in default. macOS will land on Avenir Next; Linux will
+land on DejaVu Sans. Output is pixel-stable for a given Pillow + font combo
+(the PNG byte stream may shift across zlib/Pillow patch releases under
+``optimize=True``, but the rendered pixels are deterministic).
 """
 
 from __future__ import annotations
@@ -72,22 +74,45 @@ FONT_SEARCH_PATHS_BOLD = [
 ]
 
 
-def load_font(paths: list[str], size: int, bold: bool = False) -> ImageFont.ImageFont:
+# For .ttc font collections, the face-index layout varies per collection.
+# These maps record the bold and regular face indexes for each known
+# collection. Unknown collections in the search paths are skipped rather
+# than silently falling through to face 0, which would degrade a bold
+# request to whatever weight that collection happens to put at index 0
+# (typically Regular).
+TTC_BOLD_FACE_INDEX = {
+    "Avenir Next.ttc": 0,  # Avenir Next Bold
+    "HelveticaNeue.ttc": 1,  # Helvetica Neue Bold
+    "Helvetica.ttc": 1,  # Helvetica Bold
+}
+TTC_REGULAR_FACE_INDEX = {
+    "Avenir Next.ttc": 7,  # Avenir Next Regular
+    "HelveticaNeue.ttc": 0,  # Helvetica Neue Regular
+    "Helvetica.ttc": 0,  # Helvetica Regular
+}
+
+
+def load_font(
+    paths: list[str], size: int, bold: bool = False
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """Return the first font from ``paths`` that loads. Falls back to default.
 
-    For .ttc collections (macOS Avenir Next.ttc), face 0 is Bold and face 7 is
-    Regular. Other .ttc collections use face 0 for the primary face and may
-    bundle a Bold via the same collection at varying indexes; falling back to
-    index 0 there gets the right face for the regular case and an acceptable
-    weight for the bold case.
+    For .ttc collections, looks up the correct bold or regular face index in
+    the per-collection maps above. Unknown .ttc collections are skipped so a
+    bold request never silently degrades to a regular face.
     """
+    index_map = TTC_BOLD_FACE_INDEX if bold else TTC_REGULAR_FACE_INDEX
     for path in paths:
         try:
-            if "Avenir Next.ttc" in path:
-                index = 0 if bold else 7
-                return ImageFont.truetype(path, size=size, index=index)
             if path.endswith(".ttc"):
-                return ImageFont.truetype(path, size=size, index=0)
+                collection_name = next(
+                    (name for name in index_map if name in path), None
+                )
+                if collection_name is None:
+                    continue
+                return ImageFont.truetype(
+                    path, size=size, index=index_map[collection_name]
+                )
             return ImageFont.truetype(path, size=size)
         except (OSError, IOError):
             continue
