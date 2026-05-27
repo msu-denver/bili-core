@@ -1,0 +1,72 @@
+# Dependabot configuration for bili-core.
+#
+# Tracks updates for:
+#   - Python packages declared in requirements.txt
+#   - GitHub Actions referenced in .github/workflows/
+#
+# Dependabot opens one PR per outdated dependency, grouped where it makes sense
+# to keep review burden manageable. Security updates run independently of this
+# schedule via the "Dependabot security updates" repo setting.
+
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      langchain-ecosystem:
+        patterns:
+          - "langchain*"
+          - "langgraph*"
+      llm-providers:
+        patterns:
+          - "langchain-aws"
+          - "langchain-anthropic"
+          - "langchain-openai"
+          - "langchain-google-vertexai"
+          - "langchain-huggingface"
+      ml-frameworks:
+        patterns:
+          - "torch*"
+          - "transformers"
+          - "accelerate"
+          - "sentence-transformers"
+          - "tensorflow*"
+          - "tf-keras"
+          - "keras"
+      dev-tooling:
+        patterns:
+          - "black"
+          - "isort"
+          - "autoflake"
+          - "pylint*"
+          - "pre-commit"
+          - "pytest*"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
