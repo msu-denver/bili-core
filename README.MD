@@ -13,7 +13,7 @@
 
 **BiliCore** is an open-source, domain-agnostic framework for building and testing LLM-powered applications. It provides single-agent orchestration, multi-agent system creation, and adversarial security testing in one modular package.
 
-Developed as part of the [**Colorado Sustainability Hub**](https://sustainabilityhub.co/) initiative, funded by the **[National Science Foundation (NSF)](https://www.nsf.gov/)** and the **[NAIRR Pilot](https://nairrpilot.org/)**.
+Originally developed for the [**Colorado Sustainability Hub**](https://sustainabilityhub.co/) at MSU Denver's [**Community-Centered Computing (C3) Lab**](https://c3-lab.org/), bili-core now serves as the framework behind multiple research initiatives at the lab. Funded by the **[National Science Foundation (NSF)](https://www.nsf.gov/)** and the **[NAIRR Pilot](https://nairrpilot.org/)**.
 
 ---
 
@@ -298,6 +298,6 @@ All functionality is preserved — only the locations changed.
 
 ## Acknowledgments
 
-This research is supported by the [National Science Foundation (NSF) (Grant No. 2318730)](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2318730) and the [National Artificial Intelligence Research Resource (NAIRR) Pilot](https://nairrpilot.org/projects/awarded?_requestNumber=NAIRR240197). Their support has been instrumental in advancing AI accessibility and fostering innovation in sustainability-focused applications.
+bili-core is developed at MSU Denver's [Community-Centered Computing (C3) Lab](https://c3-lab.org/), which houses research projects spanning sustainability, education, and community-centered computing. This work is supported by the [National Science Foundation (NSF) (Grant No. 2318730)](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2318730) and the [National Artificial Intelligence Research Resource (NAIRR) Pilot](https://nairrpilot.org/projects/awarded?_requestNumber=NAIRR240197). Their support has been instrumental in advancing AI accessibility and fostering innovation in sustainability-focused applications.
 
-For more information, visit the [Sustainability Hub Website](https://sustainabilityhub.co/).
+For more information, visit the [C3 Lab website](https://c3-lab.org/) or the [Sustainability Hub website](https://sustainabilityhub.co/).
