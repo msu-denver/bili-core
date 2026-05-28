@@ -1,13 +1,16 @@
 """Pytest fixtures for the AETHER persistence attack test suite.
 
-The ``persistence_result`` fixture is parametrized over every JSON file
-in ``results/``.  When the directory is empty (i.e.
-``run_persistence_suite.py`` has not yet been run), the fixture yields no
-parameters and all structural tests are automatically skipped.
+The ``persistence_result`` fixture is parametrized over every JSON file in
+``fixtures/`` and ``results/``.  Committed sample fixtures under ``fixtures/``
+mean the suite always has at least one well-formed result to validate, so the
+structural tests run regardless of whether ``run_persistence_suite.py`` has
+populated ``results/`` with live output.
 
 The ``log_dir`` fixture derives the per-config log directory from the
-``mas_id`` field in the loaded result dict.  Log files (``attack_log.ndjson``
-and ``security_events.ndjson``) are written there by the runner.
+``mas_id`` field in the loaded result dict, preferring the committed
+``fixtures/`` companion logs (``attack_log.ndjson`` and
+``security_events.ndjson``) and falling back to live runner output in
+``results/``.
 
 Note on ``_find_repo_root``
 ---------------------------
@@ -80,8 +83,9 @@ def _collect_result_files() -> list:
 def persistence_result(request) -> dict:
     """Load one persistence result JSON file.
 
-    Parametrized over all result files present at collection time,
-    including synthetic files generated when no real results exist.
+    Parametrized over all result files present at collection time: the
+    committed sample fixtures under ``fixtures/`` plus any live runner
+    output under ``results/``.
     """
     return json.loads(request.param.read_text(encoding="utf-8"))
 

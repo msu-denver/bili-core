@@ -1,12 +1,14 @@
 """Tier 1 structural assertions for the AETHER persistence attack test suite.
 
 These tests are CI-safe and stub-mode compatible: they make no LLM calls,
-perform no semantic reasoning, and rely only on the JSON result files
-written by ``run_persistence_suite.py``.
+perform no semantic reasoning, and rely only on JSON result files.
 
 All tests are parametrized via the ``persistence_result`` fixture in
-``conftest.py``.  When ``results/`` is empty the tests are automatically
-skipped — run the suite first (requires a persistent checkpointer):
+``conftest.py``, which collects committed sample fixtures under ``fixtures/``
+plus any live runner output under ``results/``.  Because ``fixtures/`` always
+carries a well-formed sample, the tests run without first executing the suite.
+To validate live output, run the suite first (requires a persistent
+checkpointer):
 
     python bili/aegis/suites/persistence/run_persistence_suite.py
     pytest bili/aegis/tests/persistence/test_persistence_structural.py -v
