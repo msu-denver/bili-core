@@ -50,11 +50,50 @@ jobs:
               run: |
                 pylint bili/ --disable=import-error --fail-under=9
 
-            # Build and Test
-            - name: Build and Test
+            # Build package (this step only packages the dist/ artifact; the
+            # actual test suite runs in the separate test-application job below.
+            # scripts/build/build-and-test.sh is named for historical reasons and
+            # does not run pytest.)
+            - name: Build package
               run: ./scripts/build/build-and-test.sh
 
             # NOTE: No cache/save or upload-artifact step here intentionally.
             # bili-core is a shared library with no downstream deploy jobs (no ECR/ECS),
             # so caching dist/ would waste GitHub Actions storage quota (~3.5 GB per entry)
             # with nothing ever restoring it.
+
+    # Run the full pytest suite. Separate from build-application so the lint
+    # gate can fail fast without paying for the heavy dependency install, and
+    # so the two concerns (static checks vs. behavioral tests) are independent
+    # required status checks.
+    test-application:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+            - name: Set up Python
+              uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+              with:
+                python-version: '3.11'
+                # Cache the pip download/build artifacts keyed on requirements.txt
+                # so the heavy ML stack (torch, tensorflow, transformers) only
+                # fully reinstalls when dependencies change.
+                cache: 'pip'
+                cache-dependency-path: requirements.txt
+
+            # Full dependency install is required: the tests import the real
+            # bili modules, which import langchain, langgraph, pymongo, etc.
+            - name: Install dependencies
+              run: |
+                python -m pip install --upgrade pip
+                pip install -r requirements.txt
+              shell: bash
+
+            # Run the full test suite. No skips or errors are tolerated; the
+            # mongomock-backed checkpointer tests and the AEGIS structural
+            # fixtures mean the suite runs fully without external services.
+            - name: Run pytest
+              run: |
+                pytest bili/ -q --tb=short
+              shell: bash

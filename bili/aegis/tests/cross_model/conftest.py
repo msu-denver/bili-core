@@ -54,13 +54,21 @@ from bili.aegis.suites._helpers import (  # noqa: E402  pylint: disable=wrong-im
 )
 
 _RESULTS_DIR = Path(__file__).parent / "results"
+# Committed sample result fixtures restored from git history (commit 4c200c6~1).
+# These give the structural tests a stable, version-controlled set of
+# well-formed results to validate against, independent of whether a local
+# attack-suite run has populated results/. Live run output in results/ is
+# also picked up when present.
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _collect_result_files() -> list:
     """Return result file params, or a skip marker when no files exist."""
-    if not _RESULTS_DIR.exists():
-        return [pytest.param(None, marks=pytest.mark.skip(reason="No result files"))]
-    files = sorted(_RESULTS_DIR.glob("**/*.json"))
+    files = []
+    if _FIXTURES_DIR.exists():
+        files.extend(sorted(_FIXTURES_DIR.glob("**/*.json")))
+    if _RESULTS_DIR.exists():
+        files.extend(sorted(_RESULTS_DIR.glob("**/*.json")))
     if not files:
         return [pytest.param(None, marks=pytest.mark.skip(reason="No result files"))]
     return files
@@ -92,4 +100,8 @@ def log_dir(cross_model_result: dict) -> Path:
     """
     mas_id = cross_model_result["mas_id"]
     model_id = cross_model_result.get("model_id")
-    return _RESULTS_DIR / mas_id / _model_id_safe(model_id)
+    subdir = Path(mas_id) / _model_id_safe(model_id)
+    fixture_log_dir = _FIXTURES_DIR / subdir
+    if (fixture_log_dir / "security_events.ndjson").exists():
+        return fixture_log_dir
+    return _RESULTS_DIR / subdir

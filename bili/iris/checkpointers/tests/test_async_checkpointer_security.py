@@ -13,24 +13,20 @@ pymongo.MongoClient and provides both sync and async methods natively.
 
 # pylint: disable=missing-function-docstring,redefined-outer-name,protected-access,abstract-class-instantiated
 
-import os
 
+import mongomock
 import pytest
 from langchain_core.messages import HumanMessage
 
 from bili.iris.checkpointers.mongo_checkpointer import AsyncPruningMongoDBSaver
 
-# Skip tests if MongoDB is not available
-pytest_plugins = ("pytest_anyio",)
+# anyio's pytest plugin is auto-registered via the anyio package's
+# `anyio.pytest_plugin` entry_point when anyio is installed. The
+# `pytestmark = pytest.mark.anyio` below is all that's needed to opt
+# the tests in. There is no separate `pytest_anyio` package on PyPI, so
+# declaring `pytest_plugins = ("pytest_anyio",)` here would fail
+# collection with ImportError.
 
-_MONGO_URI = os.environ.get("MONGO_CONNECTION_STRING", "mongodb://localhost:27017")
-
-try:
-    from pymongo import MongoClient
-
-    MONGODB_AVAILABLE = True
-except ImportError:
-    MONGODB_AVAILABLE = False
 
 # Mark all tests in this module as anyio
 pytestmark = pytest.mark.anyio
@@ -44,33 +40,106 @@ pytestmark = pytest.mark.anyio
 _TEST_DB_NAME = "test_bili_async_security"
 
 
+@pytest.fixture(autouse=True)
+def _patch_mongomock_pymongo49_compat(monkeypatch):
+    """Bridge mongomock 4.3.0 to the pymongo 4.9+ API that langgraph uses.
+
+    langgraph's ``MongoDBSaver.__init__`` (the parent class) bootstraps indexes
+    with two pymongo-4.9-era calls that mongomock 4.3.0 predates:
+
+    1. ``collection.list_indexes().to_list()`` — ``to_list()`` is a pymongo 4.9+
+       cursor method; mongomock returns a bare generator without it.
+    2. ``collection.create_index(keys=[...], unique=True)`` — pymongo names the
+       first parameter ``keys``; mongomock names it ``key_or_list``, so the
+       keyword form raises ``TypeError``.
+
+    Both raise during construction against the in-memory backend. This shim
+    adds ``to_list()`` to the index cursor and translates the ``keys=`` keyword
+    to mongomock's ``key_or_list``. Remove once mongomock ships
+    pymongo-4.9-compatible cursors and ``create_index`` signature.
+    """
+    import mongomock.collection
+
+    original_list_indexes = mongomock.collection.Collection.list_indexes
+    original_create_index = mongomock.collection.Collection.create_index
+
+    class _ToListCursor:
+        def __init__(self, items):
+            self._items = items
+
+        def to_list(self, length=None):  # noqa: ARG002 - pymongo signature parity
+            return list(self._items)
+
+        def __iter__(self):
+            return iter(self._items)
+
+    def _patched_list_indexes(self, *args, **kwargs):
+        return _ToListCursor(list(original_list_indexes(self, *args, **kwargs)))
+
+    def _patched_create_index(self, *args, **kwargs):
+        # pymongo accepts the index spec as keys=; mongomock wants key_or_list.
+        if "keys" in kwargs and "key_or_list" not in kwargs:
+            kwargs["key_or_list"] = kwargs.pop("keys")
+        # mongomock doesn't accept expireAfterSeconds; drop it (TTL behavior is
+        # irrelevant to these access-control tests).
+        kwargs.pop("expireAfterSeconds", None)
+        return original_create_index(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        mongomock.collection.Collection, "list_indexes", _patched_list_indexes
+    )
+    monkeypatch.setattr(
+        mongomock.collection.Collection, "create_index", _patched_create_index
+    )
+
+    # mongomock 4.3.0's aggregation parser doesn't implement the $toDate
+    # type-conversion operator. get_user_threads() uses
+    # {"$addFields": {"last_updated": {"$toDate": "$last_oid"}}} to turn the
+    # max ObjectId into its embedded creation timestamp for recency sorting.
+    # Add a minimal $toDate handler covering the types this codebase produces.
+    import datetime as _dt
+
+    import mongomock.aggregate
+    from bson import ObjectId as _ObjectId
+
+    _original_parse = mongomock.aggregate._Parser.parse
+
+    def _patched_parse(self, expression):
+        if isinstance(expression, dict) and list(expression.keys()) == ["$toDate"]:
+            operand = expression["$toDate"]
+            value = (
+                self.parse(operand)
+                if isinstance(operand, dict)
+                else self._parse_basic_expression(operand)
+            )
+            if value is None or isinstance(value, _dt.datetime):
+                return value
+            if isinstance(value, _ObjectId):
+                return value.generation_time
+            if isinstance(value, (int, float)):
+                return _dt.datetime.fromtimestamp(value / 1000, tz=_dt.timezone.utc)
+            if isinstance(value, str):
+                return _dt.datetime.fromisoformat(value)
+            raise TypeError(f"$toDate cannot convert {type(value).__name__}")
+        return _original_parse(self, expression)
+
+    monkeypatch.setattr(mongomock.aggregate._Parser, "parse", _patched_parse)
+
+
 @pytest.fixture
 async def async_mongo_client():
-    """Provide sync MongoDB client for testing.
+    """Provide an in-memory mongomock client for testing.
 
     MongoDBSaver 0.3.x uses a sync pymongo.MongoClient internally and
     provides async methods natively — no motor AsyncIOMotorClient needed.
+    mongomock.MongoClient is a drop-in replacement that implements real
+    MongoDB query semantics (filtering, per-document isolation) in memory,
+    so these cross-tenant security tests validate actual access-control
+    behavior without requiring a live MongoDB server. Each test gets a
+    fresh client, so no cross-test cleanup is needed.
     """
-    if not MONGODB_AVAILABLE:
-        pytest.skip("MongoDB (pymongo) not available")
-
-    client = MongoClient(_MONGO_URI)
-    db = client[_TEST_DB_NAME]
-
-    # Clean up before test — drop all checkpoint collections to prevent
-    # test pollution across runs regardless of collection naming.
-    db.checkpoints.delete_many({})
-    db.checkpoint_writes.delete_many({})
-    db.checkpoints_aio.delete_many({})
-    db.checkpoint_writes_aio.delete_many({})
-
+    client = mongomock.MongoClient()
     yield client
-
-    # Clean up after test
-    db.checkpoints.delete_many({})
-    db.checkpoint_writes.delete_many({})
-    db.checkpoints_aio.delete_many({})
-    db.checkpoint_writes_aio.delete_many({})
     client.close()
 
 
