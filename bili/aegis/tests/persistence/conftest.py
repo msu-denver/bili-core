@@ -55,6 +55,12 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _RESULTS_DIR = Path(__file__).parent / "results"
+# Committed sample result fixtures restored from git history (commit 4c200c6~1).
+# These give the structural tests a stable, version-controlled set of
+# well-formed results to validate against, independent of whether a local
+# attack-suite run has populated results/. Live run output in results/ is
+# also picked up when present.
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _synthetic_persistence_result() -> dict:
@@ -124,10 +130,12 @@ _ensure_synthetic_files()
 
 
 def _collect_result_files() -> list:
-    """Return all JSON result file paths under results/."""
-    if not _RESULTS_DIR.exists():
-        return []
-    files = sorted(_RESULTS_DIR.glob("**/*.json"))
+    """Return all JSON result file paths under fixtures/ and results/."""
+    files = []
+    if _FIXTURES_DIR.exists():
+        files.extend(sorted(_FIXTURES_DIR.glob("**/*.json")))
+    if _RESULTS_DIR.exists():
+        files.extend(sorted(_RESULTS_DIR.glob("**/*.json")))
     return files
 
 

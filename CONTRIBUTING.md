@@ -36,10 +36,20 @@ Before opening a pull request:
 
 - Run `./run_python_formatters.sh` to apply Black, Autoflake, and Isort.
 - Run `pylint bili/ --fail-under=9` to confirm the lint score is at least 9.0.
+- Run `pytest bili/` and confirm the full suite passes. The suite runs without any external services: MongoDB-backed tests use `mongomock`, and the AEGIS structural tests validate committed sample fixtures under `bili/aegis/tests/<suite>/fixtures/`. No tests should be skipped or error.
 - Add tests for new functionality. Existing test conventions for each component live under `bili/<component>/tests/`.
 - Use type hints throughout new code.
 
-The pre-commit hooks enforce most of the above automatically.
+The pre-commit hooks enforce the formatters and lint automatically. The test suite is enforced in CI.
+
+### Continuous integration
+
+Two required status checks gate every PR to `main` and `develop`:
+
+- `build-application`: runs pylint at the 9.0 threshold and builds the distribution package.
+- `test-application`: installs the full dependency set and runs the complete `pytest bili/` suite.
+
+Both must pass before a PR can merge. The test job runs the suite with no external services, so a green local `pytest bili/` should match CI.
 
 ### Opening a pull request
 

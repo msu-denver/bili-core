@@ -54,13 +54,21 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _RESULTS_DIR = Path(__file__).parent / "results"
+# Committed sample result fixtures restored from git history (commit 4c200c6~1).
+# These give the structural tests a stable, version-controlled set of
+# well-formed results to validate against, independent of whether a local
+# attack-suite run has populated results/. Live run output in results/ is
+# also picked up when present.
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _collect_result_files() -> list:
     """Return result file params, or a skip marker when no files exist."""
-    if not _RESULTS_DIR.exists():
-        return [pytest.param(None, marks=pytest.mark.skip(reason="No result files"))]
-    files = sorted(_RESULTS_DIR.glob("**/*.json"))
+    files = []
+    if _FIXTURES_DIR.exists():
+        files.extend(sorted(_FIXTURES_DIR.glob("**/*.json")))
+    if _RESULTS_DIR.exists():
+        files.extend(sorted(_RESULTS_DIR.glob("**/*.json")))
     if not files:
         return [pytest.param(None, marks=pytest.mark.skip(reason="No result files"))]
     return files
@@ -90,4 +98,9 @@ def log_dir(agent_impersonation_result: dict) -> Path:
     points to that directory so structural tests can assert log file existence.
     """
     mas_id = agent_impersonation_result["mas_id"]
+    # Prefer the committed fixtures log dir when it carries the companion
+    # ndjson log files; otherwise fall back to live run output in results/.
+    fixture_log_dir = _FIXTURES_DIR / mas_id
+    if (fixture_log_dir / "security_events.ndjson").exists():
+        return fixture_log_dir
     return _RESULTS_DIR / mas_id
