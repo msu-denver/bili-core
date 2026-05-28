@@ -27,7 +27,7 @@ Run the suite first (requires a persistent checkpointer), then run the
 structural tests:
 
     python bili/aegis/suites/persistence/run_persistence_suite.py
-    pytest bili/aegis/suites/persistence/test_persistence_structural.py -v
+    pytest bili/aegis/tests/persistence/test_persistence_structural.py -v
 """
 
 import json
@@ -63,72 +63,6 @@ _RESULTS_DIR = Path(__file__).parent / "results"
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def _synthetic_persistence_result() -> dict:
-    """Build a minimal synthetic persistence result for structural tests.
-
-    Used when no real result files exist (e.g. no persistent checkpointer
-    is configured). This ensures structural tests always run and validate
-    the expected schema shape.
-    """
-    return {
-        "payload_id": "synthetic_persistence_001",
-        "injection_type": "session_fabrication",
-        "severity": "high",
-        "mas_id": "synthetic_test",
-        "injection_phase": "checkpoint_injection",
-        "attack_suite": "persistence",
-        "execution": {
-            "success": True,
-            "duration_ms": 100.0,
-            "agent_count": 2,
-            "message_count": 4,
-        },
-        "propagation_path": ["agent_a"],
-        "influenced_agents": [],
-        "resistant_agents": ["agent_a"],
-        "run_metadata": {
-            "stub_mode": True,
-            "timestamp": "2026-01-01T00:00:00Z",
-            "tier3_score": "",
-            "tier3_confidence": "",
-            "tier3_reasoning": "",
-        },
-        "target_agent_id": "agent_a",
-        "config_fingerprint": {
-            "config_path": "bili/aether/config/examples/simple_chain.yaml",
-            "yaml_hash": "synthetic",
-        },
-    }
-
-
-def _ensure_synthetic_files() -> None:
-    """Create synthetic result files so structural tests always run.
-
-    When no real result files exist (e.g. no persistent checkpointer
-    is configured), this creates a minimal JSON result plus the log
-    files that the structural tests expect to find on disk.
-    """
-    synthetic_dir = _RESULTS_DIR / "synthetic_test"
-    result_file = synthetic_dir / "synthetic_persistence_001_checkpoint.json"
-    if result_file.exists():
-        return
-    synthetic_dir.mkdir(parents=True, exist_ok=True)
-    result_file.write_text(
-        json.dumps(_synthetic_persistence_result()), encoding="utf-8"
-    )
-    (synthetic_dir / "attack_log.ndjson").write_text(
-        json.dumps({"attack_id": "synthetic", "success": True}) + "\n",
-        encoding="utf-8",
-    )
-    (synthetic_dir / "security_events.ndjson").write_text(
-        json.dumps({"event_type": "ATTACK_DETECTED", "severity": "low"}) + "\n",
-        encoding="utf-8",
-    )
-
-
-_ensure_synthetic_files()
-
-
 def _collect_result_files() -> list:
     """Return all JSON result file paths under fixtures/ and results/."""
     files = []
@@ -161,4 +95,9 @@ def log_dir(persistence_result: dict) -> Path:
     points to that directory so structural tests can assert log file existence.
     """
     mas_id = persistence_result["mas_id"]
+    # Prefer the committed fixtures log dir when it carries the companion
+    # ndjson log files; otherwise fall back to live run output in results/.
+    fixture_log_dir = _FIXTURES_DIR / mas_id
+    if (fixture_log_dir / "security_events.ndjson").exists():
+        return fixture_log_dir
     return _RESULTS_DIR / mas_id

@@ -26,7 +26,7 @@ Usage
 Run the suite first, then run the structural tests:
 
     python bili/aegis/suites/bias_inheritance/run_bias_inheritance_suite.py --stub
-    pytest bili/aegis/suites/bias_inheritance/test_bias_inheritance_structural.py -v
+    pytest bili/aegis/tests/bias_inheritance/test_bias_inheritance_structural.py -v
 """
 
 import json

@@ -26,7 +26,7 @@ Usage
 Run the suite first, then run the structural tests:
 
     python bili/aegis/suites/jailbreak/run_jailbreak_suite.py --stub
-    pytest bili/aegis/suites/jailbreak/test_jailbreak_structural.py -v
+    pytest bili/aegis/tests/jailbreak/test_jailbreak_structural.py -v
 """
 
 import json

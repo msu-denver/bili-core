@@ -26,7 +26,7 @@ Usage
 Run the suite first, then run the structural tests:
 
     python bili/aegis/suites/memory_poisoning/run_memory_poisoning_suite.py --stub
-    pytest bili/aegis/suites/memory_poisoning/test_memory_poisoning_structural.py -v
+    pytest bili/aegis/tests/memory_poisoning/test_memory_poisoning_structural.py -v
 """
 
 import json

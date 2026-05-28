@@ -26,7 +26,7 @@ Usage
 Run the suite first, then run the structural tests:
 
     python bili/aegis/suites/agent_impersonation/run_agent_impersonation_suite.py --stub
-    pytest bili/aegis/suites/agent_impersonation/test_agent_impersonation_structural.py -v
+    pytest bili/aegis/tests/agent_impersonation/test_agent_impersonation_structural.py -v
 """
 
 import json
