@@ -10,6 +10,15 @@ on:
     push:
         branches: [main, develop]
 
+# Auto-cancel superseded in-progress runs for the same PR/ref so a rapid
+# series of pushes doesn't queue redundant heavy test runs. Cancellation is
+# scoped to pull_request events only: pushes to the protected branches
+# main/develop always run to completion so a release-path run is never
+# cancelled mid-flight.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Default GITHUB_TOKEN permissions for every job in this workflow. Limited to
 # contents:read so an attacker who modifies a script that runs in CI (such as
 # scripts/build/build-and-test.sh) cannot use the token to write to the repo,
@@ -23,6 +32,7 @@ jobs:
     # Build the application on any branch commit
     build-application:
         runs-on: ubuntu-latest
+        timeout-minutes: 15
         steps:
             # Checkout code
             - name: Checkout code
@@ -68,6 +78,7 @@ jobs:
     # required status checks.
     test-application:
         runs-on: ubuntu-latest
+        timeout-minutes: 30
         steps:
             - name: Checkout code
               uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

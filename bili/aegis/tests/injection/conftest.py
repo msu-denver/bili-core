@@ -26,7 +26,7 @@ Usage
 Run the suite first, then run the structural tests:
 
     python bili/aegis/suites/injection/run_injection_suite.py --stub
-    pytest bili/aegis/suites/injection/test_injection_structural.py -v
+    pytest bili/aegis/tests/injection/test_injection_structural.py -v
 """
 
 import json

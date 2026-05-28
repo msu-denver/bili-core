@@ -1,13 +1,16 @@
 """Pytest fixtures for the AETHER persistence attack test suite.
 
-The ``persistence_result`` fixture is parametrized over every JSON file
-in ``results/``.  When the directory is empty (i.e.
-``run_persistence_suite.py`` has not yet been run), the fixture yields no
-parameters and all structural tests are automatically skipped.
+The ``persistence_result`` fixture is parametrized over every JSON file in
+``fixtures/`` and ``results/``.  Committed sample fixtures under ``fixtures/``
+mean the suite always has at least one well-formed result to validate, so the
+structural tests run regardless of whether ``run_persistence_suite.py`` has
+populated ``results/`` with live output.
 
 The ``log_dir`` fixture derives the per-config log directory from the
-``mas_id`` field in the loaded result dict.  Log files (``attack_log.ndjson``
-and ``security_events.ndjson``) are written there by the runner.
+``mas_id`` field in the loaded result dict, preferring the committed
+``fixtures/`` companion logs (``attack_log.ndjson`` and
+``security_events.ndjson``) and falling back to live runner output in
+``results/``.
 
 Note on ``_find_repo_root``
 ---------------------------
@@ -27,7 +30,7 @@ Run the suite first (requires a persistent checkpointer), then run the
 structural tests:
 
     python bili/aegis/suites/persistence/run_persistence_suite.py
-    pytest bili/aegis/suites/persistence/test_persistence_structural.py -v
+    pytest bili/aegis/tests/persistence/test_persistence_structural.py -v
 """
 
 import json
@@ -63,72 +66,6 @@ _RESULTS_DIR = Path(__file__).parent / "results"
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def _synthetic_persistence_result() -> dict:
-    """Build a minimal synthetic persistence result for structural tests.
-
-    Used when no real result files exist (e.g. no persistent checkpointer
-    is configured). This ensures structural tests always run and validate
-    the expected schema shape.
-    """
-    return {
-        "payload_id": "synthetic_persistence_001",
-        "injection_type": "session_fabrication",
-        "severity": "high",
-        "mas_id": "synthetic_test",
-        "injection_phase": "checkpoint_injection",
-        "attack_suite": "persistence",
-        "execution": {
-            "success": True,
-            "duration_ms": 100.0,
-            "agent_count": 2,
-            "message_count": 4,
-        },
-        "propagation_path": ["agent_a"],
-        "influenced_agents": [],
-        "resistant_agents": ["agent_a"],
-        "run_metadata": {
-            "stub_mode": True,
-            "timestamp": "2026-01-01T00:00:00Z",
-            "tier3_score": "",
-            "tier3_confidence": "",
-            "tier3_reasoning": "",
-        },
-        "target_agent_id": "agent_a",
-        "config_fingerprint": {
-            "config_path": "bili/aether/config/examples/simple_chain.yaml",
-            "yaml_hash": "synthetic",
-        },
-    }
-
-
-def _ensure_synthetic_files() -> None:
-    """Create synthetic result files so structural tests always run.
-
-    When no real result files exist (e.g. no persistent checkpointer
-    is configured), this creates a minimal JSON result plus the log
-    files that the structural tests expect to find on disk.
-    """
-    synthetic_dir = _RESULTS_DIR / "synthetic_test"
-    result_file = synthetic_dir / "synthetic_persistence_001_checkpoint.json"
-    if result_file.exists():
-        return
-    synthetic_dir.mkdir(parents=True, exist_ok=True)
-    result_file.write_text(
-        json.dumps(_synthetic_persistence_result()), encoding="utf-8"
-    )
-    (synthetic_dir / "attack_log.ndjson").write_text(
-        json.dumps({"attack_id": "synthetic", "success": True}) + "\n",
-        encoding="utf-8",
-    )
-    (synthetic_dir / "security_events.ndjson").write_text(
-        json.dumps({"event_type": "ATTACK_DETECTED", "severity": "low"}) + "\n",
-        encoding="utf-8",
-    )
-
-
-_ensure_synthetic_files()
-
-
 def _collect_result_files() -> list:
     """Return all JSON result file paths under fixtures/ and results/."""
     files = []
@@ -146,8 +83,9 @@ def _collect_result_files() -> list:
 def persistence_result(request) -> dict:
     """Load one persistence result JSON file.
 
-    Parametrized over all result files present at collection time,
-    including synthetic files generated when no real results exist.
+    Parametrized over all result files present at collection time: the
+    committed sample fixtures under ``fixtures/`` plus any live runner
+    output under ``results/``.
     """
     return json.loads(request.param.read_text(encoding="utf-8"))
 
@@ -161,4 +99,9 @@ def log_dir(persistence_result: dict) -> Path:
     points to that directory so structural tests can assert log file existence.
     """
     mas_id = persistence_result["mas_id"]
+    # Prefer the committed fixtures log dir when it carries the companion
+    # ndjson log files; otherwise fall back to live run output in results/.
+    fixture_log_dir = _FIXTURES_DIR / mas_id
+    if (fixture_log_dir / "security_events.ndjson").exists():
+        return fixture_log_dir
     return _RESULTS_DIR / mas_id

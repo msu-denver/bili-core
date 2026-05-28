@@ -22,7 +22,7 @@ Usage
 Run the suite first, then run the structural tests:
 
     python bili/aegis/suites/cross_model/run_cross_model_suite.py --stub
-    pytest bili/aegis/suites/cross_model/test_cross_model_structural.py -v
+    pytest bili/aegis/tests/cross_model/test_cross_model_structural.py -v
 """
 
 import json
