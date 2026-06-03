@@ -85,7 +85,7 @@ def read_http_git_requirements():
 
 setup(
     name="bili-core",
-    version="5.2.1",
+    version="5.2.2",
     packages=find_packages(),  # Automatically detect all packages
     # find_packages() only collects .py modules, so non-Python runtime data
     # (prompts, images, aether example configs) must be declared explicitly or
