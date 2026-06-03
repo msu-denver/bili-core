@@ -1,0 +1,16 @@
+# Ship the non-Python runtime data files that live inside the bili package.
+#
+# setup.py uses find_packages(), which only collects Python modules (.py). By
+# default setuptools does NOT bundle data files such as JSON, images, or YAML,
+# so the wheel/sdist omitted them entirely. Code that reads these files at
+# import time then crashed with FileNotFoundError once bili-core was installed
+# from a wheel (e.g. bili/streamlit_ui/ui/configuration_panels.py and
+# bili/flask_app.py both load bili/prompts/default_prompts.json on import).
+#
+# These directives are intentionally targeted at the three directories that
+# hold runtime data so the distribution does NOT also pull in the aegis test
+# fixtures or the Markdown docs under the package tree. Keep this in sync with
+# the package_data globs in setup.py.
+include bili/prompts/*.json
+recursive-include bili/images *
+recursive-include bili/aether/config/examples *.yaml
