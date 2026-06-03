@@ -87,6 +87,19 @@ setup(
     name="bili-core",
     version="5.2.1",
     packages=find_packages(),  # Automatically detect all packages
+    # find_packages() only collects .py modules, so non-Python runtime data
+    # (prompts, images, aether example configs) must be declared explicitly or
+    # the wheel ships without them and import-time file reads crash. These globs
+    # are relative to the bili/ package directory and intentionally targeted so
+    # the distribution does not also bundle the aegis test fixtures or docs.
+    # Keep in sync with MANIFEST.in (which controls the sdist).
+    package_data={
+        "bili": [
+            "prompts/*.json",
+            "images/*",
+            "aether/config/examples/*.yaml",
+        ],
+    },
     install_requires=read_requirements(),  # Load only standard dependencies
     cmdclass={
         "install": PostInstallCommand,
