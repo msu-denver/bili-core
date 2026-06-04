@@ -85,8 +85,19 @@ def read_http_git_requirements():
 
 setup(
     name="bili-core",
-    version="5.2.2",
-    packages=find_packages(),  # Automatically detect all packages
+    version="5.2.3",
+    # Detect runtime packages while excluding every test subpackage. Without
+    # the exclude, find_packages() bundles 200+ .py test modules (under
+    # bili/<component>/tests/ and bili/<component>/<subcomponent>/tests/)
+    # into the wheel and sdist as a side effect of having __init__.py in
+    # each tests/ dir. The exclude patterns match full dotted package paths:
+    # "*.tests" catches packages like bili.aegis.tests and bili.aether.tests,
+    # and "*.tests.*" catches their subpackages (bili.aegis.tests.injection,
+    # bili.aegis.tests.injection.payloads, and so on). No runtime code
+    # imports from any bili.*.tests module (verified by grep), so dropping
+    # them from the distribution is safe; pytest still discovers them at
+    # the source-tree level when developers run the suite locally or in CI.
+    packages=find_packages(exclude=["*.tests", "*.tests.*", "tests", "tests.*"]),
     # find_packages() only collects .py modules, so non-Python runtime data
     # (prompts, images, aether example configs) must be declared explicitly or
     # the wheel ships without them and import-time file reads crash. These globs
