@@ -31,3 +31,27 @@ jobs:
           claude-model: claude-sonnet-4-5-20250929
           claudecode-timeout: 20
           exclude-directories: node_modules,dist,.git,venv,__pycache__,build
+
+      # The action above swallows scan failures: when it can't fetch the PR
+      # diff (e.g. a 406 because the diff is too large for GitHub's API) it
+      # writes an {"error": ...} results file, downgrades it to a ::warning::,
+      # reports findings_count=0, and the job goes GREEN. That is a false
+      # all-clear: nothing was actually scanned. This step turns that silent
+      # failure into a hard job failure so the PR check is red and a human
+      # knows to run a LOCAL security review (`/security-review`) before merge.
+      #
+      # It fails ONLY when the results file is present AND carries an .error,
+      # so a genuinely clean scan (no .error) and a marker-deduped re-run
+      # (no results file at all) both pass untouched.
+      - name: Fail on silent security-scan failure
+        if: always()
+        shell: bash
+        run: |
+          RESULTS="claudecode-results.json"
+          if [ -f "$RESULTS" ] && jq -e '.error' "$RESULTS" >/dev/null 2>&1; then
+            ERROR_MSG=$(jq -r '.error' "$RESULTS")
+            echo "::error title=Security scan did not run::$ERROR_MSG"
+            echo "::error::The automated security review FAILED to analyze this PR and covered nothing. A 406 here means the PR diff is too large for GitHub's API. Run a local '/security-review' on this branch before merging."
+            exit 1
+          fi
+          echo "No silent-failure signal: the security scan ran cleanly or was deduped."
