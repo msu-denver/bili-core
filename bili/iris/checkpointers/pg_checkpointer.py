@@ -865,10 +865,11 @@ class PruningPostgresSaver(
 
         messages = []
         for msg in raw_messages:
-            # Get message type - handle both objects and dicts
-            if hasattr(msg, "__class__"):
-                msg_class = msg.__class__.__name__
-            elif isinstance(msg, dict):
+            # Get message type - handle both objects and dicts. Check dict
+            # first: every Python object (including dict) has __class__, so a
+            # leading hasattr(msg, "__class__") guard would always win and the
+            # dict-specific type extraction below would be dead code.
+            if isinstance(msg, dict):
                 # For dict-like messages, try to determine type from 'type' field
                 msg_class = msg.get("type", msg.get("__class__", "unknown"))
                 # Handle serialized format where type might be in different places
@@ -878,6 +879,8 @@ class PruningPostgresSaver(
                         if isinstance(msg.get("id"), list)
                         else "unknown"
                     )
+            elif hasattr(msg, "__class__"):
+                msg_class = msg.__class__.__name__
             else:
                 msg_class = "unknown"
 
@@ -1089,7 +1092,7 @@ async def get_async_pg_checkpointer(keep_last_n: int = 5, user_id: str | None = 
         checkpointer = AsyncPruningPostgresSaver(
             pg_pool, keep_last_n=keep_last_n, user_id=user_id
         )
-        await checkpointer.asetup()  # Async setup
+        await checkpointer.setup()  # Async setup (AsyncPostgresSaver.setup is a coroutine)
         await checkpointer.aensure_indexes()  # Create indexes
         return checkpointer
     return None

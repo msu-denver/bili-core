@@ -4,15 +4,22 @@ Covers needs_migration detection, metadata migration, blob
 transcoding, and batch collection migration with mocked MongoDB.
 """
 
+import json
 from unittest.mock import MagicMock, patch
 
+import bson
+import msgpack
 import pytest
 
 from bili.iris.checkpointers.migrations.mongo.v1_to_v2 import (
+    _custom_ext_decoder,
+    _decode_msgpack_blob,
     _json_bytes_handler,
     _migrate_blob,
     _migrate_metadata,
     _needs_migration,
+    _unwrap_binary_value,
+    migrate_all_collections,
     migrate_checkpoint_collection,
     migrate_v1_to_v2,
 )
@@ -277,3 +284,282 @@ class TestMigrateCheckpointCollection:
         stats = migrate_checkpoint_collection(collection, dry_run=False)
         # msgpack with non-bytes value should fail gracefully
         assert stats["failed"] + stats["migrated"] + stats["skipped"] > 0
+
+    def test_batch_progress_logging_threshold(self):
+        """Crossing the batch_size threshold logs progress without error."""
+        collection = MagicMock()
+        # Two documents that both need migration, batch_size=1 forces the
+        # progress-logging branch on each migrated document.
+        docs = [
+            {
+                "_id": f"id{i}",
+                "thread_id": "t1",
+                "type": "json",
+                "metadata": {"source": "loop"},
+            }
+            for i in range(2)
+        ]
+        collection.find.return_value = docs
+        stats = migrate_checkpoint_collection(collection, dry_run=False, batch_size=1)
+        assert stats["migrated"] == 2
+        assert collection.update_one.call_count == 2
+
+    def test_update_failure_increments_failed(self):
+        """An exception during update_one increments the failed counter."""
+        collection = MagicMock()
+        doc = {
+            "_id": "id1",
+            "thread_id": "t1",
+            "type": "json",
+            "metadata": {"source": "loop"},
+        }
+        collection.find.return_value = [doc]
+        collection.update_one.side_effect = RuntimeError("db down")
+        stats = migrate_checkpoint_collection(collection, dry_run=False)
+        assert stats["failed"] == 1
+        assert stats["migrated"] == 0
+
+
+# =========================================================================
+# _custom_ext_decoder
+# =========================================================================
+
+
+class TestCustomExtDecoder:
+    """Tests for the nested msgpack extension decoder."""
+
+    def test_non_code5_returns_exttype(self):
+        """Non-5 extension codes are returned as ExtType placeholders."""
+        result = _custom_ext_decoder(7, b"payload")
+        assert isinstance(result, msgpack.ExtType)
+        assert result.code == 7
+        assert result.data == b"payload"
+
+    def test_code5_unpacks_nested_payload(self):
+        """Code 5 recursively unpacks the nested msgpack payload."""
+        nested = msgpack.packb({"inner": "value"})
+        result = _custom_ext_decoder(5, nested)
+        assert result == {"inner": "value"}
+
+    def test_code5_unpack_failure_returns_placeholder(self):
+        """A code-5 payload that fails to unpack yields a placeholder string."""
+        # 0xc1 is the reserved/never-used msgpack byte and raises on unpack.
+        result = _custom_ext_decoder(5, b"\xc1")
+        assert isinstance(result, str)
+        assert "Failed to unpack ExtType(5)" in result
+
+
+# =========================================================================
+# _decode_msgpack_blob
+# =========================================================================
+
+
+class TestDecodeMsgpackBlob:
+    """Tests for raw msgpack blob decoding."""
+
+    def test_decodes_packed_dict(self):
+        """A packed dict round-trips through the decoder."""
+        packed = msgpack.packb({"a": 1, "b": [2, 3]})
+        assert _decode_msgpack_blob(packed) == {"a": 1, "b": [2, 3]}
+
+    def test_raises_when_msgpack_unavailable(self):
+        """A RuntimeError is raised when msgpack is not installed."""
+        with patch(
+            "bili.iris.checkpointers.migrations.mongo.v1_to_v2.MSGPACK_AVAILABLE",
+            False,
+        ):
+            with pytest.raises(RuntimeError, match="msgpack package required"):
+                _decode_msgpack_blob(b"\x00")
+
+
+# =========================================================================
+# _json_bytes_handler (latin-1 fallback)
+# =========================================================================
+
+
+class TestJsonBytesHandlerLatin1:
+    """Tests for the latin-1 fallback in the bytes handler."""
+
+    def test_non_utf8_bytes_decoded_as_latin1(self):
+        """Bytes that are not valid UTF-8 fall back to latin-1 decoding."""
+        # 0xff is invalid as a standalone UTF-8 byte but valid latin-1.
+        result = _json_bytes_handler(b"\xff")
+        assert result == "\xff"
+
+
+# =========================================================================
+# _unwrap_binary_value
+# =========================================================================
+
+
+class TestUnwrapBinaryValue:
+    """Tests for unwrapping bson.Binary metadata values."""
+
+    def test_non_binary_passthrough(self):
+        """Non-Binary values are returned unchanged."""
+        assert _unwrap_binary_value("plain") == "plain"
+
+    def test_binary_json_string_parsed(self):
+        """A Binary wrapping a JSON string is parsed into the value."""
+        wrapped = bson.Binary(b'"loop"')
+        assert _unwrap_binary_value(wrapped) == "loop"
+
+    def test_binary_json_object_parsed(self):
+        """A Binary wrapping a JSON object is parsed into a dict."""
+        wrapped = bson.Binary(b'{"k": 1}')
+        assert _unwrap_binary_value(wrapped) == {"k": 1}
+
+    def test_binary_invalid_json_returns_string(self):
+        """A Binary that looks like JSON but is invalid returns the raw string."""
+        wrapped = bson.Binary(b"{not json")
+        assert _unwrap_binary_value(wrapped) == "{not json"
+
+    def test_binary_plain_text_returns_string(self):
+        """A Binary wrapping plain (non-JSON-looking) text returns the string."""
+        wrapped = bson.Binary(b"hello")
+        assert _unwrap_binary_value(wrapped) == "hello"
+
+    def test_binary_non_utf8_returns_raw_bytes(self):
+        """A Binary that cannot decode as UTF-8 returns the raw bytes."""
+        wrapped = bson.Binary(b"\xff\xfe")
+        assert _unwrap_binary_value(wrapped) == b"\xff\xfe"
+
+
+# =========================================================================
+# _migrate_metadata (step conversion failure)
+# =========================================================================
+
+
+class TestMigrateMetadataStepFailure:
+    """Tests for the step-to-int conversion failure path."""
+
+    def test_unconvertible_step_used_as_is(self):
+        """A step value that cannot become an int is wrapped as-is."""
+        metadata = {"step": "not-a-number"}
+        result = _migrate_metadata(metadata)
+        # The value is JSON-serialized unchanged after the conversion fails.
+        assert result["step"] == ["json", '"not-a-number"']
+
+
+# =========================================================================
+# _migrate_blob (bson Binary and exception paths)
+# =========================================================================
+
+
+class TestMigrateBlobBsonPaths:
+    """Tests for blob migration with bson.Binary and error handling."""
+
+    def test_bson_binary_value_transcoded(self):
+        """A bson.Binary msgpack value is unwrapped and transcoded to json."""
+        packed = msgpack.packb({"x": 1})
+        doc = {"type": "msgpack", "checkpoint": bson.Binary(packed)}
+        new_type, new_value = _migrate_blob(doc)
+        assert new_type == "json"
+        # bson available, so the result is wrapped in a Binary of JSON bytes.
+        assert isinstance(new_value, bson.Binary)
+        assert json.loads(bytes(new_value).decode("utf-8")) == {"x": 1}
+
+    def test_blob_decode_exception_returns_none(self):
+        """A decode failure inside _migrate_blob returns (None, None)."""
+        # Valid bytes but invalid msgpack content triggers the except branch.
+        doc = {"type": "msgpack", "checkpoint": b"\xc1"}
+        new_type, new_value = _migrate_blob(doc)
+        assert new_type is None
+        assert new_value is None
+
+    def test_no_bson_produces_plain_bytes(self):
+        """When bson is unavailable, the new value is plain JSON bytes."""
+        packed = msgpack.packb({"y": 2})
+        doc = {"type": "msgpack", "checkpoint": packed}
+        with patch(
+            "bili.iris.checkpointers.migrations.mongo.v1_to_v2.BSON_AVAILABLE",
+            False,
+        ):
+            new_type, new_value = _migrate_blob(doc)
+        assert new_type == "json"
+        assert isinstance(new_value, bytes)
+        assert msgpack.packb is not None  # sanity
+        assert new_value == b'{"y": 2}'
+
+
+# =========================================================================
+# migrate_v1_to_v2 (blob migration application)
+# =========================================================================
+
+
+class TestMigrateV1ToV2BlobApplication:
+    """Tests that blob migration updates are applied to the document."""
+
+    def test_msgpack_blob_migrated_to_json(self):
+        """A msgpack checkpoint blob is transcoded and the type updated."""
+        packed = msgpack.packb({"channel_values": {"messages": []}})
+        doc = {
+            "thread_id": "t1",
+            "type": "msgpack",
+            "checkpoint": bson.Binary(packed),
+            "metadata": {"source": "loop", "step": 1},
+        }
+        result = migrate_v1_to_v2(doc)
+        assert result["type"] == "json"
+        assert isinstance(result["checkpoint"], bson.Binary)
+        assert result["metadata"]["source"] == ["json", '"loop"']
+
+    def test_value_field_blob_migrated(self):
+        """A document using the 'value' field instead of 'checkpoint' migrates."""
+        packed = msgpack.packb({"data": 1})
+        doc = {
+            "thread_id": "t2",
+            "type": "msgpack",
+            "value": bson.Binary(packed),
+        }
+        result = migrate_v1_to_v2(doc)
+        assert result["type"] == "json"
+        assert isinstance(result["value"], bson.Binary)
+
+
+# =========================================================================
+# migrate_all_collections
+# =========================================================================
+
+
+class TestMigrateAllCollections:
+    """Tests for the database-wide collection migration utility."""
+
+    def test_skips_absent_collections(self):
+        """Collections not present in the database are skipped."""
+        db = MagicMock()
+        db.list_collection_names.return_value = ["checkpoints"]
+        checkpoint_col = MagicMock()
+        checkpoint_col.find.return_value = []
+        db.__getitem__.return_value = checkpoint_col
+
+        all_stats = migrate_all_collections(db, dry_run=True)
+        # Only the present collection is reported on.
+        assert list(all_stats.keys()) == ["checkpoints"]
+        assert all_stats["checkpoints"] == {
+            "migrated": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+
+    def test_migrates_present_collections(self):
+        """Present collections are migrated and their stats collected."""
+        db = MagicMock()
+        db.list_collection_names.return_value = [
+            "checkpoints",
+            "checkpoint_writes",
+        ]
+        col = MagicMock()
+        col.find.return_value = [
+            {
+                "_id": "a",
+                "thread_id": "t1",
+                "type": "json",
+                "metadata": {"source": "loop"},
+            }
+        ]
+        db.__getitem__.return_value = col
+
+        all_stats = migrate_all_collections(db, dry_run=False)
+        assert set(all_stats.keys()) == {"checkpoints", "checkpoint_writes"}
+        assert all_stats["checkpoints"]["migrated"] == 1
