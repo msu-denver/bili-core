@@ -9,7 +9,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from flask import Flask, g, jsonify, make_response
+from flask import Flask, g, jsonify, make_response, request
 
 from bili.auth.auth_manager import AuthManager
 from bili.flask_api.flask_utils import (
@@ -18,9 +18,12 @@ from bili.flask_api.flask_utils import (
     auth_required,
     handle_agent_prompt,
     handle_agent_prompt_stream,
+    per_user_agent,
     set_token_cookies,
     stream_agent_response,
 )
+from bili.iris.nodes.add_persona_and_summary import persona_and_summary_node
+from bili.iris.nodes.per_user_state import per_user_state_node
 
 _JWT_SECRET = "utils-test-secret-key"
 _TEST_EMAIL = "util_test@example.com"
@@ -222,6 +225,28 @@ class TestAuthRequiredDecorator:
         )
         assert resp.status_code == 200
 
+    def test_profile_retrieval_failure_returns_401(self):
+        """A get_user_profile failure surfaces as a 401, not a 500."""
+
+        @self.app.route("/profile-fail")
+        @auth_required(self.auth_manager)
+        def profile_fail():
+            """Route reached only if the profile fetch succeeds."""
+            return jsonify({"ok": True})
+
+        client = self.app.test_client()
+        with patch.object(
+            self.auth_manager.profile_provider,
+            "get_user_profile",
+            side_effect=RuntimeError("profile store down"),
+        ):
+            resp = client.get(
+                "/profile-fail",
+                headers={"Authorization": f"Bearer {self.token}"},
+            )
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "Failed to retrieve user profile"
+
     def test_no_role_requirement_skips_check(self):
         """When required_roles is None, role check is skipped."""
 
@@ -409,6 +434,18 @@ class TestHandleAgentPromptStream:
         _, status = result
         assert status == 400
 
+    @patch("bili.flask_api.flask_utils.stream_agent_response")
+    def test_conversation_id_builds_compound_thread_id(self, mock_stream):
+        """A conversation_id is combined with the email into the thread id."""
+        mock_stream.return_value = iter(["event: done\ndata: {}\n\n"])
+        user = {"email": "x@y.com"}
+        agent = MagicMock()
+        with self.app.test_request_context():
+            handle_agent_prompt_stream(user, agent, "Hi", conversation_id="conv-9")
+        # stream_agent_response(agent, prompt, thread_id) is called positionally.
+        thread_id = mock_stream.call_args[0][2]
+        assert thread_id == "x@y.com_conv-9"
+
 
 class TestAddUnauthorizedHandler:
     """Tests for add_unauthorized_handler middleware."""
@@ -445,3 +482,134 @@ class TestAddUnauthorizedHandler:
         client = app.test_client()
         resp = client.get("/fail")
         assert resp.status_code == 401
+
+    def test_successful_refresh_retries_and_updates_cookie(self):
+        """A 401 with a valid refresh token retries and sets new token cookies."""
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        auth_manager = MagicMock()
+        auth_manager.auth_provider.refresh_token.return_value = {
+            "id_token": "good-token",
+            "refresh_token": "new-refresh",
+        }
+        add_unauthorized_handler(auth_manager, app)
+
+        @app.route("/maybe")
+        def maybe_route():
+            """Return 200 only when the refreshed bearer token is present."""
+            if request.headers.get("Authorization") == "Bearer good-token":
+                return jsonify({"ok": True})
+            return jsonify({"error": "unauthorized"}), 401
+
+        client = app.test_client()
+        client.set_cookie("refresh_token", "stale-refresh")
+        resp = client.get("/maybe")
+        # The retry with the refreshed token succeeds, so the client sees 200.
+        assert resp.status_code == 200
+        auth_manager.auth_provider.refresh_token.assert_called_once_with(
+            "stale-refresh"
+        )
+        assert any("id_token=good-token" in h for h in _set_cookie_headers(resp))
+
+    def test_refresh_failure_returns_original_401(self):
+        """If the refresh call raises, the original 401 is returned unchanged."""
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        auth_manager = MagicMock()
+        auth_manager.auth_provider.refresh_token.side_effect = RuntimeError("boom")
+        add_unauthorized_handler(auth_manager, app)
+
+        @app.route("/fail2")
+        def fail2_route():
+            """Route that always returns 401."""
+            return jsonify({"error": "unauthorized"}), 401
+
+        client = app.test_client()
+        client.set_cookie("refresh_token", "stale-refresh")
+        resp = client.get("/fail2")
+        assert resp.status_code == 401
+
+
+class TestPerUserAgent:
+    """Tests for the per_user_agent decorator."""
+
+    def test_builds_graph_and_injects_current_user(self):
+        """With per_user_state present, the per-request graph injects current_user."""
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        node_kwargs = {"existing": "value"}
+        # A graph that already contains per_user_state_node takes the skip path.
+        graph_definition = [persona_and_summary_node, per_user_state_node]
+
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=graph_definition,
+            node_kwargs=node_kwargs,
+        )(lambda: "route-result")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1", "email": "u1@example.com"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph") as mock_build:
+                result = decorated()
+                assert result == "route-result"
+                assert g.agent is mock_build.return_value
+            # current_user is injected per request without mutating the shared dict.
+            built_kwargs = mock_build.call_args.kwargs["node_kwargs"]
+            assert built_kwargs["current_user"] == {
+                "uid": "u1",
+                "email": "u1@example.com",
+            }
+            assert "current_user" not in node_kwargs
+
+    def test_prefers_user_profile_over_user(self):
+        """When g.user_profile is set it is used as current_user."""
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        graph_definition = [persona_and_summary_node, per_user_state_node]
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=graph_definition,
+            node_kwargs={},
+        )(lambda: "ok")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1"}
+            g.user_profile = {"uid": "u1", "first_name": "Ann"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph") as mock_build:
+                decorated()
+            assert mock_build.call_args.kwargs["node_kwargs"]["current_user"] == {
+                "uid": "u1",
+                "first_name": "Ann",
+            }
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Known bug: when a graph lacks per_user_state_node the insertion "
+            "branch calls dataclasses.replace() on the persona/per_user_state "
+            "factory partials, which are not dataclass instances, so it raises "
+            "TypeError. Correct behavior is to insert a per_user_state node and "
+            "build the graph. Fix needs a decision on the factory-vs-instance "
+            "contract of build_agent_graph, so it is documented here, not pinned."
+        ),
+    )
+    def test_inserts_per_user_state_when_missing(self):
+        """A graph without per_user_state_node should still build successfully."""
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        graph_definition = [persona_and_summary_node]
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=graph_definition,
+            node_kwargs={},
+        )(lambda: "ok")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph"):
+                assert decorated() == "ok"
+
+
+def _set_cookie_headers(resp):
+    """Return all Set-Cookie header values from a Flask test response."""
+    return [value for key, value in resp.headers if key == "Set-Cookie"]
