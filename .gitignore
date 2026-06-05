@@ -316,3 +316,4 @@ bili/aegis/tests/*/results/**/*.html
 
 bili/aegis/logs/*
 bili/aegis/attacks/logs/*
+coverage.json
