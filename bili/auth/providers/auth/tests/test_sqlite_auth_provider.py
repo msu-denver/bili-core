@@ -5,8 +5,10 @@ login endpoint, including refreshToken which was previously missing and
 caused a KeyError when Flask tried to set auth cookies.
 """
 
+import datetime
 import os
 
+import jwt
 import pytest
 
 from bili.auth.providers.auth.sqlite_auth_provider import SQLiteAuthProvider
@@ -128,3 +130,41 @@ class TestJwtTokens:
         prov = _make_provider(tmp_path)
         with pytest.raises(ValueError):
             prov.verify_jwt_token("not.a.valid.token")
+
+    def test_expired_token_raises_token_expired(self, tmp_path):
+        """An expired but correctly-signed token raises a 'Token expired' error."""
+        prov = _make_provider(tmp_path)
+        past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+            hours=1
+        )
+        expired = jwt.encode(
+            {"email": _TEST_EMAIL, "exp": past},
+            os.environ["JWT_SECRET_KEY"],
+            algorithm="HS256",
+        )
+        with pytest.raises(ValueError, match="Token expired"):
+            prov.verify_jwt_token(expired)
+
+
+class TestEmailVerificationAndDeletion:
+    """Email verification flag updates and user deletion."""
+
+    def test_send_email_verification_marks_verified(self, tmp_path):
+        """send_email_verification flips the user's email_verified flag to true."""
+        prov = _make_user(_make_provider(tmp_path))
+        uid = prov.sign_in(_TEST_EMAIL, _TEST_PASSWORD)["uid"]
+        assert prov.get_account_info(uid)["emailVerified"] is False
+
+        prov.send_email_verification({"uid": uid})
+
+        assert prov.get_account_info(uid)["emailVerified"] is True
+
+    def test_delete_user_removes_account(self, tmp_path):
+        """delete_user removes the record so account lookups then fail."""
+        prov = _make_user(_make_provider(tmp_path))
+        uid = prov.sign_in(_TEST_EMAIL, _TEST_PASSWORD)["uid"]
+
+        prov.delete_user(uid)
+
+        with pytest.raises(ValueError):
+            prov.get_account_info(uid)

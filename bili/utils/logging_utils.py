@@ -95,13 +95,12 @@ log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = get_log_level(log_level_str)
 
 # Perform the root logger configuration once when the module is loaded
-if len(logging.getLogger().handlers) == 0:
-    if len(logging.getLogger().handlers) > 0:
-        # If running in an environment like AWS Lambda, the root logger is already configured
-        logging.getLogger().setLevel(log_level)
-    else:
-        # Configure the logger with a basic console handler for local usage
-        logging.basicConfig(level=log_level)
+if len(logging.getLogger().handlers) > 0:
+    # If running in an environment like AWS Lambda, the root logger is already configured
+    logging.getLogger().setLevel(log_level)
+else:
+    # Configure the logger with a basic console handler for local usage
+    logging.basicConfig(level=log_level)
 
 
 def get_logger(name: str):
