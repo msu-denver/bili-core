@@ -2,12 +2,14 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 
 from bili.iris.loaders.streaming_utils import (
     _build_config,
     _build_input,
     _extract_token,
+    astream_agent,
     invoke_agent,
     stream_agent,
 )
@@ -255,3 +257,44 @@ class TestInvokeAgent:
 
         result = invoke_agent(mock_agent, "query")
         assert result == "result text"
+
+
+class TestAstreamAgent:
+    """Async streaming: astream_agent yields tokens and degrades on error."""
+
+    @pytest.mark.anyio
+    async def test_yields_content_from_chat_model_stream_events(self):
+        """Tokens are yielded from on_chat_model_stream events with content."""
+        chunk = MagicMock()
+        chunk.content = "hello"
+        empty_chunk = MagicMock()
+        empty_chunk.content = ""
+
+        async def fake_events(*_args, **_kwargs):
+            # A content chunk is yielded; an empty one and a non-stream event
+            # are both skipped.
+            yield {"event": "on_chat_model_stream", "data": {"chunk": chunk}}
+            yield {"event": "on_chat_model_stream", "data": {"chunk": empty_chunk}}
+            yield {"event": "on_chain_start", "data": {}}
+
+        agent = MagicMock()
+        agent.astream_events = fake_events
+
+        tokens = [tok async for tok in astream_agent(agent, "hi")]
+        assert tokens == ["hello"]
+
+    @pytest.mark.anyio
+    async def test_yields_error_message_when_stream_raises(self):
+        """A failure during streaming yields a single error token, not a crash."""
+
+        async def boom_events(*_args, **_kwargs):
+            raise RuntimeError("stream boom")
+            yield  # pragma: no cover  (makes this an async generator)
+
+        agent = MagicMock()
+        agent.astream_events = boom_events
+
+        tokens = [tok async for tok in astream_agent(agent, "hi")]
+        assert len(tokens) == 1
+        assert "Async streaming response failed" in tokens[0]
+        assert "RuntimeError" in tokens[0]

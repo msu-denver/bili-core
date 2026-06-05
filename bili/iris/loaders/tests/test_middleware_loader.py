@@ -1,6 +1,6 @@
 """Tests for bili.iris.loaders.middleware_loader public API."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -75,3 +75,15 @@ class TestInitializeMiddleware:
         ):
             result = initialize_middleware(active_middleware=["summarization"])
             assert not result
+
+
+class TestInitializeMiddlewareFailure:
+    """initialize_middleware logs and re-raises when a factory fails."""
+
+    def test_reraises_factory_failure(self):
+        """A middleware factory raising propagates after being logged."""
+        boom = MagicMock(side_effect=RuntimeError("factory boom"))
+        with patch.dict(MIDDLEWARE_REGISTRY, {"summarization": boom}):
+            with pytest.raises(RuntimeError, match="factory boom"):
+                initialize_middleware(active_middleware=["summarization"])
+        boom.assert_called_once()

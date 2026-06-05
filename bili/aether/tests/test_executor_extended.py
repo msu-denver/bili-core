@@ -522,7 +522,7 @@ class TestAstreamMethod:
             return events
 
         with pytest.raises(RuntimeError, match="not initialized"):
-            asyncio.get_event_loop().run_until_complete(_run())
+            asyncio.run(_run())
 
     def test_astream_yields_events(self):
         """astream() yields StreamEvent objects for stub agents."""
@@ -536,7 +536,7 @@ class TestAstreamMethod:
                 events.append(event)
             return events
 
-        events = asyncio.get_event_loop().run_until_complete(_run())
+        events = asyncio.run(_run())
         assert len(events) > 0
         for event in events:
             assert isinstance(event, StreamEvent)
