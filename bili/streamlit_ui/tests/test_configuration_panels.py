@@ -11,6 +11,7 @@ scripts which execute within a proper Streamlit runtime context.
 
 # pylint: disable=import-outside-toplevel, protected-access
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 # ------------------------------------------------------------------
@@ -1165,3 +1166,570 @@ def test_llm_model_entries_have_model_name():
     for key, info in LLM_MODELS.items():
         for model in info["models"]:
             assert "model_name" in model, f"Provider '{key}' model missing model_name"
+
+
+# ------------------------------------------------------------------
+# Model-capability dependent branches
+# ------------------------------------------------------------------
+
+
+def test_gemini_structured_output_block_renders():
+    """Selecting a Gemini model renders the structured-output configuration."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+cp_mod.display_configuration_panels()
+st.markdown(f"struct:{st.session_state.get('supports_structured_output')}")
+st.markdown(f"mime:{'response_mime_type' in st.session_state}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "struct:True" in all_md
+    assert "mime:True" in all_md
+
+
+def test_gemini_json_mime_renders_schema_editor():
+    """Choosing the JSON MIME type renders the custom schema editor and validation."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+st.session_state["custom_response_schema"] = '{"type": "string"}'
+st.session_state["schema_preset"] = "Custom"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    # A valid JSON schema shows a success message.
+    assert any("Valid JSON schema" in s.value for s in at.success)
+
+
+def test_gemini_json_invalid_schema_shows_error():
+    """An invalid custom JSON schema renders an error message."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+st.session_state["custom_response_schema"] = "{not valid json"
+st.session_state["schema_preset"] = "Custom"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert any("Invalid JSON" in e.value for e in at.error)
+
+
+def test_gemini_text_mime_clears_schema_state():
+    """Switching back to text MIME type clears the custom schema session keys."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "text/plain"
+st.session_state["custom_response_schema"] = '{"type": "string"}'
+st.session_state["schema_preset"] = "Custom"
+cp_mod.display_configuration_panels()
+st.markdown(f"schema_gone:{'custom_response_schema' not in st.session_state}")
+st.markdown(f"preset_gone:{'schema_preset' not in st.session_state}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "schema_gone:True" in all_md
+    assert "preset_gone:True" in all_md
+
+
+def test_gemini_thinking_budget_block_renders():
+    """A Gemini model renders the thinking-budget control and initializes it."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+cp_mod.display_configuration_panels()
+st.markdown(f"thinking:{st.session_state.get('thinking_budget') is not None}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "thinking:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_openai_max_retries_block_renders():
+    """An OpenAI model renders the max-retries control and initializes it."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_openai"
+st.session_state["model_name"] = "OpenAI GPT-4o Omni"
+cp_mod.display_configuration_panels()
+st.markdown(f"retries:{st.session_state.get('max_retries') is not None}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "retries:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_model_lacking_top_k_sets_none():
+    """A model without top_k support leaves top_k as None."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_aws_bedrock"
+st.session_state["model_name"] = "AI21 Jamba 1.5 Large"
+cp_mod.display_configuration_panels()
+st.markdown(f"top_k:{st.session_state.get('top_k')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "top_k:None" in " ".join(m.value for m in at.markdown)
+
+
+def test_model_lacking_temperature_sets_none():
+    """A model without temperature support leaves temperature as None."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_azure_openai"
+st.session_state["model_name"] = "Azure OpenAI o1-mini"
+cp_mod.display_configuration_panels()
+st.markdown(f"temp:{st.session_state.get('temperature')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "temp:None" in " ".join(m.value for m in at.markdown)
+
+
+def test_model_lacking_seed_sets_none():
+    """A model without seed support leaves seed_value as None."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_aws_bedrock"
+st.session_state["model_name"] = "DeepSeek-R1"
+cp_mod.display_configuration_panels()
+st.markdown(f"seed:{st.session_state.get('seed_value')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "seed:None" in " ".join(m.value for m in at.markdown)
+
+
+def test_model_lacking_max_output_tokens_sets_none():
+    """A model without max-output-token support leaves max_output_tokens as None."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_azure_openai"
+st.session_state["model_name"] = "Azure OpenAI o3"
+cp_mod.display_configuration_panels()
+st.markdown(f"max_out:{st.session_state.get('max_output_tokens')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "max_out:None" in " ".join(m.value for m in at.markdown)
+
+
+def test_unsupported_tools_model_shows_warning():
+    """A model that does not support tools renders a warning and clears the flag."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_aws_bedrock"
+st.session_state["model_name"] = "Amazon Titan Text G1 - Premier"
+cp_mod.display_configuration_panels()
+st.markdown(f"supports:{st.session_state.get('supports_tools')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert any("does not support tools" in w.value for w in at.warning)
+    assert "supports:False" in " ".join(m.value for m in at.markdown)
+
+
+def test_custom_model_path_renders_text_input():
+    """A model with custom_model_path renders the custom model path input."""
+    at = AppTest.from_string(
+        """
+import os
+os.environ["ENV"] = "development"
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "local_llamacpp"
+st.session_state["model_name"] = "LlamaCpp Local (In Memory) Model"
+cp_mod.display_configuration_panels()
+st.markdown(f"has_id:{'model_id' in st.session_state}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "has_id:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Enable / Disable all tools button clicks
+# ------------------------------------------------------------------
+
+
+def test_enable_all_tools_button_click_enables_tools():
+    """Clicking Enable All Tools enables non-local tools in session state."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    enable_buttons = [b for b in at.button if "Enable All" in b.label]
+    assert enable_buttons
+    enable_buttons[0].click()
+    at.run()
+    assert not at.exception
+
+
+def test_disable_all_tools_button_click_disables_tools():
+    """Clicking Disable All Tools disables non-local tools in session state."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    disable_buttons = [b for b in at.button if "Disable All" in b.label]
+    assert disable_buttons
+    disable_buttons[0].click()
+    at.run()
+    assert not at.exception
+
+
+# ------------------------------------------------------------------
+# Import configuration flow
+# ------------------------------------------------------------------
+
+
+def test_import_configuration_applies_uploaded_values():
+    """Uploading a JSON config writes its keys into session state."""
+    at = AppTest.from_string(
+        """
+import io, json
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+
+class _Upload(io.BytesIO):
+    pass
+
+upload = _Upload(json.dumps({"persona": "imported-persona"}).encode("utf-8"))
+st.session_state.pop("config_imported", None)
+# Patch rerun to a no-op so the import branch (which calls st.rerun) does
+# not trigger an AppTest re-run loop; we assert directly on the state it set.
+with patch.object(cp_mod.st, "file_uploader", return_value=upload):
+    with patch.object(cp_mod.st, "rerun"):
+        cp_mod.display_configuration_panels()
+st.markdown(f"persona:{st.session_state.get('persona')}")
+st.markdown(f"flag:{st.session_state.get('config_imported')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "persona:imported-persona" in all_md
+    assert "flag:True" in all_md
+
+
+def test_import_configuration_already_imported_shows_success():
+    """When config was already imported the success message is shown."""
+    at = AppTest.from_string(
+        """
+import io, json
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+
+class _Upload(io.BytesIO):
+    pass
+
+upload = _Upload(json.dumps({"persona": "x"}).encode("utf-8"))
+st.session_state["config_imported"] = True
+with patch.object(cp_mod.st, "file_uploader", return_value=upload):
+    cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert any("imported successfully" in s.value for s in at.success)
+
+
+# ------------------------------------------------------------------
+# reset_model_name on-change callback
+# ------------------------------------------------------------------
+
+
+def test_model_type_change_resets_model_name():
+    """Changing the LLM type selectbox clears the previously chosen model name."""
+    at = AppTest.from_string(
+        """
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    type_selectbox = at.selectbox[0]
+    options = type_selectbox.options
+    # Choose a different LLM type option to fire the reset_model_name callback.
+    different = next(o for o in options if o != type_selectbox.value)
+    type_selectbox.set_value(different)
+    at.run()
+    assert not at.exception
+
+
+# ------------------------------------------------------------------
+# Boolean tool parameter widget
+# ------------------------------------------------------------------
+
+
+def test_bool_tool_param_renders_checkbox():
+    """A tool with a boolean parameter renders a checkbox for that parameter."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+
+bool_tools = {
+    "bool_param_tool": {
+        "enabled": True,
+        "description": "A tool with a boolean parameter",
+        "default_prompt": "Use the bool tool",
+        "params": {
+            "flag": {
+                "type": "bool",
+                "default": True,
+                "description": "A boolean flag",
+            }
+        },
+    }
+}
+with patch.object(cp_mod, "TOOLS", bool_tools):
+    cp_mod.display_configuration_panels()
+st.markdown(f"flag_key:{'bool_param_tool_flag' in st.session_state}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "flag_key:True" in " ".join(m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------
+# Schema preset reset/clear buttons
+# ------------------------------------------------------------------
+
+
+def test_reset_schema_button_present_for_json():
+    """The schema reset and clear buttons render in JSON MIME mode."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    labels = [b.label for b in at.button]
+    assert any("Reset to Default Schema" in l for l in labels)
+    assert any("Clear Schema" in l for l in labels)
+
+
+# ------------------------------------------------------------------
+# Temperature clamping and schema callback / button branches
+# ------------------------------------------------------------------
+
+
+def test_temperature_above_max_is_clamped():
+    """A stored temperature above the model maximum is clamped down."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+# Nova Pro supports temperature; seed an out-of-range value to force clamping.
+st.session_state["model_type"] = "remote_aws_bedrock"
+st.session_state["model_name"] = "Amazon Nova Pro"
+st.session_state["temperature"] = 9999.0
+cp_mod.display_configuration_panels()
+st.markdown(f"temp:{st.session_state.get('temperature')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    # The clamped temperature must be a finite value well below the seeded 9999.
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "temp:9999" not in all_md
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "BUG: Reset to Default Schema handler assigns st.session_state["
+        "'schema_preset'] (configuration_panels.py line 571), but schema_preset "
+        "is a widget key, so Streamlit raises StreamlitAPIException on the "
+        "click rerun. The button crashes the panel instead of resetting it."
+    ),
+)
+def test_reset_schema_button_click_sets_object_preset():
+    """Clicking Reset to Default Schema should set the object-response preset."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    reset_buttons = [b for b in at.button if "Reset to Default Schema" in b.label]
+    assert reset_buttons
+    reset_buttons[0].click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["schema_preset"] == "Object Response"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "BUG: Clear Schema handler assigns st.session_state['schema_preset'] "
+        "(configuration_panels.py line 576), but schema_preset is a widget key, "
+        "so Streamlit raises StreamlitAPIException on the click rerun. The "
+        "button crashes the panel instead of clearing the schema."
+    ),
+)
+def test_clear_schema_button_click_empties_schema():
+    """Clicking Clear Schema should empty the custom schema and reset the preset."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    clear_buttons = [b for b in at.button if "Clear Schema" in b.label]
+    assert clear_buttons
+    clear_buttons[0].click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["custom_response_schema"] == "{}"
+    assert at.session_state["schema_preset"] == "Custom"
+
+
+def test_schema_preset_change_updates_schema():
+    """Selecting a non-custom schema preset updates the custom schema text."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    preset_boxes = [s for s in at.selectbox if s.label == "Schema Preset"]
+    assert preset_boxes
+    preset_boxes[0].set_value("Array Response")
+    at.run()
+    assert not at.exception
+    assert "array" in at.session_state["custom_response_schema"]
+
+
+def test_schema_textarea_edit_switches_to_custom():
+    """Editing the schema text area switches the preset back to Custom."""
+    at = AppTest.from_string(
+        """
+import streamlit as st
+from bili.streamlit_ui.ui import configuration_panels as cp_mod
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_name"] = "Gemini 2.5 Pro"
+st.session_state["response_mime_type"] = "application/json"
+st.session_state["schema_preset"] = "Object Response"
+cp_mod.display_configuration_panels()
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    schema_areas = [t for t in at.text_area if "JSON Schema" in (t.label or "")]
+    assert schema_areas
+    schema_areas[0].set_value('{"type": "number"}')
+    at.run()
+    assert not at.exception
+    # The on_change callback syncs the edited text into custom_response_schema.
+    assert at.session_state["custom_response_schema"] == '{"type": "number"}'

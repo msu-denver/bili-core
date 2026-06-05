@@ -2,12 +2,21 @@
 
 Validates that main() can be called with mocked Streamlit and
 that the page navigation dict contains IRIS, AETHER, and AEGIS
-sections with the expected pages.
+sections with the expected pages. Also exercises the individual
+page-render callbacks that st.navigation wires up.
 """
 
 from unittest.mock import MagicMock, patch
 
-from bili.streamlit_app import main
+from bili.streamlit_app import (
+    _run_aether_page,
+    _run_attack_page,
+    _run_attack_results_page,
+    _run_baseline_runner_page,
+    _run_bilicore_page,
+    _run_results_page,
+    main,
+)
 from bili.streamlit_ui.tests.conftest import FakeSessionState
 
 _MODULE = "bili.streamlit_app"
@@ -273,3 +282,106 @@ class TestStreamlitAppMain:
             if c.kwargs.get("unsafe_allow_html")
         ]
         assert len(html_calls) >= 1
+
+
+class TestPageRenderCallbacks:
+    """Tests for the individual page-render callbacks wired into navigation."""
+
+    @patch(f"{_MODULE}.run_app_page")
+    @patch(f"{_MODULE}.get_checkpointer")
+    @patch(f"{_MODULE}.Image")
+    @patch(f"{_MODULE}.st")
+    def test_run_bilicore_page_renders_and_runs_app(
+        self,
+        mock_st,
+        mock_image,
+        mock_get_checkpointer,
+        mock_run_app_page,
+    ):
+        """The IRIS page renders the header and delegates to run_app_page."""
+        mock_image.open.return_value = MagicMock()
+        mock_get_checkpointer.return_value = "CHECKPOINTER"
+
+        _run_bilicore_page()
+
+        # The checkpointer is fetched and handed to the IRIS chat page.
+        mock_get_checkpointer.assert_called_once()
+        mock_run_app_page.assert_called_once_with("CHECKPOINTER")
+        # The IRIS heading is rendered.
+        markdown_calls = " ".join(str(c) for c in mock_st.markdown.call_args_list)
+        assert "IRIS" in markdown_calls
+
+    @patch(f"{_MODULE}.run_app_page")
+    @patch(f"{_MODULE}.get_checkpointer")
+    @patch(f"{_MODULE}.Image")
+    @patch(f"{_MODULE}.st")
+    def test_run_bilicore_page_shows_logo_when_present(
+        self,
+        mock_st,
+        mock_image,
+        _mock_get_checkpointer,
+        _mock_run_app_page,
+    ):
+        """The IRIS page shows the sidebar logo when the logo file exists."""
+        mock_image.open.return_value = MagicMock()
+
+        with patch(f"{_MODULE}.LOGO_PATH") as mock_logo_path:
+            mock_logo_path.exists.return_value = True
+            mock_logo_path.as_posix.return_value = "/tmp/logo.png"
+            _run_bilicore_page()
+
+        # st.image is called for the sidebar logo and the header logo.
+        assert mock_st.image.call_count >= 1
+
+    @patch(f"{_MODULE}.run_app_page")
+    @patch(f"{_MODULE}.get_checkpointer")
+    @patch(f"{_MODULE}.Image")
+    @patch(f"{_MODULE}.st")
+    def test_run_bilicore_page_skips_logo_when_absent(
+        self,
+        mock_st,
+        mock_image,
+        _mock_get_checkpointer,
+        _mock_run_app_page,
+    ):
+        """The IRIS page skips the sidebar logo when the logo file is absent."""
+        mock_image.open.return_value = MagicMock()
+
+        with patch(f"{_MODULE}.LOGO_PATH") as mock_logo_path:
+            mock_logo_path.exists.return_value = False
+            mock_logo_path.as_posix.return_value = "/tmp/logo.png"
+            _run_bilicore_page()
+
+        # The header logo (Image.open + st.image) still renders even with no
+        # sidebar logo, so the page does not crash.
+        assert mock_st.markdown.called
+
+    @patch(f"{_MODULE}.render_aether_page")
+    def test_run_aether_page_delegates(self, mock_render):
+        """The AETHER page delegates to render_aether_page."""
+        _run_aether_page()
+        mock_render.assert_called_once_with()
+
+    @patch(f"{_MODULE}.render_baseline_runner_page")
+    def test_run_baseline_runner_page_delegates(self, mock_render):
+        """The baseline runner page delegates to render_baseline_runner_page."""
+        _run_baseline_runner_page()
+        mock_render.assert_called_once_with()
+
+    @patch(f"{_MODULE}.render_results_page")
+    def test_run_results_page_delegates(self, mock_render):
+        """The baseline results page delegates to render_results_page."""
+        _run_results_page()
+        mock_render.assert_called_once_with()
+
+    @patch(f"{_MODULE}.render_attack_results_page")
+    def test_run_attack_results_page_delegates(self, mock_render):
+        """The attack results page delegates to render_attack_results_page."""
+        _run_attack_results_page()
+        mock_render.assert_called_once_with()
+
+    @patch(f"{_MODULE}.render_attack_page")
+    def test_run_attack_page_delegates(self, mock_render):
+        """The attack page delegates to render_attack_page."""
+        _run_attack_page()
+        mock_render.assert_called_once_with()

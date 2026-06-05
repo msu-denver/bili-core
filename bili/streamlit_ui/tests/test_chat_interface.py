@@ -6,6 +6,7 @@ triggers ``st.set_page_config()`` and other runtime side-effects.
 
 # pylint: disable=import-outside-toplevel, protected-access
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 
@@ -942,3 +943,536 @@ ci.display_model_configuration()
     )
     at.run()
     assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# load_system_components
+# ---------------------------------------------------------------------------
+
+
+def test_load_system_components_basic_flow():
+    """load_system_components builds a chain with tools and stores it in state."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_aws_bedrock"
+st.session_state["model_id"] = "model.id"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = False
+st.session_state["supports_tools"] = True
+st.session_state["selected_tools"] = ["aws_opensearch_retriever"]
+st.session_state["aws_opensearch_retriever_prompt"] = "Search the index"
+st.session_state["memory_strategy"] = "summarize"
+st.session_state["memory_limit_type"] = "message_count"
+st.session_state["memory_limit_value"] = 15
+st.session_state["memory_limit_trim_value"] = 15
+st.session_state["persona"] = "You are helpful"
+st.session_state["user_profile"] = {"name": "U"}
+st.session_state["thinking_budget"] = 0
+
+with patch.object(ci, "load_model", return_value="MODEL") as m_load:
+    with patch.object(ci, "initialize_tools", return_value=["TOOL"]) as m_tools:
+        with patch.object(ci, "build_agent_graph", return_value="AGENT") as m_graph:
+            ci.load_system_components(None)
+            st.session_state["_load_called"] = m_load.called
+            st.session_state["_tools_called"] = m_tools.called
+            st.session_state["_graph_called"] = m_graph.called
+st.markdown(f"chain:{st.session_state.get('conversation_chain')}")
+st.markdown(f"cfg:{st.session_state.get('model_config')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "chain:AGENT" in all_md
+    assert "cfg:MODEL" in all_md
+    assert at.session_state["_load_called"] is True
+    assert at.session_state["_tools_called"] is True
+    assert at.session_state["_graph_called"] is True
+
+
+def test_load_system_components_structured_output_valid_schema():
+    """A valid JSON response schema is parsed into model_kwargs."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_id"] = "gemini"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = True
+st.session_state["response_mime_type"] = "application/json"
+st.session_state["custom_response_schema"] = '{"type": "object"}'
+st.session_state["supports_tools"] = False
+st.session_state["thinking_budget"] = 0
+
+captured = {}
+def fake_load_model(**kwargs):
+    captured.update(kwargs)
+    return "MODEL"
+
+with patch.object(ci, "load_model", side_effect=fake_load_model):
+    with patch.object(ci, "initialize_tools", return_value=[]):
+        with patch.object(ci, "build_agent_graph", return_value="AGENT"):
+            ci.load_system_components(None)
+st.markdown(f"schema_obj:{captured.get('response_schema') == {'type': 'object'}}")
+st.markdown(f"mime:{captured.get('response_mime_type')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "schema_obj:True" in all_md
+    assert "mime:application/json" in all_md
+
+
+def test_load_system_components_structured_output_invalid_schema():
+    """An invalid JSON response schema falls back to the default string schema."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_id"] = "gemini"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = True
+st.session_state["response_mime_type"] = "application/json"
+st.session_state["custom_response_schema"] = "{not valid"
+st.session_state["supports_tools"] = False
+st.session_state["thinking_budget"] = 0
+
+captured = {}
+def fake_load_model(**kwargs):
+    captured.update(kwargs)
+    return "MODEL"
+
+with patch.object(ci, "load_model", side_effect=fake_load_model):
+    with patch.object(ci, "initialize_tools", return_value=[]):
+        with patch.object(ci, "build_agent_graph", return_value="AGENT"):
+            ci.load_system_components(None)
+st.markdown(f"fallback:{captured.get('response_schema') == {'type': 'string'}}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "fallback:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_load_system_components_structured_output_no_custom_schema():
+    """Structured output with no custom schema defaults to a string schema."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_id"] = "gemini"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = True
+st.session_state["response_mime_type"] = "application/json"
+st.session_state.pop("custom_response_schema", None)
+st.session_state["supports_tools"] = False
+st.session_state["thinking_budget"] = 0
+
+captured = {}
+def fake_load_model(**kwargs):
+    captured.update(kwargs)
+    return "MODEL"
+
+with patch.object(ci, "load_model", side_effect=fake_load_model):
+    with patch.object(ci, "initialize_tools", return_value=[]):
+        with patch.object(ci, "build_agent_graph", return_value="AGENT"):
+            ci.load_system_components(None)
+st.markdown(f"default:{captured.get('response_schema') == {'type': 'string'}}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "default:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_load_system_components_text_plain_mime():
+    """A text/plain MIME type sets the plain-text response MIME on model_kwargs."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_id"] = "gemini"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = True
+st.session_state["response_mime_type"] = "text/plain"
+st.session_state["supports_tools"] = False
+st.session_state["thinking_budget"] = 0
+
+captured = {}
+def fake_load_model(**kwargs):
+    captured.update(kwargs)
+    return "MODEL"
+
+with patch.object(ci, "load_model", side_effect=fake_load_model):
+    with patch.object(ci, "initialize_tools", return_value=[]):
+        with patch.object(ci, "build_agent_graph", return_value="AGENT"):
+            ci.load_system_components(None)
+st.markdown(f"mime:{captured.get('response_mime_type')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "mime:text/plain" in " ".join(m.value for m in at.markdown)
+
+
+def test_load_system_components_thinking_budget_branch():
+    """A positive thinking budget inserts the prepare_llm_config node and config."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_google_vertex"
+st.session_state["model_id"] = "gemini"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = False
+st.session_state["supports_tools"] = False
+st.session_state["thinking_budget"] = 8192
+st.session_state["memory_strategy"] = "summarize"
+st.session_state["memory_limit_type"] = "message_count"
+st.session_state["memory_limit_value"] = 15
+st.session_state["memory_limit_trim_value"] = 15
+
+captured = {}
+def fake_build(**kwargs):
+    captured.update(kwargs)
+    return "AGENT"
+
+with patch.object(ci, "load_model", return_value="MODEL"):
+    with patch.object(ci, "initialize_tools", return_value=[]):
+        with patch.object(ci, "build_agent_graph", side_effect=fake_build):
+            ci.load_system_components(None)
+node_kwargs = captured.get("node_kwargs", {})
+st.markdown(f"thinking:{node_kwargs.get('thinking_config')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "thinking:{'budget': 8192}" in " ".join(m.value for m in at.markdown)
+
+
+def test_load_system_components_no_tools_branch():
+    """When tools are unsupported, the loader passes no active tools."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+st.session_state["model_type"] = "remote_aws_bedrock"
+st.session_state["model_id"] = "model.id"
+st.session_state["model_kwargs"] = {}
+st.session_state["supports_structured_output"] = False
+st.session_state["supports_tools"] = False
+st.session_state["thinking_budget"] = 0
+st.session_state["memory_strategy"] = "trim"
+st.session_state["memory_limit_type"] = "token_length"
+st.session_state["memory_limit_value"] = 10000
+st.session_state["memory_limit_trim_value"] = 8000
+
+captured = {}
+def fake_tools(**kwargs):
+    captured.update(kwargs)
+    return []
+
+with patch.object(ci, "load_model", return_value="MODEL"):
+    with patch.object(ci, "initialize_tools", side_effect=fake_tools):
+        with patch.object(ci, "build_agent_graph", return_value="AGENT"):
+            ci.load_system_components(None)
+st.markdown(f"active:{captured.get('active_tools')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "active:None" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# run_app_page -- Load Configuration button and form submission
+# ---------------------------------------------------------------------------
+
+
+def test_load_configuration_button_click_loads_components():
+    """Clicking Load Configuration invokes load_system_components."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch
+from bili.streamlit_ui.ui import chat_interface as ci
+with patch.object(ci, "is_authenticated", return_value=True):
+    with patch.object(ci, "display_configuration_panels"):
+        with patch.object(ci, "display_state_management_management"):
+            with patch.object(ci, "display_model_configuration"):
+                with patch.object(ci, "load_system_components"):
+                    # Patch rerun so the success message survives for the assertion.
+                    with patch.object(ci.st, "rerun"):
+                        ci.run_app_page("CHECKPOINTER")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    load_buttons = [b for b in at.button if b.label == "Load Configuration"]
+    assert load_buttons
+    load_buttons[0].click()
+    at.run()
+    assert not at.exception
+    assert any("loaded successfully" in s.value for s in at.success)
+
+
+def test_form_submit_non_streaming_processes_query():
+    """Submitting the conversation form without streaming calls process_query."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch, MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state.setdefault("conversation_chain", MagicMock())
+st.session_state["is_processing_query"] = False
+st.session_state["streaming_enabled"] = False
+with patch.object(ci, "is_authenticated", return_value=True):
+    with patch.object(ci, "display_configuration_panels"):
+        with patch.object(ci, "display_state_management_management"):
+            with patch.object(ci, "display_model_configuration"):
+                with patch.object(ci, "display_state_management"):
+                    with patch.object(ci, "process_query") as mock_pq:
+                        with patch.object(ci.st, "rerun"):
+                            ci.run_app_page()
+                            st.session_state["_pq"] = mock_pq
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    submit = [b for b in at.button if b.label == "Submit"]
+    assert submit
+    submit[0].click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["_pq"].called
+
+
+def test_form_submit_streaming_processes_query():
+    """Submitting the form with streaming enabled calls process_query_streaming."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import patch, MagicMock
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+st.session_state.setdefault("conversation_chain", MagicMock())
+st.session_state["is_processing_query"] = False
+st.session_state["streaming_enabled"] = True
+with patch.object(ci, "is_authenticated", return_value=True):
+    with patch.object(ci, "display_configuration_panels"):
+        with patch.object(ci, "display_state_management_management"):
+            with patch.object(ci, "display_model_configuration"):
+                with patch.object(ci, "display_state_management"):
+                    with patch.object(
+                        ci, "process_query_streaming",
+                        return_value=iter(["a", "b"]),
+                    ) as mock_stream:
+                        with patch.object(ci.st, "write_stream"):
+                            ci.run_app_page()
+                            st.session_state["_stream"] = mock_stream
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    submit = [b for b in at.button if b.label == "Submit"]
+    assert submit
+    submit[0].click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["_stream"].called
+
+
+# ---------------------------------------------------------------------------
+# display_state_management -- intermediate steps, clear/export/import buttons
+# ---------------------------------------------------------------------------
+
+
+def test_display_state_management_renders_intermediate_steps_area():
+    """Intermediate steps render when the last human message is not first."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+# Leading AI message keeps the last human index > 0 so the processing
+# message slice between the human and the final AI message is non-empty.
+mock_state.values = {
+    "messages": [
+        AIMessage(content="Welcome"),
+        HumanMessage(content="Use a tool"),
+        ToolMessage(content="tool output", tool_call_id="tc1"),
+        AIMessage(content="Done"),
+    ]
+}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+
+form = st.form(key="inter_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    # A processing-message text area is rendered for the intermediate tool call.
+    labels = [t.label for t in at.text_area]
+    assert any("Processing Message" in (l or "") for l in labels)
+
+
+def test_clear_conversation_state_button_updates_state():
+    """Clicking Clear Conversation State updates the chain state and flags it."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {"messages": [HumanMessage(content="Hi"), AIMessage(content="Hello")]}
+mock_chain.get_state.return_value = mock_state
+st.session_state.setdefault("conversation_chain", mock_chain)
+
+form = st.form(key="clear_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    with patch.object(ci, "clear_state", return_value={"messages": []}):
+        with patch.object(ci.st, "rerun"):
+            ci.display_state_management(form)
+form.form_submit_button("submit")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    clear_buttons = [b for b in at.button if b.label == "Clear Conversation State"]
+    assert clear_buttons
+    clear_buttons[0].click()
+    at.run()
+    assert not at.exception
+    chain = at.session_state["conversation_chain"]
+    chain.update_state.assert_called()
+    # The cleared confirmation renders on the click rerun (the flag is then
+    # reset to False within the same run after the success is shown).
+    assert any("cleared" in s.value for s in at.success)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "BUG: Export handler calls JsonPlusSerializer().dumps() "
+        "(chat_interface.py line 391), but the installed langgraph "
+        "JsonPlusSerializer exposes dumps_typed/loads_typed, not "
+        "dumps/loads. Clicking Export raises AttributeError and crashes "
+        "the panel."
+    ),
+)
+def test_export_conversation_state_button_renders_download():
+    """Clicking Export Conversation State should render a download button."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {"messages": [HumanMessage(content="Hi"), AIMessage(content="Yo")]}
+mock_chain.get_state.return_value = mock_state
+st.session_state.setdefault("conversation_chain", mock_chain)
+
+form = st.form(key="export_form")
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    ci.display_state_management(form)
+form.form_submit_button("submit")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    export_buttons = [b for b in at.button if "Export Conversation State" in b.label]
+    assert export_buttons
+    export_buttons[0].click()
+    at.run()
+    assert not at.exception
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "BUG: Import handler calls JsonPlusSerializer().loads() "
+        "(chat_interface.py line 405), but the installed langgraph "
+        "JsonPlusSerializer exposes dumps_typed/loads_typed, not "
+        "dumps/loads. Uploading a state file raises AttributeError and "
+        "crashes the panel."
+    ),
+)
+def test_import_conversation_state_applies_uploaded_state():
+    """Uploading a conversation state should import messages and summary."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from langchain_core.messages import HumanMessage, AIMessage
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {"messages": [HumanMessage(content="Hi"), AIMessage(content="Yo")]}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state.pop("state_imported", None)
+
+fake_upload = MagicMock()
+fake_upload.read.return_value = b"serialized"
+
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    with patch.object(ci, "clear_state", return_value={"messages": []}):
+        with patch.object(ci.st, "file_uploader", return_value=fake_upload):
+            with patch.object(ci.st, "rerun"):
+                form = st.form(key="import_form")
+                ci.display_state_management(form)
+                form.form_submit_button("submit")
+st.markdown(f"imported:{st.session_state.get('state_imported')}")
+""",
+        default_timeout=20,
+    )
+    at.run()
+    assert not at.exception
+    assert "imported:True" in " ".join(m.value for m in at.markdown)
