@@ -4,16 +4,18 @@ Subpackages are loaded lazily (PEP 562) to avoid importing heavy dependencies
 (langgraph, torch, cloud SDKs, etc.) when only lightweight modules are needed.
 """
 
+# The lazily loadable top-level subpackages. These must be real importable
+# packages under bili/. The v5.0.0 refactor moved the former top-level
+# checkpointers/config/graph_builder/loaders/nodes/tools packages under
+# bili/iris/, so the lazy list is the three components (iris, aether, aegis)
+# plus the shared subpackages.
 _LAZY_SUBMODULES = {
+    "aegis",
     "aether",
     "auth",
-    "checkpointers",
-    "config",
     "flask_api",
-    "graph_builder",
-    "loaders",
-    "nodes",
-    "tools",
+    "iris",
+    "streamlit_ui",
     "utils",
 }
 
