@@ -680,6 +680,61 @@ class TestPerUserAgent:
             assert persona.edges == ["inject_current_datetime"]
             assert persona.conditional_edges == [("cond", "react_agent")]
 
+    def test_conditional_only_persona_gets_no_spurious_static_edge(self):
+        """A persona with only conditional routing keeps per_user_state static-edge-free."""
+        from bili.iris.nodes.add_persona_and_summary import (  # pylint: disable=import-outside-toplevel
+            persona_and_summary_node,
+        )
+
+        persona = persona_and_summary_node()
+        persona.edges = []  # no static routing
+        persona.conditional_edges = [("cond", "react_agent")]
+        persona.conditional_entry = None
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=[persona],
+            node_kwargs={},
+        )(lambda: "ok")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph") as mock_build:
+                decorated()
+            per_user_state_built = mock_build.call_args.kwargs["graph_definition"][1]
+            # No fallback static edge is synthesized; only the conditional route
+            # is inherited, preserving the original conditional-only semantics.
+            assert per_user_state_built.edges == []
+            assert per_user_state_built.conditional_edges == [("cond", "react_agent")]
+
+    def test_persona_with_no_routing_gets_fallback_edge(self):
+        """A persona with no routing at all falls back to a default static edge."""
+        from bili.iris.nodes.add_persona_and_summary import (  # pylint: disable=import-outside-toplevel
+            persona_and_summary_node,
+        )
+
+        persona = persona_and_summary_node()
+        persona.edges = []
+        persona.conditional_edges = []
+        persona.conditional_entry = None
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=[persona],
+            node_kwargs={},
+        )(lambda: "ok")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph") as mock_build:
+                decorated()
+            per_user_state_built = mock_build.call_args.kwargs["graph_definition"][1]
+            assert per_user_state_built.edges == ["inject_current_datetime"]
+
 
 def _set_cookie_headers(resp):
     """Return all Set-Cookie header values from a Flask test response."""
