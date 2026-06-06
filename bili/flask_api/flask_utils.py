@@ -78,7 +78,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from bili.auth.auth_manager import AuthManager
 from bili.iris.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
-from bili.iris.nodes.add_persona_and_summary import persona_and_summary_node
 from bili.iris.nodes.per_user_state import per_user_state_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
@@ -359,14 +358,27 @@ def per_user_agent(
             # Check that the graph definition contains the per_user_state node.
             # Use a local variable so the outer graph_definition closure is never
             # rebound, avoiding a Python UnboundLocalError.
+            #
+            # graph_definition holds Node *instances* (e.g. DEFAULT_GRAPH_DEFINITION),
+            # while per_user_state_node is a Node *factory* (functools.partial), so
+            # membership must be tested by node name, not object identity.
             current_graph = graph_definition
-            if per_user_state_node not in current_graph:
-                # Create modified copies with updated edges
+            has_per_user_state = any(
+                getattr(node, "name", None) == "per_user_state"
+                for node in current_graph
+            )
+            if not has_per_user_state:
+                # Build fresh per-request Node instances so the shared
+                # graph_definition is never mutated. Re-point the existing
+                # persona node (index 0) at the new per_user_state node, and
+                # instantiate per_user_state from its factory pointed at the
+                # original next node. replace() requires dataclass instances,
+                # which is why per_user_state_node() is called first.
                 persona_node_modified = replace(
-                    persona_and_summary_node, edges=["per_user_state"]
+                    current_graph[0], edges=["per_user_state"]
                 )
                 per_user_state_modified = replace(
-                    per_user_state_node, edges=["inject_current_datetime"]
+                    per_user_state_node(), edges=["inject_current_datetime"]
                 )
                 # Build a per-request graph with per_user_state inserted
                 current_graph = [
@@ -374,7 +386,7 @@ def per_user_agent(
                     per_user_state_modified,
                 ] + current_graph[
                     1:
-                ]  # Skip original persona_and_summary_node
+                ]  # Skip the original persona node (index 0)
 
             # Build the agent graph using the provided parameters
             agent_graph = build_agent_graph(

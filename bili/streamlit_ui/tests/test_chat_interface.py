@@ -6,7 +6,6 @@ triggers ``st.set_page_config()`` and other runtime side-effects.
 
 # pylint: disable=import-outside-toplevel, protected-access
 
-import pytest
 from streamlit.testing.v1 import AppTest
 
 
@@ -1392,16 +1391,6 @@ form.form_submit_button("submit")
     assert any("cleared" in s.value for s in at.success)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: Export handler calls JsonPlusSerializer().dumps() "
-        "(chat_interface.py line 391), but the installed langgraph "
-        "JsonPlusSerializer exposes dumps_typed/loads_typed, not "
-        "dumps/loads. Clicking Export raises AttributeError and crashes "
-        "the panel."
-    ),
-)
 def test_export_conversation_state_button_renders_download():
     """Clicking Export Conversation State should render a download button."""
     at = AppTest.from_string(
@@ -1433,23 +1422,16 @@ form.form_submit_button("submit")
     assert not at.exception
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: Import handler calls JsonPlusSerializer().loads() "
-        "(chat_interface.py line 405), but the installed langgraph "
-        "JsonPlusSerializer exposes dumps_typed/loads_typed, not "
-        "dumps/loads. Uploading a state file raises AttributeError and "
-        "crashes the panel."
-    ),
-)
 def test_import_conversation_state_applies_uploaded_state():
     """Uploading a conversation state should import messages and summary."""
     at = AppTest.from_string(
         """
+import base64
+import json
 from unittest.mock import MagicMock, patch
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from bili.streamlit_ui.ui import chat_interface as ci
 
 mock_chain = MagicMock()
@@ -1459,8 +1441,20 @@ mock_chain.get_state.return_value = mock_state
 st.session_state["conversation_chain"] = mock_chain
 st.session_state.pop("state_imported", None)
 
+# Build a valid export envelope (the inverse of the Export handler).
+serde_type, serde_bytes = JsonPlusSerializer().dumps_typed(
+    {"messages": [HumanMessage(content="Imported")], "summary": "s"}
+)
+envelope = json.dumps(
+    {
+        "serde": "jsonplus_typed",
+        "type": serde_type,
+        "data": base64.b64encode(serde_bytes).decode("ascii"),
+    }
+).encode("utf-8")
+
 fake_upload = MagicMock()
-fake_upload.read.return_value = b"serialized"
+fake_upload.read.return_value = envelope
 
 with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
     with patch.object(ci, "clear_state", return_value={"messages": []}):

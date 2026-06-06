@@ -11,7 +11,6 @@ scripts which execute within a proper Streamlit runtime context.
 
 # pylint: disable=import-outside-toplevel, protected-access
 
-import pytest
 from streamlit.testing.v1 import AppTest
 
 # ------------------------------------------------------------------
@@ -1622,15 +1621,6 @@ st.markdown(f"temp:{st.session_state.get('temperature')}")
     assert "temp:9999" not in all_md
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: Reset to Default Schema handler assigns st.session_state["
-        "'schema_preset'] (configuration_panels.py line 571), but schema_preset "
-        "is a widget key, so Streamlit raises StreamlitAPIException on the "
-        "click rerun. The button crashes the panel instead of resetting it."
-    ),
-)
 def test_reset_schema_button_click_sets_object_preset():
     """Clicking Reset to Default Schema should set the object-response preset."""
     at = AppTest.from_string(
@@ -1654,15 +1644,6 @@ cp_mod.display_configuration_panels()
     assert at.session_state["schema_preset"] == "Object Response"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: Clear Schema handler assigns st.session_state['schema_preset'] "
-        "(configuration_panels.py line 576), but schema_preset is a widget key, "
-        "so Streamlit raises StreamlitAPIException on the click rerun. The "
-        "button crashes the panel instead of clearing the schema."
-    ),
-)
 def test_clear_schema_button_click_empties_schema():
     """Clicking Clear Schema should empty the custom schema and reset the preset."""
     at = AppTest.from_string(

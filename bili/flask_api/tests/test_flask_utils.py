@@ -531,15 +531,19 @@ class TestAddUnauthorizedHandler:
 
 
 class TestPerUserAgent:
-    """Tests for the per_user_agent decorator."""
+    """Tests for the per_user_agent decorator.
+
+    graph_definition holds Node instances (as DEFAULT_GRAPH_DEFINITION does),
+    so these tests build instances by calling the node factories.
+    """
 
     def test_builds_graph_and_injects_current_user(self):
         """With per_user_state present, the per-request graph injects current_user."""
         app = Flask(__name__)
         app.config["TESTING"] = True
         node_kwargs = {"existing": "value"}
-        # A graph that already contains per_user_state_node takes the skip path.
-        graph_definition = [persona_and_summary_node, per_user_state_node]
+        # A graph that already contains a per_user_state node takes the skip path.
+        graph_definition = [persona_and_summary_node(), per_user_state_node()]
 
         decorated = per_user_agent(
             checkpoint_saver=MagicMock(),
@@ -553,6 +557,8 @@ class TestPerUserAgent:
                 result = decorated()
                 assert result == "route-result"
                 assert g.agent is mock_build.return_value
+            # The skip path passes the graph through unchanged (per_user_state present).
+            assert mock_build.call_args.kwargs["graph_definition"] is graph_definition
             # current_user is injected per request without mutating the shared dict.
             built_kwargs = mock_build.call_args.kwargs["node_kwargs"]
             assert built_kwargs["current_user"] == {
@@ -565,7 +571,7 @@ class TestPerUserAgent:
         """When g.user_profile is set it is used as current_user."""
         app = Flask(__name__)
         app.config["TESTING"] = True
-        graph_definition = [persona_and_summary_node, per_user_state_node]
+        graph_definition = [persona_and_summary_node(), per_user_state_node()]
         decorated = per_user_agent(
             checkpoint_saver=MagicMock(),
             graph_definition=graph_definition,
@@ -582,32 +588,37 @@ class TestPerUserAgent:
                 "first_name": "Ann",
             }
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Known bug: when a graph lacks per_user_state_node the insertion "
-            "branch calls dataclasses.replace() on the persona/per_user_state "
-            "factory partials, which are not dataclass instances, so it raises "
-            "TypeError. Correct behavior is to insert a per_user_state node and "
-            "build the graph. Fix needs a decision on the factory-vs-instance "
-            "contract of build_agent_graph, so it is documented here, not pinned."
-        ),
-    )
     def test_inserts_per_user_state_when_missing(self):
-        """A graph without per_user_state_node should still build successfully."""
+        """A graph without per_user_state has one inserted before building."""
+        from bili.iris.loaders.langchain_loader import (  # pylint: disable=import-outside-toplevel
+            DEFAULT_GRAPH_DEFINITION,
+        )
+
         app = Flask(__name__)
         app.config["TESTING"] = True
-        graph_definition = [persona_and_summary_node]
         decorated = per_user_agent(
             checkpoint_saver=MagicMock(),
-            graph_definition=graph_definition,
+            graph_definition=DEFAULT_GRAPH_DEFINITION,
             node_kwargs={},
         )(lambda: "ok")
 
         with app.test_request_context():
             g.user = {"uid": "u1"}
-            with patch("bili.flask_api.flask_utils.build_agent_graph"):
+            with patch("bili.flask_api.flask_utils.build_agent_graph") as mock_build:
                 assert decorated() == "ok"
+
+            built_graph = mock_build.call_args.kwargs["graph_definition"]
+            names = [getattr(n, "name", None) for n in built_graph]
+            # per_user_state is inserted at index 1, persona re-pointed to it.
+            assert names[0] == "add_persona_and_summary"
+            assert names[1] == "per_user_state"
+            assert built_graph[0].edges == ["per_user_state"]
+            assert built_graph[1].edges == ["inject_current_datetime"]
+            # The shared DEFAULT_GRAPH_DEFINITION is never mutated.
+            assert all(
+                getattr(n, "name", None) != "per_user_state"
+                for n in DEFAULT_GRAPH_DEFINITION
+            )
 
 
 def _set_cookie_headers(resp):

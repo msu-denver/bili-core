@@ -1098,7 +1098,9 @@ async def get_async_pg_checkpointer(keep_last_n: int = 5, user_id: str | None = 
     return None
 
 
-class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
+class AsyncPruningPostgresSaver(
+    VersionedCheckpointerMixin, QueryableCheckpointerMixin, AsyncPostgresSaver
+):
     """
     Async version of PruningPostgresSaver for streaming operations.
 
@@ -1107,6 +1109,12 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
 
     Also implements:
     - VersionedCheckpointerMixin: Version detection and lazy migration
+    - QueryableCheckpointerMixin: Query methods for conversation data retrieval.
+      Thread-ownership validation (_validate_thread_ownership) lives in this
+      mixin, so it must be in the base list for aput/aget_tuple to enforce
+      multi-tenant isolation. The five query methods are satisfied by
+      delegating to a sync PruningPostgresSaver that shares this saver's sync
+      connection pool, reusing the tested sync SQL without duplicating it.
     """
 
     # Identify this checkpointer type for migrations
@@ -1140,6 +1148,9 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
         self._async_txn_conn = None
         # Lazy-initialized sync pool for migration operations
         self._sync_pool: ConnectionPool | None = None
+        # Lazy-initialized sync saver used to satisfy the QueryableCheckpointerMixin
+        # query methods (it reuses the sync SQL over this saver's sync pool).
+        self._query_delegate: "PruningPostgresSaver | None" = None
 
     @asynccontextmanager
     async def _cursor(self, *, pipeline: bool = False):
@@ -1224,6 +1235,57 @@ class AsyncPruningPostgresSaver(VersionedCheckpointerMixin, AsyncPostgresSaver):
             if not index_exists:
                 LOGGER.info("Creating user_id index on checkpoints table (async)")
                 await cur.execute(_SQL_CREATE_USER_ID_INDEX)
+
+    # ------------------------------------------------------------------
+    # QueryableCheckpointerMixin methods
+    #
+    # These are inherently synchronous (they return materialized lists, not
+    # awaitables). To avoid duplicating the sync SQL, they delegate to a
+    # PruningPostgresSaver that shares this saver's sync connection pool and
+    # user_id, so ownership validation and results match the sync path.
+    # ------------------------------------------------------------------
+
+    def _get_query_delegate(self) -> "PruningPostgresSaver":
+        """Return (lazily creating) the sync saver used for query methods."""
+        if self._query_delegate is None:
+            self._query_delegate = PruningPostgresSaver(
+                self._get_sync_pool(),
+                keep_last_n=self.keep_last_n,
+                user_id=self.user_id,
+            )
+        return self._query_delegate
+
+    def get_user_threads(
+        self, user_identifier: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Get all conversation threads for a user (delegates to the sync saver)."""
+        return self._get_query_delegate().get_user_threads(
+            user_identifier, limit, offset
+        )
+
+    def get_thread_messages(
+        self,
+        thread_id: str,
+        limit: int | None = None,
+        offset: int = 0,
+        message_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get messages from a conversation thread (delegates to the sync saver)."""
+        return self._get_query_delegate().get_thread_messages(
+            thread_id, limit, offset, message_types
+        )
+
+    def delete_thread(self, thread_id: str) -> bool:
+        """Delete all checkpoints for a thread (delegates to the sync saver)."""
+        return self._get_query_delegate().delete_thread(thread_id)
+
+    def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
+        """Get usage statistics for a user (delegates to the sync saver)."""
+        return self._get_query_delegate().get_user_stats(user_identifier)
+
+    def thread_exists(self, thread_id: str) -> bool:
+        """Check whether a thread exists (delegates to the sync saver)."""
+        return self._get_query_delegate().thread_exists(thread_id)
 
     async def aput(
         self,

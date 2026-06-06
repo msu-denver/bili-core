@@ -652,16 +652,16 @@ class TestRealFlaskAppRoutes:
             "weather_api_tool": {"default_prompt": "weather"},
             "serp_api_tool": {"default_prompt": "search"},
         }
-        # Seed the graph definition with the real per_user_state_node so the
-        # per_user_agent decorator takes its skip-path (it checks membership of
-        # that node) and does not hit the known dataclasses.replace() bug on the
-        # functools.partial node factories.
+        # Seed the graph definition with a per_user_state Node instance so the
+        # per_user_agent decorator takes its skip-path (it checks for a node
+        # named "per_user_state"). graph_definition holds Node instances, so the
+        # factory is called to build one.
         from bili.iris.nodes.per_user_state import (  # pylint: disable=import-outside-toplevel
             per_user_state_node,
         )
 
         patches["bili.iris.loaders.langchain_loader"].DEFAULT_GRAPH_DEFINITION = [
-            per_user_state_node
+            per_user_state_node()
         ]
         patches["bili.iris.loaders.langchain_loader"].build_agent_graph.return_value = (
             agent

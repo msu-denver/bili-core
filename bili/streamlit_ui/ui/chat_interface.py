@@ -58,6 +58,7 @@ Example:
     run_app_page()
 """
 
+import base64
 import copy
 import json
 
@@ -386,9 +387,25 @@ def display_state_management(question_form):
 
         # Export button
         if st.button("Export Conversation State as JSON", use_container_width=True):
+            # Export the state values dict (messages, summary, ...), which is
+            # what the import handler reconstructs via .get(). langgraph's
+            # JsonPlusSerializer exposes dumps_typed/loads_typed (it returns a
+            # (type, bytes) pair so LangChain message objects round-trip). Wrap
+            # that pair in a JSON envelope so the download is a single JSON file
+            # and the import side can reconstruct the pair.
+            serde_type, serde_bytes = JsonPlusSerializer().dumps_typed(
+                latest_state.values
+            )
+            export_payload = json.dumps(
+                {
+                    "serde": "jsonplus_typed",
+                    "type": serde_type,
+                    "data": base64.b64encode(serde_bytes).decode("ascii"),
+                }
+            )
             st.download_button(
                 label="Download Conversation State as JSON",
-                data=JsonPlusSerializer().dumps(latest_state),
+                data=export_payload,
                 file_name="conversation_state.json",
                 mime="application/json",
                 use_container_width=True,
@@ -402,7 +419,12 @@ def display_state_management(question_form):
         )
         if uploaded_file is not None:
             if not st.session_state.get("state_imported", False):
-                imported_state = JsonPlusSerializer().loads(uploaded_file.read())
+                # Reconstruct the (type, bytes) pair from the export envelope and
+                # deserialize via loads_typed (the inverse of the export above).
+                envelope = json.loads(uploaded_file.read())
+                imported_state = JsonPlusSerializer().loads_typed(
+                    (envelope["type"], base64.b64decode(envelope["data"]))
+                )
                 # If imported_state is a list, take first value as state
                 if isinstance(imported_state, list):
                     imported_state = imported_state[0]

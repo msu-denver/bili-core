@@ -828,36 +828,18 @@ class TestSyncQueryBranches:
         assert messages[0]["content"] == "hello there"
 
 
-class TestAsyncPgThreadOwnershipKnownBug:
-    """The async PG saver should validate thread ownership but currently cannot.
+class TestAsyncPgThreadOwnership:
+    """The async PG saver validates thread ownership on aput and aget_tuple.
 
-    KNOWN BUG awaiting a design decision. AsyncPruningPostgresSaver inherits
-    (VersionedCheckpointerMixin, AsyncPostgresSaver) but, unlike the sync
-    PruningPostgresSaver, NOT QueryableCheckpointerMixin, which is where
-    _validate_thread_ownership lives. So aput and aget_tuple call
-    self._validate_thread_ownership and raise AttributeError at runtime
-    instead of enforcing multi-tenant isolation. The mongo async saver mirrors
-    the mixin correctly; PG does not.
-
-    The correct fix is not a one-liner: QueryableCheckpointerMixin is abstract
-    with five query methods (get_user_threads, get_thread_messages,
-    delete_thread, get_user_stats, thread_exists), so either the async saver
-    must implement those, or _validate_thread_ownership must move to a
-    non-abstract base both savers share. That is a design decision.
-
-    This test asserts the correct behavior (a cross-tenant aput is rejected
-    with PermissionError) and is xfail(strict) until the decision is made and
-    the fix lands. When fixed, the test will XPASS and strict mode will fail
-    the suite, forcing this marker to be removed.
+    AsyncPruningPostgresSaver now inherits QueryableCheckpointerMixin (mirroring
+    the sync PruningPostgresSaver and the async Mongo saver), so it gets
+    _validate_thread_ownership and the five query methods. A cross-tenant
+    aput/aget_tuple is rejected with PermissionError instead of raising
+    AttributeError.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="AsyncPruningPostgresSaver lacks QueryableCheckpointerMixin; "
-        "aput raises AttributeError instead of validating thread ownership "
-        "(pending design decision, see class docstring)",
-    )
     async def test_aput_rejects_cross_tenant_write(self):
+        """A write to another user's thread is rejected with PermissionError."""
         saver = _make_async_saver(user_id="owner@example.com")
         config = {
             "configurable": {
@@ -867,3 +849,54 @@ class TestAsyncPgThreadOwnershipKnownBug:
         }
         with pytest.raises(PermissionError):
             await saver.aput(config, {}, {}, {})
+
+    async def test_aget_tuple_rejects_cross_tenant_read(self):
+        """A read of another user's thread is rejected with PermissionError."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        config = {
+            "configurable": {
+                "thread_id": "attacker@example.com_t1",
+                "checkpoint_ns": "",
+            }
+        }
+        with pytest.raises(PermissionError):
+            await saver.aget_tuple(config)
+
+    def test_owner_thread_passes_validation(self):
+        """The owner's own threads pass ownership validation without raising."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        # Exact match and the "{user}_..." conversation form are both allowed.
+        saver._validate_thread_ownership("owner@example.com")
+        saver._validate_thread_ownership("owner@example.com_conv1")
+
+    def test_validation_disabled_without_user_id(self):
+        """With no user_id configured, ownership validation is a no-op."""
+        saver = _make_async_saver(user_id=None)
+        # Any thread id is accepted when validation is disabled.
+        saver._validate_thread_ownership("anyone@example.com_t9")
+
+    def test_query_methods_present(self):
+        """All five QueryableCheckpointerMixin methods exist on the async saver."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        for name in (
+            "get_user_threads",
+            "get_thread_messages",
+            "delete_thread",
+            "get_user_stats",
+            "thread_exists",
+        ):
+            assert callable(getattr(saver, name))
+
+    def test_query_methods_delegate_to_sync_saver(self):
+        """The query methods forward to a sync delegate sharing the pool."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        delegate = MagicMock()
+        delegate.get_user_threads.return_value = [{"thread_id": "owner@example.com"}]
+        delegate.thread_exists.return_value = True
+        saver._query_delegate = delegate
+
+        assert saver.get_user_threads("owner@example.com") == [
+            {"thread_id": "owner@example.com"}
+        ]
+        assert saver.thread_exists("owner@example.com_t1") is True
+        delegate.get_user_threads.assert_called_once_with("owner@example.com", None, 0)

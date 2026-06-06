@@ -561,20 +561,45 @@ def display_configuration_panels():
                     "[📚 Learn about Vertex AI JSON schemas](https://ai.google.dev/gemini-api/docs/structured-output)"
                 )
 
-                # Clear/Reset buttons
+                def reset_to_default_schema():
+                    """Reset the response schema to the default object preset.
+
+                    Run as the button's on_click callback (not in the main body)
+                    so it can set the schema_preset widget key. Callbacks run
+                    before widgets are instantiated, so this is allowed; setting
+                    a widget key after instantiation raises StreamlitAPIException.
+                    """
+                    st.session_state["custom_response_schema"] = (
+                        '{"type": "object", "properties": {"response": '
+                        '{"type": "string"}}, "required": ["response"]}'
+                    )
+                    st.session_state["schema_preset"] = "Object Response"
+
+                def clear_schema():
+                    """Clear the response schema back to an empty object.
+
+                    Run as the button's on_click callback so it may set the
+                    schema_preset widget key (see reset_to_default_schema).
+                    """
+                    st.session_state["custom_response_schema"] = "{}"
+                    st.session_state["schema_preset"] = "Custom"
+
+                # Clear/Reset buttons. The state mutations live in on_click
+                # callbacks (which auto-rerun) so they never write to the
+                # schema_preset widget key after the selectbox is instantiated.
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("Reset to Default Schema", use_container_width=True):
-                        st.session_state["custom_response_schema"] = (
-                            '{"type": "object", "properties": {"response": {"type": "string"}}, "required": ["response"]}'
-                        )
-                        st.session_state["schema_preset"] = "Object Response"
-                        st.rerun()
+                    st.button(
+                        "Reset to Default Schema",
+                        use_container_width=True,
+                        on_click=reset_to_default_schema,
+                    )
                 with col2:
-                    if st.button("Clear Schema", use_container_width=True):
-                        st.session_state["custom_response_schema"] = "{}"
-                        st.session_state["schema_preset"] = "Custom"
-                        st.rerun()
+                    st.button(
+                        "Clear Schema",
+                        use_container_width=True,
+                        on_click=clear_schema,
+                    )
 
             else:
                 # Clear custom schema and related settings for non-JSON MIME types
