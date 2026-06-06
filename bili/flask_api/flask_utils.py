@@ -394,15 +394,24 @@ def per_user_agent(
                 # edges, conditional entry) so the rest of the pipeline, including
                 # any conditional branches, runs after the injection rather than
                 # bypassing it.
-                per_user_state_modified.edges = list(persona_node_modified.edges) or [
-                    "inject_current_datetime"
-                ]
-                per_user_state_modified.conditional_edges = (
-                    persona_node_modified.conditional_edges
+                inherited_edges = list(persona_node_modified.edges)
+                inherited_conditional = persona_node_modified.conditional_edges
+                inherited_entry = persona_node_modified.conditional_entry
+                # Only synthesize a fallback static edge when the persona had no
+                # routing at all (a caller that forgot to wire it). If it routed
+                # only conditionally, keep static edges empty so we do not add a
+                # spurious parallel branch alongside the inherited conditional
+                # decision.
+                has_no_routing = (
+                    not inherited_edges
+                    and not inherited_conditional
+                    and not inherited_entry
                 )
-                per_user_state_modified.conditional_entry = (
-                    persona_node_modified.conditional_entry
+                per_user_state_modified.edges = inherited_edges or (
+                    ["inject_current_datetime"] if has_no_routing else []
                 )
+                per_user_state_modified.conditional_edges = inherited_conditional
+                per_user_state_modified.conditional_entry = inherited_entry
                 # The persona now routes unconditionally to per_user_state only.
                 persona_node_modified.edges = ["per_user_state"]
                 persona_node_modified.conditional_edges = []

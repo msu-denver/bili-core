@@ -17,6 +17,10 @@ omit =
     */tests/*
     */test_*.py
     */conftest.py
+    # Illustrative demo scripts, not runtime logic. They exercise full
+    # end-to-end workflows (real MAS execution), so they are explicitly out of
+    # scope for the per-file 90% gate rather than left silently unmeasured.
+    */examples/*
 
 [report]
 exclude_lines =
