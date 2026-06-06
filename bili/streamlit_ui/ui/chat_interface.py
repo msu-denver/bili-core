@@ -59,7 +59,6 @@ Example:
 """
 
 import base64
-import binascii
 import copy
 import json
 
@@ -114,13 +113,13 @@ def _deserialize_conversation_state(raw_bytes):
             raise ValueError(f"unsupported serde type: {serde_type!r}")
         data = base64.b64decode(envelope["data"])
         return JsonPlusSerializer().loads_typed((serde_type, data))
-    except (
-        ValueError,
-        KeyError,
-        TypeError,
-        json.JSONDecodeError,
-        binascii.Error,
-    ) as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Deliberately broad: this deserializes an arbitrary user-uploaded file.
+        # Beyond malformed envelopes (ValueError/KeyError/JSONDecodeError/
+        # binascii.Error), a valid envelope with corrupt or stale inner bytes can
+        # make loads_typed raise msgpack errors, AttributeError, or ImportError
+        # (a renamed/removed message class). Any failure should surface as a
+        # friendly error, never an uncaught Streamlit traceback.
         st.error(
             "Could not import conversation state: the file is malformed or from "
             "an incompatible release. Please re-export it. "
@@ -418,6 +417,9 @@ def display_state_management(question_form):
             st.session_state["conversation_chain"].update_state(
                 config, clear_state(latest_state)
             )
+            # Drop any cached export so the download button does not keep
+            # offering the now-cleared conversation's state.
+            st.session_state.pop("conversation_state_export", None)
             st.session_state["state_cleared"] = True
             st.rerun()
         if st.session_state.get("state_cleared", False):
@@ -455,21 +457,30 @@ def display_state_management(question_form):
                 use_container_width=True,
             )
 
-        # Import uploader
+        # Import uploader. on_change resets both flags so a freshly uploaded
+        # file is processed again (and any prior failure is retried).
         uploaded_file = st.file_uploader(
             "Import Conversation State from JSON",
             type="json",
-            on_change=lambda: st.session_state.update({"state_imported": False}),
+            on_change=lambda: st.session_state.update(
+                {"state_imported": False, "state_import_failed": False}
+            ),
         )
         if uploaded_file is not None:
-            if not st.session_state.get("state_imported", False):
+            if not st.session_state.get(
+                "state_imported", False
+            ) and not st.session_state.get("state_import_failed", False):
                 # getvalue() is position-independent; read() would consume the
                 # BytesIO cursor and return b"" on a later rerun, crashing
                 # json.loads. Returns None (after st.error) on a bad upload.
                 imported_state = _deserialize_conversation_state(
                     uploaded_file.getvalue()
                 )
-                if imported_state is not None:
+                if imported_state is None:
+                    # Remember the failure so we do not re-parse (and re-emit the
+                    # error) on every rerun until a new file is uploaded.
+                    st.session_state["state_import_failed"] = True
+                else:
                     # If imported_state is a list, take first value as state
                     if isinstance(imported_state, list):
                         imported_state = imported_state[0]
@@ -489,7 +500,7 @@ def display_state_management(question_form):
                     )
                     st.session_state["state_imported"] = True
                     st.rerun()
-            elif "state_imported" in st.session_state:
+            elif st.session_state.get("state_imported", False):
                 st.success("Configuration imported successfully!")
 
         container = st.expander("Current Conversation State", expanded=False)

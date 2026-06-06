@@ -1152,6 +1152,10 @@ class AsyncPruningPostgresSaver(
         # Lazy-initialized sync saver used to satisfy the QueryableCheckpointerMixin
         # query methods (it reuses the sync SQL over this saver's sync pool).
         self._query_delegate: "PruningPostgresSaver | None" = None
+        # Guards lazy delegate construction: concurrent a*-query coroutines run
+        # in separate to_thread workers and would otherwise each build a delegate
+        # (and re-run its schema migration) in a check-then-act race.
+        self._query_delegate_lock = threading.Lock()
 
     @asynccontextmanager
     async def _cursor(self, *, pipeline: bool = False):
@@ -1248,12 +1252,17 @@ class AsyncPruningPostgresSaver(
 
     def _get_query_delegate(self) -> "PruningPostgresSaver":
         """Return (lazily creating) the sync saver used for query methods."""
+        # Double-checked locking: skip the lock on the hot path once built, but
+        # serialize the one-time construction (and its schema migration) so
+        # concurrent a*-query workers don't each build a delegate.
         if self._query_delegate is None:
-            self._query_delegate = PruningPostgresSaver(
-                self._get_sync_pool(),
-                keep_last_n=self.keep_last_n,
-                user_id=self.user_id,
-            )
+            with self._query_delegate_lock:
+                if self._query_delegate is None:
+                    self._query_delegate = PruningPostgresSaver(
+                        self._get_sync_pool(),
+                        keep_last_n=self.keep_last_n,
+                        user_id=self.user_id,
+                    )
         return self._query_delegate
 
     def get_user_threads(

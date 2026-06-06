@@ -479,6 +479,15 @@ def display_configuration_panels():
                         st.session_state["custom_response_schema"] = preset_schemas[
                             preset
                         ]
+                        # Also drive the textarea widget key so the box reflects
+                        # the preset. Streamlit ignores the value= argument once
+                        # the widget is keyed, so without this the box keeps the
+                        # old text and the next keystroke would undo the switch.
+                        # Safe here: on_change callbacks run before the widget is
+                        # re-instantiated.
+                        st.session_state["custom_response_schema_input"] = (
+                            preset_schemas[preset]
+                        )
 
                 # Preset selector
                 schema_preset = st.selectbox(

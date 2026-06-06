@@ -643,6 +643,43 @@ class TestPerUserAgent:
                 with pytest.raises(ValueError, match="add_persona_and_summary"):
                     decorated()
 
+    def test_persona_conditional_routing_transfers_to_per_user_state(self):
+        """per_user_state inherits the persona's conditional routing, not persona."""
+        from bili.iris.nodes.add_persona_and_summary import (  # pylint: disable=import-outside-toplevel
+            persona_and_summary_node,
+        )
+
+        persona = persona_and_summary_node()
+        persona.edges = ["inject_current_datetime"]
+        persona.conditional_edges = [("cond", "react_agent")]
+        persona.conditional_entry = "entry_sentinel"
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=[persona],
+            node_kwargs={},
+        )(lambda: "ok")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph") as mock_build:
+                decorated()
+            built = mock_build.call_args.kwargs["graph_definition"]
+            persona_built, per_user_state_built = built[0], built[1]
+            # persona now routes unconditionally to per_user_state only.
+            assert persona_built.edges == ["per_user_state"]
+            assert persona_built.conditional_edges == []
+            assert persona_built.conditional_entry is None
+            # per_user_state inherits the persona's original routing.
+            assert per_user_state_built.edges == ["inject_current_datetime"]
+            assert per_user_state_built.conditional_edges == [("cond", "react_agent")]
+            assert per_user_state_built.conditional_entry == "entry_sentinel"
+            # The caller's persona instance is not mutated (deep copy).
+            assert persona.edges == ["inject_current_datetime"]
+            assert persona.conditional_edges == [("cond", "react_agent")]
+
 
 def _set_cookie_headers(resp):
     """Return all Set-Cookie header values from a Flask test response."""

@@ -920,3 +920,14 @@ class TestAsyncPgThreadOwnership:
         assert await saver.aget_user_stats("owner@example.com") == {"total_threads": 1}
         assert await saver.athread_exists("t1") is True
         delegate.get_user_threads.assert_called_once_with("owner@example.com", None, 0)
+
+    def test_query_delegate_built_once(self):
+        """The delegate is constructed a single time (double-checked lock)."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        with patch(
+            "bili.iris.checkpointers.pg_checkpointer.PruningPostgresSaver"
+        ) as mock_cls, patch.object(saver, "_get_sync_pool", return_value=MagicMock()):
+            first = saver._get_query_delegate()
+            second = saver._get_query_delegate()
+        assert first is second
+        mock_cls.assert_called_once()

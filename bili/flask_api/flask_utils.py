@@ -385,17 +385,28 @@ def per_user_agent(
                         "in graph_definition to insert per_user_state before"
                     )
                 # Deep-copy the persona node so the shared graph_definition and
-                # its nested mutable fields (conditional_edges, cache_policy) are
-                # never mutated. per_user_state is a fresh factory instance.
+                # its nested mutable fields are never mutated. per_user_state is
+                # a fresh factory instance.
                 persona_node_modified = copy.deepcopy(current_graph[persona_idx])
-                original_persona_edges = list(persona_node_modified.edges)
-                persona_node_modified.edges = ["per_user_state"]
                 per_user_state_modified = per_user_state_node()
-                # Route per_user_state to wherever persona originally pointed so
-                # the rest of the pipeline is preserved for any graph shape.
-                per_user_state_modified.edges = original_persona_edges or [
+                # per_user_state becomes the persona's successor and inherits ALL
+                # of the persona's original routing (static edges, conditional
+                # edges, conditional entry) so the rest of the pipeline, including
+                # any conditional branches, runs after the injection rather than
+                # bypassing it.
+                per_user_state_modified.edges = list(persona_node_modified.edges) or [
                     "inject_current_datetime"
                 ]
+                per_user_state_modified.conditional_edges = (
+                    persona_node_modified.conditional_edges
+                )
+                per_user_state_modified.conditional_entry = (
+                    persona_node_modified.conditional_entry
+                )
+                # The persona now routes unconditionally to per_user_state only.
+                persona_node_modified.edges = ["per_user_state"]
+                persona_node_modified.conditional_edges = []
+                persona_node_modified.conditional_entry = None
                 # Insert per_user_state immediately after the persona node.
                 current_graph = (
                     current_graph[:persona_idx]

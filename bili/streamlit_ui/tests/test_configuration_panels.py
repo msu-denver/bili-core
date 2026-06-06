@@ -1689,6 +1689,9 @@ cp_mod.display_configuration_panels()
     at.run()
     assert not at.exception
     assert "array" in at.session_state["custom_response_schema"]
+    # The textarea widget key is also updated so the box reflects the preset
+    # (otherwise the switch is invisible and the next keystroke undoes it).
+    assert "array" in at.session_state["custom_response_schema_input"]
 
 
 def test_schema_textarea_edit_switches_to_custom():

@@ -40,6 +40,14 @@ def main() -> int:
     data = json.loads(path.read_text())
     files = data.get("files", {})
 
+    if not files:
+        print(
+            f"ERROR: {COVERAGE_JSON} has no measured files. Coverage did not run "
+            "correctly; re-run the test suite with coverage enabled.",
+            file=sys.stderr,
+        )
+        return 2
+
     offenders = []
     for file_path, fdata in sorted(files.items()):
         summary = fdata["summary"]
@@ -50,7 +58,7 @@ def main() -> int:
         if pct < THRESHOLD:
             offenders.append((file_path, pct, summary["missing_lines"]))
 
-    total = data["totals"]["percent_covered"]
+    total = data.get("totals", {}).get("percent_covered", 0.0)
 
     if offenders:
         print(

@@ -1506,3 +1506,49 @@ st.markdown(f"imported:{st.session_state.get('state_imported')}")
     # An error is surfaced and the import is not marked complete.
     assert any("Could not import conversation state" in e.value for e in at.error)
     assert "imported:None" in " ".join(m.value for m in at.markdown)
+
+
+def test_import_conversation_state_corrupt_payload_shows_error():
+    """A valid envelope whose inner bytes are corrupt fails gracefully."""
+    at = AppTest.from_string(
+        """
+import base64
+import json
+from unittest.mock import MagicMock, patch
+import streamlit as st
+from bili.streamlit_ui.ui import chat_interface as ci
+
+mock_chain = MagicMock()
+mock_state = MagicMock()
+mock_state.values = {"messages": []}
+mock_chain.get_state.return_value = mock_state
+st.session_state["conversation_chain"] = mock_chain
+st.session_state.pop("state_imported", None)
+st.session_state.pop("state_import_failed", None)
+
+# A well-formed envelope whose data base64-decodes to random, non-msgpack
+# bytes. json.loads/base64 succeed, but loads_typed raises a msgpack error,
+# which the broadened except must catch.
+envelope = json.dumps({
+    "serde": "jsonplus_typed",
+    "type": "msgpack",
+    "data": base64.b64encode(b"\\xde\\xad\\xbe\\xef not msgpack").decode("ascii"),
+}).encode("utf-8")
+fake_upload = MagicMock()
+fake_upload.getvalue.return_value = envelope
+
+with patch.object(ci, "get_state_config", return_value={"configurable": {"thread_id": "t"}}):
+    with patch.object(ci.st, "file_uploader", return_value=fake_upload):
+        with patch.object(ci.st, "rerun"):
+            form = st.form(key="import_form")
+            ci.display_state_management(form)
+            form.form_submit_button("submit")
+st.markdown(f"failed:{st.session_state.get('state_import_failed')}")
+""",
+        default_timeout=30,
+    )
+    at.run()
+    assert not at.exception
+    assert any("Could not import conversation state" in e.value for e in at.error)
+    # The failure is remembered so it is not re-parsed every rerun.
+    assert "failed:True" in " ".join(m.value for m in at.markdown)
