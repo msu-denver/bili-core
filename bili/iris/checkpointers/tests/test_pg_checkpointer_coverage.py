@@ -900,3 +900,23 @@ class TestAsyncPgThreadOwnership:
         ]
         assert saver.thread_exists("owner@example.com_t1") is True
         delegate.get_user_threads.assert_called_once_with("owner@example.com", None, 0)
+
+    async def test_async_query_variants_delegate_off_thread(self):
+        """The a*-prefixed variants run the sync query in a worker thread."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        delegate = MagicMock()
+        delegate.get_user_threads.return_value = [{"thread_id": "t"}]
+        delegate.get_thread_messages.return_value = [{"role": "user"}]
+        delegate.delete_thread.return_value = False
+        delegate.get_user_stats.return_value = {"total_threads": 1}
+        delegate.thread_exists.return_value = True
+        saver._query_delegate = delegate
+
+        assert await saver.aget_user_threads("owner@example.com") == [
+            {"thread_id": "t"}
+        ]
+        assert await saver.aget_thread_messages("t1") == [{"role": "user"}]
+        assert await saver.adelete_thread("t1") is False
+        assert await saver.aget_user_stats("owner@example.com") == {"total_threads": 1}
+        assert await saver.athread_exists("t1") is True
+        delegate.get_user_threads.assert_called_once_with("owner@example.com", None, 0)

@@ -68,8 +68,8 @@ if __name__ == '__main__':
     app.run()
 """
 
+import copy
 import json
-from dataclasses import replace
 from functools import wraps
 
 from flask import Response, g, jsonify, make_response, request, stream_with_context
@@ -368,25 +368,40 @@ def per_user_agent(
                 for node in current_graph
             )
             if not has_per_user_state:
-                # Build fresh per-request Node instances so the shared
-                # graph_definition is never mutated. Re-point the existing
-                # persona node (index 0) at the new per_user_state node, and
-                # instantiate per_user_state from its factory pointed at the
-                # original next node. replace() requires dataclass instances,
-                # which is why per_user_state_node() is called first.
-                persona_node_modified = replace(
-                    current_graph[0], edges=["per_user_state"]
+                # Locate the persona node by name. Do not assume it is index 0:
+                # an empty or persona-less graph must fail loudly rather than
+                # rewire an arbitrary first node's edges.
+                persona_idx = next(
+                    (
+                        i
+                        for i, node in enumerate(current_graph)
+                        if getattr(node, "name", None) == "add_persona_and_summary"
+                    ),
+                    None,
                 )
-                per_user_state_modified = replace(
-                    per_user_state_node(), edges=["inject_current_datetime"]
+                if persona_idx is None:
+                    raise ValueError(
+                        "per_user_agent requires an 'add_persona_and_summary' node "
+                        "in graph_definition to insert per_user_state before"
+                    )
+                # Deep-copy the persona node so the shared graph_definition and
+                # its nested mutable fields (conditional_edges, cache_policy) are
+                # never mutated. per_user_state is a fresh factory instance.
+                persona_node_modified = copy.deepcopy(current_graph[persona_idx])
+                original_persona_edges = list(persona_node_modified.edges)
+                persona_node_modified.edges = ["per_user_state"]
+                per_user_state_modified = per_user_state_node()
+                # Route per_user_state to wherever persona originally pointed so
+                # the rest of the pipeline is preserved for any graph shape.
+                per_user_state_modified.edges = original_persona_edges or [
+                    "inject_current_datetime"
+                ]
+                # Insert per_user_state immediately after the persona node.
+                current_graph = (
+                    current_graph[:persona_idx]
+                    + [persona_node_modified, per_user_state_modified]
+                    + current_graph[persona_idx + 1 :]
                 )
-                # Build a per-request graph with per_user_state inserted
-                current_graph = [
-                    persona_node_modified,
-                    per_user_state_modified,
-                ] + current_graph[
-                    1:
-                ]  # Skip the original persona node (index 0)
 
             # Build the agent graph using the provided parameters
             agent_graph = build_agent_graph(

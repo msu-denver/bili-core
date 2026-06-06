@@ -94,13 +94,16 @@ log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 # using the custom function that supports TRACE
 log_level = get_log_level(log_level_str)
 
-# Perform the root logger configuration once when the module is loaded
-if len(logging.getLogger().handlers) > 0:
-    # If running in an environment like AWS Lambda, the root logger is already configured
-    logging.getLogger().setLevel(log_level)
-else:
-    # Configure the logger with a basic console handler for local usage
+# Perform the root logger configuration once when the module is loaded.
+if len(logging.getLogger().handlers) == 0:
+    # No handlers yet: configure a basic console handler for local usage.
     logging.basicConfig(level=log_level)
+elif "LOG_LEVEL" in os.environ:
+    # The root logger is already configured (e.g. Gunicorn, uvicorn, AWS
+    # Lambda, pytest --log-cli-level). Only override its level when LOG_LEVEL
+    # was set explicitly, so importing bili does not silently stomp on the
+    # host application's logging configuration.
+    logging.getLogger().setLevel(log_level)
 
 
 def get_logger(name: str):

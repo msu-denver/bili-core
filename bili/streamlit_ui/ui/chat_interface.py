@@ -59,6 +59,7 @@ Example:
 """
 
 import base64
+import binascii
 import copy
 import json
 
@@ -88,6 +89,44 @@ from bili.streamlit_ui.utils.state_management import (
     get_state_config,
 )
 from bili.utils.langgraph_utils import State, clear_state, format_message_with_citations
+
+# langgraph's JsonPlusSerializer.dumps_typed tags payloads as "json" or
+# "msgpack"; reject anything else so an attacker-supplied envelope cannot steer
+# loads_typed into an unexpected decoder branch.
+_VALID_EXPORT_SERDE_TYPES = {"json", "msgpack"}
+
+
+def _deserialize_conversation_state(raw_bytes):
+    """Deserialize an uploaded conversation-state export envelope.
+
+    Expects the typed JSON envelope produced by the Export handler. Returns the
+    state dict on success, or None (after surfacing st.error) when the upload is
+    malformed, has an unsupported serde type, or is from an incompatible older
+    release whose format predates the envelope.
+
+    :param raw_bytes: Raw bytes read from the uploaded file.
+    :return: The deserialized state, or None on failure.
+    """
+    try:
+        envelope = json.loads(raw_bytes)
+        serde_type = envelope["type"]
+        if serde_type not in _VALID_EXPORT_SERDE_TYPES:
+            raise ValueError(f"unsupported serde type: {serde_type!r}")
+        data = base64.b64decode(envelope["data"])
+        return JsonPlusSerializer().loads_typed((serde_type, data))
+    except (
+        ValueError,
+        KeyError,
+        TypeError,
+        json.JSONDecodeError,
+        binascii.Error,
+    ) as exc:
+        st.error(
+            "Could not import conversation state: the file is malformed or from "
+            "an incompatible release. Please re-export it. "
+            f"({type(exc).__name__})"
+        )
+        return None
 
 
 def run_app_page(checkpointer=None):
@@ -352,7 +391,7 @@ def display_state_management(question_form):
             last_ai_message_index = None
 
         processing_messages = []
-        if last_human_message_index and last_ai_message_index:
+        if last_human_message_index is not None and last_ai_message_index is not None:
             processing_messages = latest_state_messages[
                 last_human_message_index + 1 : last_ai_message_index
             ]
@@ -385,7 +424,11 @@ def display_state_management(question_form):
             st.success("Conversation state cleared!")
             st.session_state.update({"state_cleared": False})
 
-        # Export button
+        # Export button. Build the envelope on click and stash it in session
+        # state, then render the download_button unconditionally. A
+        # download_button rendered only inside the click branch disappears on
+        # the next rerun (sibling widget, uploader on_change, external rerun)
+        # before the user clicks Download, discarding the serialized state.
         if st.button("Export Conversation State as JSON", use_container_width=True):
             # Export the state values dict (messages, summary, ...), which is
             # what the import handler reconstructs via .get(). langgraph's
@@ -396,16 +439,17 @@ def display_state_management(question_form):
             serde_type, serde_bytes = JsonPlusSerializer().dumps_typed(
                 latest_state.values
             )
-            export_payload = json.dumps(
+            st.session_state["conversation_state_export"] = json.dumps(
                 {
                     "serde": "jsonplus_typed",
                     "type": serde_type,
                     "data": base64.b64encode(serde_bytes).decode("ascii"),
                 }
             )
+        if st.session_state.get("conversation_state_export"):
             st.download_button(
                 label="Download Conversation State as JSON",
-                data=export_payload,
+                data=st.session_state["conversation_state_export"],
                 file_name="conversation_state.json",
                 mime="application/json",
                 use_container_width=True,
@@ -419,31 +463,32 @@ def display_state_management(question_form):
         )
         if uploaded_file is not None:
             if not st.session_state.get("state_imported", False):
-                # Reconstruct the (type, bytes) pair from the export envelope and
-                # deserialize via loads_typed (the inverse of the export above).
-                envelope = json.loads(uploaded_file.read())
-                imported_state = JsonPlusSerializer().loads_typed(
-                    (envelope["type"], base64.b64decode(envelope["data"]))
+                # getvalue() is position-independent; read() would consume the
+                # BytesIO cursor and return b"" on a later rerun, crashing
+                # json.loads. Returns None (after st.error) on a bad upload.
+                imported_state = _deserialize_conversation_state(
+                    uploaded_file.getvalue()
                 )
-                # If imported_state is a list, take first value as state
-                if isinstance(imported_state, list):
-                    imported_state = imported_state[0]
+                if imported_state is not None:
+                    # If imported_state is a list, take first value as state
+                    if isinstance(imported_state, list):
+                        imported_state = imported_state[0]
 
-                # Clear state first to remove existing messages and summary
-                st.session_state["conversation_chain"].update_state(
-                    config, clear_state(latest_state)
-                )
+                    # Clear state first to remove existing messages and summary
+                    st.session_state["conversation_chain"].update_state(
+                        config, clear_state(latest_state)
+                    )
 
-                # Next, import the new state
-                st.session_state["conversation_chain"].update_state(
-                    config,
-                    {
-                        "messages": imported_state.get("messages", []),
-                        "summary": imported_state.get("summary", ""),
-                    },
-                )
-                st.session_state["state_imported"] = True
-                st.rerun()
+                    # Next, import the new state
+                    st.session_state["conversation_chain"].update_state(
+                        config,
+                        {
+                            "messages": imported_state.get("messages", []),
+                            "summary": imported_state.get("summary", ""),
+                        },
+                    )
+                    st.session_state["state_imported"] = True
+                    st.rerun()
             elif "state_imported" in st.session_state:
                 st.success("Configuration imported successfully!")
 

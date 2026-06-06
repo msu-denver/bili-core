@@ -565,23 +565,31 @@ def display_configuration_panels():
                     """Reset the response schema to the default object preset.
 
                     Run as the button's on_click callback (not in the main body)
-                    so it can set the schema_preset widget key. Callbacks run
-                    before widgets are instantiated, so this is allowed; setting
-                    a widget key after instantiation raises StreamlitAPIException.
+                    so it can set the schema_preset and textarea widget keys.
+                    Callbacks run before widgets are instantiated, so this is
+                    allowed; setting a widget key after instantiation raises
+                    StreamlitAPIException. Both the data key
+                    (custom_response_schema) and the textarea widget key
+                    (custom_response_schema_input) are set so the box shows the
+                    reset value rather than the user's stale text.
                     """
-                    st.session_state["custom_response_schema"] = (
+                    default_schema = (
                         '{"type": "object", "properties": {"response": '
                         '{"type": "string"}}, "required": ["response"]}'
                     )
+                    st.session_state["custom_response_schema"] = default_schema
+                    st.session_state["custom_response_schema_input"] = default_schema
                     st.session_state["schema_preset"] = "Object Response"
 
                 def clear_schema():
                     """Clear the response schema back to an empty object.
 
                     Run as the button's on_click callback so it may set the
-                    schema_preset widget key (see reset_to_default_schema).
+                    schema_preset and textarea widget keys (see
+                    reset_to_default_schema).
                     """
                     st.session_state["custom_response_schema"] = "{}"
+                    st.session_state["custom_response_schema_input"] = "{}"
                     st.session_state["schema_preset"] = "Custom"
 
                 # Clear/Reset buttons. The state mutations live in on_click

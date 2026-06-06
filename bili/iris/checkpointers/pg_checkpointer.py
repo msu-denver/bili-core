@@ -43,6 +43,7 @@ Example:
     pg_checkpointer = get_pg_checkpointer()
 """
 
+import asyncio
 import atexit
 import contextlib
 import os
@@ -874,10 +875,10 @@ class PruningPostgresSaver(
                 msg_class = msg.get("type", msg.get("__class__", "unknown"))
                 # Handle serialized format where type might be in different places
                 if msg_class == "unknown" and "kwargs" in msg:
+                    raw_id = msg.get("id")
+                    # Guard against an empty id list: [][-1] would raise.
                     msg_class = (
-                        msg.get("id", ["unknown"])[-1]
-                        if isinstance(msg.get("id"), list)
-                        else "unknown"
+                        raw_id[-1] if isinstance(raw_id, list) and raw_id else "unknown"
                     )
             elif hasattr(msg, "__class__"):
                 msg_class = msg.__class__.__name__
@@ -1286,6 +1287,42 @@ class AsyncPruningPostgresSaver(
     def thread_exists(self, thread_id: str) -> bool:
         """Check whether a thread exists (delegates to the sync saver)."""
         return self._get_query_delegate().thread_exists(thread_id)
+
+    # Async variants: run the blocking sync query (and its lazy first-call
+    # schema migration) in a worker thread so async callers never block the
+    # event loop. These mirror the async Mongo saver's a*-prefixed methods.
+
+    async def aget_user_threads(
+        self, user_identifier: str, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Async variant of get_user_threads (runs off the event loop)."""
+        return await asyncio.to_thread(
+            self.get_user_threads, user_identifier, limit, offset
+        )
+
+    async def aget_thread_messages(
+        self,
+        thread_id: str,
+        limit: int | None = None,
+        offset: int = 0,
+        message_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Async variant of get_thread_messages (runs off the event loop)."""
+        return await asyncio.to_thread(
+            self.get_thread_messages, thread_id, limit, offset, message_types
+        )
+
+    async def adelete_thread(self, thread_id: str) -> bool:
+        """Async variant of delete_thread (runs off the event loop)."""
+        return await asyncio.to_thread(self.delete_thread, thread_id)
+
+    async def aget_user_stats(self, user_identifier: str) -> dict[str, Any]:
+        """Async variant of get_user_stats (runs off the event loop)."""
+        return await asyncio.to_thread(self.get_user_stats, user_identifier)
+
+    async def athread_exists(self, thread_id: str) -> bool:
+        """Async variant of thread_exists (runs off the event loop)."""
+        return await asyncio.to_thread(self.thread_exists, thread_id)
 
     async def aput(
         self,

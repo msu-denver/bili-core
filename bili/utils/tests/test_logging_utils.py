@@ -6,6 +6,7 @@ trace() logger method, and the module-load root-logger configuration.
 
 import importlib
 import logging
+import os
 from unittest.mock import MagicMock, patch
 
 import bili.utils.logging_utils as logging_utils
@@ -139,15 +140,29 @@ class TestModuleRootConfiguration:
         """Reload the module unpatched so later tests see normal state."""
         importlib.reload(logging_utils)
 
-    def test_sets_level_when_root_has_handlers(self):
-        """An already-configured root logger only gets its level set."""
+    def test_sets_level_when_handlers_present_and_log_level_set(self):
+        """A configured root logger gets its level set only when LOG_LEVEL is set."""
         fake_root = MagicMock()
         fake_root.handlers = [MagicMock()]
         with patch("logging.getLogger", return_value=fake_root), patch(
             "logging.basicConfig"
-        ) as mock_basic:
+        ) as mock_basic, patch.dict("os.environ", {"LOG_LEVEL": "DEBUG"}):
             importlib.reload(logging_utils)
         fake_root.setLevel.assert_called_once()
+        mock_basic.assert_not_called()
+
+    def test_respects_host_config_when_log_level_unset(self):
+        """A configured root logger is left untouched when LOG_LEVEL is absent."""
+        fake_root = MagicMock()
+        fake_root.handlers = [MagicMock()]
+        env_without_log_level = {
+            k: v for k, v in os.environ.items() if k != "LOG_LEVEL"
+        }
+        with patch("logging.getLogger", return_value=fake_root), patch(
+            "logging.basicConfig"
+        ) as mock_basic, patch.dict("os.environ", env_without_log_level, clear=True):
+            importlib.reload(logging_utils)
+        fake_root.setLevel.assert_not_called()
         mock_basic.assert_not_called()
 
     def test_basic_config_when_root_has_no_handlers(self):

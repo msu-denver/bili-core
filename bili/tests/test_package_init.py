@@ -43,3 +43,16 @@ class TestLazySubmoduleLoader:
         for name in bili._LAZY_SUBMODULES:
             module = importlib.import_module(f"bili.{name}")
             assert isinstance(module, types.ModuleType)
+
+    def test_all_matches_lazy_submodules(self):
+        """__all__ must equal _LAZY_SUBMODULES so `from bili import *` works.
+
+        A name in __all__ that is not in _LAZY_SUBMODULES would raise
+        AttributeError from __getattr__ during a star import.
+        """
+        assert set(bili.__all__) == set(bili._LAZY_SUBMODULES)
+
+    def test_star_import_resolves_every_name(self):
+        """Every name in __all__ resolves via __getattr__ (star-import safe)."""
+        for name in bili.__all__:
+            assert isinstance(getattr(bili, name), types.ModuleType)

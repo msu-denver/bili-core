@@ -613,12 +613,35 @@ class TestPerUserAgent:
             assert names[0] == "add_persona_and_summary"
             assert names[1] == "per_user_state"
             assert built_graph[0].edges == ["per_user_state"]
+            # per_user_state inherits the persona's original out-edges.
             assert built_graph[1].edges == ["inject_current_datetime"]
-            # The shared DEFAULT_GRAPH_DEFINITION is never mutated.
+            # The shared DEFAULT_GRAPH_DEFINITION is never mutated (deep copy).
             assert all(
                 getattr(n, "name", None) != "per_user_state"
                 for n in DEFAULT_GRAPH_DEFINITION
             )
+            assert DEFAULT_GRAPH_DEFINITION[0].edges == ["inject_current_datetime"]
+
+    def test_raises_when_graph_has_no_persona_node(self):
+        """A graph lacking a persona node raises rather than rewiring index 0."""
+        from bili.iris.nodes.inject_current_datetime import (  # pylint: disable=import-outside-toplevel
+            inject_current_datetime_node,
+        )
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        # A non-empty graph whose first node is not the persona node.
+        decorated = per_user_agent(
+            checkpoint_saver=MagicMock(),
+            graph_definition=[inject_current_datetime_node()],
+            node_kwargs={},
+        )(lambda: "ok")
+
+        with app.test_request_context():
+            g.user = {"uid": "u1"}
+            with patch("bili.flask_api.flask_utils.build_agent_graph"):
+                with pytest.raises(ValueError, match="add_persona_and_summary"):
+                    decorated()
 
 
 def _set_cookie_headers(resp):

@@ -34,15 +34,8 @@ def __dir__():
     return list(_LAZY_SUBMODULES)
 
 
-__all__ = [
-    "aether",
-    "auth",
-    "checkpointers",
-    "config",
-    "flask_api",
-    "graph_builder",
-    "loaders",
-    "nodes",
-    "tools",
-    "utils",
-]
+# Keep __all__ in sync with _LAZY_SUBMODULES: `from bili import *` iterates
+# __all__ and resolves each name via __getattr__, so any name not in
+# _LAZY_SUBMODULES would raise AttributeError. The v5.0.0 refactor moved
+# checkpointers/config/graph_builder/loaders/nodes/tools under bili/iris/.
+__all__ = sorted(_LAZY_SUBMODULES)

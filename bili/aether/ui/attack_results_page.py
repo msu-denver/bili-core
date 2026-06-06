@@ -693,11 +693,19 @@ def _render_matrix(df: pd.DataFrame, is_cross_model: bool) -> None:
     # alone. When no result carries a Tier-3 score, pivot_score is empty and a
     # score-only axis would hide every Tier-1/Tier-2 fallback cell. The union
     # guarantees the matrix still shows "!" and "T2:" cells in that case.
-    row_labels = sorted(
-        set(pivot_score.index) | set(pivot_tier1.index) | set(pivot_tier2.index)
-    )
-    col_labels = sorted(
-        set(pivot_score.columns) | set(pivot_tier1.columns) | set(pivot_tier2.columns)
+    #
+    # Keep only string labels before sorting: a missing phase/payload can leave
+    # NaN/None in a pivot index, and sorted() raises TypeError comparing a float
+    # against a str, which would crash the whole matrix render.
+    def _string_labels(*indexes):
+        labels = set()
+        for index in indexes:
+            labels.update(v for v in index if isinstance(v, str))
+        return sorted(labels)
+
+    row_labels = _string_labels(pivot_score.index, pivot_tier1.index, pivot_tier2.index)
+    col_labels = _string_labels(
+        pivot_score.columns, pivot_tier1.columns, pivot_tier2.columns
     )
     display = pd.DataFrame(
         {col: [_cell_val(row, col) for row in row_labels] for col in col_labels},
