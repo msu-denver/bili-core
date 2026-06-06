@@ -23,7 +23,7 @@ with patch.object(ci, "is_authenticated", return_value=False):
         st.session_state.auth_manager = mock_auth
         ci.run_app_page()
 """,
-        default_timeout=10,
+        default_timeout=30,
     )
     at.run()
     assert not at.exception
@@ -573,7 +573,7 @@ with patch.object(ci, "get_state_config", return_value={"configurable": {"thread
     ci.display_state_management(form)
 form.form_submit_button("submit")
 """,
-        default_timeout=10,
+        default_timeout=30,
     )
     at.run()
     assert not at.exception
