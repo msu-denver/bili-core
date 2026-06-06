@@ -1472,8 +1472,16 @@ class TestGetTuple:
 class TestDictMessages:
     """Tests for dict-based message handling in get_thread_messages."""
 
-    def test_dict_message_falls_to_unknown(self):
-        """Dict messages get __class__.__name__ = 'dict' mapped to unknown role."""
+    def test_dict_message_type_field_drives_role(self):
+        """A dict message resolves its role from the 'type' field.
+
+        Previously this asserted dict messages fell through to role "unknown",
+        which pinned a real bug: the type-detection guard checked
+        ``hasattr(msg, "__class__")`` first, and since every dict has
+        __class__, the dict-specific 'type' extraction was dead code. With the
+        guard reordered to check ``isinstance(msg, dict)`` first, a serialized
+        {"type": "human"} message correctly maps to role "user".
+        """
         saver = _make_saver()
         msg = {"type": "human", "content": "Hello dict"}
         checkpoint = {"channel_values": {"messages": [msg]}}
@@ -1483,7 +1491,7 @@ class TestDictMessages:
 
         result = saver.get_thread_messages("t1")
         assert len(result) == 1
-        assert result[0]["role"] == "unknown"
+        assert result[0]["role"] == "user"
         assert result[0]["content"] == "Hello dict"
 
     def test_function_message_mapped(self):

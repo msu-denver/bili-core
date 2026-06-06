@@ -6,9 +6,10 @@ a main() function that parses CLI args and delegates to run_suite().
 All external dependencies are mocked.
 """
 
+import importlib
 import sys
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -439,6 +440,91 @@ class TestBiasInheritanceRunnerMain:
 
         kw = mock_run_suite.call_args[1]
         assert kw["phases"] == ["mid_execution"]
+
+
+# ===================================================================
+# Non-stub mode: baseline resolution + SemanticEvaluator init
+# ===================================================================
+
+# (module_path, payload_constant_name, script_name)
+_NON_STUB_RUNNERS = [
+    (_AI_MOD, "AGENT_IMPERSONATION_PAYLOADS", "run_agent_impersonation_suite.py"),
+    (_BI_MOD, "BIAS_INHERITANCE_PAYLOADS", "run_bias_inheritance_suite.py"),
+    (_JB_MOD, "JAILBREAK_PAYLOADS", "run_jailbreak_suite.py"),
+    (_MP_MOD, "MEMORY_POISONING_PAYLOADS", "run_memory_poisoning_suite.py"),
+]
+
+
+@pytest.mark.parametrize("mod_path,payload_const,script", _NON_STUB_RUNNERS)
+def test_non_stub_initializes_semantic_evaluator(
+    mod_path, payload_const, script, tmp_path, monkeypatch
+):
+    """Non-stub mode constructs a SemanticEvaluator and passes it to run_suite."""
+    mod = importlib.import_module(mod_path)
+    baseline_dir = tmp_path / "baseline"
+    baseline_dir.mkdir()
+    fake_eval = MagicMock(name="SemanticEvaluator")
+
+    with patch.object(mod, "run_suite", side_effect=SystemExit(0)) as mock_run, patch(
+        "bili.aegis.evaluator.SemanticEvaluator", return_value=fake_eval
+    ), patch.object(mod, payload_const, [_fake_payload()]), patch.object(
+        mod, "CONFIG_PATHS", ["c.yaml"]
+    ), patch.object(
+        sys,
+        "argv",
+        [script, "--baseline-results", str(baseline_dir)],
+    ):
+        with pytest.raises(SystemExit):
+            mod.main()
+
+    kw = mock_run.call_args[1]
+    assert kw["stub"] is False
+    assert kw["semantic_evaluator"] is fake_eval
+    assert kw["baseline_results_dir"] == baseline_dir
+
+
+@pytest.mark.parametrize("mod_path,payload_const,script", _NON_STUB_RUNNERS)
+def test_missing_baseline_dir_warns_and_clears(mod_path, payload_const, script, capsys):
+    """A nonexistent baseline dir is reported and reset to None."""
+    mod = importlib.import_module(mod_path)
+    fake_eval = MagicMock(name="SemanticEvaluator")
+
+    with patch.object(mod, "run_suite", side_effect=SystemExit(0)) as mock_run, patch(
+        "bili.aegis.evaluator.SemanticEvaluator", return_value=fake_eval
+    ), patch.object(mod, payload_const, [_fake_payload()]), patch.object(
+        mod, "CONFIG_PATHS", ["c.yaml"]
+    ), patch.object(
+        sys,
+        "argv",
+        [script, "--baseline-results", "/no/such/baseline/dir"],
+    ):
+        with pytest.raises(SystemExit):
+            mod.main()
+
+    err = capsys.readouterr().err
+    assert "baseline results dir not found" in err
+    assert mock_run.call_args[1]["baseline_results_dir"] is None
+
+
+@pytest.mark.parametrize("mod_path,payload_const,script", _NON_STUB_RUNNERS)
+def test_semantic_evaluator_import_error_is_handled(mod_path, payload_const, script):
+    """A failing SemanticEvaluator init leaves the evaluator as None."""
+    mod = importlib.import_module(mod_path)
+
+    with patch.object(mod, "run_suite", side_effect=SystemExit(0)) as mock_run, patch(
+        "bili.aegis.evaluator.SemanticEvaluator",
+        side_effect=RuntimeError("no credentials"),
+    ), patch.object(mod, payload_const, [_fake_payload()]), patch.object(
+        mod, "CONFIG_PATHS", ["c.yaml"]
+    ), patch.object(
+        sys,
+        "argv",
+        [script],
+    ):
+        with pytest.raises(SystemExit):
+            mod.main()
+
+    assert mock_run.call_args[1]["semantic_evaluator"] is None
 
 
 # ===================================================================

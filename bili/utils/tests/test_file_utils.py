@@ -7,7 +7,7 @@ are tested only via mocking or skipped.
 """
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from langchain_core.documents import Document
 
@@ -18,9 +18,19 @@ from bili.utils.file_utils import (
     load_from_json,
     preprocess_directory,
     preprocess_file,
+    process_excel_data,
+    process_html_data,
+    process_json_data,
+    process_markdown_data,
+    process_pdf_data,
     process_text,
     process_text_data,
+    process_unstructured_data,
+    process_word_data,
+    process_xml_data,
 )
+
+_MODULE = "bili.utils.file_utils"
 
 # ------------------------------------------------------------------
 # load_from_json
@@ -263,3 +273,82 @@ class TestDefaultConstants:
     def test_default_chunk_overlap(self):
         """DEFAULT_CHUNK_OVERLAP is 200."""
         assert DEFAULT_CHUNK_OVERLAP == 200
+
+
+# ------------------------------------------------------------------
+# Loader-wrapper processors (mocked LangChain loaders)
+# ------------------------------------------------------------------
+
+
+class TestLoaderWrappers:
+    """Each processor delegates to its LangChain loader and returns load()."""
+
+    def _assert_delegates(self, loader_name, func):
+        """Patch *loader_name* and assert *func* returns the loader's load()."""
+        with patch(f"{_MODULE}.{loader_name}") as loader_cls:
+            loader_cls.return_value.load.return_value = ["doc"]
+            result = func("some/file.path", ".ext")
+        assert result == ["doc"]
+        loader_cls.return_value.load.assert_called_once()
+
+    def test_process_excel_data(self):
+        """process_excel_data uses UnstructuredExcelLoader."""
+        self._assert_delegates("UnstructuredExcelLoader", process_excel_data)
+
+    def test_process_word_data(self):
+        """process_word_data uses UnstructuredWordDocumentLoader."""
+        self._assert_delegates("UnstructuredWordDocumentLoader", process_word_data)
+
+    def test_process_json_data(self):
+        """process_json_data uses JSONLoader."""
+        self._assert_delegates("JSONLoader", process_json_data)
+
+    def test_process_html_data(self):
+        """process_html_data uses BSHTMLLoader."""
+        self._assert_delegates("BSHTMLLoader", process_html_data)
+
+    def test_process_markdown_data(self):
+        """process_markdown_data uses UnstructuredMarkdownLoader."""
+        self._assert_delegates("UnstructuredMarkdownLoader", process_markdown_data)
+
+    def test_process_xml_data(self):
+        """process_xml_data uses UnstructuredXMLLoader."""
+        self._assert_delegates("UnstructuredXMLLoader", process_xml_data)
+
+    def test_process_unstructured_data(self):
+        """process_unstructured_data uses UnstructuredFileLoader."""
+        self._assert_delegates("UnstructuredFileLoader", process_unstructured_data)
+
+
+class TestProcessPdfData:
+    """process_pdf_data tries image extraction then retries without it."""
+
+    def test_success_with_image_extraction(self):
+        """The first attempt extracts images and returns its split content."""
+        with patch(f"{_MODULE}.PyPDFLoader") as loader_cls:
+            loader_cls.return_value.load_and_split.return_value = ["pdf"]
+            result = process_pdf_data("doc.pdf", ".pdf")
+        assert result == ["pdf"]
+        # First (and only) attempt requests image extraction.
+        assert loader_cls.call_args_list[0].kwargs["extract_images"] is True
+
+    def test_retries_without_images_on_error(self):
+        """A failure with images retries with extract_images disabled."""
+        first = MagicMock()
+        first.load_and_split.side_effect = ValueError("image boom")
+        second = MagicMock()
+        second.load_and_split.return_value = ["retried"]
+        with patch(f"{_MODULE}.PyPDFLoader", side_effect=[first, second]) as loader_cls:
+            result = process_pdf_data("doc.pdf", ".pdf")
+        assert result == ["retried"]
+        assert loader_cls.call_args_list[0].kwargs["extract_images"] is True
+        assert loader_cls.call_args_list[1].kwargs["extract_images"] is False
+
+
+class TestPreprocessFileErrorHandling:
+    """preprocess_file swallows loader IOError/ValueError and returns ''."""
+
+    def test_returns_empty_string_on_loader_error(self):
+        """A processor that raises a handled error yields an empty string."""
+        with patch(f"{_MODULE}.process_csv_data", side_effect=ValueError("bad csv")):
+            assert preprocess_file("data.csv") == ""

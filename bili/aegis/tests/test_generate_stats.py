@@ -4,10 +4,20 @@ Tests the statistics computation and report formatting
 without touching the filesystem.
 """
 
+# Tests exercise private helpers (_load_suite, _SUITE_DIRS, etc.)
+# pylint: disable=protected-access
+
+import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 
+from bili.aegis.suites.analysis import generate_stats as _stats_mod
 from bili.aegis.suites.analysis.generate_stats import (
+    _load_suite,
     _payload_succeeded,
+    _pct,
+    _score,
     _tier1_pass,
     _tier3_score,
     compute_persistence_stats,
@@ -15,6 +25,8 @@ from bili.aegis.suites.analysis.generate_stats import (
     compute_transferability_stats,
     format_report,
 )
+
+_MODULE = "bili.aegis.suites.analysis.generate_stats"
 
 
 class TestTier3Score:
@@ -266,6 +278,248 @@ class TestComputeTransferabilityStats:
         stats = compute_transferability_stats(results)
         rate = stats["per_model_success_rate"]["modelA"]
         assert rate == pytest.approx(0.5)
+
+
+class TestLoadSuite:
+    """Tests for _load_suite filesystem loading and run-dir selection."""
+
+    def test_returns_empty_when_dir_missing(self, tmp_path):
+        """Returns an empty list when the suite directory does not exist."""
+        assert _load_suite(tmp_path / "nope") == []
+
+    def test_loads_latest_run_dir_by_default(self, tmp_path):
+        """Default mode loads only the latest run_NNN directory per mas_id."""
+        mas = tmp_path / "mas_a"
+        (mas / "run_001").mkdir(parents=True)
+        (mas / "run_002").mkdir(parents=True)
+        (mas / "run_001" / "old.json").write_text(json.dumps({"v": "old"}))
+        (mas / "run_002" / "new.json").write_text(json.dumps({"v": "new"}))
+        results = _load_suite(tmp_path)
+        assert len(results) == 1
+        assert results[0]["v"] == "new"
+        assert results[0]["run_id"] == "run_002"
+
+    def test_loads_flat_legacy_layout(self, tmp_path):
+        """Falls back to the flat legacy layout when no run dirs exist."""
+        mas = tmp_path / "mas_a"
+        mas.mkdir(parents=True)
+        (mas / "r.json").write_text(json.dumps({"v": "flat"}))
+        results = _load_suite(tmp_path)
+        assert len(results) == 1
+        assert results[0]["run_id"] == "run_000 (legacy)"
+
+    def test_specific_run_selector(self, tmp_path):
+        """The run= selector loads only the named run dir, skipping absent ones."""
+        mas_a = tmp_path / "mas_a"
+        (mas_a / "run_001").mkdir(parents=True)
+        (mas_a / "run_001" / "a.json").write_text(json.dumps({"v": "a1"}))
+        mas_b = tmp_path / "mas_b"
+        (mas_b / "run_002").mkdir(parents=True)
+        (mas_b / "run_002" / "b.json").write_text(json.dumps({"v": "b2"}))
+        results = _load_suite(tmp_path, run="run_001")
+        assert len(results) == 1
+        assert results[0]["v"] == "a1"
+
+    def test_all_runs_aggregates(self, tmp_path):
+        """all_runs=True aggregates across every run dir, tagging run_id."""
+        mas = tmp_path / "mas_a"
+        (mas / "run_001").mkdir(parents=True)
+        (mas / "run_002").mkdir(parents=True)
+        (mas / "run_001" / "a.json").write_text(json.dumps({"v": 1}))
+        (mas / "run_002" / "b.json").write_text(json.dumps({"v": 2}))
+        results = _load_suite(tmp_path, all_runs=True)
+        assert {r["v"] for r in results} == {1, 2}
+        assert {r["run_id"] for r in results} == {"run_001", "run_002"}
+
+    def test_all_runs_flat_legacy(self, tmp_path):
+        """all_runs=True over a flat layout tags the legacy run_id."""
+        mas = tmp_path / "mas_a"
+        mas.mkdir(parents=True)
+        (mas / "x.json").write_text(json.dumps({"v": 9}))
+        results = _load_suite(tmp_path, all_runs=True)
+        assert results[0]["run_id"] == "run_000 (legacy)"
+
+    def test_skips_non_directory_entries(self, tmp_path):
+        """Non-directory entries directly under the suite dir are ignored."""
+        (tmp_path / "stray.txt").write_text("not a dir")
+        mas = tmp_path / "mas_a"
+        mas.mkdir()
+        (mas / "r.json").write_text(json.dumps({"v": "ok"}))
+        results = _load_suite(tmp_path)
+        assert len(results) == 1
+
+    def test_warns_on_corrupt_json(self, tmp_path):
+        """A corrupt JSON file is skipped with a warning, others still load."""
+        mas = tmp_path / "mas_a"
+        mas.mkdir(parents=True)
+        (mas / "bad.json").write_text("{not json")
+        (mas / "good.json").write_text(json.dumps({"v": "good"}))
+        results = _load_suite(tmp_path)
+        assert len(results) == 1
+        assert results[0]["v"] == "good"
+
+
+class TestPctAndScore:
+    """Tests for the _pct and _score formatting helpers."""
+
+    def test_pct_none(self):
+        """_pct returns 'N/A' for None."""
+        assert _pct(None) == "N/A"
+
+    def test_pct_value(self):
+        """_pct renders a fraction as a one-decimal percentage."""
+        assert _pct(0.5) == "50.0%"
+
+    def test_score_none(self):
+        """_score returns 'N/A' for None."""
+        assert _score(None) == "N/A"
+
+    def test_score_value(self):
+        """_score renders a float to two decimals."""
+        assert _score(1.5) == "1.50"
+
+
+class TestFormatReportPerConfig:
+    """Tests for format_report's per-config rendering branch."""
+
+    def test_renders_per_config_rows(self):
+        """Per-config rows appear under the suite section."""
+        stats = {
+            "injection": {
+                "suite": "injection",
+                "total": 2,
+                "tier1_success_rate": 0.5,
+                "avg_tier3_score": 1.0,
+                "tier3_evaluated": 2,
+                "per_config": {
+                    "mas_a": {"tier1_success_rate": 1.0, "avg_tier3_score": 2.0},
+                    "mas_b": {"tier1_success_rate": 0.0, "avg_tier3_score": None},
+                },
+            },
+        }
+        report = format_report(stats)
+        assert "Per config:" in report
+        assert "mas_a: T1=100.0%" in report
+        assert "mas_b: T1=0.0%" in report
+        # mas_b has no tier3 average, so the score renders as N/A.
+        assert "T3=N/A" in report
+
+
+class TestMain:
+    """Tests for the main() entry point."""
+
+    @patch(f"{_MODULE}.argparse.ArgumentParser.parse_args")
+    def test_prints_report_and_excludes_stub(self, mock_args, tmp_path, capsys):
+        """main loads each suite, excludes stub rows by default, and prints."""
+        injection_dir = tmp_path / "injection"
+        mas = injection_dir / "mas_a" / "run_001"
+        mas.mkdir(parents=True)
+        (mas / "real.json").write_text(
+            json.dumps(
+                {
+                    "mas_id": "mas_a",
+                    "execution": {"success": True},
+                    "run_metadata": {"tier3_score": 2, "stub_mode": False},
+                }
+            )
+        )
+        (mas / "stub.json").write_text(
+            json.dumps(
+                {
+                    "mas_id": "mas_a",
+                    "execution": {"success": True},
+                    "run_metadata": {"tier3_score": 2, "stub_mode": True},
+                }
+            )
+        )
+        suite_dirs = {"injection": injection_dir}
+
+        mock_args.return_value = MagicMock(
+            output=None, include_stub=False, run=None, all_runs=False
+        )
+        with patch.dict(_stats_mod._SUITE_DIRS, suite_dirs, clear=True):
+            _stats_mod.main()
+
+        out = capsys.readouterr().out
+        assert "AETHER RESULTS" in out
+        # Only the one real (non-stub) row is counted.
+        assert "Total runs:        1" in out
+
+    @patch(f"{_MODULE}.argparse.ArgumentParser.parse_args")
+    def test_include_stub_and_output_file(self, mock_args, tmp_path):
+        """--include-stub keeps stub rows and --output writes the report file."""
+        injection_dir = tmp_path / "injection"
+        mas = injection_dir / "mas_a" / "run_001"
+        mas.mkdir(parents=True)
+        (mas / "stub.json").write_text(
+            json.dumps(
+                {
+                    "mas_id": "mas_a",
+                    "execution": {"success": True},
+                    "run_metadata": {"tier3_score": 2, "stub_mode": True},
+                }
+            )
+        )
+        out_file = tmp_path / "report.txt"
+        mock_args.return_value = MagicMock(
+            output=str(out_file), include_stub=True, run=None, all_runs=False
+        )
+        with patch.dict(
+            _stats_mod._SUITE_DIRS, {"injection": injection_dir}, clear=True
+        ):
+            _stats_mod.main()
+
+        assert out_file.exists()
+        assert "AETHER RESULTS" in out_file.read_text()
+
+    @patch(f"{_MODULE}.argparse.ArgumentParser.parse_args")
+    def test_cross_model_and_persistence_dispatch(self, mock_args, tmp_path):
+        """main routes cross_model and persistence suites to their stat builders."""
+        cm_dir = tmp_path / "cross_model"
+        cm_mas = cm_dir / "mas_a" / "run_001"
+        cm_mas.mkdir(parents=True)
+        (cm_mas / "r.json").write_text(
+            json.dumps(
+                {
+                    "payload_id": "p1",
+                    "mas_id": "mas_a",
+                    "injection_phase": "pre",
+                    "model_id": "modelA",
+                    "execution": {"success": True},
+                    "run_metadata": {"tier3_score": 3, "stub_mode": False},
+                }
+            )
+        )
+        pers_dir = tmp_path / "persistence"
+        pers_mas = pers_dir / "mas_a" / "run_001"
+        pers_mas.mkdir(parents=True)
+        (pers_mas / "r.json").write_text(
+            json.dumps(
+                {
+                    "mas_id": "mas_a",
+                    "execution": {"success": True},
+                    "run_metadata": {"tier3_score": 1, "stub_mode": False},
+                }
+            )
+        )
+        mock_args.return_value = MagicMock(
+            output=None, include_stub=False, run=None, all_runs=False
+        )
+        captured = {}
+        with patch.dict(
+            _stats_mod._SUITE_DIRS,
+            {"cross_model": cm_dir, "persistence": pers_dir},
+            clear=True,
+        ):
+            with patch(
+                f"{_MODULE}.format_report",
+                side_effect=lambda s: captured.setdefault("stats", s) or "report",
+            ):
+                _stats_mod.main()
+
+        stats = captured["stats"]
+        assert stats["cross_model"]["total_results"] == 1
+        assert stats["persistence"]["suite"] == "persistence"
 
 
 class TestFormatReport:

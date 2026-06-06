@@ -101,10 +101,21 @@ jobs:
                 pip install -r requirements.txt
               shell: bash
 
-            # Run the full test suite. No skips or errors are tolerated; the
-            # mongomock-backed checkpointer tests and the AEGIS structural
-            # fixtures mean the suite runs fully without external services.
-            - name: Run pytest
+            # Run the full test suite with coverage. No skips or errors are
+            # tolerated; the mongomock-backed checkpointer tests and the AEGIS
+            # structural fixtures mean the suite runs fully without external
+            # services. Coverage is scoped to runtime code via .coveragerc
+            # (the test tree is omitted so it cannot inflate the numbers).
+            - name: Run pytest with coverage
               run: |
-                pytest bili/ -q --tb=short
+                pytest bili/ -q --tb=short \
+                  --cov=bili --cov-report=json:coverage.json
+              shell: bash
+
+            # Per-file coverage gate: every runtime file must reach >= 90% line
+            # coverage. This is a required check, not an average; a single file
+            # below threshold fails the build. See scripts/check_coverage.py.
+            - name: Enforce per-file coverage gate (>= 90%)
+              run: |
+                python scripts/check_coverage.py
               shell: bash

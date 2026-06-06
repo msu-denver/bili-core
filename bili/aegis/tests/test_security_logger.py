@@ -2,6 +2,7 @@
 
 import json
 import threading
+from unittest.mock import patch
 
 from bili.aegis.security.logger import SecurityEventLogger
 from bili.aegis.security.models import SecurityEventType
@@ -150,6 +151,39 @@ def test_export_json_preserves_all_fields(tmp_path):
     assert entry["run_id"] == "run-xyz"
     assert entry["severity"] == "medium"
     assert entry["mas_id"] == "test_mas"
+
+
+def test_export_json_skips_blank_and_malformed_lines(tmp_path):
+    """Blank lines are ignored and malformed JSON lines are skipped with a warning."""
+    log_path = tmp_path / "events.ndjson"
+    logger = SecurityEventLogger(log_path=log_path)
+    logger.log(_event())
+    # Append a blank line and a malformed line after a valid record.
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n")
+        handle.write("{ this is not valid json }\n")
+
+    with patch("bili.aegis.security.logger.LOGGER.warning") as mock_warning:
+        parsed = json.loads(logger.export_json())
+
+    # Only the one valid event survives; the malformed line triggered a warning.
+    assert len(parsed) == 1
+    mock_warning.assert_called_once()
+
+
+def test_export_json_warns_and_returns_empty_on_read_error(tmp_path):
+    """A read failure is logged and yields an empty array rather than raising."""
+    log_path = tmp_path / "events.ndjson"
+    logger = SecurityEventLogger(log_path=log_path)
+    logger.log(_event())
+
+    with patch(
+        "pathlib.Path.read_text", side_effect=OSError("permission denied")
+    ), patch("bili.aegis.security.logger.LOGGER.warning") as mock_warning:
+        result = logger.export_json()
+
+    assert json.loads(result) == []
+    mock_warning.assert_called_once()
 
 
 # =========================================================================

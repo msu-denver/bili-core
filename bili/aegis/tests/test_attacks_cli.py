@@ -4,15 +4,19 @@ Covers argument parsing, payload resolution, and output formatting.
 All external dependencies (MASExecutor, AttackInjector, etc.) are mocked.
 """
 
+import os
 import sys
+import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
+from bili.aegis.attacks import cli as cli_module
 from bili.aegis.attacks.cli import (
     _build_parser,
     _build_payload,
+    _ensure_bili_stub,
     _format_attack_result,
     _row,
 )
@@ -384,6 +388,60 @@ class TestMainEntryPoint:
     @patch("bili.aegis.attacks.AttackInjector")
     @patch("bili.aether.runtime.executor.MASExecutor")
     @patch("bili.aether.config.loader.load_mas_from_yaml")
+    def test_main_async_submission_exits_zero(
+        self,
+        mock_load,
+        mock_executor_cls,
+        mock_injector_cls,
+        mock_logger_cls,
+    ):
+        """An async submission (no completed_at, no error) exits with code 0."""
+        mock_load.return_value = MagicMock()
+        mock_executor_cls.return_value = MagicMock()
+
+        mock_injector = MagicMock()
+        mock_injector.__enter__ = MagicMock(return_value=mock_injector)
+        mock_injector.__exit__ = MagicMock(return_value=False)
+        mock_injector.inject_attack.return_value = SimpleNamespace(
+            success=False,
+            attack_id="atk-async",
+            mas_id="test-mas",
+            target_agent_id="agent_a",
+            attack_type="prompt_injection",
+            injection_phase="pre_execution",
+            error=None,
+            completed_at=None,
+            propagation_path=[],
+            influenced_agents=[],
+            resistant_agents=[],
+        )
+        mock_injector_cls.return_value = mock_injector
+
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "cli.py",
+                "config.yaml",
+                "--agent-id",
+                "agent_a",
+                "--attack-type",
+                "prompt_injection",
+                "--payload",
+                "test",
+            ],
+        ):
+            from bili.aegis.attacks.cli import main
+
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            # Async submission succeeds even though success is False.
+            assert exc_info.value.code == 0
+
+    @patch("bili.aegis.attacks.logger.AttackLogger")
+    @patch("bili.aegis.attacks.AttackInjector")
+    @patch("bili.aether.runtime.executor.MASExecutor")
+    @patch("bili.aether.config.loader.load_mas_from_yaml")
     def test_main_value_error_exits_one(
         self,
         mock_load,
@@ -421,3 +479,25 @@ class TestMainEntryPoint:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
+
+
+class TestEnsureBiliStub:
+    """_ensure_bili_stub adds the project root to sys.path and stubs bili."""
+
+    def test_inserts_root_and_creates_stub(self):
+        """When bili lacks a __path__, a lightweight package stub is installed."""
+        expected_root = os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(cli_module.__file__)))
+            )
+        )
+        # A bili module without __path__ forces the stub-creation branch, and a
+        # sys.path missing the root forces the path-insertion branch.
+        with patch.object(sys, "path", ["/unrelated/path"]), patch.dict(
+            sys.modules, {"bili": types.ModuleType("bili")}
+        ):
+            _ensure_bili_stub()
+            assert expected_root in sys.path
+            stub = sys.modules["bili"]
+            assert hasattr(stub, "__path__")
+            assert stub.__path__ == [os.path.join(expected_root, "bili")]

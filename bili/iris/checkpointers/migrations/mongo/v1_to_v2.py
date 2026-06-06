@@ -37,7 +37,7 @@ try:
     import msgpack
 
     MSGPACK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - msgpack is a hard dependency in this env
     MSGPACK_AVAILABLE = False
     LOGGER.warning(
         "msgpack not available - migration may fail for msgpack-encoded data"
@@ -48,7 +48,7 @@ try:
     import bson
 
     BSON_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - bson ships with pymongo in this env
     BSON_AVAILABLE = False
     LOGGER.warning("bson not available - migration may have limited Binary support")
 

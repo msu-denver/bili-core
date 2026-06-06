@@ -49,7 +49,7 @@ try:
     )
 
     LANGCHAIN_MIDDLEWARE_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional-dependency import fallback
     LANGCHAIN_MIDDLEWARE_AVAILABLE = False
 
 from bili.utils.logging_utils import get_logger

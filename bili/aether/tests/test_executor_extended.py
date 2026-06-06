@@ -19,6 +19,7 @@ Split from test_executor.py to stay within the pylint line limit.
 
 import asyncio
 from unittest.mock import MagicMock as Mock
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import HumanMessage  # pylint: disable=import-error
@@ -522,7 +523,7 @@ class TestAstreamMethod:
             return events
 
         with pytest.raises(RuntimeError, match="not initialized"):
-            asyncio.get_event_loop().run_until_complete(_run())
+            asyncio.run(_run())
 
     def test_astream_yields_events(self):
         """astream() yields StreamEvent objects for stub agents."""
@@ -536,7 +537,7 @@ class TestAstreamMethod:
                 events.append(event)
             return events
 
-        events = asyncio.get_event_loop().run_until_complete(_run())
+        events = asyncio.run(_run())
         assert len(events) > 0
         for event in events:
             assert isinstance(event, StreamEvent)
@@ -658,3 +659,141 @@ class TestResumeStreaming:  # pylint: disable=too-few-public-methods
         executor = MASExecutor(config)
         with pytest.raises(RuntimeError, match="not initialized"):
             list(executor.resume_streaming("input", "thread-1"))
+
+
+# =========================================================================
+# Helper-method coverage
+# =========================================================================
+
+
+class TestExecutorHelpers:
+    """Direct tests for small executor helper methods and properties."""
+
+    def test_log_dir_property_returns_configured_dir(self, tmp_path):
+        executor = MASExecutor(_seq_config(), log_dir=str(tmp_path))
+        assert executor.log_dir == str(tmp_path)
+
+    def test_resolve_agent_for_node_exact_prefix_and_miss(self):
+        executor = MASExecutor(_seq_config(n_agents=2))
+        executor.initialize()
+        # Exact match returns the node name itself.
+        assert executor._resolve_agent_for_node("agent_0") == "agent_0"
+        # A pipeline sub-node prefixed by an agent id resolves to that agent.
+        assert executor._resolve_agent_for_node("agent_0__sub") == "agent_0"
+        # An unrelated node name resolves to None.
+        assert executor._resolve_agent_for_node("nonexistent") is None
+
+    def test_resolve_agent_for_node_returns_none_before_init(self):
+        executor = MASExecutor(_seq_config())
+        assert executor._resolve_agent_for_node("agent_0") is None
+
+    def test_get_communication_log_path_is_none(self):
+        executor = MASExecutor(_seq_config())
+        assert executor._get_communication_log_path() is None
+
+    def test_serialize_state_stringifies_unserializable_values(self):
+        # A dict with non-string keys cannot be JSON-encoded even with default=str.
+        state = {
+            "messages": [HumanMessage(content="hi")],
+            "weird": {(1, 2): "tuple-key"},
+        }
+        result = MASExecutor._serialize_state(state)
+        assert result["messages"][0]["content"] == "hi"
+        assert isinstance(result["weird"], str)
+
+    def test_create_checkpointer_with_user_id_uses_factory(self):
+        executor = MASExecutor(
+            _seq_config(
+                checkpoint_enabled=True, checkpoint_config={"type": "postgres"}
+            ),
+            user_id="u@example.com",
+        )
+        sentinel = Mock()
+        with patch(
+            "bili.aether.integration.checkpointer_factory.create_checkpointer_from_config",
+            return_value=sentinel,
+        ) as mock_factory:
+            result = executor._create_checkpointer_with_user_id()
+        assert result is sentinel
+        assert mock_factory.call_args.kwargs["user_id"] == "u@example.com"
+
+    def test_create_checkpointer_with_user_id_falls_back_on_import_error(self):
+        from langgraph.checkpoint.memory import MemorySaver
+
+        executor = MASExecutor(_seq_config(), user_id="u@example.com")
+        # Making the factory module unimportable forces the MemorySaver fallback.
+        with patch.dict(
+            "sys.modules",
+            {"bili.aether.integration.checkpointer_factory": None},
+        ):
+            result = executor._create_checkpointer_with_user_id()
+        assert isinstance(result, MemorySaver)
+
+    def test_initialize_with_user_id_creates_tenant_checkpointer(self):
+        executor = MASExecutor(
+            _seq_config(
+                checkpoint_enabled=True, checkpoint_config={"type": "postgres"}
+            ),
+            user_id="u@example.com",
+        )
+        with patch.object(
+            executor, "_create_checkpointer_with_user_id", return_value=Mock()
+        ) as mock_create:
+            executor.initialize()
+        mock_create.assert_called_once()
+
+
+# =========================================================================
+# run_streaming_tokens branch coverage
+# =========================================================================
+
+
+class TestRunStreamingTokensBranches:
+    """Drive run_streaming_tokens with a stubbed graph to cover edge branches."""
+
+    def test_token_and_node_complete_branches(self):
+        executor = MASExecutor(_seq_config())
+        executor.initialize()
+
+        chunk_text = Mock()
+        chunk_text.content = "hello"
+        chunk_empty = Mock()
+        chunk_empty.content = ""
+        chunk_list = Mock()
+        chunk_list.content = [{"text": "abc"}, {"no_text": "skip"}]
+
+        fake_stream = [
+            # Empty content is skipped.
+            ("messages", (chunk_empty, {"langgraph_node": "agent_0"})),
+            # Missing node name is skipped.
+            ("messages", (chunk_text, {"langgraph_node": ""})),
+            # Structured (list) content yields only the text blocks.
+            ("messages", (chunk_list, {"langgraph_node": "agent_0"})),
+            # Plain string content yields a token.
+            ("messages", (chunk_text, {"langgraph_node": "agent_0"})),
+            # Updates mode yields a node-complete event.
+            ("updates", {"agent_0": {"messages": []}}),
+        ]
+        executor._compiled_graph = Mock()
+        executor._compiled_graph.stream.return_value = iter(fake_stream)
+
+        events = list(executor.run_streaming_tokens({"messages": []}))
+        tokens = [d["token"] for k, d in events if k == "__token__"]
+        assert "abc" in tokens
+        assert "hello" in tokens
+        assert any(k == "__node_complete__" for k, _ in events)
+
+    def test_emits_human_interrupt_when_graph_pauses(self):
+        executor = MASExecutor(_seq_config(human_in_loop=True))
+        executor.initialize()
+
+        executor._compiled_graph = Mock()
+        executor._compiled_graph.stream.return_value = iter([])
+        graph_state = Mock()
+        graph_state.next = ["agent_1"]
+        executor._compiled_graph.get_state.return_value = graph_state
+
+        events = list(executor.run_streaming_tokens({"messages": []}, thread_id="t1"))
+        interrupts = [d for k, d in events if k == "__human_interrupt__"]
+        assert len(interrupts) == 1
+        assert interrupts[0]["next"] == ["agent_1"]

@@ -479,6 +479,15 @@ def display_configuration_panels():
                         st.session_state["custom_response_schema"] = preset_schemas[
                             preset
                         ]
+                        # Also drive the textarea widget key so the box reflects
+                        # the preset. Streamlit ignores the value= argument once
+                        # the widget is keyed, so without this the box keeps the
+                        # old text and the next keystroke would undo the switch.
+                        # Safe here: on_change callbacks run before the widget is
+                        # re-instantiated.
+                        st.session_state["custom_response_schema_input"] = (
+                            preset_schemas[preset]
+                        )
 
                 # Preset selector
                 schema_preset = st.selectbox(
@@ -561,20 +570,53 @@ def display_configuration_panels():
                     "[📚 Learn about Vertex AI JSON schemas](https://ai.google.dev/gemini-api/docs/structured-output)"
                 )
 
-                # Clear/Reset buttons
+                def reset_to_default_schema():
+                    """Reset the response schema to the default object preset.
+
+                    Run as the button's on_click callback (not in the main body)
+                    so it can set the schema_preset and textarea widget keys.
+                    Callbacks run before widgets are instantiated, so this is
+                    allowed; setting a widget key after instantiation raises
+                    StreamlitAPIException. Both the data key
+                    (custom_response_schema) and the textarea widget key
+                    (custom_response_schema_input) are set so the box shows the
+                    reset value rather than the user's stale text.
+                    """
+                    default_schema = (
+                        '{"type": "object", "properties": {"response": '
+                        '{"type": "string"}}, "required": ["response"]}'
+                    )
+                    st.session_state["custom_response_schema"] = default_schema
+                    st.session_state["custom_response_schema_input"] = default_schema
+                    st.session_state["schema_preset"] = "Object Response"
+
+                def clear_schema():
+                    """Clear the response schema back to an empty object.
+
+                    Run as the button's on_click callback so it may set the
+                    schema_preset and textarea widget keys (see
+                    reset_to_default_schema).
+                    """
+                    st.session_state["custom_response_schema"] = "{}"
+                    st.session_state["custom_response_schema_input"] = "{}"
+                    st.session_state["schema_preset"] = "Custom"
+
+                # Clear/Reset buttons. The state mutations live in on_click
+                # callbacks (which auto-rerun) so they never write to the
+                # schema_preset widget key after the selectbox is instantiated.
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("Reset to Default Schema", use_container_width=True):
-                        st.session_state["custom_response_schema"] = (
-                            '{"type": "object", "properties": {"response": {"type": "string"}}, "required": ["response"]}'
-                        )
-                        st.session_state["schema_preset"] = "Object Response"
-                        st.rerun()
+                    st.button(
+                        "Reset to Default Schema",
+                        use_container_width=True,
+                        on_click=reset_to_default_schema,
+                    )
                 with col2:
-                    if st.button("Clear Schema", use_container_width=True):
-                        st.session_state["custom_response_schema"] = "{}"
-                        st.session_state["schema_preset"] = "Custom"
-                        st.rerun()
+                    st.button(
+                        "Clear Schema",
+                        use_container_width=True,
+                        on_click=clear_schema,
+                    )
 
             else:
                 # Clear custom schema and related settings for non-JSON MIME types

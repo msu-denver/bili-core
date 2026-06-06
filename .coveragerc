@@ -1,0 +1,29 @@
+# Coverage configuration for bili-core.
+#
+# Scopes measurement to runtime code only. The test tree lives inside the
+# bili package (bili/<component>/tests/), and test files execute at close to
+# 100% by definition, so including them inflates the headline coverage number.
+# Omitting them here means the reported percentage is the coverage of the code
+# that actually ships.
+#
+# The per-file 90% floor is enforced by scripts/check_coverage.py (run in CI
+# after pytest), not by a global [report] fail_under, because the project goal
+# is that EVERY runtime file clears 90%, not that the average does.
+
+[run]
+source = bili
+branch = False
+omit =
+    */tests/*
+    */test_*.py
+    */conftest.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @(abc\.)?abstractmethod
+show_missing = True

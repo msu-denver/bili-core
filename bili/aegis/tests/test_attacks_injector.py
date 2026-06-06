@@ -562,3 +562,108 @@ def test_invalid_injection_phase_raises(tmp_path):
             payload=_PAYLOAD,
             injection_phase="not_a_phase",
         )
+
+
+# =========================================================================
+# _create_checkpointer
+# =========================================================================
+
+
+def _checkpoint_config(ctype="postgres", enabled=True):
+    """Build a MASConfig with checkpoint settings for checkpointer tests."""
+    return MASConfig(
+        mas_id="ckpt_mas",
+        name="Checkpoint MAS",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("agent_a"), _agent("agent_b")],
+        checkpoint_enabled=enabled,
+        checkpoint_config={"type": ctype},
+    )
+
+
+def test_create_checkpointer_defaults_to_memory_saver(tmp_path):
+    """A disabled-checkpoint config resolves to an in-process MemorySaver."""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    injector = _make_injector(_seq_config(), log_path=tmp_path / "log.ndjson")
+    assert isinstance(injector._create_checkpointer(), MemorySaver)
+
+
+def test_create_checkpointer_uses_factory_when_configured(tmp_path):
+    """An enabled non-memory config delegates to the checkpointer factory."""
+    injector = _make_injector(
+        _checkpoint_config("postgres"), log_path=tmp_path / "log.ndjson"
+    )
+    sentinel = object()
+    with patch(
+        "bili.aether.integration.checkpointer_factory.create_checkpointer_from_config",
+        return_value=sentinel,
+    ) as mock_factory:
+        result = injector._create_checkpointer()
+    assert result is sentinel
+    mock_factory.assert_called_once()
+
+
+def test_create_checkpointer_falls_back_when_factory_raises(tmp_path):
+    """A factory failure logs a warning and falls back to MemorySaver."""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    injector = _make_injector(
+        _checkpoint_config("postgres"), log_path=tmp_path / "log.ndjson"
+    )
+    with patch(
+        "bili.aether.integration.checkpointer_factory.create_checkpointer_from_config",
+        side_effect=RuntimeError("backend down"),
+    ):
+        result = injector._create_checkpointer()
+    assert isinstance(result, MemorySaver)
+
+
+# =========================================================================
+# _run_checkpoint_execution
+# =========================================================================
+
+
+def test_run_checkpoint_execution_rejects_memory_saver(tmp_path):
+    """A resolved MemorySaver is refused because it is in-process only."""
+    injector = _make_injector(_seq_config(), log_path=tmp_path / "log.ndjson")
+    with pytest.raises(RuntimeError, match="MemorySaver"):
+        injector._run_checkpoint_execution(
+            agent_id="agent_a",
+            attack_type=AttackType.MEMORY_POISONING,
+            payload=_PAYLOAD,
+            tracker=None,
+        )
+
+
+def test_run_checkpoint_execution_injects_and_observes(tmp_path):
+    """The persistence flow injects via the checkpointer and observes each agent."""
+    from langchain_core.messages import AIMessage
+
+    config = _seq_config()
+    injector = _make_injector(config, log_path=tmp_path / "log.ndjson")
+
+    graph = MagicMock()
+    graph.invoke.return_value = {"messages": [AIMessage(content="poisoned reply")]}
+    compiled = MagicMock()
+    compiled.compile_graph.return_value = graph
+
+    tracker = MagicMock()
+    with patch.object(
+        injector, "_create_checkpointer", return_value=MagicMock()
+    ), patch("bili.aether.compiler.compile_mas", return_value=compiled), patch(
+        "bili.aegis.attacks.strategies.persistence.inject_persistence"
+    ) as mock_inject:
+        thread_id = injector._run_checkpoint_execution(
+            agent_id="agent_a",
+            attack_type=AttackType.MEMORY_POISONING,
+            payload=_PAYLOAD,
+            tracker=tracker,
+        )
+
+    assert isinstance(thread_id, str)
+    mock_inject.assert_called_once()
+    # Every agent in the config is observed with the poisoned output excerpt.
+    assert tracker.observe.call_count == len(config.agents)
+    observed = tracker.observe.call_args.kwargs
+    assert observed["output_state"]["output"] == "poisoned reply"

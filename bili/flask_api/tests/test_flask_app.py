@@ -626,3 +626,267 @@ class TestRoleAuthorization:
             headers=_auth_header(sign_in["token"]),
         )
         assert resp.status_code == 200
+
+
+class TestRealFlaskAppRoutes:
+    """Exercise the real flask_app route handler bodies.
+
+    The real bili.flask_app module is reloaded with every heavy dependency
+    (LLM loader, checkpointer, tools loader, langchain loader, file IO) and
+    the auth manager replaced by configured mocks, so the route bodies run
+    end-to-end without any real LLM, database, or network access.
+    """
+
+    def _reload_with_mocks(self, auth_manager, agent):
+        """Reload flask_app with deps mocked and the given auth and agent."""
+        patches = {
+            "bili.iris.checkpointers.pg_checkpointer": MagicMock(),
+            "bili.iris.loaders.llm_loader": MagicMock(),
+            "bili.iris.loaders.tools_loader": MagicMock(),
+            "bili.iris.loaders.langchain_loader": MagicMock(),
+            "bili.iris.config.tool_config": MagicMock(),
+            "bili.utils.file_utils": MagicMock(),
+            "bili.utils.langgraph_utils": MagicMock(),
+        }
+        patches["bili.iris.config.tool_config"].TOOLS = {
+            "weather_api_tool": {"default_prompt": "weather"},
+            "serp_api_tool": {"default_prompt": "search"},
+        }
+        # Seed the graph definition with a per_user_state Node instance so the
+        # per_user_agent decorator takes its skip-path (it checks for a node
+        # named "per_user_state"). graph_definition holds Node instances, so the
+        # factory is called to build one.
+        from bili.iris.nodes.per_user_state import (  # pylint: disable=import-outside-toplevel
+            per_user_state_node,
+        )
+
+        patches["bili.iris.loaders.langchain_loader"].DEFAULT_GRAPH_DEFINITION = [
+            per_user_state_node()
+        ]
+        patches["bili.iris.loaders.langchain_loader"].build_agent_graph.return_value = (
+            agent
+        )
+        patches["bili.utils.file_utils"].load_from_json.return_value = {
+            "default": {"persona": "You are helpful."}
+        }
+        patches["bili.utils.langgraph_utils"].State = dict
+
+        saved = {}
+        for mod_name, mock_mod in patches.items():
+            saved[mod_name] = sys.modules.get(mod_name)
+            sys.modules[mod_name] = mock_mod
+
+        with patch(
+            "bili.auth.auth_manager.get_auth_manager",
+            return_value=auth_manager,
+        ):
+            if "bili.flask_app" in sys.modules:
+                del sys.modules["bili.flask_app"]
+            import bili.flask_app as flask_app_mod  # pylint: disable=import-outside-toplevel
+
+        for mod_name, orig in saved.items():
+            if orig is None:
+                sys.modules.pop(mod_name, None)
+            else:
+                sys.modules[mod_name] = orig
+
+        return flask_app_mod
+
+    def _make_auth_manager(self, *, email_verified=True, sign_in_error=None):
+        """Build a configured auth-manager mock for the route bodies."""
+        mgr = MagicMock()
+        if sign_in_error is not None:
+            mgr.auth_provider.sign_in.side_effect = sign_in_error
+        else:
+            mgr.auth_provider.sign_in.return_value = {
+                "uid": "uid-1",
+                "token": "id-token-123",
+                "refreshToken": "refresh-token-456",
+            }
+        mgr.auth_provider.get_account_info.return_value = {
+            "email": _TEST_EMAIL,
+            "emailVerified": email_verified,
+        }
+        # auth_required reads these for protected routes.
+        mgr.auth_provider.verify_jwt_token.return_value = {
+            "email": _TEST_EMAIL,
+            "uid": "uid-1",
+        }
+        mgr.role_provider.is_authorized.return_value = True
+        mgr.profile_provider.get_user_profile.return_value = {"name": "Test"}
+        return mgr
+
+    def _make_agent(self):
+        """Build an agent mock whose invoke returns a well-formed result."""
+        agent = MagicMock()
+        agent.invoke.return_value = {
+            "messages": [MagicMock(content="Hello from the LLM")]
+        }
+        return agent
+
+    # ----- /login -----
+
+    def test_login_success_returns_token_and_sets_cookies(self):
+        """A valid login returns the token and sets auth cookies."""
+        mod = self._reload_with_mocks(self._make_auth_manager(), self._make_agent())
+        client = mod.app.test_client()
+        resp = client.post(
+            "/login", json={"email": _TEST_EMAIL, "password": _TEST_PASSWORD}
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["token"] == "id-token-123"
+        assert data["user"]["email"] == _TEST_EMAIL
+        cookie_names = [h.split("=")[0] for h in resp.headers.getlist("Set-Cookie")]
+        assert "id_token" in cookie_names
+        assert "refresh_token" in cookie_names
+
+    def test_login_missing_fields_returns_400(self):
+        """A login request without email or password returns 400."""
+        mod = self._reload_with_mocks(self._make_auth_manager(), self._make_agent())
+        client = mod.app.test_client()
+        resp = client.post("/login", json={"email": _TEST_EMAIL})
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Email and password are required"
+
+    def test_login_unverified_email_returns_403(self):
+        """A login with an unverified email returns 403."""
+        mod = self._reload_with_mocks(
+            self._make_auth_manager(email_verified=False), self._make_agent()
+        )
+        client = mod.app.test_client()
+        resp = client.post(
+            "/login", json={"email": _TEST_EMAIL, "password": _TEST_PASSWORD}
+        )
+        assert resp.status_code == 403
+        assert "not verified" in resp.get_json()["error"].lower()
+
+    def test_login_auth_failure_returns_401(self):
+        """A sign-in error from the provider returns 401 with the message."""
+        mod = self._reload_with_mocks(
+            self._make_auth_manager(sign_in_error=ValueError("bad creds")),
+            self._make_agent(),
+        )
+        client = mod.app.test_client()
+        resp = client.post("/login", json={"email": _TEST_EMAIL, "password": "wrong"})
+        assert resp.status_code == 401
+        assert "bad creds" in resp.get_json()["error"]
+
+    # ----- /me -----
+
+    def test_me_returns_user_when_authenticated(self):
+        """The /me route returns the authenticated user from g.user."""
+        mod = self._reload_with_mocks(self._make_auth_manager(), self._make_agent())
+        client = mod.app.test_client()
+        resp = client.get("/me", headers={"Authorization": "Bearer any-token"})
+        assert resp.status_code == 200
+        assert resp.get_json()["user"]["email"] == _TEST_EMAIL
+
+    # ----- /nova_global -----
+
+    def test_nova_global_success_returns_response(self):
+        """The /nova_global route returns the agent's response."""
+        agent = self._make_agent()
+        mod = self._reload_with_mocks(self._make_auth_manager(), agent)
+        client = mod.app.test_client()
+        resp = client.get(
+            "/nova_global",
+            headers={"Authorization": "Bearer any-token"},
+            json={"prompt": "Hello"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["response"] == "Hello from the LLM"
+
+    def test_nova_global_missing_body_returns_400(self):
+        """The /nova_global route returns 400 when the parsed body is empty."""
+        mod = self._reload_with_mocks(self._make_auth_manager(), self._make_agent())
+        client = mod.app.test_client()
+        # A JSON ``null`` body parses to None without raising, so the route's
+        # explicit "Request body is required" guard is exercised.
+        resp = client.get(
+            "/nova_global",
+            headers={"Authorization": "Bearer any-token"},
+            data="null",
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Request body is required"
+
+    def test_nova_global_passes_conversation_id(self):
+        """The /nova_global route threads the conversation_id into the agent call."""
+        agent = self._make_agent()
+        mod = self._reload_with_mocks(self._make_auth_manager(), agent)
+        client = mod.app.test_client()
+        resp = client.get(
+            "/nova_global",
+            headers={"Authorization": "Bearer any-token"},
+            json={"prompt": "Hello", "conversation_id": "conv_7"},
+        )
+        assert resp.status_code == 200
+        config = agent.invoke.call_args[0][1]
+        assert config["configurable"]["thread_id"] == f"{_TEST_EMAIL}_conv_7"
+
+    # ----- /nova_per_user -----
+
+    @patch("bili.flask_api.flask_utils.build_agent_graph")
+    def test_nova_per_user_success_returns_response(self, mock_build):
+        """The /nova_per_user route returns the per-user agent's response."""
+        agent = self._make_agent()
+        mock_build.return_value = agent
+        mod = self._reload_with_mocks(self._make_auth_manager(), agent)
+        client = mod.app.test_client()
+        resp = client.get(
+            "/nova_per_user",
+            headers={"Authorization": "Bearer any-token"},
+            json={"prompt": "Hello"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["response"] == "Hello from the LLM"
+
+    @patch("bili.flask_api.flask_utils.build_agent_graph")
+    def test_nova_per_user_missing_body_returns_400(self, mock_build):
+        """The /nova_per_user route returns 400 when the parsed body is empty."""
+        agent = self._make_agent()
+        mock_build.return_value = agent
+        mod = self._reload_with_mocks(self._make_auth_manager(), agent)
+        client = mod.app.test_client()
+        resp = client.get(
+            "/nova_per_user",
+            headers={"Authorization": "Bearer any-token"},
+            data="null",
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    # ----- /nova_stream -----
+
+    @patch("bili.flask_api.flask_utils.stream_agent_response")
+    def test_nova_stream_success_returns_event_stream(self, mock_stream):
+        """The /nova_stream route returns a text/event-stream response."""
+        mock_stream.return_value = iter(
+            ['event: token\ndata: {"content": "Hi"}\n\n', "event: done\ndata: {}\n\n"]
+        )
+        mod = self._reload_with_mocks(self._make_auth_manager(), self._make_agent())
+        client = mod.app.test_client()
+        resp = client.post(
+            "/nova_stream",
+            headers={"Authorization": "Bearer any-token"},
+            json={"prompt": "Hello"},
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.content_type
+
+    def test_nova_stream_missing_body_returns_400(self):
+        """The /nova_stream route returns 400 when the parsed body is empty."""
+        mod = self._reload_with_mocks(self._make_auth_manager(), self._make_agent())
+        client = mod.app.test_client()
+        # A JSON ``null`` body parses to None without raising, exercising the
+        # route's explicit "Request body is required" guard.
+        resp = client.post(
+            "/nova_stream",
+            headers={"Authorization": "Bearer any-token"},
+            data="null",
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Request body is required"
