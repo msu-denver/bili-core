@@ -5,9 +5,12 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from bili.aegis.suites._helpers import (
     CONFIG_PATHS,
     config_fingerprint,
+    find_repo_root,
     model_id_safe,
     yaml_hash,
 )
@@ -30,6 +33,30 @@ class TestConfigPaths:
         """Every entry in CONFIG_PATHS ends with .yaml."""
         for path in CONFIG_PATHS:
             assert path.endswith(".yaml")
+
+
+class TestFindRepoRoot:
+    """Tests for find_repo_root()."""
+
+    def test_locates_real_repo_root(self):
+        """Returns a directory that contains a .git directory."""
+        root = find_repo_root()
+        assert (root / ".git").is_dir()
+        # The repo root must contain the bili package this module lives in.
+        assert (root / "bili" / "aegis" / "suites" / "_helpers.py").is_file()
+
+    def test_raises_when_no_git_dir_found(self, tmp_path, monkeypatch):
+        """Raises RuntimeError when no .git directory exists above the file."""
+        import bili.aegis.suites._helpers as helpers_mod
+
+        nested = tmp_path / "a" / "b" / "c"
+        nested.mkdir(parents=True)
+        fake_file = nested / "_helpers.py"
+        fake_file.write_text("# stub")
+        monkeypatch.setattr(helpers_mod, "__file__", str(fake_file))
+
+        with pytest.raises(RuntimeError, match="Could not locate repo root"):
+            find_repo_root()
 
 
 class TestYamlHash:

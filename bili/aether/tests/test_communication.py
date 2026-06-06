@@ -14,6 +14,7 @@ Covers:
 import json
 import os
 import tempfile
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -214,6 +215,73 @@ class TestCommunicationLogger:
         finally:
             os.unlink(log_path)
 
+    def test_log_message_opens_file_lazily(self):
+        """log_message opens the file when no handle has been created yet."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False
+        ) as tmp:
+            log_path = tmp.name
+        os.unlink(log_path)
+        try:
+            logger = CommunicationLogger(log_path)
+            assert logger._file_handle is None  # pylint: disable=protected-access
+            logger.log_message(
+                Message(sender="a", receiver="b", channel="c", content="lazy")
+            )
+            assert logger._file_handle is not None  # pylint: disable=protected-access
+            logger.close()
+            with open(log_path, encoding="utf-8") as fh:
+                assert json.loads(fh.readline())["content"] == "lazy"
+        finally:
+            if os.path.exists(log_path):
+                os.unlink(log_path)
+
+    def test_flush_flushes_open_handle(self):
+        """flush forwards to the underlying file handle when one is open."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False
+        ) as tmp:
+            log_path = tmp.name
+        try:
+            logger = CommunicationLogger(log_path)
+            logger.log_message(
+                Message(sender="a", receiver="b", channel="c", content="x")
+            )
+            handle = logger._file_handle  # pylint: disable=protected-access
+            handle.flush = MagicMock()
+            logger.flush()
+            handle.flush.assert_called_once()
+            logger.close()
+        finally:
+            os.unlink(log_path)
+
+    def test_flush_noop_without_open_handle(self):
+        """flush is a no-op when no file handle has been opened."""
+        logger = CommunicationLogger("/nonexistent/never-opened.jsonl")
+        # Should not raise even though no handle exists.
+        logger.flush()
+        assert logger._file_handle is None  # pylint: disable=protected-access
+
+    def test_close_logs_warning_on_oserror(self):
+        """A close failure is caught, logged, and the handle is cleared."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False
+        ) as tmp:
+            log_path = tmp.name
+        try:
+            logger = CommunicationLogger(log_path)
+            logger.log_message(
+                Message(sender="a", receiver="b", channel="c", content="x")
+            )
+            handle = logger._file_handle  # pylint: disable=protected-access
+            handle.flush = MagicMock(side_effect=OSError("disk gone"))
+            with patch("bili.aether.runtime.logger.LOGGER.warning") as mock_warning:
+                logger.close()
+            mock_warning.assert_called_once()
+            assert logger._file_handle is None  # pylint: disable=protected-access
+        finally:
+            os.unlink(log_path)
+
 
 # ======================================================================
 # Channel tests
@@ -374,6 +442,38 @@ class TestChannelManager:
         mgr = ChannelManager()
         with pytest.raises(KeyError, match="Channel 'missing'"):
             mgr.send_message("missing", "a", "content")
+
+    def test_enable_logging_warns_and_writes_jsonl(self):
+        """enable_logging=True warns (deprecated) and persists sent messages to JSONL."""
+        channels = [_make_channel_config("ch1", CommunicationProtocol.DIRECT)]
+        config = _make_simple_mas(channels)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with pytest.warns(DeprecationWarning, match="JSONL logging"):
+                mgr = ChannelManager.initialize_from_config(
+                    config, log_dir=tmp_dir, enable_logging=True
+                )
+            # Sending a message exercises the logger.log_message branch.
+            mgr.send_message("ch1", "agent_a", "logged message")
+            mgr.close()
+
+            jsonl_files = [f for f in os.listdir(tmp_dir) if f.endswith(".jsonl")]
+            assert len(jsonl_files) == 1
+            contents = os.path.join(tmp_dir, jsonl_files[0])
+            with open(contents, encoding="utf-8") as fh:
+                logged = json.loads(fh.readline())
+            assert logged["content"] == "logged message"
+
+    def test_get_channel_returns_registered_channel(self):
+        """get_channel looks up a channel by its registered id."""
+        channels = [_make_channel_config("ch1", CommunicationProtocol.DIRECT)]
+        config = _make_simple_mas(channels)
+        mgr = ChannelManager.initialize_from_config(config)
+        channel = mgr.get_channel("ch1")
+        assert channel is not None
+        with pytest.raises(KeyError):
+            mgr.get_channel("does_not_exist")
+        mgr.close()
 
 
 # ======================================================================

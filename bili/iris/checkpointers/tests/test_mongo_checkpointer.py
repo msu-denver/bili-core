@@ -4,8 +4,9 @@ All MongoDB interactions are mocked — no real database is needed.
 """
 
 import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
 import pytest
 
 from bili.iris.checkpointers.mongo_checkpointer import PruningMongoDBSaver
@@ -1649,3 +1650,523 @@ class TestGetThreadMessagesMultimodal:
         msgs = saver.get_thread_messages("t1")
         assert "Part 1" in msgs[0]["content"]
         assert "Part 2" in msgs[0]["content"]
+
+
+# =========================================================================
+# Module-level factory functions
+# =========================================================================
+
+
+class TestModuleLevelFunctions:
+    """Tests for get_mongo_client, close_mongo_client, get_mongo_checkpointer."""
+
+    @patch("bili.iris.checkpointers.mongo_checkpointer.atexit.register")
+    @patch("bili.iris.checkpointers.mongo_checkpointer.MongoClient")
+    @patch.dict(
+        "os.environ", {"MONGO_CONNECTION_STRING": "mongodb://localhost"}, clear=True
+    )
+    def test_get_mongo_client_returns_langgraph_db(self, mock_client_cls, mock_atexit):
+        """A set connection string yields the 'langgraph' database and registers cleanup."""
+        from bili.iris.checkpointers.mongo_checkpointer import (
+            close_mongo_client,
+            get_mongo_client,
+        )
+
+        fake_client = MagicMock()
+        fake_db = MagicMock()
+        fake_client.__getitem__.return_value = fake_db
+        mock_client_cls.return_value = fake_client
+
+        db = get_mongo_client()
+        assert db is fake_db
+        mock_client_cls.assert_called_once_with("mongodb://localhost")
+        fake_client.__getitem__.assert_called_once_with("langgraph")
+        mock_atexit.assert_called_once_with(close_mongo_client, fake_client)
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_get_mongo_client_returns_none_without_env(self):
+        """No connection string returns None."""
+        from bili.iris.checkpointers.mongo_checkpointer import get_mongo_client
+
+        assert get_mongo_client() is None
+
+    def test_close_mongo_client_closes_active(self):
+        """An active client is closed."""
+        from bili.iris.checkpointers.mongo_checkpointer import close_mongo_client
+
+        client = MagicMock()
+        close_mongo_client(client)
+        client.close.assert_called_once_with()
+
+    def test_close_mongo_client_noop_for_none(self):
+        """Passing None does not raise."""
+        from bili.iris.checkpointers.mongo_checkpointer import close_mongo_client
+
+        # Should simply return without error.
+        assert close_mongo_client(None) is None
+
+    @patch("bili.iris.checkpointers.mongo_checkpointer.get_mongo_client")
+    def test_get_mongo_checkpointer_returns_saver(self, mock_get_client):
+        """A live db produces a PruningMongoDBSaver."""
+        from bili.iris.checkpointers.mongo_checkpointer import get_mongo_checkpointer
+
+        mock_get_client.return_value = MagicMock()
+        with patch.object(PruningMongoDBSaver, "_ensure_indexes"), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = get_mongo_checkpointer(keep_last_n=3, user_id="u@example.com")
+        assert isinstance(saver, PruningMongoDBSaver)
+        assert saver.keep_last_n == 3
+        assert saver.user_id == "u@example.com"
+
+    @patch("bili.iris.checkpointers.mongo_checkpointer.get_mongo_client")
+    def test_get_mongo_checkpointer_returns_none_without_db(self, mock_get_client):
+        """No db yields None."""
+        from bili.iris.checkpointers.mongo_checkpointer import get_mongo_checkpointer
+
+        mock_get_client.return_value = None
+        assert get_mongo_checkpointer() is None
+
+
+# =========================================================================
+# get_async_mongo_checkpointer
+# =========================================================================
+
+
+pytest_anyio_mark = pytest.mark.anyio
+
+
+class TestGetAsyncMongoCheckpointer:
+    """Tests for the async checkpointer factory."""
+
+    pytestmark = pytest.mark.anyio
+
+    @patch("bili.iris.checkpointers.mongo_checkpointer.get_mongo_client")
+    async def test_returns_saver_when_db_available(self, mock_get_client):
+        """A live db produces a PruningMongoDBSaver from the async factory."""
+        from bili.iris.checkpointers.mongo_checkpointer import (
+            get_async_mongo_checkpointer,
+        )
+
+        mock_get_client.return_value = MagicMock()
+        with patch.object(PruningMongoDBSaver, "_ensure_indexes"), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.__init__",
+            return_value=None,
+        ):
+            saver = await get_async_mongo_checkpointer(keep_last_n=2)
+        assert isinstance(saver, PruningMongoDBSaver)
+        assert saver.keep_last_n == 2
+
+    @patch("bili.iris.checkpointers.mongo_checkpointer.get_mongo_client")
+    async def test_returns_none_without_db(self, mock_get_client):
+        """No db yields None from the async factory."""
+        from bili.iris.checkpointers.mongo_checkpointer import (
+            get_async_mongo_checkpointer,
+        )
+
+        mock_get_client.return_value = None
+        assert await get_async_mongo_checkpointer() is None
+
+
+# =========================================================================
+# Index helper error paths
+# =========================================================================
+
+
+class TestIndexHelperErrorPaths:
+    """Tests for _drop_conflicting_indexes and _create_index_safe edge cases."""
+
+    def test_drop_conflicting_handles_operation_failure(self):
+        """An OperationFailure while listing indexes is logged, not raised."""
+        from pymongo.errors import OperationFailure
+
+        collection = MagicMock()
+        collection.name = "checkpoints"
+        collection.index_information.side_effect = OperationFailure("no perms")
+        # Should not raise.
+        PruningMongoDBSaver._drop_conflicting_indexes(
+            collection, [("thread_id", 1)], "idx_x"
+        )
+        collection.drop_index.assert_not_called()
+
+    def test_create_index_safe_code86_drops_by_name_then_retries(self):
+        """Code 86 conflict drops the same-named index and retries successfully."""
+        from pymongo.errors import OperationFailure
+
+        collection = MagicMock()
+        collection.name = "checkpoints"
+        collection.index_information.return_value = {}
+        # First create_index raises code 86, second succeeds.
+        collection.create_index.side_effect = [
+            OperationFailure("conflict", code=86),
+            None,
+        ]
+        PruningMongoDBSaver._create_index_safe(
+            collection, [("thread_id", 1)], "idx_dup"
+        )
+        collection.drop_index.assert_called_once_with("idx_dup")
+        assert collection.create_index.call_count == 2
+
+    def test_create_index_safe_code86_drop_failure_swallowed(self):
+        """A failure dropping the code-86 index by name is swallowed before retry."""
+        from pymongo.errors import OperationFailure
+
+        collection = MagicMock()
+        collection.name = "checkpoints"
+        collection.index_information.return_value = {}
+        collection.drop_index.side_effect = OperationFailure("drop failed")
+        collection.create_index.side_effect = [
+            OperationFailure("conflict", code=86),
+            None,
+        ]
+        PruningMongoDBSaver._create_index_safe(
+            collection, [("thread_id", 1)], "idx_dup"
+        )
+        assert collection.create_index.call_count == 2
+
+    def test_create_index_safe_unhandled_code_raises(self):
+        """An unhandled OperationFailure code propagates."""
+        from pymongo.errors import OperationFailure
+
+        collection = MagicMock()
+        collection.name = "checkpoints"
+        collection.create_index.side_effect = OperationFailure("fatal", code=999)
+        with pytest.raises(OperationFailure):
+            PruningMongoDBSaver._create_index_safe(
+                collection, [("thread_id", 1)], "idx_x"
+            )
+
+
+# =========================================================================
+# get_tuple / aget_tuple migration orchestration (sync saver)
+# =========================================================================
+
+
+class TestGetTupleMigration:
+    """Tests for PruningMongoDBSaver.get_tuple migration handling."""
+
+    def test_get_tuple_returns_none_on_migration_error(self):
+        """An exception during migration causes get_tuple to return None."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", side_effect=RuntimeError("boom")
+        ):
+            assert saver.get_tuple(config) is None
+
+    def test_get_tuple_returns_none_when_still_needs_migration(self):
+        """A checkpoint still needing migration after the attempt returns None."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=True
+        ), patch.object(
+            saver, "_get_raw_checkpoint", return_value={"type": "msgpack"}
+        ), patch.object(
+            saver, "_needs_migration", return_value=True
+        ):
+            assert saver.get_tuple(config) is None
+
+    def test_get_tuple_fixes_string_step(self):
+        """A string step value in returned metadata is coerced to int."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        fake_result = MagicMock()
+        fake_result.metadata = {"step": "4"}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=False
+        ), patch.object(saver, "_get_raw_checkpoint", return_value={}), patch.object(
+            saver, "_needs_migration", return_value=False
+        ), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.get_tuple",
+            return_value=fake_result,
+        ):
+            result = saver.get_tuple(config)
+        assert result.metadata["step"] == 4
+
+    def test_get_tuple_handles_unconvertible_step(self):
+        """A non-numeric string step is left in place when conversion fails."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        fake_result = MagicMock()
+        fake_result.metadata = {"step": "abc"}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=False
+        ), patch.object(saver, "_get_raw_checkpoint", return_value={}), patch.object(
+            saver, "_needs_migration", return_value=False
+        ), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.get_tuple",
+            return_value=fake_result,
+        ):
+            result = saver.get_tuple(config)
+        assert result.metadata["step"] == "abc"
+
+    def test_get_tuple_validates_ownership(self):
+        """Ownership is validated before migration in get_tuple."""
+        saver = _make_saver(user_id="alice@example.com")
+        config = {
+            "configurable": {"thread_id": "bob@example.com_c1", "checkpoint_ns": ""}
+        }
+        with pytest.raises(PermissionError, match="Access denied"):
+            saver.get_tuple(config)
+
+
+class TestAsyncGetTupleMigration:
+    """Tests for PruningMongoDBSaver.aget_tuple migration handling."""
+
+    pytestmark = pytest.mark.anyio
+
+    async def test_aget_tuple_returns_none_on_migration_error(self):
+        """An exception during migration causes aget_tuple to return None."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", side_effect=RuntimeError("boom")
+        ):
+            assert await saver.aget_tuple(config) is None
+
+    async def test_aget_tuple_returns_none_when_still_needs_migration(self):
+        """A checkpoint still needing migration after the attempt returns None."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=True
+        ), patch.object(
+            saver, "_get_raw_checkpoint", return_value={"type": "msgpack"}
+        ), patch.object(
+            saver, "_needs_migration", return_value=True
+        ):
+            assert await saver.aget_tuple(config) is None
+
+    async def test_aget_tuple_fixes_string_step(self):
+        """A string step in returned metadata is coerced to int (async path)."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        fake_result = MagicMock()
+        fake_result.metadata = {"step": "9"}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=False
+        ), patch.object(saver, "_get_raw_checkpoint", return_value={}), patch.object(
+            saver, "_needs_migration", return_value=False
+        ), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.aget_tuple",
+            new_callable=AsyncMock,
+            return_value=fake_result,
+        ):
+            result = await saver.aget_tuple(config)
+        assert result.metadata["step"] == 9
+
+    async def test_aget_tuple_handles_unconvertible_step(self):
+        """A non-numeric step string is left in place (async path)."""
+        saver = _make_saver()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        fake_result = MagicMock()
+        fake_result.metadata = {"step": "zzz"}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=False
+        ), patch.object(saver, "_get_raw_checkpoint", return_value={}), patch.object(
+            saver, "_needs_migration", return_value=False
+        ), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.aget_tuple",
+            new_callable=AsyncMock,
+            return_value=fake_result,
+        ):
+            result = await saver.aget_tuple(config)
+        assert result.metadata["step"] == "zzz"
+
+
+# =========================================================================
+# AsyncPruningMongoDBSaver — raw checkpoint, archive, aput, aget_tuple
+# =========================================================================
+
+
+def _make_async_saver_mocked(user_id=None, keep_last_n=-1):
+    """Build an AsyncPruningMongoDBSaver with mocked MongoDB collections."""
+    from bili.iris.checkpointers.mongo_checkpointer import AsyncPruningMongoDBSaver
+
+    with patch(
+        "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.__init__",
+        return_value=None,
+    ):
+        saver = AsyncPruningMongoDBSaver.__new__(AsyncPruningMongoDBSaver)
+        saver.keep_last_n = keep_last_n
+        saver.user_id = user_id
+        saver._indexes_ensured = True
+        saver.checkpoint_collection = MagicMock()
+        saver.writes_collection = MagicMock()
+        saver.db = MagicMock()
+        saver.serde = MagicMock()
+    return saver
+
+
+class TestAsyncSaverRawCheckpoint:
+    """Tests for AsyncPruningMongoDBSaver raw checkpoint helpers."""
+
+    def test_get_raw_checkpoint_queries_collection(self):
+        """_get_raw_checkpoint issues a find_one sorted by checkpoint_id."""
+        saver = _make_async_saver_mocked()
+        expected = {"_id": "x", "thread_id": "t1"}
+        saver.checkpoint_collection.find_one.return_value = expected
+        result = saver._get_raw_checkpoint("t1", "")
+        assert result is expected
+        args = saver.checkpoint_collection.find_one.call_args[0]
+        assert args[0] == {"thread_id": "t1", "checkpoint_ns": ""}
+
+    def test_replace_raw_checkpoint_without_id_returns_false(self):
+        """A document lacking _id cannot be replaced."""
+        saver = _make_async_saver_mocked()
+        assert saver._replace_raw_checkpoint("t1", {"thread_id": "t1"}) is False
+        saver.checkpoint_collection.replace_one.assert_not_called()
+
+    def test_replace_raw_checkpoint_success(self):
+        """A document with _id is replaced and reports matched."""
+        saver = _make_async_saver_mocked()
+        result_obj = MagicMock()
+        result_obj.matched_count = 1
+        saver.checkpoint_collection.replace_one.return_value = result_obj
+        doc = {"_id": "abc", "thread_id": "t1"}
+        assert saver._replace_raw_checkpoint("t1", doc) is True
+        saver.checkpoint_collection.replace_one.assert_called_once_with(
+            {"_id": "abc"}, doc
+        )
+
+    def test_archive_checkpoint_inserts_and_deletes(self):
+        """_archive_checkpoint inserts into archive and removes from main."""
+        saver = _make_async_saver_mocked()
+        archive_col = MagicMock()
+        saver.db.__getitem__.return_value = archive_col
+        doc = {"_id": "abc", "thread_id": "t1"}
+        saver._archive_checkpoint("t1", doc, RuntimeError("bad"))
+        archive_col.insert_one.assert_called_once()
+        saver.checkpoint_collection.delete_one.assert_called_once_with({"_id": "abc"})
+
+    def test_archive_checkpoint_handles_insert_error(self):
+        """An insert failure during archiving is swallowed."""
+        saver = _make_async_saver_mocked()
+        archive_col = MagicMock()
+        archive_col.insert_one.side_effect = RuntimeError("insert down")
+        saver.db.__getitem__.return_value = archive_col
+        # Should not raise.
+        saver._archive_checkpoint("t1", {"_id": "x"}, RuntimeError("orig"))
+        saver.checkpoint_collection.delete_one.assert_not_called()
+
+
+class TestAsyncSaverAput:
+    """Tests for AsyncPruningMongoDBSaver.aput pruning and versioning."""
+
+    pytestmark = pytest.mark.anyio
+
+    async def test_aput_adds_format_version_and_skips_pruning(self):
+        """aput stamps the format version and skips pruning when disabled."""
+        saver = _make_async_saver_mocked(keep_last_n=-1)
+        next_cfg = {"configurable": {"thread_id": "t1", "checkpoint_id": "c1"}}
+        config = {"configurable": {"thread_id": "t1"}}
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.aput",
+            new_callable=AsyncMock,
+            return_value=next_cfg,
+        ) as mock_aput:
+            result = await saver.aput(config, {"v": 1}, {"source": "loop"}, {})
+        assert result is next_cfg
+        # versioned metadata includes format_version
+        passed_metadata = mock_aput.call_args[0][2]
+        assert passed_metadata["format_version"] == saver.format_version
+        saver.checkpoint_collection.find.assert_not_called()
+
+    async def test_aput_prunes_excess_checkpoints(self):
+        """aput deletes checkpoints beyond keep_last_n."""
+        saver = _make_async_saver_mocked(keep_last_n=1)
+        next_cfg = {"configurable": {"thread_id": "t1", "checkpoint_id": "c2"}}
+        config = {"configurable": {"thread_id": "t1"}}
+
+        # find().sort() returns two docs; keep_last_n=1 means one is deleted.
+        sort_cursor = [
+            {"checkpoint_id": "c2"},
+            {"checkpoint_id": "c1"},
+        ]
+        find_cursor = MagicMock()
+        find_cursor.sort.return_value = sort_cursor
+        saver.checkpoint_collection.find.return_value = find_cursor
+
+        with patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.aput",
+            new_callable=AsyncMock,
+            return_value=next_cfg,
+        ):
+            await saver.aput(config, {"v": 1}, {}, {})
+
+        saver.checkpoint_collection.delete_one.assert_called_once_with(
+            {"thread_id": "t1", "checkpoint_id": "c1"}
+        )
+        saver.writes_collection.delete_many.assert_called_once_with(
+            {"thread_id": "t1", "checkpoint_id": "c1"}
+        )
+
+
+class TestAsyncSaverAgetTuple:
+    """Tests for AsyncPruningMongoDBSaver.aget_tuple migration handling."""
+
+    pytestmark = pytest.mark.anyio
+
+    async def test_aget_tuple_returns_none_on_migration_error(self):
+        """A migration error returns None from the async saver's aget_tuple."""
+        saver = _make_async_saver_mocked()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", side_effect=RuntimeError("boom")
+        ):
+            assert await saver.aget_tuple(config) is None
+
+    async def test_aget_tuple_delegates_to_super(self):
+        """A clean migration delegates to the parent aget_tuple."""
+        saver = _make_async_saver_mocked()
+        config = {"configurable": {"thread_id": "t1", "checkpoint_ns": ""}}
+        sentinel = object()
+        with patch.object(
+            saver, "migrate_checkpoint_if_needed", return_value=False
+        ), patch(
+            "bili.iris.checkpointers.mongo_checkpointer.MongoDBSaver.aget_tuple",
+            new_callable=AsyncMock,
+            return_value=sentinel,
+        ):
+            assert await saver.aget_tuple(config) is sentinel
+
+
+class TestAsyncSaverQueryFilters:
+    """Tests for AsyncPruningMongoDBSaver query filtering and pagination."""
+
+    def test_get_thread_messages_filters_by_type(self):
+        """message_types filters out non-matching message classes."""
+        saver = _make_async_saver_mocked()
+        human = _human_msg("hi")
+        ai = _ai_msg("hello")
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": [human, ai]}},
+        }
+        msgs = saver.get_thread_messages("t1", message_types=["HumanMessage"])
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "user"
+
+    def test_get_thread_messages_pagination(self):
+        """offset and limit slice the returned messages."""
+        saver = _make_async_saver_mocked()
+        msgs_in = [_human_msg(f"m{i}") for i in range(4)]
+        saver.checkpoint_collection.find_one.return_value = {
+            "thread_id": "t1",
+            "checkpoint": {"channel_values": {"messages": msgs_in}},
+        }
+        msgs = saver.get_thread_messages("t1", limit=2, offset=1)
+        assert len(msgs) == 2
+
+    def test_deserialize_returns_empty_for_missing_checkpoint(self):
+        """A document without a checkpoint yields an empty dict."""
+        saver = _make_async_saver_mocked()
+        assert saver._deserialize_checkpoint_data({}) == {}
+
+    def test_athread_exists_delegates(self):
+        """athread_exists delegates to the sync thread_exists."""
+        saver = _make_async_saver_mocked()
+        saver.checkpoint_collection.count_documents.return_value = 1
+        assert anyio.run(saver.athread_exists, "t1") is True

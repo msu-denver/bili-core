@@ -689,12 +689,27 @@ def _render_matrix(df: pd.DataFrame, is_cross_model: bool) -> None:
             return "T2:✓" if not t2 else "T2:✗"
         return "—"
 
+    # Build the matrix axes from the union of all three pivots, not pivot_score
+    # alone. When no result carries a Tier-3 score, pivot_score is empty and a
+    # score-only axis would hide every Tier-1/Tier-2 fallback cell. The union
+    # guarantees the matrix still shows "!" and "T2:" cells in that case.
+    #
+    # Keep only string labels before sorting: a missing phase/payload can leave
+    # NaN/None in a pivot index, and sorted() raises TypeError comparing a float
+    # against a str, which would crash the whole matrix render.
+    def _string_labels(*indexes):
+        labels = set()
+        for index in indexes:
+            labels.update(v for v in index if isinstance(v, str))
+        return sorted(labels)
+
+    row_labels = _string_labels(pivot_score.index, pivot_tier1.index, pivot_tier2.index)
+    col_labels = _string_labels(
+        pivot_score.columns, pivot_tier1.columns, pivot_tier2.columns
+    )
     display = pd.DataFrame(
-        {
-            col: [_cell_val(row, col) for row in pivot_score.index]
-            for col in pivot_score.columns
-        },
-        index=pivot_score.index,
+        {col: [_cell_val(row, col) for row in row_labels] for col in col_labels},
+        index=row_labels,
     )
 
     def _cell_style(val: str) -> str:

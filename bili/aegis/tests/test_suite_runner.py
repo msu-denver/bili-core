@@ -16,6 +16,8 @@ import pytest
 
 from bili.aegis.suites._suite_runner import (
     _build_result_dict,
+    _load_baseline,
+    _print_summary,
     _run_config,
     _target_agent_id,
     _write_csv,
@@ -534,6 +536,266 @@ class TestRunSuite:
         # 1 pass out of 2 total -> exit(1)
         assert exc_info.value.code == 1
         assert mock_run_config.call_count == 2
+
+    @patch(f"{_MODULE}._print_summary")
+    @patch(f"{_MODULE}._write_csv")
+    @patch(f"{_MODULE}._run_config")
+    def test_versioned_csv_name_uses_first_run_dir(
+        self, mock_run_config, mock_write_csv, _mock_print
+    ):
+        """CSV filename is suffixed with the first config's run_dir name."""
+        mock_run_config.return_value = (
+            [{"tier1_pass": "true"}],
+            Path("/fake/run_007"),
+        )
+        mock_write_csv.return_value = Path("/fake.csv")
+
+        with pytest.raises(SystemExit):
+            run_suite(
+                payloads=[_fake_payload()],
+                attack_suite="test",
+                attack_type="prompt_injection",
+                csv_filename="injection_results_matrix.csv",
+                suite_name="Test",
+                results_dir=Path("/tmp/results"),
+                repo_root=Path("/tmp"),
+                config_paths=["a.yaml"],
+                phases=["pre_input"],
+                stub=True,
+            )
+
+        versioned_name = mock_write_csv.call_args[0][2]
+        assert versioned_name == "injection_results_matrix_run_007.csv"
+
+
+# =========================================================================
+# _print_summary
+# =========================================================================
+
+
+class TestPrintSummary:
+    """Tests for _print_summary."""
+
+    def test_counts_passes_and_influenced(self, capsys):
+        """Summary reports total, tier1 passes, and influenced cases."""
+        rows = [
+            {"tier1_pass": "true", "tier2_influenced": '["a"]'},
+            {"tier1_pass": "false", "tier2_influenced": "[]"},
+            {"tier1_pass": "true", "tier2_influenced": "[]"},
+        ]
+        _print_summary(rows, "My Suite")
+        out = capsys.readouterr().out
+        assert "My Suite Summary" in out
+        assert "Total test cases : 3" in out
+        assert "Tier 1 pass      : 2/3" in out
+        assert "1 cases had" in out
+
+
+# =========================================================================
+# _load_baseline
+# =========================================================================
+
+
+class TestLoadBaseline:
+    """Tests for _load_baseline in the shared suite runner."""
+
+    def test_returns_none_when_dir_is_none(self):
+        """Returns None when baseline_results_dir is None."""
+        assert _load_baseline(None, "mas1") is None
+
+    def test_returns_none_when_search_dir_missing(self, tmp_path):
+        """Returns None when the mas_id subdirectory does not exist."""
+        assert _load_baseline(tmp_path, "missing") is None
+
+    def test_returns_none_when_no_json(self, tmp_path):
+        """Returns None when the directory has no JSON files."""
+        (tmp_path / "mas1").mkdir()
+        assert _load_baseline(tmp_path, "mas1") is None
+
+    def test_loads_first_json_in_flat_layout(self, tmp_path):
+        """Loads the first JSON file from the flat (legacy) layout."""
+        mas_dir = tmp_path / "mas1"
+        mas_dir.mkdir()
+        (mas_dir / "a_result.json").write_text(json.dumps({"baseline": 1}))
+        assert _load_baseline(tmp_path, "mas1") == {"baseline": 1}
+
+    def test_prefers_latest_run_dir(self, tmp_path):
+        """Loads from the latest run_NNN directory when one exists."""
+        mas_dir = tmp_path / "mas1"
+        (mas_dir / "run_001").mkdir(parents=True)
+        (mas_dir / "run_002").mkdir(parents=True)
+        (mas_dir / "run_001" / "old.json").write_text(json.dumps({"v": "old"}))
+        (mas_dir / "run_002" / "new.json").write_text(json.dumps({"v": "new"}))
+        assert _load_baseline(tmp_path, "mas1") == {"v": "new"}
+
+    def test_returns_none_on_corrupt_json(self, tmp_path):
+        """Returns None and warns when the baseline JSON is invalid."""
+        mas_dir = tmp_path / "mas1"
+        mas_dir.mkdir()
+        (mas_dir / "bad.json").write_text("{not valid json")
+        assert _load_baseline(tmp_path, "mas1") is None
+
+
+# =========================================================================
+# _run_config — executor init and tier3 evaluation paths
+# =========================================================================
+
+
+class TestRunConfigExtended:
+    """Tests for _run_config branches not covered by the basic cases."""
+
+    @patch(f"{_MODULE}._write_result")
+    @patch(f"{_MODULE}.MASExecutor")
+    @patch(f"{_MODULE}.SecurityEventLogger")
+    @patch(f"{_MODULE}.SecurityEventDetector")
+    @patch(f"{_MODULE}.AttackInjector")
+    @patch(f"{_MODULE}.load_mas_from_yaml")
+    def test_initializes_executor_for_mid_execution(
+        self,
+        mock_load,
+        mock_injector_cls,
+        _mock_detector,
+        _mock_logger,
+        mock_executor_cls,
+        mock_write,
+    ):
+        """An executor is built and initialized when mid_execution is in phases."""
+        config = _fake_config()
+        mock_load.return_value = config
+        mock_executor = MagicMock()
+        mock_executor_cls.return_value = mock_executor
+
+        mock_injector = MagicMock()
+        mock_injector.__enter__ = MagicMock(return_value=mock_injector)
+        mock_injector.__exit__ = MagicMock(return_value=False)
+        mock_injector.inject_attack.return_value = _fake_attack_result()
+        mock_injector_cls.return_value = mock_injector
+        mock_write.return_value = Path("/fake/out.json")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "t.yaml").write_text("x")
+            rows, _run_dir = _run_config(
+                yaml_path="t.yaml",
+                payloads=[_fake_payload()],
+                phases=["mid_execution"],
+                stub_mode=True,
+                semantic_evaluator=None,
+                baseline_results_dir=None,
+                results_dir=root / "results",
+                repo_root=root,
+                attack_suite="injection",
+                attack_type="prompt_injection",
+            )
+
+        mock_executor_cls.assert_called_once_with(config)
+        mock_executor.initialize.assert_called_once()
+        # The executor instance is threaded into AttackInjector.
+        assert mock_injector_cls.call_args[0][1] is mock_executor
+        assert len(rows) == 1
+
+    @patch(f"{_MODULE}._load_baseline")
+    @patch(f"{_MODULE}._write_result")
+    @patch(f"{_MODULE}.SecurityEventLogger")
+    @patch(f"{_MODULE}.SecurityEventDetector")
+    @patch(f"{_MODULE}.AttackInjector")
+    @patch(f"{_MODULE}.load_mas_from_yaml")
+    def test_tier3_evaluation_populates_score(
+        self,
+        mock_load,
+        mock_injector_cls,
+        _mock_detector,
+        _mock_logger,
+        mock_write,
+        mock_load_baseline,
+    ):
+        """Non-stub run with a baseline evaluates Tier 3 and records the best score."""
+        config = _fake_config()
+        mock_load.return_value = config
+
+        mock_injector = MagicMock()
+        mock_injector.__enter__ = MagicMock(return_value=mock_injector)
+        mock_injector.__exit__ = MagicMock(return_value=False)
+        mock_injector.inject_attack.return_value = _fake_attack_result()
+        mock_injector_cls.return_value = mock_injector
+        mock_write.return_value = Path("/fake/out.json")
+        mock_load_baseline.return_value = {"baseline": True}
+
+        evaluator = MagicMock()
+        evaluator.evaluate.return_value = [
+            SimpleNamespace(score=1, confidence="low", reasoning="r1"),
+            SimpleNamespace(score=3, confidence="high", reasoning="r3"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "t.yaml").write_text("x")
+            rows, _run_dir = _run_config(
+                yaml_path="t.yaml",
+                payloads=[_fake_payload()],
+                phases=["pre_input"],
+                stub_mode=False,
+                semantic_evaluator=evaluator,
+                baseline_results_dir=Path(tmpdir) / "baseline",
+                results_dir=root / "results",
+                repo_root=root,
+                attack_suite="injection",
+                attack_type="prompt_injection",
+            )
+
+        evaluator.evaluate.assert_called_once()
+        assert rows[0]["tier3_score"] == "3"
+        assert rows[0]["tier3_confidence"] == "high"
+        assert rows[0]["tier3_reasoning"] == "r3"
+
+    @patch(f"{_MODULE}._load_baseline")
+    @patch(f"{_MODULE}._write_result")
+    @patch(f"{_MODULE}.SecurityEventLogger")
+    @patch(f"{_MODULE}.SecurityEventDetector")
+    @patch(f"{_MODULE}.AttackInjector")
+    @patch(f"{_MODULE}.load_mas_from_yaml")
+    def test_tier3_evaluator_error_is_swallowed(
+        self,
+        mock_load,
+        mock_injector_cls,
+        _mock_detector,
+        _mock_logger,
+        mock_write,
+        mock_load_baseline,
+    ):
+        """A failing evaluator leaves tier3 columns empty without aborting the run."""
+        config = _fake_config()
+        mock_load.return_value = config
+
+        mock_injector = MagicMock()
+        mock_injector.__enter__ = MagicMock(return_value=mock_injector)
+        mock_injector.__exit__ = MagicMock(return_value=False)
+        mock_injector.inject_attack.return_value = _fake_attack_result()
+        mock_injector_cls.return_value = mock_injector
+        mock_write.return_value = Path("/fake/out.json")
+        mock_load_baseline.return_value = {"baseline": True}
+
+        evaluator = MagicMock()
+        evaluator.evaluate.side_effect = RuntimeError("judge down")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "t.yaml").write_text("x")
+            rows, _run_dir = _run_config(
+                yaml_path="t.yaml",
+                payloads=[_fake_payload()],
+                phases=["pre_input"],
+                stub_mode=False,
+                semantic_evaluator=evaluator,
+                baseline_results_dir=Path(tmpdir) / "baseline",
+                results_dir=root / "results",
+                repo_root=root,
+                attack_suite="injection",
+                attack_type="prompt_injection",
+            )
+
+        assert rows[0]["tier3_score"] == ""
+        assert rows[0]["tier3_reasoning"] == ""
 
     @patch(f"{_MODULE}._run_config", return_value=([], None))
     def test_no_results_exits_zero(self, _mock_run_config):

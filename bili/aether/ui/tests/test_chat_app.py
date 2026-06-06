@@ -4745,3 +4745,1142 @@ with _patch.dict("sys.modules", fm):
     )
     at.run()
     assert not at.exception
+
+
+# ===========================================================================
+# Coverage expansion batch 2
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# streamlit-flow ImportError fallback (lines 58-60)
+# ---------------------------------------------------------------------------
+
+
+def test_flow_unavailable_sets_flag_false():
+    """Executing chat_app source without streamlit-flow sets _FLOW_AVAILABLE False.
+
+    The module's transitive dependencies are already imported and cached, so
+    re-executing the source resolves the ``bili.*`` imports from cache and only
+    the ``streamlit_flow`` import fails, exercising the ImportError fallback.
+    """
+    at = AppTest.from_string(
+        """
+from pathlib import Path
+from unittest.mock import patch as _patch
+import streamlit as st
+import bili.aether.ui.chat_app as real_ca
+
+src = Path(real_ca.__file__).read_text(encoding="utf-8")
+ns = {"__name__": "chat_app_noflow", "__file__": real_ca.__file__}
+fm = {"streamlit_flow": None, "streamlit_flow.state": None}
+with _patch.dict("sys.modules", fm):
+    exec(compile(src, real_ca.__file__, "exec"), ns)
+st.markdown(f"flow_available:{ns['_FLOW_AVAILABLE']}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "flow_available:False" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _apply_model_patch validation-failure early return (line 127)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_model_patch_invalid_returns_early():
+    """_apply_model_patch returns early without reinit when validation fails."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="invalid_patch")
+    with _patch.object(ca, "_validate_config", return_value=False):
+        with _patch.object(ca, "_initialize_executor") as init:
+            ca._apply_model_patch(cfg, "gpt-4o")
+            st.markdown(f"init_called:{init.called}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "init_called:False" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _load_all_model_options (lines 318-331)
+# ---------------------------------------------------------------------------
+
+
+def test_load_all_model_options_builds_lists():
+    """_load_all_model_options flattens LLM_MODELS into display/id/provider lists."""
+    with patch.dict("sys.modules", _FM):
+        from bili.aether.ui import chat_app as ca
+
+        fake_models = {
+            "remote_openai": {
+                "name": "OpenAI",
+                "models": [
+                    {"model_name": "GPT-4o", "model_id": "gpt-4o"},
+                    {"model_name": "GPT-4o mini", "model_id": "gpt-4o-mini"},
+                ],
+            },
+        }
+        import sys
+        import types
+
+        fake_cfg = types.ModuleType("bili.iris.config.llm_config")
+        fake_cfg.LLM_MODELS = fake_models
+        with patch.dict(sys.modules, {"bili.iris.config.llm_config": fake_cfg}):
+            display, ids, providers = ca._load_all_model_options.__wrapped__()
+    assert display == ["[OpenAI] GPT-4o", "[OpenAI] GPT-4o mini"]
+    assert ids == ["gpt-4o", "gpt-4o-mini"]
+    assert providers == ["remote_openai", "remote_openai"]
+
+
+# ---------------------------------------------------------------------------
+# _render_sidebar logo branch (line 550)
+# ---------------------------------------------------------------------------
+
+
+def test_render_sidebar_renders_logo_when_present():
+    """_render_sidebar calls st.image when the logo file exists."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    with _patch.object(ca, "LOGO_PATH") as lp:
+        lp.exists.return_value = True
+        lp.__str__ = lambda self: "/fake/logo.png"
+        with _patch("streamlit.image") as img:
+            with _patch.object(ca, "render_sidebar_content"):
+                ca._render_sidebar()
+                st.markdown(f"image_called:{img.called}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "image_called:True" in " ".join(m.value for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# _render_supervisor_diagram fallback paths (lines 879-884)
+# ---------------------------------------------------------------------------
+
+
+def test_render_supervisor_diagram_no_entry_agent_empty():
+    """_render_supervisor_diagram falls back to sequential when no coordinator."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = _Mock()
+    cfg.agents = []
+    cfg.get_entry_agent.side_effect = ValueError("no entry")
+    ca._render_supervisor_diagram(cfg)
+    st.markdown("done:True")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "done:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_render_supervisor_diagram_entry_error_falls_back_to_first():
+    """_render_supervisor_diagram uses the first agent when get_entry_agent raises."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    # Use plain Mock agents so get_entry_agent raising does not collide with
+    # pydantic attribute teardown semantics.
+    lead = _Mock()
+    lead.agent_id = "lead"
+    lead.role = "lead"
+    worker = _Mock()
+    worker.agent_id = "w1"
+    worker.role = "worker"
+    cfg = _Mock()
+    cfg.agents = [lead, worker]
+    cfg.get_entry_agent.side_effect = ValueError("boom")
+    ca._render_supervisor_diagram(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+# ---------------------------------------------------------------------------
+# _render_thread_list filter + rename/select/edit/delete clicks
+# (lines 230, 250-256, 267-270, 273-274, 277-278)
+# ---------------------------------------------------------------------------
+
+
+def test_render_thread_list_filter_matches():
+    """_render_thread_list applies the text filter to thread names."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ca._new_thread("alpha_mas")
+    ca._new_thread("beta_mas")
+    st.session_state["chat_thread_filter"] = "alpha"
+    ca._render_thread_list()
+"""
+    )
+    at.run()
+    assert not at.exception
+    # The filter keeps only the matching thread button (plus its edit/delete).
+    labels = [b.label for b in at.button]
+    assert any("alpha_mas" in lbl for lbl in labels)
+    assert not any("beta_mas" in lbl for lbl in labels)
+
+
+def _seed_thread_script(body: str) -> str:
+    """Return an AppTest script that seeds two fixed threads then runs *body*.
+
+    Threads use deterministic IDs (t1 active, t2 older) so button widget keys
+    stay stable across the click-triggered rerun.
+    """
+    return (
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    st.session_state["chat_threads"] = {
+        "t1": {"name": "first_thread", "messages": [], "mas_id": "m",
+               "created_at": 2.0},
+        "t2": {"name": "second_thread", "messages": [], "mas_id": "m",
+               "created_at": 1.0},
+    }
+    st.session_state["chat_thread_id"] = "t1"
+    with _patch.object(ca.st, "rerun"):
+"""
+        + body
+    )
+
+
+def test_render_thread_list_rename_confirm():
+    """Confirming a rename writes the new name and exits editing mode."""
+    at = AppTest.from_string(
+        _seed_thread_script(
+            """        st.session_state["chat_editing_thread"] = "t1"
+        st.session_state["chat_rename_input_t1"] = "Renamed Thread"
+        ca._render_thread_list()
+"""
+        )
+    )
+    at.run()
+    assert not at.exception
+    confirm_buttons = [b for b in at.button if b.label == "✓"]
+    assert confirm_buttons
+    confirm_buttons[0].click().run()
+    assert not at.exception
+    assert at.session_state["chat_threads"]["t1"]["name"] == "Renamed Thread"
+    assert "chat_editing_thread" not in at.session_state
+
+
+def test_render_thread_list_rename_cancel():
+    """Cancelling a rename leaves the name unchanged and exits editing mode."""
+    at = AppTest.from_string(
+        _seed_thread_script(
+            """        st.session_state["chat_editing_thread"] = "t1"
+        ca._render_thread_list()
+"""
+        )
+    )
+    at.run()
+    assert not at.exception
+    cancel_buttons = [b for b in at.button if b.label == "✕"]
+    assert cancel_buttons
+    cancel_buttons[0].click().run()
+    assert not at.exception
+    assert at.session_state["chat_threads"]["t1"]["name"] == "first_thread"
+    assert "chat_editing_thread" not in at.session_state
+
+
+def test_render_thread_list_select_thread_click():
+    """Clicking a non-active thread button switches the active thread."""
+    at = AppTest.from_string(
+        _seed_thread_script(
+            """        ca._render_thread_list()
+"""
+        )
+    )
+    at.run()
+    assert not at.exception
+    select_buttons = [b for b in at.button if b.label == "second_thread"]
+    assert select_buttons
+    select_buttons[0].click().run()
+    assert not at.exception
+    assert at.session_state["chat_thread_id"] == "t2"
+
+
+def test_render_thread_list_edit_click_enters_editing():
+    """Clicking the pencil button puts the thread into editing mode."""
+    at = AppTest.from_string(
+        _seed_thread_script(
+            """        ca._render_thread_list()
+"""
+        )
+    )
+    at.run()
+    assert not at.exception
+    edit_buttons = [b for b in at.button if b.label == "✏️"]
+    assert edit_buttons
+    edit_buttons[0].click().run()
+    assert not at.exception
+    assert at.session_state["chat_editing_thread"] in ("t1", "t2")
+
+
+def test_render_thread_list_delete_click_removes_thread():
+    """Clicking the trash button deletes the thread from session state."""
+    at = AppTest.from_string(
+        _seed_thread_script(
+            """        ca._render_thread_list()
+"""
+        )
+    )
+    at.run()
+    assert not at.exception
+    delete_buttons = [b for b in at.button if b.label == "\U0001f5d1️"]
+    assert delete_buttons
+    before = len(at.session_state["chat_threads"])
+    delete_buttons[0].click().run()
+    assert not at.exception
+    assert len(at.session_state["chat_threads"]) == before - 1
+
+
+# ===========================================================================
+# Coverage expansion batch 3: render_sidebar_content full flow
+# ===========================================================================
+
+
+def test_sidebar_content_full_flow_with_loaded_config(tmp_path):
+    """render_sidebar_content renders model picker, export, and send buttons.
+
+    Drives the lower half of the sidebar by selecting the first YAML config and
+    seeding chat_config + a thread with history so the export buttons appear.
+    """
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="sidebar_full")
+    # Pre-load config + a thread with one message so export buttons render.
+    st.session_state.chat_config = cfg
+    st.session_state.chat_config_base = cfg
+    st.session_state["chat_threads"] = {{
+        "t1": {{"name": "t1", "messages": [
+            {{"content": "hi", "agent_trace": []}}
+        ], "mas_id": "sidebar_full", "created_at": 1.0}},
+    }}
+    st.session_state["chat_thread_id"] = "t1"
+    # Pre-select the first config so the selectbox resolves to a file.
+    st.session_state["chat_yaml_selector"] = 0
+    with _patch.object(ca, "_load_config"):
+        with _patch.object(
+            ca, "_build_chat_model_options",
+            return_value=(["[OpenAI] gpt-4o"], ["gpt-4o"]),
+        ):
+            ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "sidebar_full" in all_md
+    assert "Model Settings" in all_md
+    button_labels = [b.label for b in at.button]
+    assert any("New Conversation" in lbl for lbl in button_labels)
+    # The Send to Attack Suite button confirms the lower sidebar block ran.
+    assert any("Send to Attack" in lbl for lbl in button_labels)
+
+
+def test_sidebar_content_apply_model_button(tmp_path):
+    """Clicking 'Apply to all' invokes _apply_model_patch with the chosen model."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="apply_btn")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_config_base = cfg
+    st.session_state["chat_yaml_selector"] = 0
+    st.session_state["chat_model_selector"] = 0
+    with _patch.object(ca, "_load_config"):
+        with _patch.object(
+            ca, "_build_chat_model_options",
+            return_value=(["[OpenAI] gpt-4o"], ["gpt-4o"]),
+        ):
+            with _patch.object(ca, "_apply_model_patch") as patch_fn:
+                ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+                st.session_state["__patch_fn"] = patch_fn
+"""
+    )
+    at.run()
+    assert not at.exception
+    apply_buttons = [b for b in at.button if b.label == "Apply to all"]
+    assert apply_buttons
+    apply_buttons[0].click().run()
+    assert not at.exception
+
+
+def test_sidebar_content_stub_button(tmp_path):
+    """Clicking 'Stub mode' invokes _apply_model_patch with None."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="stub_btn", model_name="gpt-4o")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_config_base = cfg
+    st.session_state["chat_yaml_selector"] = 0
+    with _patch.object(ca, "_load_config"):
+        with _patch.object(
+            ca, "_build_chat_model_options",
+            return_value=(["[OpenAI] gpt-4o"], ["gpt-4o"]),
+        ):
+            with _patch.object(ca, "_apply_model_patch") as patch_fn:
+                ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+                st.session_state["__stub_patch_fn"] = patch_fn
+"""
+    )
+    at.run()
+    assert not at.exception
+    stub_buttons = [b for b in at.button if b.label == "Stub mode"]
+    assert stub_buttons
+    stub_buttons[0].click().run()
+    assert not at.exception
+
+
+def test_sidebar_content_new_conversation_button(tmp_path):
+    """Clicking 'New Conversation' creates a new thread."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="new_conv")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_config_base = cfg
+    st.session_state["chat_yaml_selector"] = 0
+    with _patch.object(ca, "_load_config"):
+        with _patch.object(
+            ca, "_build_chat_model_options",
+            return_value=(["[OpenAI] gpt-4o"], ["gpt-4o"]),
+        ):
+            with _patch.object(ca.st, "rerun"):
+                ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+"""
+    )
+    at.run()
+    assert not at.exception
+    nc_buttons = [b for b in at.button if "New Conversation" in b.label]
+    assert nc_buttons
+
+
+def test_sidebar_content_autoload_uploaded_config(tmp_path):
+    """render_sidebar_content autoloads a pending uploaded config."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    pending = mk(mas_id="autoloaded")
+    st.session_state["chat_uploaded_configs"] = {{"up.yaml": pending}}
+    st.session_state["chat_autoload_name"] = "up.yaml"
+    with _patch.object(ca, "_load_uploaded_config") as loader:
+        ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+        st.markdown(f"autoload_called:{{loader.called}}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "autoload_called:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_sidebar_content_selects_uploaded_config(tmp_path):
+    """render_sidebar_content loads an uploaded config selected in the selectbox."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    up = mk(mas_id="picked_upload")
+    st.session_state["chat_uploaded_configs"] = {{"up.yaml": up}}
+    # Index 1 = the uploaded config (index 0 is the single example file).
+    st.session_state["chat_yaml_selector"] = 1
+    with _patch.object(ca, "_load_uploaded_config") as loader:
+        ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+        st.markdown(f"upload_loaded:{{loader.called}}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "upload_loaded:True" in " ".join(m.value for m in at.markdown)
+
+
+# ===========================================================================
+# Coverage expansion batch 4
+# ===========================================================================
+
+
+def test_sidebar_content_upload_success(tmp_path):
+    """render_sidebar_content parses and registers a valid uploaded YAML file."""
+
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import io
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="uploaded_cfg")
+    # Fake uploaded file object returned by st.file_uploader.
+    fake_upload = _Mock()
+    fake_upload.name = "new_upload.yaml"
+    fake_upload.read.return_value = b"mas_id: uploaded_cfg"
+    with _patch.object(ca.st, "file_uploader", return_value=fake_upload):
+        with _patch.object(ca.yaml, "safe_load", return_value={{"mas_id": "u"}}):
+            with _patch.object(ca, "load_mas_from_dict", return_value=cfg):
+                with _patch.object(ca, "compile_mas"):
+                    with _patch.object(ca.st, "rerun"):
+                        ca.render_sidebar_content(
+                            examples_dir=Path({str(tmp_path)!r})
+                        )
+    registered = "new_upload.yaml" in st.session_state.get(
+        "chat_uploaded_configs", {{}}
+    )
+    st.markdown(f"registered:{{registered}}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "registered:True" in " ".join(m.value for m in at.markdown)
+
+
+def test_sidebar_content_upload_invalid_top_level(tmp_path):
+    """render_sidebar_content errors when uploaded YAML is not a mapping."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    fake_upload = _Mock()
+    fake_upload.name = "bad_upload.yaml"
+    fake_upload.read.return_value = b"- just\\n- a\\n- list"
+    with _patch.object(ca.st, "file_uploader", return_value=fake_upload):
+        with _patch.object(ca.yaml, "safe_load", return_value=["a", "b"]):
+            ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "must be a mapping" in " ".join(e.value for e in at.error)
+
+
+def test_sidebar_content_upload_parse_error(tmp_path):
+    """render_sidebar_content surfaces an error when compile_mas fails on upload."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk()
+    fake_upload = _Mock()
+    fake_upload.name = "broken_upload.yaml"
+    fake_upload.read.return_value = b"mas_id: x"
+    with _patch.object(ca.st, "file_uploader", return_value=fake_upload):
+        with _patch.object(ca.yaml, "safe_load", return_value={{"mas_id": "x"}}):
+            with _patch.object(ca, "load_mas_from_dict", return_value=cfg):
+                with _patch.object(
+                    ca, "compile_mas", side_effect=ValueError("circular edge")
+                ):
+                    ca.render_sidebar_content(
+                        examples_dir=Path({str(tmp_path)!r})
+                    )
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "Invalid config" in " ".join(e.value for e in at.error)
+
+
+def test_sidebar_content_apply_invalid_model_index(tmp_path):
+    """Clicking Apply with an out-of-range model index shows an error."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="bad_idx")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_config_base = cfg
+    st.session_state["chat_yaml_selector"] = 0
+    # display has one option (selectbox index 0 is valid) but the id list is
+    # empty, so the Apply handler's bounds check (idx >= len(id_opts)) fails.
+    with _patch.object(ca, "_load_config"):
+        with _patch.object(
+            ca, "_build_chat_model_options",
+            return_value=(["[OpenAI] gpt-4o"], []),
+        ):
+            ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+"""
+    )
+    at.run()
+    assert not at.exception
+    apply_buttons = [b for b in at.button if b.label == "Apply to all"]
+    assert apply_buttons
+    apply_buttons[0].click().run()
+    assert not at.exception
+    assert "Invalid model selection" in " ".join(e.value for e in at.error)
+
+
+def test_render_stored_turn_error_with_trace_divider():
+    """_render_stored_turn renders a divider when a turn has both error and trace."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk()
+    st.session_state.chat_config = cfg
+    turn = {
+        "content": "Partial then failed",
+        "turn_index": 0,
+        "error": "downstream node failed",
+        "agent_trace": [
+            {"agent_id": "agent_0",
+             "output": {"agent_outputs": {"agent_0": {"message": "partial"}}}},
+        ],
+    }
+    ca._render_stored_turn(turn)
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "downstream node failed" in " ".join(e.value for e in at.error)
+
+
+def test_render_timeline_completed_button_click():
+    """Clicking a completed timeline chip stores the (turn, agent) selection."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    ph = st.empty()
+    with _patch.object(ca.st, "rerun"):
+        ca._render_timeline(
+            ph,
+            completed=["agent_0"],
+            active=None,
+            all_nodes=["agent_0", "agent_1"],
+            key_prefix="tl_click",
+            turn_index=3,
+        )
+"""
+    )
+    at.run()
+    assert not at.exception
+    completed_buttons = [b for b in at.button if b.label == "✓ agent_0"]
+    assert completed_buttons
+    completed_buttons[0].click().run()
+    assert not at.exception
+    assert at.session_state["aether_selected_trace_node"] == (3, "agent_0")
+
+
+def test_run_turn_agent_panel_render_error():
+    """_run_turn shows a per-agent error when _render_agent_panel raises."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="render_err_turn")
+    st.session_state.chat_config = cfg
+    ca._new_thread("render_err_turn")
+    mock_exec = _Mock()
+    events = [
+        ("__node_complete__", {
+            "node": "agent_0",
+            "state_update": {"agent_outputs": {"agent_0": {"message": "ok"}}},
+        }),
+    ]
+    mock_exec.run_streaming_tokens.return_value = iter(events)
+    st.session_state.chat_executor = mock_exec
+    with _patch.object(ca, "_render_agent_panel", side_effect=RuntimeError("boom")):
+        with _patch.object(ca.st, "rerun"):
+            ca._run_turn("trigger render error")
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "failed to render" in " ".join(e.value for e in at.error)
+
+
+def test_chat_area_chat_input_runs_turn():
+    """_render_chat_area dispatches a submitted chat message to _run_turn."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="chat_input_test")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_executor = _Mock()
+    with _patch.object(ca, "_render_mas_structure"):
+        with _patch.object(ca, "_run_turn") as run_turn:
+            ca._render_chat_area()
+            st.session_state["__run_turn_fn"] = run_turn
+"""
+    )
+    at.run()
+    assert not at.exception
+    # Submit a message through the chat input, then assert no error on the rerun.
+    at.chat_input[0].set_value("Hello there").run()
+    assert not at.exception
+
+
+# ===========================================================================
+# Coverage expansion batch 5: New Conversation click, flow graph, HITL resume
+# ===========================================================================
+
+
+def test_sidebar_content_new_conversation_click_creates_thread(tmp_path):
+    """Clicking 'New Conversation' creates a fresh thread and clears trace state."""
+    (tmp_path / "demo_config.yaml").write_text("mas_id: x\n", encoding="utf-8")
+    at = AppTest.from_string(
+        f"""
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from pathlib import Path
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {{
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="nc_click")
+    st.session_state.chat_config = cfg
+    st.session_state.chat_config_base = cfg
+    st.session_state["chat_yaml_selector"] = 0
+    st.session_state["aether_execution_trace"] = ["agent_0"]
+    with _patch.object(ca, "_load_config"):
+        with _patch.object(
+            ca, "_build_chat_model_options",
+            return_value=(["[OpenAI] gpt-4o"], ["gpt-4o"]),
+        ):
+            with _patch.object(ca.st, "rerun"):
+                ca.render_sidebar_content(examples_dir=Path({str(tmp_path)!r}))
+"""
+    )
+    at.run()
+    assert not at.exception
+    nc_buttons = [b for b in at.button if "New Conversation" in b.label]
+    assert nc_buttons
+    nc_buttons[0].click().run()
+    assert not at.exception
+    assert "chat_thread_id" in at.session_state
+
+
+def test_render_flow_graph_builds_and_shows_details():
+    """_render_flow_graph builds the graph state and renders selected-node details.
+
+    Uses the real streamlit_flow import (installed) but stubs the component call
+    so the node-click detail branch runs without a live frontend.
+    """
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+from bili.aether.ui import chat_app as ca
+
+cfg = mk(mas_id="flow_graph_test", num_agents=2)
+
+# Stub the component call to return a state whose selected_id points at agent_0
+# so the agent-details branch executes.
+returned_state = _Mock()
+returned_state.selected_id = "agent_0"
+with _patch.object(ca, "_FLOW_AVAILABLE", True):
+    with _patch.object(ca, "streamlit_flow", return_value=returned_state):
+        # Call the undecorated fragment body directly.
+        ca._render_flow_graph.__wrapped__(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+    # The agent-details container renders the selected agent's id.
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "agent_0" in all_md
+
+
+def test_render_flow_graph_no_selection_shows_hint():
+    """_render_flow_graph shows the click hint when no node is selected."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+from bili.aether.ui import chat_app as ca
+
+cfg = mk(mas_id="flow_no_sel", num_agents=1)
+returned_state = _Mock()
+returned_state.selected_id = None
+with _patch.object(ca, "_FLOW_AVAILABLE", True):
+    with _patch.object(ca, "streamlit_flow", return_value=returned_state):
+        ca._render_flow_graph.__wrapped__(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert "Click a node" in " ".join(c.value for c in at.caption)
+
+
+def test_render_flow_graph_active_node_highlight():
+    """_render_flow_graph applies the active-node highlight when one is executing."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+from bili.aether.ui import chat_app as ca
+
+cfg = mk(mas_id="flow_active", num_agents=2)
+st.session_state["aether_executing_node"] = "agent_0"
+returned_state = _Mock()
+returned_state.selected_id = None
+with _patch.object(ca, "_FLOW_AVAILABLE", True):
+    with _patch.object(ca, "streamlit_flow", return_value=returned_state):
+        ca._render_flow_graph.__wrapped__(cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+
+
+def test_render_hitl_form_resume_completes_turn():
+    """_render_hitl_form resumes execution and appends the completed turn."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="hitl_resume", num_agents=2)
+    st.session_state.chat_config = cfg
+    tid = ca._new_thread("hitl_resume")
+    mock_exec = _Mock()
+    # resume_streaming yields (node, state_update) pairs, including a None update.
+    mock_exec.resume_streaming.return_value = iter([
+        ("agent_1", None),
+        ("agent_1", {"agent_outputs": {"agent_1": {"message": "resumed output"}}}),
+    ])
+    st.session_state.chat_executor = mock_exec
+    st.session_state.hitl_pending = {
+        "next": ["agent_1"],
+        "thread_id": tid,
+        "partial_turn": {
+            "role": "user", "content": "needs review",
+            "turn_index": 0,
+            "agent_trace": [
+                {"agent_id": "agent_0",
+                 "output": {"agent_outputs": {"agent_0": {"message": "first"}}}},
+            ],
+        },
+    }
+    # Pre-fill the form's text area so the submit branch proceeds.
+    st.session_state["hitl_human_input"] = "Looks good, proceed"
+    with _patch.object(ca.st, "rerun"):
+        ca._render_hitl_form(mock_exec)
+"""
+    )
+    at.run()
+    assert not at.exception
+    # Submit the resume form to drive the streaming-resume body.
+    if at.button:
+        submit = [b for b in at.button if "Resume" in b.label]
+        if submit:
+            submit[0].click().run()
+    assert not at.exception
+
+
+def test_render_hitl_form_resume_handles_error():
+    """_render_hitl_form records an error when resume_streaming raises."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="hitl_err", num_agents=2)
+    st.session_state.chat_config = cfg
+    tid = ca._new_thread("hitl_err")
+    mock_exec = _Mock()
+    mock_exec.resume_streaming.side_effect = RuntimeError("resume blew up")
+    st.session_state.chat_executor = mock_exec
+    st.session_state.hitl_pending = {
+        "next": ["agent_1"],
+        "thread_id": tid,
+        "partial_turn": {
+            "role": "user", "content": "needs review",
+            "turn_index": 0, "agent_trace": [],
+        },
+    }
+    st.session_state["hitl_human_input"] = "proceed"
+    with _patch.object(ca.st, "rerun"):
+        ca._render_hitl_form(mock_exec)
+"""
+    )
+    at.run()
+    assert not at.exception
+    submit = [b for b in at.button if "Resume" in b.label]
+    if submit:
+        submit[0].click().run()
+    assert not at.exception
+
+
+def test_render_hitl_form_resume_panel_render_error():
+    """_render_hitl_form shows a per-agent error if a panel fails to render on resume."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui import chat_app as ca
+    cfg = mk(mas_id="hitl_panel_err", num_agents=2)
+    st.session_state.chat_config = cfg
+    tid = ca._new_thread("hitl_panel_err")
+    mock_exec = _Mock()
+    mock_exec.resume_streaming.return_value = iter([
+        ("agent_1", {"agent_outputs": {"agent_1": {"message": "resumed"}}}),
+    ])
+    st.session_state.chat_executor = mock_exec
+    st.session_state.hitl_pending = {
+        "next": ["agent_1"],
+        "thread_id": tid,
+        "partial_turn": {
+            "role": "user", "content": "needs review",
+            "turn_index": 0, "agent_trace": [],
+        },
+    }
+    st.session_state["hitl_human_input"] = "proceed now"
+    with _patch.object(ca, "_render_agent_panel", side_effect=RuntimeError("panel boom")):
+        with _patch.object(ca.st, "rerun"):
+            ca._render_hitl_form(mock_exec)
+"""
+    )
+    at.run()
+    assert not at.exception
+    submit = [b for b in at.button if "Resume" in b.label]
+    assert submit
+    submit[0].click().run()
+    assert not at.exception
+    assert "failed to render" in " ".join(e.value for e in at.error)

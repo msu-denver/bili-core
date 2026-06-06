@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bili.iris.loaders.llm_loader import (
+    load_huggingface_model,
+    load_llamacpp_model,
     load_model,
     load_remote_azure_openai,
     load_remote_bedrock_model,
@@ -337,3 +339,223 @@ class TestDeviceDetection:
         mock_torch.cuda.is_available.return_value = False
         assert not mock_torch.backends.mps.is_available()
         assert not mock_torch.cuda.is_available()
+
+
+# ---------------------------------------------------------------------------
+# load_huggingface_model (local)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadHuggingFaceModel:
+    """Verify the local HuggingFace pipeline construction."""
+
+    @patch("bili.iris.loaders.llm_loader.ChatHuggingFace")
+    @patch("bili.iris.loaders.llm_loader.HuggingFacePipeline")
+    @patch("bili.iris.loaders.llm_loader.pipeline")
+    @patch("bili.iris.loaders.llm_loader.AutoModelForCausalLM")
+    @patch("bili.iris.loaders.llm_loader.torch")
+    @patch("bili.iris.loaders.llm_loader.load_huggingface_tokenizer")
+    def test_builds_chat_model_with_full_generation_config(
+        self,
+        mock_tokenizer_loader,
+        mock_torch,
+        mock_auto_model,
+        mock_pipeline,
+        mock_hf_pipeline,
+        mock_chat_hf,
+    ):
+        """Verify generation config is assembled and a ChatHuggingFace is returned."""
+        tokenizer = MagicMock()
+        tokenizer.pad_token = None
+        tokenizer.eos_token = "</s>"
+        mock_tokenizer_loader.return_value = tokenizer
+        mock_torch.cuda.is_available.return_value = True
+        model = MagicMock()
+        mock_auto_model.from_pretrained.return_value = model
+        mock_chat_hf.return_value = "chat_model"
+
+        result = load_huggingface_model(
+            model_name="gpt2",
+            max_tokens=128,
+            temperature=0.6,
+            top_p=0.9,
+            top_k=40,
+            seed=7,
+        )
+
+        assert result == "chat_model"
+        # Missing pad token is backfilled from the eos token.
+        assert tokenizer.pad_token == "</s>"
+        # CUDA cache is cleared when CUDA is available.
+        mock_torch.cuda.empty_cache.assert_called_once()
+        # The optional generation params are forwarded to pipeline().
+        pipeline_kwargs = mock_pipeline.call_args[1]
+        assert pipeline_kwargs["task"] == "text-generation"
+        assert pipeline_kwargs["return_full_text"] is False
+        assert pipeline_kwargs["model"] is model
+        assert pipeline_kwargs["max_new_tokens"] == 128
+        assert pipeline_kwargs["temperature"] == 0.6
+        assert pipeline_kwargs["top_p"] == 0.9
+        assert pipeline_kwargs["top_k"] == 40
+        assert pipeline_kwargs["seed"] == 7
+        mock_hf_pipeline.assert_called_once_with(pipeline=mock_pipeline.return_value)
+        mock_chat_hf.assert_called_once_with(llm=mock_hf_pipeline.return_value)
+
+    @patch("bili.iris.loaders.llm_loader.ChatHuggingFace")
+    @patch("bili.iris.loaders.llm_loader.HuggingFacePipeline")
+    @patch("bili.iris.loaders.llm_loader.pipeline")
+    @patch("bili.iris.loaders.llm_loader.AutoModelForCausalLM")
+    @patch("bili.iris.loaders.llm_loader.torch")
+    @patch("bili.iris.loaders.llm_loader.load_huggingface_tokenizer")
+    def test_minimal_config_omits_optional_params(
+        self,
+        mock_tokenizer_loader,
+        mock_torch,
+        mock_auto_model,
+        mock_pipeline,
+        mock_hf_pipeline,
+        mock_chat_hf,
+    ):
+        """Verify optional generation params are absent when not provided."""
+        tokenizer = MagicMock()
+        tokenizer.pad_token = "<pad>"
+        mock_tokenizer_loader.return_value = tokenizer
+        mock_torch.cuda.is_available.return_value = False
+        mock_chat_hf.return_value = "chat_model"
+
+        load_huggingface_model(model_name="gpt2")
+
+        # No CUDA cache clear when CUDA is unavailable.
+        mock_torch.cuda.empty_cache.assert_not_called()
+        pipeline_kwargs = mock_pipeline.call_args[1]
+        for absent in ("max_new_tokens", "temperature", "top_p", "top_k", "seed"):
+            assert absent not in pipeline_kwargs
+
+
+# ---------------------------------------------------------------------------
+# load_llamacpp_model (local)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadLlamaCppModel:
+    """Verify the local LlamaCpp model construction."""
+
+    @patch("bili.iris.loaders.llm_loader.ChatLlamaCpp")
+    def test_full_config_passes_all_params(self, mock_cls):
+        """Verify all optional params are merged into the LlamaCpp config."""
+        mock_cls.return_value = "llama_model"
+
+        result = load_llamacpp_model(
+            model_name="model.gguf",
+            max_tokens=256,
+            temperature=0.8,
+            top_p=0.95,
+            top_k=50,
+            seed=11,
+        )
+
+        assert result == "llama_model"
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["model_path"] == "model.gguf"
+        assert call_kwargs["n_ctx"] == 4096
+        assert call_kwargs["max_tokens"] == 256
+        assert call_kwargs["temperature"] == 0.8
+        assert call_kwargs["top_p"] == 0.95
+        assert call_kwargs["top_k"] == 50
+        assert call_kwargs["seed"] == 11
+
+    @patch("bili.iris.loaders.llm_loader.ChatLlamaCpp")
+    def test_minimal_config_omits_optional_params(self, mock_cls):
+        """Verify optional params are omitted when falsy."""
+        mock_cls.return_value = "llama_model"
+
+        load_llamacpp_model(model_name="model.gguf")
+
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["model_path"] == "model.gguf"
+        for absent in ("max_tokens", "temperature", "top_p", "top_k", "seed"):
+            assert absent not in call_kwargs
+
+
+# ---------------------------------------------------------------------------
+# Optional-parameter coverage for remote loaders
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteLoaderOptionalParams:
+    """Verify optional config keys are set on the remote loaders."""
+
+    @patch("bili.iris.loaders.llm_loader.ChatVertexAI")
+    def test_vertex_all_optional_params(self, mock_cls):
+        """Verify every optional Vertex config key is forwarded."""
+        mock_cls.return_value = MagicMock()
+        schema = {"type": "object"}
+        load_remote_gcp_vertex_model(
+            model_name="gemini-pro",
+            max_tokens=100,
+            temperature=0.5,
+            top_p=0.9,
+            top_k=20,
+            seed=3,
+            response_mime_type="application/json",
+            response_schema=schema,
+        )
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["max_output_tokens"] == 100
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["top_p"] == 0.9
+        assert call_kwargs["top_k"] == 20
+        assert call_kwargs["seed"] == 3
+        assert call_kwargs["response_mime_type"] == "application/json"
+        assert call_kwargs["response_schema"] == schema
+
+    @patch("bili.iris.loaders.llm_loader.AzureChatOpenAI")
+    def test_azure_top_k_forwarded(self, mock_cls):
+        """Verify Azure top_k is forwarded."""
+        mock_cls.return_value = MagicMock()
+        load_remote_azure_openai(model_name="gpt-4", api_version="2024-01", top_k=15)
+        assert mock_cls.call_args[1]["top_k"] == 15
+
+    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    def test_openai_top_k_forwarded(self, mock_cls):
+        """Verify OpenAI top_k is forwarded."""
+        mock_cls.return_value = MagicMock()
+        load_remote_openai(model_name="gpt-4o", top_k=25)
+        assert mock_cls.call_args[1]["top_k"] == 25
+
+
+# ---------------------------------------------------------------------------
+# prepare_runtime_config — ThinkingConfig error handling
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareRuntimeConfigErrors:
+    """Verify ThinkingConfig value/type errors are caught and logged."""
+
+    def test_invalid_budget_string_is_handled(self):
+        """Verify a non-numeric budget string is caught without raising."""
+        fake_types = MagicMock()
+        fake_types.ThinkingConfig.side_effect = None
+        with patch.dict(
+            "sys.modules",
+            {"google.genai": MagicMock(types=fake_types)},
+        ):
+            # An int() conversion failure on the budget string is caught by
+            # the ValueError/TypeError handler, leaving the config empty.
+            result = prepare_runtime_config(
+                model_type="remote_google_vertex",
+                thinking_config={"budget": "not-a-number"},
+            )
+        assert "thinking_config" not in result
+
+    def test_none_budget_skips_thinking_config(self):
+        """Verify an explicit None budget produces no thinking_config."""
+        with patch.dict(
+            "sys.modules",
+            {"google.genai": MagicMock()},
+        ):
+            result = prepare_runtime_config(
+                model_type="remote_google_vertex",
+                thinking_config={"budget": None},
+            )
+        assert "thinking_config" not in result

@@ -68,8 +68,8 @@ if __name__ == '__main__':
     app.run()
 """
 
+import copy
 import json
-from dataclasses import replace
 from functools import wraps
 
 from flask import Response, g, jsonify, make_response, request, stream_with_context
@@ -78,7 +78,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from bili.auth.auth_manager import AuthManager
 from bili.iris.loaders.langchain_loader import GRAPH_NODE_REGISTRY, build_agent_graph
-from bili.iris.nodes.add_persona_and_summary import persona_and_summary_node
 from bili.iris.nodes.per_user_state import per_user_state_node
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
@@ -359,22 +358,61 @@ def per_user_agent(
             # Check that the graph definition contains the per_user_state node.
             # Use a local variable so the outer graph_definition closure is never
             # rebound, avoiding a Python UnboundLocalError.
+            #
+            # graph_definition holds Node *instances* (e.g. DEFAULT_GRAPH_DEFINITION),
+            # while per_user_state_node is a Node *factory* (functools.partial), so
+            # membership must be tested by node name, not object identity.
             current_graph = graph_definition
-            if per_user_state_node not in current_graph:
-                # Create modified copies with updated edges
-                persona_node_modified = replace(
-                    persona_and_summary_node, edges=["per_user_state"]
+            has_per_user_state = any(
+                getattr(node, "name", None) == "per_user_state"
+                for node in current_graph
+            )
+            if not has_per_user_state:
+                # Locate the persona node by name. Do not assume it is index 0:
+                # an empty or persona-less graph must fail loudly rather than
+                # rewire an arbitrary first node's edges.
+                persona_idx = next(
+                    (
+                        i
+                        for i, node in enumerate(current_graph)
+                        if getattr(node, "name", None) == "add_persona_and_summary"
+                    ),
+                    None,
                 )
-                per_user_state_modified = replace(
-                    per_user_state_node, edges=["inject_current_datetime"]
+                if persona_idx is None:
+                    raise ValueError(
+                        "per_user_agent requires an 'add_persona_and_summary' node "
+                        "in graph_definition to insert per_user_state before"
+                    )
+                # Deep-copy the persona node so the shared graph_definition and
+                # its nested mutable fields are never mutated. per_user_state is
+                # a fresh factory instance.
+                persona_node_modified = copy.deepcopy(current_graph[persona_idx])
+                per_user_state_modified = per_user_state_node()
+                # per_user_state becomes the persona's successor and inherits ALL
+                # of the persona's original routing (static edges, conditional
+                # edges, conditional entry) so the rest of the pipeline, including
+                # any conditional branches, runs after the injection rather than
+                # bypassing it.
+                per_user_state_modified.edges = list(persona_node_modified.edges) or [
+                    "inject_current_datetime"
+                ]
+                per_user_state_modified.conditional_edges = (
+                    persona_node_modified.conditional_edges
                 )
-                # Build a per-request graph with per_user_state inserted
-                current_graph = [
-                    persona_node_modified,
-                    per_user_state_modified,
-                ] + current_graph[
-                    1:
-                ]  # Skip original persona_and_summary_node
+                per_user_state_modified.conditional_entry = (
+                    persona_node_modified.conditional_entry
+                )
+                # The persona now routes unconditionally to per_user_state only.
+                persona_node_modified.edges = ["per_user_state"]
+                persona_node_modified.conditional_edges = []
+                persona_node_modified.conditional_entry = None
+                # Insert per_user_state immediately after the persona node.
+                current_graph = (
+                    current_graph[:persona_idx]
+                    + [persona_node_modified, per_user_state_modified]
+                    + current_graph[persona_idx + 1 :]
+                )
 
             # Build the agent graph using the provided parameters
             agent_graph = build_agent_graph(

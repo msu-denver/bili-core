@@ -470,3 +470,337 @@ with _patch.dict("sys.modules", fm):
     )
     at.run()
     assert not at.exception
+
+
+def test_metadata_bar_truncates_many_tags():
+    """More than three tags are truncated with an ellipsis."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    cfg = mk()
+    cfg_tags = cfg.model_copy(update={"tags": ["a", "b", "c", "d", "e"]})
+    gv.render_metadata_bar(cfg_tags)
+"""
+    )
+    at.run()
+    assert not at.exception
+    metric_values = [m.value for m in at.metric]
+    assert any("..." in str(v) for v in metric_values)
+
+
+# ---------------------------------------------------------------------------
+# build_model_options
+# ---------------------------------------------------------------------------
+
+
+def test_build_model_options_structure():
+    """build_model_options returns display list and the two lookup dicts."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+fake_models = {
+    "openai": {
+        "name": "OpenAI",
+        "models": [
+            {"model_id": "id-1", "model_name": "gpt-test"},
+        ],
+    },
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    with _patch("bili.iris.config.llm_config.LLM_MODELS", fake_models):
+        gv.build_model_options.clear()
+        options, name_to_model, lookup = gv.build_model_options()
+        gv.build_model_options.clear()
+    st.markdown(f"opt:{options[0]}")
+    st.markdown(f"n2m:{name_to_model[options[0]]}")
+    st.markdown(f"by_id:{lookup['id-1']}")
+    st.markdown(f"by_name:{lookup['gpt-test']}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "opt:[OpenAI] gpt-test" in all_md
+    assert "n2m:gpt-test" in all_md
+    assert "by_id:[OpenAI] gpt-test" in all_md
+    assert "by_name:[OpenAI] gpt-test" in all_md
+
+
+# ---------------------------------------------------------------------------
+# Full agent properties panel with all optional fields populated
+# ---------------------------------------------------------------------------
+
+
+def test_agent_properties_full_render():
+    """A fully populated agent renders every optional property block."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.schema.agent_spec import AgentSpec
+from bili.aether.schema.mas_config import MASConfig
+from bili.aether.schema.enums import WorkflowType
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    agent = AgentSpec(
+        agent_id="agent_x",
+        role="analyst",
+        objective="Analyze threats thoroughly",
+        system_prompt="You are an analyst.",
+        temperature=0.5,
+        max_tokens=2048,
+        model_name="gpt-test",
+        tools=["search_tool"],
+        capabilities=["threat_modeling"],
+        middleware=["summarization"],
+        tier=1,
+        voting_weight=2.0,
+        is_supervisor=True,
+        inherit_from_bili_core=True,
+    )
+    cfg = MASConfig(
+        mas_id="full_agent",
+        name="Full",
+        description="d",
+        agents=[agent],
+        channels=[],
+        workflow_type=WorkflowType.SEQUENTIAL,
+    )
+    st.session_state[gv._overrides_key(cfg.mas_id)] = {}
+    opts = ["[Test] gpt-test"]
+    n2m = {"[Test] gpt-test": "gpt-test"}
+    lookup = {"gpt-test": "[Test] gpt-test"}
+    with _patch.object(gv, "build_model_options", return_value=(opts, n2m, lookup)):
+        with _patch.object(gv, "_get_tool_names", return_value=["search_tool", "calc_tool"]):
+            gv._render_properties_panel(cfg, "agent_x", [], cfg.mas_id)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "threat_modeling" in all_md
+    assert "summarization" in all_md
+    assert "Tier:" in all_md
+    assert "Voting Weight:" in all_md
+    assert "Supervisor" in all_md
+    assert "Inherits from bili-core" in all_md
+    # The model selector pre-selects the YAML model.
+    assert any("gpt-test" in str(s.value) for s in at.selectbox)
+
+
+def test_agent_properties_uses_override_bucket_values():
+    """Override bucket values pre-fill the editable widgets over YAML defaults."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.schema.agent_spec import AgentSpec
+from bili.aether.schema.mas_config import MASConfig
+from bili.aether.schema.enums import WorkflowType
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    agent = AgentSpec(
+        agent_id="agent_y",
+        role="r",
+        objective="Original objective text",
+    )
+    cfg = MASConfig(
+        mas_id="ov_agent",
+        name="Ov",
+        description="d",
+        agents=[agent],
+        channels=[],
+        workflow_type=WorkflowType.SEQUENTIAL,
+    )
+    st.session_state[gv._overrides_key(cfg.mas_id)] = {
+        "agent_y": {
+            "objective": "Overridden objective",
+            "system_prompt": "Overridden prompt",
+            "temperature": 1.3,
+            "max_tokens": 4096,
+            "tools": ["calc_tool"],
+            "model_name": "[Test] gpt-test",
+        }
+    }
+    opts = ["[Test] gpt-test"]
+    n2m = {"[Test] gpt-test": "gpt-test"}
+    lookup = {"gpt-test": "[Test] gpt-test"}
+    with _patch.object(gv, "build_model_options", return_value=(opts, n2m, lookup)):
+        with _patch.object(gv, "_get_tool_names", return_value=["calc_tool", "search_tool"]):
+            gv._render_properties_panel(cfg, "agent_y", [], cfg.mas_id)
+"""
+    )
+    at.run()
+    assert not at.exception
+    text_area_vals = " ".join(str(t.value) for t in at.text_area)
+    assert "Overridden objective" in text_area_vals
+    assert "Overridden prompt" in text_area_vals
+    slider_vals = [s.value for s in at.slider]
+    assert 1.3 in slider_vals
+    number_vals = [n.value for n in at.number_input]
+    assert 4096 in number_vals
+    # The override model is pre-selected.
+    assert any("gpt-test" in str(s.value) for s in at.selectbox)
+
+
+def test_agent_properties_no_tools_in_registry():
+    """When the tool registry is empty no multiselect is rendered."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.ui.tests.conftest import make_test_config as mk
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    cfg = mk(mas_id="no_tools")
+    st.session_state[gv._overrides_key(cfg.mas_id)] = {}
+    with _patch.object(gv, "build_model_options", return_value=([], {}, {})):
+        with _patch.object(gv, "_get_tool_names", return_value=[]):
+            gv._render_properties_panel(cfg, "agent_0", [], cfg.mas_id)
+"""
+    )
+    at.run()
+    assert not at.exception
+    assert any("None configured in YAML" in c.value for c in at.caption)
+    assert len(at.multiselect) == 0
+
+
+def test_model_selector_keep_sentinel_clears_override():
+    """Selecting the keep sentinel removes any stored model override."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+import streamlit as st
+from bili.aether.schema.agent_spec import AgentSpec
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    agent = AgentSpec(agent_id="agent_z", role="r", objective="Do the work")
+    mas_id = "sel_clear"
+    st.session_state[gv._overrides_key(mas_id)] = {
+        "agent_z": {"model_name": "[Test] gpt-test"}
+    }
+    opts = ["[Test] gpt-test"]
+    lookup = {"gpt-test": "[Test] gpt-test"}
+    with _patch.object(gv, "build_model_options", return_value=(opts, {}, lookup)):
+        gv._render_model_selector(agent, mas_id)
+    bucket = st.session_state[gv._overrides_key(mas_id)]["agent_z"]
+    st.markdown(f"has_model:{'model_name' in bucket}")
+"""
+    )
+    at.run()
+    assert not at.exception
+    # The stored override display is preselected, so the rendered value keeps it.
+    assert any("gpt-test" in str(s.value) for s in at.selectbox)
+
+
+# ---------------------------------------------------------------------------
+# Edge properties: channel + workflow edge matches
+# ---------------------------------------------------------------------------
+
+
+def test_edge_properties_with_channel_and_workflow_match():
+    """Edge properties surface channel protocol and conditional workflow edge."""
+    at = AppTest.from_string(
+        """
+from unittest.mock import MagicMock as _Mock
+from unittest.mock import patch as _patch
+from bili.aether.schema.agent_spec import AgentSpec
+from bili.aether.schema.mas_config import MASConfig, Channel, WorkflowEdge
+from bili.aether.schema.enums import WorkflowType
+fm = {
+    "streamlit_flow": _Mock(),
+    "streamlit_flow.elements": _Mock(),
+    "streamlit_flow.state": _Mock(),
+}
+with _patch.dict("sys.modules", fm):
+    from bili.aether.ui.components import graph_viewer as gv
+    agents = [
+        AgentSpec(agent_id="agent_0", role="r0", objective="Objective zero"),
+        AgentSpec(agent_id="agent_1", role="r1", objective="Objective one"),
+    ]
+    channel = Channel(
+        channel_id="ch01",
+        protocol="direct",
+        source="agent_0",
+        target="agent_1",
+        description="Primary link",
+        bidirectional=True,
+    )
+    wedge = WorkflowEdge(
+        from_agent="agent_0",
+        to_agent="agent_1",
+        condition="state.score > 0.5",
+    )
+    cfg = MASConfig(
+        mas_id="edge_full",
+        name="Edge",
+        description="d",
+        agents=agents,
+        channels=[channel],
+        workflow_edges=[wedge],
+        workflow_type=WorkflowType.CUSTOM,
+    )
+    edge = _Mock()
+    edge.id = "e01"
+    edge.source = "agent_0"
+    edge.target = "agent_1"
+    edge.label = "direct"
+    gv._render_edge_properties(edge, cfg)
+"""
+    )
+    at.run()
+    assert not at.exception
+    all_md = " ".join(m.value for m in at.markdown)
+    assert "Protocol:" in all_md
+    assert "Primary link" in all_md
+    assert any("Bidirectional" in s.value for s in at.success)
+    assert any("state.score > 0.5" in c.value for c in at.code)
+
+
+# NOTE: a "Download YAML button present" AppTest was removed here. It used
+# at.download_button, which is not an accessor on AppTest in this Streamlit
+# version, and the st.download_button("Download YAML", ...) call at
+# graph_viewer.py:162 is already exercised by the other render_graph_viewer
+# tests in this file (line 162 is covered). The removed test added no
+# coverage and asserted via a non-existent API.
