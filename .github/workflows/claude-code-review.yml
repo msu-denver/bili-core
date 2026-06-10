@@ -9,7 +9,6 @@ jobs:
   # findings comment so the Claude review job (which reads PR comments) folds the
   # results into its review. Replaces the metered claude-security-review.yml.
   semgrep:
-    if: ${{ github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,6 +40,10 @@ jobs:
             --config p/dockerfile || true
 
       - name: Post Semgrep findings as a sticky PR comment
+        # Dependabot PRs run with a read-only token, so the comment post fails
+        # there. continue-on-error keeps the job (and the run) green, so the
+        # review workflow does not surface as a failed/skipped run on dependabot.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
