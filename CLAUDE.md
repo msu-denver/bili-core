@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Automated Review Policy
+
+The PR review workflow enforces two rules the automated reviewer applies on every pull request:
+
+- **Tests ship with code.** If a PR changes application or library source code in a way that warrants tests (new or changed behavior, bug fixes, new branches or edge cases) and does not add or update corresponding tests, the reviewer flags it as a HIGH-severity finding. Docs-only, README, comments, formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only, version bumps) are exempt.
+- **Semgrep findings inform the review.** A free Semgrep (OSS) scan runs before the Claude review and posts its findings as a PR comment, which the reviewer folds into its analysis. It scans with the `p/python`, `p/secrets`, `p/ci`, and `p/dockerfile` rule packs. This replaces the metered Claude security-review job.
+
 ## Project Overview
 
 BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments. The framework is organized into three core components:
