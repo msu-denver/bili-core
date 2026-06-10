@@ -149,7 +149,15 @@ def create_llm(agent: AgentSpec) -> Any:
             f"cannot create LLM instance."
         )
 
-    provider, model_id, extra_kwargs = _resolve_model_full(agent.model_name)
+    if agent.model_type:
+        # Explicit provider override: trust the YAML-declared model_type and use
+        # model_name verbatim as the model_id, bypassing the LLM_MODELS registry
+        # and heuristic resolution. Direct first-party providers (Anthropic,
+        # DeepSeek, Gemini) need this deterministic path — the heuristic would
+        # otherwise route them to Bedrock, Vertex, or the OpenAI client.
+        provider, model_id, extra_kwargs = agent.model_type, agent.model_name, {}
+    else:
+        provider, model_id, extra_kwargs = _resolve_model_full(agent.model_name)
 
     # Build kwargs for load_model — extra_kwargs first so the resolved
     # model_id always wins if extra_kwargs ever contains a "model_name" key.

@@ -267,6 +267,78 @@ class TestCreateLlm:
         assert kwargs["api_version"] == "2024-02-01"
         assert kwargs["model_name"] == "azure-gpt-4o"
 
+    def test_create_llm_model_type_override_uses_provider_verbatim(self):
+        """model_type set → provider used as-is, model_name forwarded as model_id."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "victim",
+            model_name="claude-sonnet-4-6",
+            model_type="remote_anthropic",
+            temperature=0.0,
+        )
+
+        fake_load_model = MagicMock(return_value="ANTHROPIC_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        # LLM_MODELS deliberately holds a colliding entry that would resolve
+        # claude-sonnet-4-6 to Bedrock; model_type must win and skip the lookup.
+        colliding_models = {
+            "remote_aws_bedrock": {
+                "models": [
+                    {
+                        "model_name": "claude-sonnet-4-6",
+                        "model_id": "us.anthropic.claude-sonnet-4-6",
+                    }
+                ]
+            }
+        }
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", colliding_models):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                result = llm_resolver.create_llm(agent)
+
+        assert result == "ANTHROPIC_LLM"
+        provider_arg = fake_load_model.call_args[0][0]
+        kwargs = fake_load_model.call_args[1]
+        assert provider_arg == "remote_anthropic"
+        # model_name passed through verbatim, NOT rewritten to the Bedrock id.
+        assert kwargs["model_name"] == "claude-sonnet-4-6"
+        assert kwargs["temperature"] == 0.0
+
+    def test_create_llm_model_type_override_skips_resolution(self):
+        """model_type bypasses _resolve_model_full entirely (never called)."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        # A model_name the resolver could never resolve on its own — proves the
+        # override path does not fall through to the registry/heuristic.
+        agent = _agent(
+            "victim",
+            model_name="totally-unknown-direct-model",
+            model_type="remote_deepseek",
+        )
+
+        fake_load_model = MagicMock(return_value="DEEPSEEK_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch.object(
+            llm_resolver, "_resolve_model_full", side_effect=AssertionError("called")
+        ):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                result = llm_resolver.create_llm(agent)
+
+        assert result == "DEEPSEEK_LLM"
+        assert fake_load_model.call_args[0][0] == "remote_deepseek"
+        assert (
+            fake_load_model.call_args[1]["model_name"] == "totally-unknown-direct-model"
+        )
+
 
 class TestResolveProvider:
     """Tests for resolve_provider() and the LLM_MODELS ImportError path."""
