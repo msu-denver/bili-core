@@ -73,9 +73,80 @@ jobs:
             done
           gh pr comment "$PR" --body-file semgrep-comment.md
 
+  # Wait for the CI/CD pipeline's test-application job (in ci-cd.yml) to finish
+  # on this PR's head commit, then post its result as a sticky comment. The
+  # Claude review `needs:` this job (so it runs only after tests complete) and
+  # reads PR comments, so it folds the pytest / coverage-gate outcome into its
+  # review, the same sticky-comment hand-off the semgrep job uses. The review
+  # action only supports pull_request context (not workflow_run), so the gating
+  # is done in-workflow. ci-cd.yml builds, lints, AND tests in one run with a
+  # distinct test-application job, so we poll the run for this head commit and
+  # then read that specific job's conclusion by name via the jobs API.
+  await-tests:
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Wait for the test job and post the result as a sticky comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          MARKER: '### CI Tests'
+        run: |
+          # Poll the CI/CD pipeline run for this head commit (~30 min ceiling),
+          # then read the test-application job's conclusion by name. The build
+          # and test jobs run in the same ci-cd.yml run, so the run-level
+          # conclusion can be dragged down by the lint/build job; we want the
+          # test job specifically.
+          status="missing"; conclusion=""; runid=""
+          for i in $(seq 1 60); do
+            run=$(gh api "repos/$REPO/actions/workflows/ci-cd.yml/runs?head_sha=$SHA&event=pull_request&per_page=1" 2>/dev/null || echo '{}')
+            status=$(echo "$run" | jq -r '.workflow_runs[0].status // "missing"')
+            runid=$(echo "$run" | jq -r '.workflow_runs[0].id // ""')
+            if [ "$status" = "completed" ]; then
+              break
+            fi
+            sleep 30
+          done
+          if [ "$status" = "completed" ] && [ -n "$runid" ]; then
+            # Pull the test-application job's own conclusion out of the run.
+            conclusion=$(gh api "repos/$REPO/actions/runs/$runid/jobs" \
+              --jq '.jobs[] | select(.name=="test-application") | .conclusion' 2>/dev/null || echo "")
+          fi
+          {
+            printf '%s\n\n' "$MARKER"
+            if [ "$conclusion" = "success" ]; then
+              printf '✅ **Tests passed**: the pytest suite and the per-file coverage gate (>= 90%%) are green on `%s`.\n' "${SHA:0:9}"
+            elif [ "$conclusion" = "failure" ]; then
+              printf '❌ **Tests failed** on `%s`. Failing output (truncated):\n\n```\n' "${SHA:0:9}"
+              gh run view "$runid" --repo "$REPO" --log-failed 2>/dev/null \
+                | grep -iE 'FAILED |ERROR |AssertionError|assert |Error:|Exception|E   |short test summary|coverage|below threshold|did not pass' \
+                | head -40 || true
+              printf '```\n'
+            else
+              printf '⚠️ The test job did not complete within the wait window (last status: %s). The review proceeds without a final test result; confirm the test-application check before merge.\n' "${conclusion:-$status}"
+            fi
+            printf '\n_Posted before the Claude review so the test outcome is folded into the review._\n'
+          } > ci-tests-comment.md
+          # Sticky: replace any prior CI Tests comment so the thread keeps one.
+          gh api "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" \
+          | while read -r id; do
+              gh api -X DELETE "repos/$REPO/issues/comments/$id" || true
+            done
+          # --repo is required: this job has no checkout, so gh cannot infer the
+          # repo from git context (unlike the semgrep job).
+          gh pr comment "$PR" --repo "$REPO" --body-file ci-tests-comment.md
+
   claude-review:
     if: ${{ github.actor != 'dependabot[bot]' }}
-    needs: semgrep   # guarantees the Semgrep comment is posted before the review
+    # Both gates post their sticky comments before the review runs:
+    #   semgrep -> "Semgrep (OSS)"; await-tests -> "CI Tests".
+    needs: [semgrep, await-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -103,9 +174,21 @@ jobs:
           claude_args: '--model opus'
           prompt: >-
             /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment
-            Additionally: if this PR changes application or library source code in a way
-            that warrants tests (new or changed behavior, bug fixes, new branches or edge
-            cases) and does NOT add or update corresponding tests, flag it as a HIGH-severity
-            review finding naming the untested change. Exempt docs-only, README, comments,
-            formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only,
-            version bumps) from this requirement.
+            This PR's CI has already run. A "Semgrep (OSS)" comment and a "CI Tests" comment
+            (the pytest suite and per-file coverage-gate outcome, with any failing test
+            output) are posted on the PR. Read both and factor them into your review. You do NOT
+            have a runnable test environment here and cannot install the bili ML stack or run
+            pytest yourself, so rely on the "CI Tests" comment for results and do not tell the
+            reader to "confirm CI is green".
+            Always include a "Test coverage" section in your review (never omit it):
+            - If the "CI Tests" comment shows a failure, call it out as a blocking finding and
+            relate the failing tests to the diff where you can.
+            - If this PR changes application or library source code in a way that warrants tests
+            (new or changed behavior, bug fixes, new branches or edge cases) and does NOT add or
+            update corresponding tests, flag it as a HIGH-severity finding naming the specific
+            untested change.
+            - If the change is exempt (docs-only, README, comments, formatting, or pure
+            configuration: CI YAML, lockfile bumps, asset-only, version bumps) or existing tests
+            already cover it, say so explicitly in one line (e.g. "No test changes needed:
+            <reason>") rather than staying silent.
+            - If tests were added or changed, briefly assess whether they meaningfully cover the change.
