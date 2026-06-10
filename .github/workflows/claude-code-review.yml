@@ -9,6 +9,7 @@ jobs:
   # findings comment so the Claude review job (which reads PR comments) folds the
   # results into its review. Replaces the metered claude-security-review.yml.
   semgrep:
+    if: ${{ github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -70,6 +71,7 @@ jobs:
           gh pr comment "$PR" --body-file semgrep-comment.md
 
   claude-review:
+    if: ${{ github.actor != 'dependabot[bot]' }}
     needs: semgrep   # guarantees the Semgrep comment is posted before the review
     runs-on: ubuntu-latest
     permissions:
