@@ -5,7 +5,72 @@ on:
     types: [opened, synchronize, ready_for_review, reopened]
 
 jobs:
+  # Free, token-free SAST (Semgrep OSS). Runs first and posts a single sticky
+  # findings comment so the Claude review job (which reads PR comments) folds the
+  # results into its review. Replaces the metered claude-security-review.yml.
+  semgrep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+        with:
+          python-version: '3.12'
+
+      - name: Install Semgrep (OSS, pinned, no token)
+        run: pip install semgrep==1.165.0
+
+      - name: Run Semgrep
+        # --error sets a non-zero exit on findings; `|| true` keeps the job
+        # green so findings are advisory (the Claude review and a human decide),
+        # mirroring the comment-only behavior of the security job it replaces.
+        run: |
+          semgrep scan --json --output semgrep.json \
+            --config p/python \
+            --config p/secrets \
+            --config p/ci \
+            --config p/dockerfile || true
+
+      - name: Post Semgrep findings as a sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          MARKER: '### Semgrep (OSS)'
+        run: |
+          COUNT=$(jq '.results | length' semgrep.json)
+          if [ "$COUNT" -eq 0 ]; then
+            printf '%s: no findings\n\n_Clean scan. Posted before the Claude review._\n' "$MARKER" > semgrep-comment.md
+          else
+            HIGH=$(jq '[.results[]|select(.extra.severity=="ERROR")]|length' semgrep.json)
+            MED=$(jq '[.results[]|select(.extra.severity=="WARNING")]|length' semgrep.json)
+            LOW=$(jq '[.results[]|select(.extra.severity=="INFO")]|length' semgrep.json)
+            {
+              printf '%s: %s findings\n\n' "$MARKER" "$COUNT"
+              printf '<details><summary>HIGH (%s) · MEDIUM (%s) · LOW (%s)</summary>\n\n' "$HIGH" "$MED" "$LOW"
+              printf '| Sev | Rule | Location | Message |\n|---|---|---|---|\n'
+              jq -r '.results[] | "| \(.extra.severity|if .=="ERROR" then "HIGH" elif .=="WARNING" then "MEDIUM" else "LOW" end) | \(.check_id|split(".")|last) | \(.path):\(.start.line) | \(.extra.message|gsub("[\n|]";" ")|.[0:120]) |"' semgrep.json
+              printf '\n</details>\n\n_Posted before the Claude review so findings are folded into the review._\n'
+            } > semgrep-comment.md
+          fi
+          # Sticky: delete any prior Semgrep comment so the thread keeps one.
+          gh api "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" \
+          | while read -r id; do
+              gh api -X DELETE "repos/$REPO/issues/comments/$id" || true
+            done
+          gh pr comment "$PR" --body-file semgrep-comment.md
+
   claude-review:
+    needs: semgrep   # guarantees the Semgrep comment is posted before the review
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,4 +96,11 @@ jobs:
           track_progress: true
           allowed_bots: 'claude[bot]'
           claude_args: '--model opus'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          prompt: >-
+            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment
+            Additionally: if this PR changes application or library source code in a way
+            that warrants tests (new or changed behavior, bug fixes, new branches or edge
+            cases) and does NOT add or update corresponding tests, flag it as a HIGH-severity
+            review finding naming the untested change. Exempt docs-only, README, comments,
+            formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only,
+            version bumps) from this requirement.
