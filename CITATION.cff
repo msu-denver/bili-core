@@ -39,8 +39,8 @@ authors:
     family-names: Williams
     email: awill157@msudenver.edu
     affiliation: "Metropolitan State University of Denver, Community-Centered Computing (C3) Lab"
-version: 5.2.3
-date-released: 2026-06-11
+version: 5.3.2
+date-released: 2026-06-12
 license: MIT
 repository-code: "https://github.com/msu-denver/bili-core"
 url: "https://github.com/msu-denver/bili-core"
