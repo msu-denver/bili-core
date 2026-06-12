@@ -85,7 +85,7 @@ def read_http_git_requirements():
 
 setup(
     name="bili-core",
-    version="5.3.1",
+    version="5.3.2",
     # Detect runtime packages while excluding every test subpackage. Without
     # the exclude, find_packages() bundles 200+ .py test modules (under
     # bili/<component>/tests/ and bili/<component>/<subcomponent>/tests/)
