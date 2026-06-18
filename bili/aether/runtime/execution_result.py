@@ -33,6 +33,8 @@ class AgentExecutionResult:  # pylint: disable=too-many-instance-attributes
         tools_used: List of tool names invoked (empty for stub agents).
         messages_sent: Count of messages sent by this agent.
         messages_received: Count of messages received by this agent.
+        total_tokens: Token usage reported by the agent's LLM response
+            (input + output). 0 for stub agents or providers that omit usage.
     """
 
     agent_id: str
@@ -43,6 +45,7 @@ class AgentExecutionResult:  # pylint: disable=too-many-instance-attributes
     tools_used: List[str] = field(default_factory=list)
     messages_sent: int = 0
     messages_received: int = 0
+    total_tokens: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a JSON-compatible dictionary."""
@@ -55,6 +58,7 @@ class AgentExecutionResult:  # pylint: disable=too-many-instance-attributes
             "tools_used": self.tools_used,
             "messages_sent": self.messages_sent,
             "messages_received": self.messages_received,
+            "total_tokens": self.total_tokens,
         }
 
 

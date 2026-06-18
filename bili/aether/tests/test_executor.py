@@ -122,6 +122,32 @@ class TestSequentialExecution:
             assert agent_result.output.get("status") == "stub"
             assert agent_result.agent_id in ("agent_0", "agent_1")
 
+    def test_extract_agent_results_surfaces_total_tokens(self):
+        """An agent output carrying total_tokens surfaces on the result."""
+        config = _seq_config(n_agents=1)
+        executor = MASExecutor(config)
+        final_state = {
+            "agent_outputs": {"agent_0": {"status": "completed", "total_tokens": 256}},
+            "communication_log": [],
+        }
+        results = executor._extract_agent_results(  # pylint: disable=protected-access
+            final_state
+        )
+        assert results[0].total_tokens == 256
+
+    def test_extract_agent_results_total_tokens_defaults_to_zero(self):
+        """A stub output without total_tokens yields 0, not an error."""
+        config = _seq_config(n_agents=1)
+        executor = MASExecutor(config)
+        final_state = {
+            "agent_outputs": {"agent_0": {"status": "stub"}},
+            "communication_log": [],
+        }
+        results = executor._extract_agent_results(  # pylint: disable=protected-access
+            final_state
+        )
+        assert results[0].total_tokens == 0
+
     def test_final_state_contains_messages(self):
         config = _seq_config(n_agents=2)
         executor = MASExecutor(config)
@@ -215,11 +241,13 @@ class TestResultSerialization:
             tools_used=["tool_a"],
             messages_sent=2,
             messages_received=1,
+            total_tokens=99,
         )
         d = ar.to_dict()
         assert d["agent_id"] == "test"
         assert d["execution_time_ms"] == 42.5
         assert d["tools_used"] == ["tool_a"]
+        assert d["total_tokens"] == 99
         # Verify JSON-serializable
         json.dumps(d)
 

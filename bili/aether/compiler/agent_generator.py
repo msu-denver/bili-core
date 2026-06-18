@@ -69,6 +69,35 @@ def _normalise_message_content(msg: Any) -> Any:
     return msg.model_copy(update={"content": _normalise_content_value(msg.content)})
 
 
+def _response_total_tokens(response: Any) -> int:
+    """Return the total token usage from an LLM response, or 0 when absent.
+
+    LangChain chat models attach usage to ``AIMessage.usage_metadata`` as
+    ``{"input_tokens", "output_tokens", "total_tokens"}``. Providers that omit
+    usage, and stub responses, yield 0 rather than raising.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        return 0
+    total = usage.get("total_tokens")
+    if isinstance(total, int):
+        return total
+    inp = usage.get("input_tokens")
+    out = usage.get("output_tokens")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return 0
+
+
+def _messages_total_tokens(messages: List) -> int:
+    """Sum token usage across a list of LLM response messages.
+
+    Tool-enabled agents run a ``create_agent`` loop that may emit several
+    AIMessages. Messages without usage metadata contribute 0.
+    """
+    return sum(_response_total_tokens(m) for m in messages)
+
+
 def generate_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     """Create a node callable for the given agent.
 
@@ -212,7 +241,9 @@ def _generate_tool_agent_node(
         if response_messages:
             content = _normalise_content_value(response_messages[-1].content)
 
-        output = _build_output(agent, content)
+        output = _build_output(
+            agent, content, total_tokens=_messages_total_tokens(response_messages)
+        )
         agent_outputs = dict(state.get("agent_outputs") or {})
         agent_outputs[agent.agent_id] = output
 
@@ -307,7 +338,9 @@ def _generate_direct_llm_node(agent: AgentSpec, llm: object) -> Callable[[dict],
             execution_ms,
         )
 
-        output = _build_output(agent, content)
+        output = _build_output(
+            agent, content, total_tokens=_response_total_tokens(response)
+        )
         agent_outputs = dict(state.get("agent_outputs") or {})
         agent_outputs[agent.agent_id] = output
 
@@ -479,13 +512,18 @@ def _resolve_middleware(agent: AgentSpec) -> list:
 # =========================================================================
 
 
-def _build_output(agent: AgentSpec, content: str) -> dict:
-    """Build the agent output dict, parsing JSON if configured."""
+def _build_output(agent: AgentSpec, content: str, total_tokens: int = 0) -> dict:
+    """Build the agent output dict, parsing JSON if configured.
+
+    ``total_tokens`` carries the LLM response's token usage so the executor
+    can surface it on ``AgentExecutionResult`` for downstream cost accounting.
+    """
     output = {
         "agent_id": agent.agent_id,
         "role": agent.role,
         "status": "completed",
         "message": content,
+        "total_tokens": total_tokens,
     }
 
     if agent.output_format == OutputFormat.JSON:

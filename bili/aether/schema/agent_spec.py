@@ -102,6 +102,20 @@ class AgentSpec(BaseModel):
         examples=["gpt-4", "gpt-3.5-turbo", "claude-sonnet-3-5-20241022"],
     )
 
+    model_type: Optional[str] = Field(
+        None,
+        description=(
+            "Explicit bili-core provider type (e.g. 'remote_anthropic', "
+            "'remote_deepseek', 'remote_google_genai', 'remote_aws_bedrock'). "
+            "When set, the resolver uses this provider directly with model_name "
+            "as the model_id, bypassing the LLM_MODELS registry and heuristic "
+            "lookup. Use this when model_name alone is ambiguous — e.g. a direct "
+            "first-party API the heuristic would otherwise route to Bedrock, "
+            "Vertex, or the OpenAI-compatible client."
+        ),
+        examples=["remote_anthropic", "remote_deepseek", "remote_google_genai"],
+    )
+
     max_tokens: Optional[int] = Field(
         None, ge=1, description="Maximum tokens in LLM response"
     )

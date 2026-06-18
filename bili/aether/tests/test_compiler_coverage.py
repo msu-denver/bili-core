@@ -267,6 +267,78 @@ class TestCreateLlm:
         assert kwargs["api_version"] == "2024-02-01"
         assert kwargs["model_name"] == "azure-gpt-4o"
 
+    def test_create_llm_model_type_override_uses_provider_verbatim(self):
+        """model_type set → provider used as-is, model_name forwarded as model_id."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "victim",
+            model_name="claude-sonnet-4-6",
+            model_type="remote_anthropic",
+            temperature=0.0,
+        )
+
+        fake_load_model = MagicMock(return_value="ANTHROPIC_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        # LLM_MODELS deliberately holds a colliding entry that would resolve
+        # claude-sonnet-4-6 to Bedrock; model_type must win and skip the lookup.
+        colliding_models = {
+            "remote_aws_bedrock": {
+                "models": [
+                    {
+                        "model_name": "claude-sonnet-4-6",
+                        "model_id": "us.anthropic.claude-sonnet-4-6",
+                    }
+                ]
+            }
+        }
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", colliding_models):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                result = llm_resolver.create_llm(agent)
+
+        assert result == "ANTHROPIC_LLM"
+        provider_arg = fake_load_model.call_args[0][0]
+        kwargs = fake_load_model.call_args[1]
+        assert provider_arg == "remote_anthropic"
+        # model_name passed through verbatim, NOT rewritten to the Bedrock id.
+        assert kwargs["model_name"] == "claude-sonnet-4-6"
+        assert kwargs["temperature"] == 0.0
+
+    def test_create_llm_model_type_override_skips_resolution(self):
+        """model_type bypasses _resolve_model_full entirely (never called)."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        # A model_name the resolver could never resolve on its own — proves the
+        # override path does not fall through to the registry/heuristic.
+        agent = _agent(
+            "victim",
+            model_name="totally-unknown-direct-model",
+            model_type="remote_deepseek",
+        )
+
+        fake_load_model = MagicMock(return_value="DEEPSEEK_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch.object(
+            llm_resolver, "_resolve_model_full", side_effect=AssertionError("called")
+        ):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                result = llm_resolver.create_llm(agent)
+
+        assert result == "DEEPSEEK_LLM"
+        assert fake_load_model.call_args[0][0] == "remote_deepseek"
+        assert (
+            fake_load_model.call_args[1]["model_name"] == "totally-unknown-direct-model"
+        )
+
 
 class TestResolveProvider:
     """Tests for resolve_provider() and the LLM_MODELS ImportError path."""
@@ -574,6 +646,73 @@ class TestDirectLlmNodeBranches:
         result = node({"messages": [], "agent_outputs": {}})
         assert result["current_agent"] == "mw"
         mock_llm.invoke.assert_called_once()
+
+
+class TestAgentTokenUsage:
+    """Tests for LLM token-usage capture on the generated agent nodes."""
+
+    def test_response_total_tokens_reads_total(self):
+        """usage_metadata.total_tokens is returned directly when present."""
+        from bili.aether.compiler.agent_generator import (  # pylint: disable=import-outside-toplevel
+            _response_total_tokens,
+        )
+
+        resp = types.SimpleNamespace(
+            usage_metadata={"input_tokens": 30, "output_tokens": 20, "total_tokens": 50}
+        )
+        assert _response_total_tokens(resp) == 50
+
+    def test_response_total_tokens_sums_input_output_when_no_total(self):
+        """When total_tokens is missing, input + output is used."""
+        from bili.aether.compiler.agent_generator import (  # pylint: disable=import-outside-toplevel
+            _response_total_tokens,
+        )
+
+        resp = types.SimpleNamespace(
+            usage_metadata={"input_tokens": 30, "output_tokens": 20}
+        )
+        assert _response_total_tokens(resp) == 50
+
+    def test_response_total_tokens_zero_without_usage(self):
+        """A response with no usage_metadata yields 0, not an error."""
+        from bili.aether.compiler.agent_generator import (  # pylint: disable=import-outside-toplevel
+            _response_total_tokens,
+        )
+
+        assert _response_total_tokens(types.SimpleNamespace()) == 0
+        assert _response_total_tokens(types.SimpleNamespace(usage_metadata=None)) == 0
+
+    def test_messages_total_tokens_sums_across_messages(self):
+        """Token usage is summed across a list of response messages."""
+        from bili.aether.compiler.agent_generator import (  # pylint: disable=import-outside-toplevel
+            _messages_total_tokens,
+        )
+
+        messages = [
+            types.SimpleNamespace(usage_metadata={"total_tokens": 40}),
+            types.SimpleNamespace(),  # no usage -> 0
+            types.SimpleNamespace(usage_metadata={"total_tokens": 15}),
+        ]
+        assert _messages_total_tokens(messages) == 55
+
+    def test_direct_llm_node_records_token_usage(self):
+        """The direct LLM node writes the response's token usage into its output."""
+        agent = _agent("victim", model_name="gpt-4o")
+        from bili.aether.compiler.agent_generator import (  # pylint: disable=import-outside-toplevel
+            generate_agent_node,
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = types.SimpleNamespace(
+            content="ok",
+            usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
+        )
+        with patch(
+            "bili.aether.compiler.llm_resolver.create_llm", return_value=mock_llm
+        ), patch("bili.aether.compiler.llm_resolver.resolve_tools", return_value=[]):
+            node = generate_agent_node(agent)
+        result = node({"messages": [], "agent_outputs": {}})
+        assert result["agent_outputs"]["victim"]["total_tokens"] == 20
 
 
 class TestToolAgentNodeBranches:

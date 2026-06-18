@@ -301,6 +301,9 @@ bili/aegis/suites/persistence/results/**/*.ndjson
 bili/aegis/suites/cross_model/results/**/*.json
 bili/aegis/suites/cross_model/results/**/*.csv
 bili/aegis/suites/cross_model/results/**/*.ndjson
+bili/aegis/suites/probe/results/**/*.json
+bili/aegis/suites/probe/results/**/*.csv
+bili/aegis/suites/probe/results/**/*.ndjson
 
 # AEGIS unit-test structural-run outputs (collected at runtime — not committed)
 bili/aegis/tests/*/results/**/*.json

@@ -1081,6 +1081,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 and entry.get("sender") != agent.agent_id
             )
 
+            total_tokens = output.get("total_tokens", 0)
             results.append(
                 AgentExecutionResult(
                     agent_id=agent.agent_id,
@@ -1090,6 +1091,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                     tools_used=output.get("tools_used", []),
                     messages_sent=sent,
                     messages_received=received,
+                    total_tokens=total_tokens if isinstance(total_tokens, int) else 0,
                 )
             )
 

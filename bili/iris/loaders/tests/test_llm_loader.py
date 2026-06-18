@@ -13,10 +13,12 @@ from bili.iris.loaders.llm_loader import (
     load_huggingface_model,
     load_llamacpp_model,
     load_model,
+    load_remote_anthropic,
     load_remote_azure_openai,
     load_remote_bedrock_model,
     load_remote_gcp_vertex_model,
     load_remote_openai,
+    load_remote_openai_compatible,
     prepare_runtime_config,
 )
 
@@ -78,6 +80,40 @@ class TestLoadModel:
         mock_loader.return_value = MagicMock()
         result = load_model("remote_openai", model_name="gpt-4o")
         mock_loader.assert_called_once_with(model_name="gpt-4o")
+        assert result is mock_loader.return_value
+
+    @patch("bili.iris.loaders.llm_loader.load_remote_anthropic")
+    def test_routes_to_anthropic(self, mock_loader):
+        """Verify remote_anthropic routes to the direct Anthropic loader."""
+        mock_loader.return_value = MagicMock()
+        result = load_model("remote_anthropic", model_name="claude-sonnet-4-6")
+        mock_loader.assert_called_once_with(model_name="claude-sonnet-4-6")
+        assert result is mock_loader.return_value
+
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "dk-test"})
+    @patch("bili.iris.loaders.llm_loader.load_remote_openai_compatible")
+    def test_routes_deepseek_through_openai_shim(self, mock_loader):
+        """remote_deepseek routes to the OpenAI-compatible loader with DeepSeek's URL + env key."""
+        mock_loader.return_value = MagicMock()
+        result = load_model("remote_deepseek", model_name="deepseek-chat")
+        mock_loader.assert_called_once_with(
+            base_url="https://api.deepseek.com",
+            api_key="dk-test",
+            model_name="deepseek-chat",
+        )
+        assert result is mock_loader.return_value
+
+    @patch.dict("os.environ", {"GEMINI_API_KEY": "gm-test"})
+    @patch("bili.iris.loaders.llm_loader.load_remote_openai_compatible")
+    def test_routes_google_genai_through_openai_shim(self, mock_loader):
+        """remote_google_genai routes to the OpenAI-compatible loader with the Gemini shim."""
+        mock_loader.return_value = MagicMock()
+        result = load_model("remote_google_genai", model_name="gemini-2.5-flash")
+        mock_loader.assert_called_once_with(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key="gm-test",
+            model_name="gemini-2.5-flash",
+        )
         assert result is mock_loader.return_value
 
     def test_invalid_model_type_raises_value_error(self):
@@ -307,6 +343,94 @@ class TestLoadRemoteOpenai:
         assert call_kwargs["max_completion_tokens"] == 500
         assert call_kwargs["temperature"] == 0.3
         assert call_kwargs["max_retries"] == 3
+
+
+class TestLoadRemoteAnthropic:
+    """Verify direct (first-party) Anthropic API model initialization."""
+
+    @patch("bili.iris.loaders.llm_loader.ChatAnthropic")
+    def test_minimal_config(self, mock_cls):
+        """Verify ChatAnthropic init with only model_name."""
+        mock_cls.return_value = MagicMock()
+        result = load_remote_anthropic(model_name="claude-sonnet-4-6")
+        mock_cls.assert_called_once_with(model="claude-sonnet-4-6")
+        assert result is mock_cls.return_value
+
+    @patch("bili.iris.loaders.llm_loader.ChatAnthropic")
+    def test_forwards_optional_params_and_api_key(self, mock_cls):
+        """Verify max_tokens, temperature, and an explicit api_key are forwarded."""
+        mock_cls.return_value = MagicMock()
+        load_remote_anthropic(
+            model_name="claude-sonnet-4-6",
+            max_tokens=256,
+            temperature=0.5,
+            api_key="ak-test",
+        )
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["model"] == "claude-sonnet-4-6"
+        assert call_kwargs["max_tokens"] == 256
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["anthropic_api_key"] == "ak-test"
+
+
+class TestLoadRemoteOpenaiCompatible:
+    """Verify the OpenAI-compatible third-party loader (DeepSeek, Gemini shim)."""
+
+    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    def test_base_url_and_api_key_forwarded(self, mock_cls):
+        """Verify base_url + api_key reach ChatOpenAI alongside the model name."""
+        mock_cls.return_value = MagicMock()
+        result = load_remote_openai_compatible(
+            model_name="deepseek-chat",
+            base_url="https://api.deepseek.com",
+            api_key="dk-test",
+        )
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["model"] == "deepseek-chat"
+        assert call_kwargs["base_url"] == "https://api.deepseek.com"
+        assert call_kwargs["api_key"] == "dk-test"
+        assert result is mock_cls.return_value
+
+    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    def test_generation_params_flow_through_shared_builder(self, mock_cls):
+        """Verify generation kwargs reach ChatOpenAI via the shared config builder."""
+        mock_cls.return_value = MagicMock()
+        load_remote_openai_compatible(
+            model_name="gemini-2.5-flash",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            max_tokens=128,
+            temperature=0.4,
+            top_p=0.9,
+        )
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["max_completion_tokens"] == 128
+        assert call_kwargs["temperature"] == 0.4
+        assert call_kwargs["top_p"] == 0.9
+        assert (
+            call_kwargs["base_url"]
+            == "https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+
+    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    def test_api_key_omitted_when_not_supplied(self, mock_cls):
+        """Verify no api_key key is set when the caller passes none (env fallback)."""
+        mock_cls.return_value = MagicMock()
+        load_remote_openai_compatible(
+            model_name="deepseek-chat",
+            base_url="https://api.deepseek.com",
+        )
+        assert "api_key" not in mock_cls.call_args[1]
+
+    @patch("bili.iris.loaders.llm_loader.ChatAnthropic")
+    def test_zero_temperature_is_dropped(self, mock_cls):
+        """A temperature of 0.0 is falsy and not forwarded.
+
+        This matches the other loaders and avoids the 400 that Opus 4.7+ raise
+        when a sampling parameter is sent.
+        """
+        mock_cls.return_value = MagicMock()
+        load_remote_anthropic(model_name="claude-opus-4-8", temperature=0.0)
+        assert "temperature" not in mock_cls.call_args[1]
 
 
 # ---------------------------------------------------------------------------

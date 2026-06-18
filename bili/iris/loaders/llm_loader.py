@@ -57,8 +57,10 @@ Example:
 """
 
 import gc
+import os
 
 import torch
+from langchain_anthropic import ChatAnthropic
 from langchain_aws import ChatBedrockConverse
 from langchain_community.chat_models import ChatLlamaCpp
 from langchain_google_vertexai import ChatVertexAI
@@ -102,8 +104,10 @@ def load_model(
 
     :param model_type: Specifies the type of the model to be loaded. The value determines
         which loader function will be called. Supported types are "local_llamacpp",
-        "local_huggingface", "remote_google_vertex", "remote_aws_bedrock", and
-        "remote_azure_openai".
+        "local_huggingface", "remote_google_vertex", "remote_aws_bedrock",
+        "remote_azure_openai", "remote_openai", "remote_anthropic" (direct
+        Anthropic API), "remote_deepseek" (direct DeepSeek API), and
+        "remote_google_genai" (direct Gemini / Google AI Studio API).
     :type model_type: str
     :param kwargs: Additional keyword arguments specific to the loader function for
         the chosen model type. These arguments differ depending on the model type.
@@ -128,6 +132,25 @@ def load_model(
         llm_model = load_remote_azure_openai(**kwargs)
     elif model_type == "remote_openai":
         llm_model = load_remote_openai(**kwargs)
+    elif model_type == "remote_anthropic":
+        llm_model = load_remote_anthropic(**kwargs)
+    elif model_type == "remote_deepseek":
+        # DeepSeek's API is OpenAI-compatible; route through the OpenAI client
+        # with DeepSeek's base URL. The key is read from the environment here so
+        # it never lands in a caller-held (and possibly serialized) model_config.
+        llm_model = load_remote_openai_compatible(
+            base_url="https://api.deepseek.com",
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            **kwargs,
+        )
+    elif model_type == "remote_google_genai":
+        # Gemini exposes an OpenAI-compatible endpoint; same approach as DeepSeek.
+        llm_model = load_remote_openai_compatible(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY"),
+            **kwargs,
+        )
     else:
         raise ValueError(f"Invalid model type: {model_type}")
 
@@ -635,6 +658,51 @@ def load_remote_azure_openai(
     return llm
 
 
+def _build_openai_chat_config(
+    model_name,
+    max_tokens=None,
+    temperature=None,
+    top_p=None,
+    top_k=None,
+    seed=None,
+    max_retries=None,
+):
+    """Map generic generation parameters onto a ``ChatOpenAI`` config dict.
+
+    Shared by :func:`load_remote_openai` and
+    :func:`load_remote_openai_compatible` so the OpenAI loader and the
+    OpenAI-compatible third-party loaders stay in step. Only truthy values are
+    forwarded, which drops a ``temperature`` of 0.0 to match the behavior of the
+    other loaders in this module.
+
+    :param model_name: Name of the model deployment.
+    :param max_tokens: Optional. Maximum number of tokens to generate.
+    :param temperature: Optional. Sampling temperature that controls randomness.
+    :param top_p: Optional. Nucleus sampling probability.
+    :param top_k: Optional. Top-k sampling cutoff for next-token selection.
+    :param seed: Optional. Random seed for deterministic sampling.
+    :param max_retries: Optional. Maximum number of client-side retries.
+    :return: A keyword-argument dict ready to splat into ``ChatOpenAI``.
+    :rtype: dict
+    """
+    openai_config = {
+        "model": model_name,
+    }
+    if temperature:
+        openai_config["temperature"] = temperature
+    if max_tokens:
+        openai_config["max_completion_tokens"] = max_tokens
+    if top_p:
+        openai_config["top_p"] = top_p
+    if top_k:
+        openai_config["top_k"] = top_k
+    if seed:
+        openai_config["seed"] = seed
+    if max_retries:
+        openai_config["max_retries"] = max_retries
+    return openai_config
+
+
 @conditional_cache_resource()
 def load_remote_openai(
     model_name,
@@ -666,27 +734,95 @@ def load_remote_openai(
     :param top_k: Optional. Top-k sampling that limits the next token
         selection to k most likely options, if specified.
     :param seed: Optional. Random seed for deterministic outputs in sampling.
+    :param max_retries: Optional. Maximum number of client-side retries.
     :return: An initialized OpenAI language model instance.
     """
     LOGGER.info("Initializing OpenAI model: %s", model_name)
 
-    # Define OpenAI-specific parameters
-    openai_config = {
-        "model": model_name,
-    }
-    if temperature:
-        openai_config["temperature"] = temperature
-    if max_tokens:
-        openai_config["max_completion_tokens"] = max_tokens
-    if top_p:
-        openai_config["top_p"] = top_p
-    if top_k:
-        openai_config["top_k"] = top_k
-    if seed:
-        openai_config["seed"] = seed
-    if max_retries:
-        openai_config["max_retries"] = max_retries
+    openai_config = _build_openai_chat_config(
+        model_name,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        seed=seed,
+        max_retries=max_retries,
+    )
 
     llm = ChatOpenAI(**openai_config)
+    LOGGER.debug(llm)
+    return llm
+
+
+@conditional_cache_resource()
+def load_remote_openai_compatible(model_name, base_url, api_key=None, **kwargs):
+    """Load a third-party endpoint that speaks the OpenAI chat API.
+
+    DeepSeek and the Gemini OpenAI shim are wire-compatible with ``ChatOpenAI``
+    and differ only by base URL and credential. Generation parameters
+    (``max_tokens``, ``temperature``, ``top_p``, ``top_k``, ``seed``,
+    ``max_retries``) flow through ``kwargs`` into the shared config builder, so
+    these providers stay in step with :func:`load_remote_openai`.
+
+    The key is passed in rather than pulled from ``model_config`` so it is never
+    serialized into a session sidecar. Callers read it from the environment and
+    hand it here.
+
+    :param model_name: The provider's model ID, e.g. ``deepseek-chat``.
+    :param base_url: The OpenAI-compatible endpoint base URL.
+    :param api_key: (Optional) API key for the endpoint. When omitted, the
+        OpenAI client falls back to the ``OPENAI_API_KEY`` environment variable.
+    :return: An initialized ``ChatOpenAI`` instance pointed at ``base_url``.
+    :rtype: ChatOpenAI
+    """
+    LOGGER.info("Initializing OpenAI-compatible model: %s (%s)", model_name, base_url)
+
+    openai_config = _build_openai_chat_config(model_name, **kwargs)
+    openai_config["base_url"] = base_url
+    if api_key:
+        openai_config["api_key"] = api_key
+
+    llm = ChatOpenAI(**openai_config)
+    LOGGER.debug(llm)
+    return llm
+
+
+@conditional_cache_resource()
+def load_remote_anthropic(model_name, max_tokens=None, temperature=None, api_key=None):
+    """Initialize a direct Anthropic API chat model via ``langchain_anthropic``.
+
+    Uses the first-party Anthropic API, not Bedrock or Vertex. The API key is
+    read from the ``ANTHROPIC_API_KEY`` environment variable unless ``api_key``
+    is supplied.
+
+    Note: Claude Opus 4.7 and later reject the ``temperature`` parameter, so it
+    is forwarded only when truthy — a ``temperature`` of 0.0 is dropped, matching
+    the behavior of the other loaders.
+
+    :param model_name: The Anthropic model ID, e.g. ``claude-sonnet-4-6``.
+    :type model_name: str
+    :param max_tokens: (Optional) Maximum number of tokens to generate.
+    :type max_tokens: int
+    :param temperature: (Optional) Sampling temperature controlling randomness.
+    :type temperature: float
+    :param api_key: (Optional) Anthropic API key; falls back to the
+        ``ANTHROPIC_API_KEY`` environment variable when omitted.
+    :type api_key: str
+    :return: An initialized ChatAnthropic instance.
+    :rtype: ChatAnthropic
+    """
+    LOGGER.info("Initializing Anthropic (direct API) model: %s", model_name)
+
+    anthropic_config = {
+        "model": model_name,
+    }
+    if max_tokens:
+        anthropic_config["max_tokens"] = max_tokens
+    if temperature:
+        anthropic_config["temperature"] = temperature
+    if api_key:
+        anthropic_config["anthropic_api_key"] = api_key
+
+    llm = ChatAnthropic(**anthropic_config)
     LOGGER.debug(llm)
     return llm
