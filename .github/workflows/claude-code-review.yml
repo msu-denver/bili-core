@@ -93,10 +93,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           MARKER: '### CI Tests'
         run: |
+          # On a manual workflow_dispatch re-run there is no pull_request context,
+          # so head.sha arrives empty — resolve it from the PR number instead.
+          if [ -z "${SHA:-}" ]; then
+            SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || echo "")
+          fi
           # Poll the CI/CD pipeline run for this head commit (~30 min ceiling),
           # then read the test-application job's conclusion by name. The build
           # and test jobs run in the same ci-cd.yml run, so the run-level
@@ -219,6 +224,13 @@ jobs:
     # Only run when the review actually produced something to extract from.
     if: ${{ needs.claude-review.result == 'success' && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
+    # The verdict travels to the gate as a JOB OUTPUT parsed from the agent's
+    # execution log — NOT via a PR comment. claude-code-action's comment behavior
+    # is unreliable for a one-shot (track_progress on leaves an un-updated "I'll
+    # analyze this" placeholder; off posts no comment at all), but the agent's
+    # emitted line is always in the execution log, so we read it from there.
+    outputs:
+      verdict_line: ${{ steps.parse.outputs.verdict_line }}
     permissions:
       contents: read
       pull-requests: write
@@ -254,22 +266,62 @@ jobs:
       # SHA-pinned anthropics/claude-code-action v1.0.133 (same as the review).
       # Cheap model (Haiku) — this is a one-line classification, not a review.
       - name: Extract the merge verdict
+        id: extract
         uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1.0.133
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          track_progress: true
+          # track_progress off: we do NOT rely on the action posting a comment.
+          # The agent's one-line answer is read from its execution log by the
+          # parse step below. (With track_progress on, the action leaves an
+          # un-updated "I'll analyze this" placeholder on this tiny one-shot; with
+          # it off it posts no comment — either way the comment is not a reliable
+          # channel, so the execution log is the source of truth.)
+          track_progress: false
           claude_args: '--model haiku'
+          # NOTE: the format example below uses <placeholders> ON PURPOSE — it must
+          # NOT contain a concrete `VERDICT=PASS COUNT=0`-style string, or the parse
+          # step's regex would false-match the prompt echoed in the execution log
+          # instead of the agent's real answer.
           prompt: >-
             Read the file ./REVIEW.md in the repository — it is an automated code review of this
             pull request. Your ONLY task is to report its merge verdict. Count the findings the
             review itself rates HIGH or CRITICAL severity (a "CI Tests" FAILURE called out in the
             review also counts). Do NOT re-judge the diff, do NOT add findings of your own, and do
             NOT count MEDIUM/LOW findings, missing-test notes, or anything the review did not label
-            HIGH/CRITICAL. Your published PR comment must be EXACTLY one line, nothing else:
-            MERGE-VERDICT-GATE VERDICT=PASS COUNT=0
-            (when the review has zero HIGH/CRITICAL findings), or
-            MERGE-VERDICT-GATE VERDICT=BLOCK COUNT=N
-            (where N is the number of HIGH/CRITICAL findings, N>=1).
+            HIGH/CRITICAL. Respond with EXACTLY one line and NOTHING else — no preamble, no
+            acknowledgement, no "I'll analyze this". The line has this shape (substitute the
+            placeholders, do not emit them literally):
+            MERGE-VERDICT-GATE VERDICT=<PASS-or-BLOCK> COUNT=<integer>
+            Use VERDICT=PASS with the count as zero when the review has zero HIGH/CRITICAL
+            findings; otherwise VERDICT=BLOCK with the count set to the number of HIGH/CRITICAL
+            findings.
+
+      - name: Parse the verdict from the execution log
+        id: parse
+        env:
+          EXEC_FILE: ${{ steps.extract.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          # The agent's emitted verdict line lives in claude-code-action's execution
+          # log (it does not post a usable comment for a one-shot). Read it from
+          # there — schema-tolerant: prefer the final result text via jq, fall back
+          # to a raw scan. The prompt above uses <placeholders>, so it contributes
+          # no concrete `VERDICT=... COUNT=N` string for the regex to false-match;
+          # only the agent's real answer matches, and tail -1 takes the last (the
+          # answer comes after any input context in the log).
+          f="${EXEC_FILE:-}"
+          [ -n "$f" ] && [ -f "$f" ] || f="$RUNNER_TEMP/claude-execution-output.json"
+          re='MERGE-VERDICT-GATE VERDICT=(PASS|BLOCK) COUNT=[0-9]+'
+          line=""
+          if [ -f "$f" ]; then
+            final=$(jq -r 'if type=="array" then ([.[] | (.result? // (.message?.content[]? | select(.type=="text") | .text))] | map(select(.!=null)) | last // "") else (.result // "") end' "$f" 2>/dev/null || true)
+            line=$(printf '%s' "$final" | grep -oE "$re" | tail -1 || true)
+            [ -z "$line" ] && line=$(grep -oE "$re" "$f" | tail -1 || true)
+          else
+            echo "execution log not found at '$f'" >&2
+          fi
+          echo "Parsed verdict line: ${line:-<none>}"
+          echo "verdict_line=$line" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
   # Merge gate. Reads the verdict extractor's line and FAILS this check when the
@@ -304,10 +356,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      # issues: write so the gate can delete the raw verdict-extractor comment
-      # (a PR conversation/issue comment authored by the review bot) after
-      # parsing it, leaving only the human-readable gate verdict.
-      issues: write
     steps:
       - name: Evaluate the verdict
         env:
@@ -317,11 +365,18 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           EXTRACT_RESULT: ${{ needs.verdict-extract.result }}
+          VERDICT_LINE: ${{ needs.verdict-extract.outputs.verdict_line }}
           REVIEW_BOT: 'claude[bot]'
           ACK_LABEL: review-ack
           MARKER: '### Review Gate'
         run: |
           set -euo pipefail
+          # On a manual workflow_dispatch re-run there is no pull_request context,
+          # so head.sha is empty — resolve it from the PR number (used below for
+          # review-ack head-scoping).
+          if [ -z "${SHA:-}" ]; then
+            SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || echo "")
+          fi
           verdict=""; count="0"; reason=""; gate="BLOCK"
 
           # 1) INCONCLUSIVE if the review or the extractor didn't complete.
@@ -332,16 +387,15 @@ jobs:
             verdict="INCONCLUSIVE"
             reason="The verdict extractor did not complete (job result: \`${EXTRACT_RESULT}\`)."
           else
-            # 2) Parse the verdict from the extractor's comment (authored by the
-            # review bot AND carrying the MERGE-VERDICT-GATE token — the review
-            # comment itself never carries that token, so this isolates the
-            # extractor without matching the gate's own comment or the docs).
-            body=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-              --jq "map(select(.user.login==\"$REVIEW_BOT\" and (.body|contains(\"MERGE-VERDICT-GATE\")))) | last | .body // \"\"")
-            line=$(printf '%s' "$body" | grep -oE 'MERGE-VERDICT-GATE VERDICT=(PASS|BLOCK) COUNT=[0-9]+' | tail -1 || true)
+            # 2) Read the verdict from the extractor's JOB OUTPUT (parsed from the
+            # agent's execution log, not a PR comment — the comment channel is
+            # unreliable for a one-shot). The extractor job succeeded (checked
+            # above); an empty/garbled line here means the agent emitted nothing
+            # parseable, which is INCONCLUSIVE (never a silent PASS).
+            line=$(printf '%s' "$VERDICT_LINE" | grep -oE 'MERGE-VERDICT-GATE VERDICT=(PASS|BLOCK) COUNT=[0-9]+' | tail -1 || true)
             if [ -z "$line" ]; then
               verdict="INCONCLUSIVE"
-              reason="No parseable \`MERGE-VERDICT-GATE VERDICT=...\` line was found in the extractor comment."
+              reason="The verdict extractor produced no parseable \`MERGE-VERDICT-GATE VERDICT=...\` line."
             else
               verdict=$(printf '%s' "$line" | sed -E 's/.*VERDICT=([A-Z]+).*/\1/')
               count=$(printf '%s' "$line" | sed -E 's/.*COUNT=([0-9]+).*/\1/')
@@ -384,7 +438,7 @@ jobs:
               PASS:PASS)        printf '✅ **Gate: PASS** — %s\n' "$reason" ;;
               PASS:*)           printf '✅ **Gate: PASS (override)** — %s\n' "$reason" ;;
               BLOCK:BLOCK)      printf '🛑 **Gate: BLOCK** — the review reported %s HIGH/CRITICAL finding(s). Address them and push (the review re-runs on each push), or a maintainer can apply the `%s` label to override.\n' "$count" "$ACK_LABEL" ;;
-              *:INCONCLUSIVE)   printf '⚠️ **Gate: INCONCLUSIVE** — %s Re-run via Actions → Claude Code Review → Run workflow (with this PR number), or a maintainer can apply the `%s` label.\n' "$reason" "$ACK_LABEL" ;;
+              *:INCONCLUSIVE)   printf '⚠️ **Gate: INCONCLUSIVE** — %s Push a new commit to re-run the checks (they re-run on every push), or a maintainer can apply the `%s` label.\n' "$reason" "$ACK_LABEL" ;;
               *)                printf '🛑 **Gate: BLOCK** — %s\n' "$reason" ;;
             esac
             printf '\n_Observe-only until `review-gate` is added to the branch'"'"'s required status checks._\n'
@@ -393,15 +447,9 @@ jobs:
             --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null \
           | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null 2>&1 || true; done
           gh pr comment "$PR" --repo "$REPO" --body-file gate-comment.md || true
-
-          # Tidy the thread: now that we've parsed it, remove the raw verdict-
-          # extractor comment (the machine `MERGE-VERDICT-GATE VERDICT=...` line)
-          # so a reader sees only this human-readable gate verdict at the bottom,
-          # not the plumbing. Scoped to the review-bot author AND the marker, so
-          # it never touches the review comment or anything else.
-          gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq ".[] | select(.user.login==\"$REVIEW_BOT\" and (.body|contains(\"MERGE-VERDICT-GATE\"))) | .id" 2>/dev/null \
-          | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null 2>&1 || true; done
+          # (No raw extractor comment to tidy: the verdict now travels as a job
+          # output, so the extractor posts nothing to the thread. The visible
+          # comments are the review, semgrep, CI, and this gate verdict.)
 
           # 6) Set the check result.
           if [ "$gate" = "PASS" ]; then
