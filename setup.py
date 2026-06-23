@@ -132,6 +132,10 @@ setup(
             "langchain-xai>=0.2.0",
             "langchain-groq>=0.2.0",
         ],
+        # MCP client subsystem -- lets bili-core agents consume tools from
+        # MCP servers (stdio subprocess or HTTP/SSE transport).
+        # Usage: pip install bili-core[mcp]
+        "mcp": ["mcp>=1.0"],
     },
     cmdclass={
         "install": PostInstallCommand,
