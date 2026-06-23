@@ -28,6 +28,17 @@ Heavy dependencies (cloud SDKs, torch, etc.) MUST be imported inside the
 subpackage import without installing optional dependencies.
 """
 
+# Import builtin after the public API is defined so the side-effect
+# (populating PROVIDER_REGISTRY with the six built-in providers) runs after
+# the registry singleton exists.  Any code that does
+# `from bili.iris.providers import ...` — including the lazy import in
+# llm_loader.py's else branch — triggers this registration automatically, so
+# the registry is always populated on the production path without a separate
+# explicit call.  The isort: skip comment keeps isort from hoisting this above
+# the functional imports.
+from . import (  # noqa: F401  pylint: disable=wrong-import-position  # isort: skip
+    builtin as _builtin,
+)
 from .base import LLMProvider
 from .registry import (
     PROVIDER_REGISTRY,

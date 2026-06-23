@@ -133,6 +133,16 @@ def load_model(
     # This if/elif block is intentionally preserved for backward compatibility;
     # the individual loader functions are part of the public API and may be
     # imported and called directly by consumers (e.g. sustainability-hub-engine).
+    #
+    # Follow-up (delegation refactor): each branch below duplicates logic that
+    # also lives in the corresponding LLMProvider class in bili.iris.providers.
+    # The clean fix is to delegate these branches to provider_class().load(**kwargs)
+    # so there is one implementation per backend. The blocker is the
+    # @conditional_cache_resource() decorator on each load_* function — removing
+    # it would silently change caching behavior for existing callers. Once a
+    # cache-aware delegation path exists (or caching is lifted into the caller),
+    # replace this block with: provider_class = PROVIDER_REGISTRY.get(model_type);
+    # llm_model = provider_class().load(**kwargs).
     if model_type == "local_llamacpp":
         llm_model = load_llamacpp_model(**kwargs)
     elif model_type == "local_huggingface":

@@ -233,6 +233,84 @@ class TestBuiltinRegistration:
 
 
 # ---------------------------------------------------------------------------
+# Registry population on the production path (not just after test setup)
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryPopulatedOnProductionPath:
+    """Verify the registry is populated whenever the production code path runs.
+
+    The production path in load_model() does:
+        from bili.iris.providers.registry import PROVIDER_REGISTRY
+    Importing bili.iris.providers.registry does NOT by itself populate the
+    registry. The population happens via bili.iris.providers.__init__, which
+    now imports builtin as a side effect.
+
+    These tests confirm that:
+    1. Importing the providers PACKAGE (not just registry.py) populates
+       PROVIDER_REGISTRY with all six built-in types.
+    2. The registry object imported in the tests IS the same singleton
+       that the llm_loader else-branch would access, so tests and production
+       share state correctly.
+    """
+
+    def test_providers_package_import_populates_registry(self):
+        """Verify that importing bili.iris.providers populates PROVIDER_REGISTRY.
+
+        The test module imports from bili.iris.providers at the top level, which
+        triggers builtin registration via __init__.py. This test confirms that
+        state is present and not just an artifact of how the test file loaded.
+        """
+        # PROVIDER_REGISTRY is the same object imported at module top level.
+        # If __init__ correctly imports builtin, all six types must be present.
+        for provider_type in _EXPECTED_BUILTIN_TYPES:
+            assert provider_type in PROVIDER_REGISTRY, (
+                f"Production-path registry missing '{provider_type}'. "
+                "Check that bili/iris/providers/__init__.py imports builtin."
+            )
+
+    def test_registry_singleton_shared_with_loader_path(self):
+        """Verify registry imported via providers.registry is the same singleton."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        registry_mod = importlib.import_module("bili.iris.providers.registry")
+        # PROVIDER_REGISTRY from the top-level import and from direct registry
+        # module access must be the same object (same id).
+        assert registry_mod.PROVIDER_REGISTRY is PROVIDER_REGISTRY, (
+            "PROVIDER_REGISTRY is not a singleton: "
+            "bili.iris.providers.PROVIDER_REGISTRY and "
+            "bili.iris.providers.registry.PROVIDER_REGISTRY differ."
+        )
+        # And the singleton must be populated.
+        for provider_type in _EXPECTED_BUILTIN_TYPES:
+            assert provider_type in registry_mod.PROVIDER_REGISTRY
+
+    def test_load_model_else_branch_reaches_populated_registry(self):
+        """Verify load_model() else branch finds a populated registry.
+
+        Simulates the production path: a third-party type is registered, then
+        load_model() is called with that type. If PROVIDER_REGISTRY were empty
+        the call would raise ValueError even for newly registered types.
+        """
+        from bili.iris.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
+            load_model,
+        )
+
+        mock_llm = MagicMock()
+
+        class _ProductionPathProvider(LLMProvider):
+            def load(self, **kwargs):
+                return mock_llm
+
+        register_provider("test_production_path_type", _ProductionPathProvider)
+        try:
+            result = load_model("test_production_path_type", model_name="test")
+            assert result is mock_llm
+        finally:
+            PROVIDER_REGISTRY.unregister("test_production_path_type")
+
+
+# ---------------------------------------------------------------------------
 # Convenience functions
 # ---------------------------------------------------------------------------
 
@@ -345,6 +423,19 @@ class TestVertexAIProvider:
 
 class TestAzureOpenAIProvider:
     """Verify AzureOpenAIProvider.load() constructs AzureChatOpenAI correctly."""
+
+    def test_api_version_is_required(self):
+        """Verify load() raises TypeError when api_version is omitted.
+
+        api_version has no default so the caller cannot silently use a stale
+        version string.  This test pins that contract.
+        """
+        mock_cls = MagicMock()
+        with patch("langchain_openai.AzureChatOpenAI", mock_cls):
+            with pytest.raises(TypeError):
+                AzureOpenAIProvider().load(  # pylint: disable=no-value-for-parameter
+                    model_name="gpt-4"
+                )
 
     def test_minimal_load(self):
         """Verify minimal config passes azure_deployment and api_version."""

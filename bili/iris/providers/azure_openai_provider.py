@@ -31,7 +31,10 @@ class AzureOpenAIProvider(LLMProvider):
     model_name : str
         Azure deployment name (e.g. ``"gpt-41"``).
     api_version : str
-        Azure OpenAI REST API version (e.g. ``"2024-08-01-preview"``).
+        Azure OpenAI REST API version string (e.g. ``"2025-01-01-preview"``).
+        Required. No default is provided here to match the contract of
+        ``load_remote_azure_openai``; the caller must supply the version
+        explicitly so it cannot silently drift.
     max_tokens : int, optional
         Maximum completion tokens (mapped to ``max_completion_tokens``).
     temperature : float, optional
@@ -47,7 +50,7 @@ class AzureOpenAIProvider(LLMProvider):
     def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
         self,
         model_name: str,
-        api_version: str = "2024-08-01-preview",
+        api_version: str,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
@@ -58,7 +61,8 @@ class AzureOpenAIProvider(LLMProvider):
         """Create and return an ``AzureChatOpenAI`` instance.
 
         :param model_name: Azure deployment name.
-        :param api_version: REST API version string.
+        :param api_version: REST API version string. Required; no default is
+            provided so the caller cannot silently use a stale version.
         :returns: An ``AzureChatOpenAI`` instance.
         :raises ImportError: If ``langchain_openai`` is not installed.
         """
