@@ -183,6 +183,38 @@ class TestLLMModelsEntries:
         assert "compound-beta" in ids
         assert "compound-beta-mini" in ids
 
+    def test_google_genai_display_names_include_direct_api(self):
+        """Verify remote_google_genai entries use '(Direct API)' in display names.
+
+        The disambiguation suffix makes these entries selectable via display name
+        without colliding with the identically-model_id'd Vertex entries.
+        """
+        from bili.iris.config.llm_config import (  # pylint: disable=import-outside-toplevel
+            LLM_MODELS,
+        )
+
+        for entry in LLM_MODELS["remote_google_genai"]["models"]:
+            assert "(Direct API)" in entry["model_name"], (
+                f"remote_google_genai entry missing '(Direct API)' in model_name: "
+                f"{entry['model_name']!r}"
+            )
+
+    def test_google_genai_display_names_are_distinct_from_vertex(self):
+        """Verify no remote_google_genai display name collides with Vertex display names."""
+        from bili.iris.config.llm_config import (  # pylint: disable=import-outside-toplevel
+            LLM_MODELS,
+        )
+
+        vertex_names = {
+            m["model_name"]
+            for m in LLM_MODELS.get("remote_google_vertex", {}).get("models", [])
+        }
+        for entry in LLM_MODELS["remote_google_genai"]["models"]:
+            assert entry["model_name"] not in vertex_names, (
+                f"remote_google_genai display name '{entry['model_name']}' collides "
+                f"with a remote_google_vertex entry"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Heuristic resolution — new patterns
@@ -256,6 +288,50 @@ class TestHeuristicResolution:
         """Verify 'compound-beta' routes to remote_groq."""
         provider, _, _ = self._resolve("compound-beta")
         assert provider == "remote_groq"
+
+    # Backward-compat fallbacks (pre-existing rules restored in this PR)
+
+    def test_bare_gemini_still_routes_to_vertex(self):
+        """Verify bare 'gemini' (no hyphen) still falls back to remote_google_vertex.
+
+        Pre-existing behavior: 'gemini' was a broad heuristic for Vertex AI.
+        With the addition of 'gemini-' -> remote_google_genai, the hyphenated
+        form goes to GenAI while the bare form still reaches Vertex.
+        """
+        provider, _, _ = self._resolve("gemini")
+        assert (
+            provider == "remote_google_vertex"
+        ), "Bare 'gemini' must still fall back to remote_google_vertex"
+
+    def test_bare_mistral_still_routes_to_bedrock(self):
+        """Verify a bare 'mistral' string still falls back to remote_aws_bedrock.
+
+        Pre-existing behavior: 'mistral' was a Bedrock catch-all.  The more
+        specific 'mistral-' -> remote_mistral pattern handles direct-API IDs;
+        bare 'mistral' (no hyphen) reaches the Bedrock fallback.
+        """
+        provider, _, _ = self._resolve("mistral")
+        assert (
+            provider == "remote_aws_bedrock"
+        ), "Bare 'mistral' must still fall back to remote_aws_bedrock"
+
+    def test_gemini_hyphen_takes_priority_over_bare_gemini(self):
+        """Verify 'gemini-2.0-flash' hits the more-specific GenAI rule, not Vertex.
+
+        The 'gemini-' pattern fires first because it appears before the broad
+        'gemini' fallback in _HEURISTIC_RULES.
+        """
+        provider, _, _ = self._resolve("gemini-2.0-flash")
+        assert provider == "remote_google_genai"
+
+    def test_mistral_hyphen_takes_priority_over_bare_mistral(self):
+        """Verify 'mistral-large-latest' hits direct Mistral, not Bedrock fallback.
+
+        The 'mistral-' pattern fires first because it appears before the broad
+        'mistral' fallback in _HEURISTIC_RULES.
+        """
+        provider, _, _ = self._resolve("mistral-large-latest")
+        assert provider == "remote_mistral"
 
 
 # ---------------------------------------------------------------------------
@@ -717,6 +793,14 @@ class TestLoadModelNewProviders:
             # Cohere: Command family registered under remote_cohere
             ("command-r-plus", "remote_cohere"),
             ("command-a-plus-05-2026", "remote_cohere"),
+            # Google GenAI: use the disambiguation display name "(Direct API)" so
+            # the LLM_MODELS lookup selects remote_google_genai, not Vertex.
+            # The raw model_id (e.g. "gemini-2.5-flash") also exists in the
+            # Vertex catalog; passing the raw ID resolves to Vertex (first match
+            # in insertion order) -- that's tested in test_raw_gemini_resolves_to_vertex.
+            ("Gemini 2.5 Flash (Direct API)", "remote_google_genai"),
+            ("Gemini 2.0 Flash (Direct API)", "remote_google_genai"),
+            ("Gemini 2.0 Flash Lite (Direct API)", "remote_google_genai"),
             # DeepSeek: registered under remote_deepseek
             ("deepseek-chat", "remote_deepseek"),
             ("deepseek-reasoner", "remote_deepseek"),
@@ -731,17 +815,13 @@ class TestLoadModelNewProviders:
     def test_llm_models_lookup_resolves_new_providers(
         self, model_id: str, expected_provider: str
     ):
-        """Verify model IDs in LLM_MODELS resolve to the correct new provider.
+        """Verify display names in LLM_MODELS resolve to the correct new provider.
 
-        Note: Gemini model IDs (e.g. gemini-2.5-flash) are intentionally absent
-        from this parametrize set.  All current Gemini model IDs in
-        LLM_MODELS["remote_google_genai"] are also present in
-        LLM_MODELS["remote_google_vertex"] (Vertex registers them first), so the
-        LLM_MODELS lookup returns Vertex for those IDs.  Users who want the
-        remote_google_genai provider invoke load_model("remote_google_genai", ...)
-        directly rather than relying on name resolution.  The heuristic-only
-        tests above (which patch out LLM_MODELS) confirm the gemini- heuristic
-        routes to remote_google_genai when the LLM_MODELS lookup finds nothing.
+        Google GenAI entries use display names that include "(Direct API)" to
+        distinguish them from the identical model_id values registered under
+        remote_google_vertex.  Users who want the Google AI Developer API
+        (GOOGLE_API_KEY, not GCP/Vertex credentials) must select a model by its
+        display name or invoke load_model() with provider_type explicitly set.
         """
         from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
             resolve_model,
@@ -752,3 +832,23 @@ class TestLoadModelNewProviders:
             f"Expected model '{model_id}' to resolve to '{expected_provider}', "
             f"got '{provider}'"
         )
+
+    def test_raw_gemini_model_id_resolves_to_vertex(self):
+        """Verify raw gemini-* model IDs resolve to Vertex (first catalog match).
+
+        Because the same gemini-2.5-flash model_id exists in both
+        remote_google_vertex (registered first in LLM_MODELS) and
+        remote_google_genai, the raw ID resolves to Vertex.  This is expected
+        and backward-compatible.  Users reach remote_google_genai via the
+        '(Direct API)' display-name catalog entries or by calling load_model()
+        with an explicit provider_type.
+        """
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_model,
+        )
+
+        provider, model_id = resolve_model("gemini-2.5-flash")
+        assert (
+            provider == "remote_google_vertex"
+        ), "Raw 'gemini-2.5-flash' must resolve to Vertex (first catalog match)"
+        assert model_id == "gemini-2.5-flash"

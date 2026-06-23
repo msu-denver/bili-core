@@ -1301,7 +1301,13 @@ LLM_MODELS = {
         "model_help": "https://ai.google.dev/gemini-api/docs/models",
         "models": [
             {
-                "model_name": "Gemini 2.5 Flash",
+                # Display name includes "(Direct API)" to disambiguate from the
+                # identically-named Vertex AI entries.  Users who want the Google
+                # AI Developer API (GOOGLE_API_KEY, not GCP/Vertex credentials)
+                # must select by this display name or invoke load_model() with
+                # provider_type="remote_google_genai" directly.  The model_id
+                # sent to the API remains the standard Gemini identifier.
+                "model_name": "Gemini 2.5 Flash (Direct API)",
                 "model_id": "gemini-2.5-flash",
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
@@ -1316,7 +1322,7 @@ LLM_MODELS = {
                 "max_retries_max": 10,
             },
             {
-                "model_name": "Gemini 2.0 Flash",
+                "model_name": "Gemini 2.0 Flash (Direct API)",
                 "model_id": "gemini-2.0-flash",
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
@@ -1331,7 +1337,7 @@ LLM_MODELS = {
                 "max_retries_max": 10,
             },
             {
-                "model_name": "Gemini 2.0 Flash Lite",
+                "model_name": "Gemini 2.0 Flash Lite (Direct API)",
                 "model_id": "gemini-2.0-flash-lite",
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,

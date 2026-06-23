@@ -26,31 +26,49 @@ LOGGER = logging.getLogger(__name__)
 
 _HEURISTIC_RULES = [
     # (substring_or_prefix, provider_type)
-    # Order matters — more specific patterns must come before broader ones.
+    # Order matters -- more specific patterns must come before broader ones.
+    # The heuristic layer only fires when LLM_MODELS lookup returns nothing,
+    # so these rules apply to non-catalog model IDs only.
     ("gpt-", "remote_openai"),
     ("gpt4", "remote_openai"),
     ("o1-", "remote_openai"),
     ("o1", "remote_openai"),
     ("o3-", "remote_openai"),
     ("o3", "remote_openai"),
-    # Bedrock-hosted models (prefix check before bare provider name checks)
+    # Bedrock-hosted models use dotted-namespace prefixes.  Check these first
+    # so that provider-bare patterns below do not intercept them.
     ("anthropic.claude", "remote_aws_bedrock"),
     ("amazon.nova", "remote_aws_bedrock"),
     ("amazon.titan", "remote_aws_bedrock"),
     ("meta.llama", "remote_aws_bedrock"),
     ("cohere.command", "remote_aws_bedrock"),
     ("mistral.mistral", "remote_aws_bedrock"),
-    # Direct provider API heuristics
+    # Direct-API heuristics for non-Bedrock-namespaced model IDs.
+    # Each pattern is more specific than the broad fallbacks below,
+    # so place them first.
     ("claude-", "remote_anthropic"),  # Anthropic direct API
-    ("mistral-", "remote_mistral"),  # Mistral AI direct
+    ("mistral-", "remote_mistral"),  # Mistral AI direct (not Bedrock)
     ("codestral", "remote_mistral"),  # Mistral's code model
     ("command-", "remote_cohere"),  # Cohere Command family
+    # "gemini-" routes to the Google AI Developer API.  Users who want
+    # Vertex AI should select a model by its catalog display name, use the
+    # Vertex-registered model_id directly, or invoke load_model() with
+    # provider_type="remote_google_vertex" explicitly.
     ("gemini-", "remote_google_genai"),  # Google GenAI developer API
     ("deepseek-", "remote_deepseek"),  # DeepSeek direct API
     ("grok-", "remote_xai"),  # xAI Grok
     ("llama-3", "remote_groq"),  # Groq-hosted Llama
     ("compound-beta", "remote_groq"),  # Groq compound system
     ("gemma2-", "remote_groq"),  # Groq-hosted Gemma
+    # Broad pre-existing fallbacks -- preserved for backward compatibility.
+    # These fire for non-catalog model IDs that match only the bare vendor
+    # name (e.g. bare "gemini", legacy Bedrock-style "mistral-..." that did
+    # not match "mistral.mistral-*" above).  Because "mistral-" already
+    # routes to remote_mistral, the "mistral" fallback below only triggers
+    # for strings containing "mistral" but NOT "mistral-" (e.g. a bare
+    # "mistral" string or "mistral_v2").
+    ("gemini", "remote_google_vertex"),  # bare/non-hyphenated gemini IDs
+    ("mistral", "remote_aws_bedrock"),  # legacy Bedrock Mistral catch-all
 ]
 
 
