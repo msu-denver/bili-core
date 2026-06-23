@@ -3,8 +3,14 @@ Module: llm_loader
 
 This module provides functions to load and initialize various language models for LangChain.
 It supports local models (LlamaCpp, HuggingFace) and remote models
-(Google Vertex AI, AWS Bedrock, Azure OpenAI).
-The functions are conditionally cached to optimize resource usage in Streamlit applications.
+(Google Vertex AI, AWS Bedrock, Azure OpenAI, OpenAI direct).
+
+The six built-in provider types are dispatched directly by ``load_model()``.
+Additional provider types — registered at application startup via
+``bili.iris.providers.register_provider()`` — are discovered through the
+``bili.iris.providers.PROVIDER_REGISTRY`` when the built-in dispatch does not
+match.  This allows third-party provider implementations to integrate without
+modifying this module.
 
 Functions:
     - load_model(model_type, **kwargs):
@@ -54,6 +60,12 @@ Example:
         max_tokens=100,
         temperature=0.7
     )
+
+    # Load a provider registered at startup via register_provider()
+    from bili.iris.providers import register_provider
+    from mypackage import MyProvider
+    register_provider("remote_my_api", MyProvider)
+    model = load_model("remote_my_api", model_name="my-model")
 """
 
 import gc
@@ -100,22 +112,37 @@ def load_model(
     routes to the appropriate loader function depending on whether the model type
     is local or hosted remotely on cloud services.
 
-    :param model_type: Specifies the type of the model to be loaded. The value determines
-        which loader function will be called. Supported types are "local_llamacpp",
-        "local_huggingface", "remote_google_vertex", "remote_aws_bedrock", and
-        "remote_azure_openai".
+    :param model_type: Specifies the type of the model to be loaded. Built-in
+        supported types are ``"local_llamacpp"``, ``"local_huggingface"``,
+        ``"remote_google_vertex"``, ``"remote_aws_bedrock"``,
+        ``"remote_azure_openai"``, and ``"remote_openai"``.  Additional types
+        registered via ``bili.iris.providers.register_provider()`` are also
+        supported through the provider registry.
     :type model_type: str
     :param kwargs: Additional keyword arguments specific to the loader function for
         the chosen model type. These arguments differ depending on the model type.
     :type kwargs: dict
     :return: The loaded model object as returned by the appropriate model loader
         function. The return value may differ in format depending on the chosen
-        model type.
+        model type, but always exposes an ``.invoke(messages)`` method.
     :rtype: object
-    :raises ValueError: If the specified model_type is not one of the supported
-        values, this exception will be raised.
+    :raises ValueError: If the specified model_type is not one of the built-in
+        types and is not registered in the provider registry.
     """
-    # Based on model_type, call the appropriate loader function
+    # Built-in provider dispatch — handles the six types shipped with bili-core.
+    # This if/elif block is intentionally preserved for backward compatibility;
+    # the individual loader functions are part of the public API and may be
+    # imported and called directly by consumers (e.g. sustainability-hub-engine).
+    #
+    # Follow-up (delegation refactor): each branch below duplicates logic that
+    # also lives in the corresponding LLMProvider class in bili.iris.providers.
+    # The clean fix is to delegate these branches to provider_class().load(**kwargs)
+    # so there is one implementation per backend. The blocker is the
+    # @conditional_cache_resource() decorator on each load_* function — removing
+    # it would silently change caching behavior for existing callers. Once a
+    # cache-aware delegation path exists (or caching is lifted into the caller),
+    # replace this block with: provider_class = PROVIDER_REGISTRY.get(model_type);
+    # llm_model = provider_class().load(**kwargs).
     if model_type == "local_llamacpp":
         llm_model = load_llamacpp_model(**kwargs)
     elif model_type == "local_huggingface":
@@ -129,7 +156,22 @@ def load_model(
     elif model_type == "remote_openai":
         llm_model = load_remote_openai(**kwargs)
     else:
-        raise ValueError(f"Invalid model type: {model_type}")
+        # Fall through to the provider registry for third-party / extended
+        # provider types registered at startup via register_provider().
+        # Lazy import to avoid circular dependency and module-level overhead.
+        from bili.iris.providers.registry import (  # pylint: disable=import-outside-toplevel
+            PROVIDER_REGISTRY,
+        )
+
+        provider_class = PROVIDER_REGISTRY.get(model_type)
+        if provider_class is None:
+            raise ValueError(f"Invalid model type: {model_type}")
+        LOGGER.info(
+            "Delegating model_type '%s' to registered provider: %s",
+            model_type,
+            provider_class.__name__,
+        )
+        llm_model = provider_class().load(**kwargs)
 
     return llm_model
 
