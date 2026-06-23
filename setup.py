@@ -117,16 +117,16 @@ setup(
         # Provider extras — install the optional SDK for each new provider.  #
         # Usage: pip install bili-core[anthropic,mistral]                     #
         # ------------------------------------------------------------------ #
-        "anthropic": ["langchain-anthropic>=0.3.0"],
+        "anthropic": ["langchain-anthropic~=1.0.0"],
         "mistral": ["langchain-mistralai>=0.2.0"],
         "cohere": ["langchain-cohere>=0.3.0"],
         "google-genai": ["langchain-google-genai>=2.0.0"],
         "deepseek": ["langchain-deepseek>=0.1.0"],
         "xai": ["langchain-xai>=0.2.0"],
         "groq": ["langchain-groq>=0.2.0"],
-        # Convenience bundle for all new API providers
+        # Convenience bundle for all API providers
         "all-providers": [
-            "langchain-anthropic>=0.3.0",
+            "langchain-anthropic~=1.0.0",
             "langchain-mistralai>=0.2.0",
             "langchain-cohere>=0.3.0",
             "langchain-google-genai>=2.0.0",
@@ -154,9 +154,11 @@ setup(
         # ------------------------------------------------------------------ #
         # Security / adversarial testing (AEGIS).                             #
         # Usage: pip install bili-core[aegis]                                 #
+        # AEGIS itself is lean-core-importable; this extra provides the       #
+        # cross-model Anthropic support used in some attack strategies.       #
         # ------------------------------------------------------------------ #
         "aegis": [
-            "langchain-anthropic>=0.3.0",
+            "langchain-anthropic~=1.0.0",
         ],
         # ------------------------------------------------------------------ #
         # Tool-backend extras — heavy retrieval / search SDKs.               #
@@ -173,6 +175,7 @@ setup(
             "opensearch-py~=3.0.0",
             "requests-aws4auth==1.3.1",
             "boto3~=1.40.19",
+            "botocore~=1.40.19",
         ],
         # ------------------------------------------------------------------ #
         # Checkpointer-backend extras — database state persistence.          #
@@ -188,6 +191,8 @@ setup(
         # Usage: pip install bili-core[postgres]
         "postgres": [
             "psycopg2~=2.9.11",
+            "psycopg[binary]>=3.2",
+            "psycopg-pool>=3.2",
             "langgraph-checkpoint-postgres~=3.0.0",
         ],
         # ------------------------------------------------------------------ #
@@ -198,11 +203,47 @@ setup(
         # Usage: pip install bili-core[huggingface]
         "huggingface": [
             "torch==2.6.0",
+            "torchaudio==2.6.0",
+            "torchvision==0.21.0",
             "transformers~=4.57.1",
             "langchain-huggingface~=1.0.0",
             "sentence-transformers~=5.1.2",
             "accelerate~=1.11.0",
             "datasets~=4.3.0",
+            "huggingface_hub~=0.34.0",
+            "optimum~=2.0.0",
+        ],
+        # llama.cpp local inference (bili/iris/loaders/llm_loader.py LlamaCpp path).
+        # Usage: pip install bili-core[llamacpp]
+        "llamacpp": [
+            "llama-cpp-python==0.3.7",
+        ],
+        # Full ML stack: Keras, TensorFlow, scikit-learn (AEGIS attack strategies,
+        # baseline runners, and advanced embedding backends).
+        # Usage: pip install bili-core[ml]
+        "ml": [
+            "keras~=3.12.0",
+            "tensorflow~=2.18.0",
+            "tf-keras~=2.18.0",
+            "scikit-learn~=1.7.2",
+            "ml-dtypes~=0.5.1",
+            "numpy==1.26.4",
+            "opencv-python==4.10.0.84",
+            "pi-heif==0.21.0",
+        ],
+        # Document-processing tools (PDFs, DOCX, OCR, HTML extraction).
+        # Used by AEGIS attack strategies and bili-core tool integrations.
+        # Usage: pip install bili-core[docs]
+        "docs": [
+            "beautifulsoup4==4.12.3",
+            "nltk==3.9.1",
+            "openpyxl==3.1.5",
+            "pypdf~=6.1.3",
+            "python-docx~=1.2.0",
+            "rapidocr-onnxruntime==1.3.24",
+            "textract==1.5.0",
+            "unstructured[all-docs]~=0.18.15",
+            "unstructured-client==0.42.3",
         ],
         # ------------------------------------------------------------------ #
         # Auth extras                                                          #
@@ -219,6 +260,24 @@ setup(
         # ------------------------------------------------------------------ #
         "mcp": ["mcp>=1.0"],
         # ------------------------------------------------------------------ #
+        # Development tooling.                                                 #
+        # Usage: pip install bili-core[dev]                                   #
+        # ------------------------------------------------------------------ #
+        "dev": [
+            "autoflake==2.3.1",
+            "black==24.10.0",
+            "isort==5.13.2",
+            "mongomock==4.3.0",
+            "pre-commit==4.0.1",
+            "pylint==3.3.1",
+            "pylint-pydantic==0.3.2",
+            "pympler==1.1",
+            "pytest~=8.0.0",
+            "pytest-cov~=7.0.0",
+            "setuptools~=65.5.0",
+            "watchdog==5.0.3",
+        ],
+        # ------------------------------------------------------------------ #
         # Convenience bundle — installs all optional extras so that existing  #
         # consumers migrate from the old monolithic install with a single     #
         # word change:  pip install bili-core  →  pip install bili-core[all]  #
@@ -231,33 +290,59 @@ setup(
             "pandas==2.2.3",
             "flask~=3.1.2",
             "pyjwt==2.10.1",
-            # AEGIS / security
-            "langchain-anthropic>=0.3.0",
             # Provider extras
+            "langchain-anthropic~=1.0.0",
             "langchain-mistralai>=0.2.0",
             "langchain-cohere>=0.3.0",
             "langchain-google-genai>=2.0.0",
             "langchain-deepseek>=0.1.0",
             "langchain-xai>=0.2.0",
             "langchain-groq>=0.2.0",
-            # Tools
+            # Tool backends
             "faiss-cpu~=1.12.0",
             "sentence-transformers~=5.1.2",
             "opensearch-py~=3.0.0",
             "requests-aws4auth==1.3.1",
             "boto3~=1.40.19",
+            "botocore~=1.40.19",
             # Checkpointers
             "pymongo~=4.15.3",
             "motor~=3.7.0",
             "langgraph-checkpoint-mongodb~=0.3.0",
             "psycopg2~=2.9.11",
+            "psycopg[binary]>=3.2",
+            "psycopg-pool>=3.2",
             "langgraph-checkpoint-postgres~=3.0.0",
             # Local models
             "torch==2.6.0",
+            "torchaudio==2.6.0",
+            "torchvision==0.21.0",
             "transformers~=4.57.1",
             "langchain-huggingface~=1.0.0",
             "accelerate~=1.11.0",
             "datasets~=4.3.0",
+            "huggingface_hub~=0.34.0",
+            "optimum~=2.0.0",
+            "llama-cpp-python==0.3.7",
+            # Full ML stack
+            "keras~=3.12.0",
+            "tensorflow~=2.18.0",
+            "tf-keras~=2.18.0",
+            "scikit-learn~=1.7.2",
+            "ml-dtypes~=0.5.1",
+            "numpy==1.26.4",
+            "opencv-python==4.10.0.84",
+            "pi-heif==0.21.0",
+            # Document processing
+            "beautifulsoup4==4.12.3",
+            "nltk==3.9.1",
+            "openpyxl==3.1.5",
+            "pypdf~=6.1.3",
+            "python-docx~=1.2.0",
+            "rapidocr-onnxruntime==1.3.24",
+            "textract==1.5.0",
+            "unstructured[all-docs]~=0.18.15",
+            "unstructured-client==0.42.3",
             # Auth
             "firebase-admin~=6.6.0",
             # MCP

@@ -1,9 +1,31 @@
 # =============================================================================
-# bili-core Dependencies
+# bili-core — Lean Core Dependencies
 # =============================================================================
-# This file is organized by category for easier maintenance.
-# Transitive dependencies are pinned at the bottom to prevent pip backtracking.
-# See: https://pip.pypa.io/en/stable/topics/dependency-resolution/
+# This file declares the BASE install requirements: everything that
+# ``import bili.iris`` and ``import bili.aether`` need to run, and nothing
+# more.  Heavy optional backends (databases, ML frameworks, vector search,
+# UI surfaces, auth providers) live ONLY in the extras_require section of
+# setup.py and must NOT appear here.
+#
+# Extras catalogue (see setup.py for full pin list):
+#   pip install bili-core[streamlit]    # Streamlit UI surface
+#   pip install bili-core[flask]        # Flask REST API surface
+#   pip install bili-core[aegis]        # AEGIS adversarial testing
+#   pip install bili-core[faiss]        # FAISS vector search
+#   pip install bili-core[opensearch]   # Amazon OpenSearch
+#   pip install bili-core[mongo]        # MongoDB checkpointer
+#   pip install bili-core[postgres]     # PostgreSQL checkpointer
+#   pip install bili-core[huggingface]  # HuggingFace local models
+#   pip install bili-core[llamacpp]     # llama.cpp local models
+#   pip install bili-core[ml]           # Full ML stack (AEGIS attacks)
+#   pip install bili-core[docs]         # Document-processing tools
+#   pip install bili-core[firebase]     # Firebase auth provider
+#   pip install bili-core[mcp]          # MCP client subsystem
+#   pip install bili-core[all-providers]# All API LLM providers
+#   pip install bili-core[all]          # Everything (backward-compat bundle)
+#
+# Dev tooling is declared in the [dev] extra (setup.py); install it with:
+#   pip install bili-core[dev]
 
 # -----------------------------------------------------------------------------
 # LangChain & LangGraph Core
@@ -12,102 +34,39 @@ langchain~=1.0.3
 langchain-core~=1.0.3
 langchain-community~=0.4.1
 langgraph==1.0.2
-langgraph-checkpoint-mongodb~=0.3.0
-langgraph-checkpoint-postgres~=3.0.0
 
 # -----------------------------------------------------------------------------
-# LLM Providers
+# Primary LLM Provider SDKs
+# These are the built-in providers IRIS ships support for out of the box.
+# Additional providers (Anthropic, Mistral, Cohere, etc.) are in extras.
 # -----------------------------------------------------------------------------
 langchain-aws~=1.0.0
 langchain-google-vertexai~=3.0.1
-langchain-huggingface~=1.0.0
 langchain-openai~=1.0.1
 
 # -----------------------------------------------------------------------------
-# Machine Learning & Deep Learning
+# Core Utilities
 # -----------------------------------------------------------------------------
-accelerate~=1.11.0
-faiss-cpu~=1.12.0
-keras~=3.12.0
-llama-cpp-python==0.3.7
-ml-dtypes~=0.5.1
-optimum~=2.0.0
-scikit-learn~=1.7.2
-sentence-transformers~=5.1.2
-tensorflow~=2.18.0
-tf-keras~=2.18.0
-torch==2.6.0
-torchaudio==2.6.0
-torchvision==0.21.0
-transformers~=4.57.1
-
-# -----------------------------------------------------------------------------
-# Database & Storage
-# -----------------------------------------------------------------------------
-boto3~=1.40.19
-botocore~=1.40.19
-firebase-admin~=6.6.0
-motor~=3.7.0
-opensearch-py~=3.0.0
-psycopg2~=2.9.11
-pymongo~=4.15.3
-
-# -----------------------------------------------------------------------------
-# Web Framework & APIs
-# -----------------------------------------------------------------------------
-flask~=3.1.2
-pyjwt==2.10.1
+pyyaml~=6.0
 requests~=2.32.3
-requests-aws4auth==1.3.1
-streamlit~=1.51.0
-
-# -----------------------------------------------------------------------------
-# Document Processing
-# -----------------------------------------------------------------------------
-beautifulsoup4==4.12.3
-nltk==3.9.1
-openpyxl==3.1.5
-pypdf~=6.1.3
-python-docx~=1.2.0
-rapidocr-onnxruntime==1.3.24
-textract==1.5.0
-unstructured[all-docs]~=0.18.15
-
-# -----------------------------------------------------------------------------
-# Data Processing & Analysis
-# -----------------------------------------------------------------------------
-datasets~=4.3.0
-huggingface_hub~=0.34.0
-numpy==1.26.4
-pandas==2.2.3
-pillow~=10.4.0
-
-# -----------------------------------------------------------------------------
-# Development Tools
-# -----------------------------------------------------------------------------
-autoflake==2.3.1
-black==24.10.0
-isort==5.13.2
-mongomock==4.3.0
-pre-commit==4.0.1
-pylint==3.3.1
-pympler==1.1
-pytest~=8.0.0
-pytest-cov~=7.0.0
-setuptools~=65.5.0
-watchdog==5.0.3
 
 # =============================================================================
 # Pinned Transitive Dependencies
 # =============================================================================
-# These packages are transitive dependencies that cause pip resolution
-# backtracking when not pinned. Pinning them to specific versions prevents
-# pip from trying multiple versions, significantly speeding up installation.
-#
-# To update: Run pip install with verbose output, note the first version
-# pip tries for each package, and update the pins accordingly.
+# Packages below are transitive dependencies pinned to prevent pip
+# backtracking during resolution.  They are NOT imported directly by
+# bili-core runtime code; they are here solely for install-time stability.
+# Do NOT add new entries here without confirming they are genuine transitives
+# of the lean-core packages above.
 
-# Google Cloud packages (from firebase-admin, langchain-google-vertexai)
+# LangChain ecosystem
+langchain-mongodb==0.8.0
+langgraph-prebuilt==1.0.8  # Pin: 1.0.9 imports ExecutionInfo absent in langgraph==1.0.2
+
+# Runtime glue
+anyio==4.12.0
+
+# Google Cloud packages (from langchain-google-vertexai)
 google-api-core==2.28.1
 google-cloud-aiplatform==1.128.0
 google-cloud-resource-manager==1.15.0
@@ -119,26 +78,5 @@ googleapis-common-protos==1.72.0
 grpc-google-iam-v1==0.14.3
 proto-plus==1.26.1
 
-# LangChain ecosystem
-langchain-mongodb==0.8.0
-langgraph-prebuilt==1.0.8  # Pin: 1.0.9 imports ExecutionInfo which doesn't exist in langgraph==1.0.2
-
-# Other transitive dependencies
-anyio==4.12.0
-opencv-python==4.10.0.84
-pi-heif==0.21.0
-unstructured-client==0.42.3
-
-# =============================================================================
-# AETHER Framework (added for security testing)
-# =============================================================================
-
-# Anthropic Claude support (for cross-model testing)
-langchain-anthropic~=1.0.0
-
-# YAML config parsing
-pyyaml~=6.0  # Might already be transitive, but explicit is better
+# YAML / pydantic
 pylint-pydantic==0.3.2
-
-# AETHER UI
-streamlit-flow-component>=1.3.0

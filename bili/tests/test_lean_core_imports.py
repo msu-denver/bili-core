@@ -16,8 +16,12 @@ The optional surfaces/backends are guarded by extras:
     pip install bili-core[mongo]       # MongoDB checkpointer
     pip install bili-core[postgres]    # PostgreSQL checkpointer
     pip install bili-core[huggingface] # HuggingFace local models
+    pip install bili-core[llamacpp]    # llama.cpp local models
+    pip install bili-core[ml]          # Full ML stack
+    pip install bili-core[docs]        # Document-processing tools
     pip install bili-core[firebase]    # Firebase auth
     pip install bili-core[mcp]         # MCP client subsystem
+    pip install bili-core[dev]         # Development tooling
     pip install bili-core[all]         # everything (backward-compat bundle)
 
 Approach: block optional modules from sys.modules using None-sentinels, then
@@ -26,9 +30,11 @@ blocking rather than uninstalling packages makes the test runnable in the
 full development environment without destroying any packages.
 """
 
+import re
 import sys
 import types
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Dict, List
 
 # ---------------------------------------------------------------------------
@@ -490,3 +496,191 @@ class TestLazyLoaderInits:
         names = pkg.__dir__()
         assert "state_management" in names
         assert "streamlit_utils" in names
+
+
+# ---------------------------------------------------------------------------
+# Lean install_requires gate
+#
+# Asserts that setup.py's install_requires (populated from requirements.txt)
+# contains only the lean-core set, and that every heavy optional package
+# appears ONLY in extras_require, never in install_requires.
+#
+# This is a static analysis test: it parses setup.py's extras_require and
+# reads requirements.txt directly rather than running a subprocess install,
+# so it runs without network access in CI and without needing a clean venv.
+# ---------------------------------------------------------------------------
+
+# Canonical set of package name prefixes that must NEVER appear in the
+# base install_requires.  These are the heavy optional backends gated by
+# extras.  Matching is case-insensitive and normalises hyphens to underscores
+# so "faiss-cpu" matches "faiss_cpu".
+_MUST_BE_EXTRAS_ONLY = {
+    # Streamlit surface
+    "streamlit",
+    "streamlit_flow_component",
+    "pillow",
+    "pandas",
+    # Flask surface
+    "flask",
+    "pyjwt",
+    # ML frameworks
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "tensorflow",
+    "tf_keras",
+    "keras",
+    "scikit_learn",
+    "ml_dtypes",
+    "accelerate",
+    "optimum",
+    # HuggingFace stack
+    "transformers",
+    "langchain_huggingface",
+    "sentence_transformers",
+    "datasets",
+    # llama.cpp
+    "llama_cpp_python",
+    # Vector search
+    "faiss_cpu",
+    "opensearch_py",
+    "requests_aws4auth",
+    # DB adapters
+    "pymongo",
+    "motor",
+    "langgraph_checkpoint_mongodb",
+    "psycopg2",
+    "langgraph_checkpoint_postgres",
+    # Auth
+    "firebase_admin",
+    # Document processing
+    "beautifulsoup4",
+    "nltk",
+    "openpyxl",
+    "pypdf",
+    "python_docx",
+    "rapidocr_onnxruntime",
+    "textract",
+    "unstructured",
+    "unstructured_client",
+    # Vision / imaging extras
+    "opencv_python",
+    "pi_heif",
+    # Dev tooling
+    "pytest",
+    "pylint",
+    "black",
+    "isort",
+    "autoflake",
+    "pre_commit",
+    "mongomock",
+    "pympler",
+    "watchdog",
+    "setuptools",
+}
+
+
+def _normalise(pkg_spec: str) -> str:
+    """Return the normalised package name from a requirement specifier.
+
+    Strips version constraints (``~=``, ``>=``, ``==``, etc.), extras
+    (``[all-docs]``), and normalises hyphens to underscores + lowercase.
+    """
+    # Strip extras like [all-docs]
+    name = re.split(r"[\[~>=<!;]", pkg_spec.strip())[0]
+    return name.lower().replace("-", "_")
+
+
+class TestInstallRequiresIsLean:
+    """install_requires must contain only the lean-core set.
+
+    Reads requirements.txt (the source of install_requires) and asserts that
+    none of the heavy optional packages are listed there.  Also asserts that
+    the known heavy packages DO appear in at least one extras_require entry in
+    setup.py, confirming they are still reachable via extras rather than simply
+    dropped.
+    """
+
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+    _REQUIREMENTS_TXT = _REPO_ROOT / "requirements.txt"
+    _SETUP_PY = _REPO_ROOT / "setup.py"
+
+    def _read_requirements(self):
+        """Parse requirements.txt into a list of normalised package names."""
+        lines = self._REQUIREMENTS_TXT.read_text(encoding="utf-8").splitlines()
+        return [
+            _normalise(line)
+            for line in lines
+            if line.strip()
+            and not line.startswith("#")
+            and not line.startswith("git+")
+            and not line.startswith("http")
+        ]
+
+    def _read_all_extras_packages(self):
+        """Parse all package names mentioned in any extras_require entry.
+
+        Uses a simple regex scan of setup.py rather than executing it, so the
+        test has no side effects and runs in a sandboxed CI environment.
+        """
+        text = self._SETUP_PY.read_text(encoding="utf-8")
+        # Match quoted strings inside the extras_require dict block.
+        # This regex finds string literals that look like package specifiers.
+        raw = re.findall(r'["\']([A-Za-z0-9][A-Za-z0-9._\-\[\]~>=<!, ]+)["\']', text)
+        return {_normalise(r) for r in raw}
+
+    def test_no_heavy_package_in_install_requires(self):
+        """requirements.txt must not contain any heavy optional package."""
+        base_packages = self._read_requirements()
+        violations = [pkg for pkg in base_packages if pkg in _MUST_BE_EXTRAS_ONLY]
+        assert not violations, (
+            "The following heavy packages must be moved from requirements.txt "
+            f"(install_requires) to an extras_require entry in setup.py:\n"
+            + "\n".join(f"  {v}" for v in sorted(violations))
+        )
+
+    def test_heavy_packages_present_in_extras(self):
+        """Every mandatory-extras-only package appears in at least one extra."""
+        extras_packages = self._read_all_extras_packages()
+        # Spot-check a representative sample rather than the full set, because
+        # some packages (e.g. llama_cpp_python) have unusual pip specifiers that
+        # the regex may not capture identically.
+        spot_check = {
+            "streamlit",
+            "torch",
+            "pymongo",
+            "psycopg2",
+            "faiss_cpu",
+            "opensearch_py",
+            "firebase_admin",
+            "flask",
+            "transformers",
+            "langgraph_checkpoint_mongodb",
+            "langgraph_checkpoint_postgres",
+        }
+        missing = {pkg for pkg in spot_check if pkg not in extras_packages}
+        assert not missing, (
+            "The following packages are expected to appear in extras_require "
+            f"in setup.py but were not found:\n"
+            + "\n".join(f"  {m}" for m in sorted(missing))
+        )
+
+    def test_lean_core_packages_present_in_requirements(self):
+        """requirements.txt must contain the essential lean-core packages."""
+        base_packages = set(self._read_requirements())
+        lean_core_required = {
+            "langchain",
+            "langchain_core",
+            "langchain_community",
+            "langgraph",
+            "langchain_aws",
+            "langchain_google_vertexai",
+            "langchain_openai",
+            "pyyaml",
+            "requests",
+        }
+        missing = lean_core_required - base_packages
+        assert not missing, (
+            "The following lean-core packages are missing from requirements.txt:\n"
+            + "\n".join(f"  {m}" for m in sorted(missing))
+        )
