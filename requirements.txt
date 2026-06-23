@@ -46,7 +46,7 @@ transformers~=4.57.1
 # -----------------------------------------------------------------------------
 boto3~=1.40.19
 botocore~=1.40.19
-firebase-admin~=6.6.0
+firebase-admin~=7.4.0
 motor~=3.7.0
 opensearch-py~=3.0.0
 psycopg2~=2.9.11
