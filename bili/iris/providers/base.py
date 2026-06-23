@@ -43,8 +43,9 @@ KNOWN_PROVIDER_TYPES = frozenset(
         # Local in-process providers
         "local_llamacpp",
         "local_huggingface",
+        # Subprocess / transport-level providers
+        "cli",
         # Future provider shapes (not yet implemented)
-        # "cli"   -- subprocess / stdin-stdout transport
         # "mcp"   -- Model Context Protocol server transport
     }
 )

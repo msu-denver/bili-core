@@ -1517,6 +1517,42 @@ LLM_MODELS = {
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # CLI (subprocess) provider                                          #
+    # ------------------------------------------------------------------ #
+    # The "cli" provider type drives any command-line LLM tool as a     #
+    # stateless text-in / text-out model.  The model_id is the display  #
+    # name only; the actual executable is configured via the "command"  #
+    # kwarg at runtime (e.g. command=["my-llm", "--no-color"]).         #
+    # The entry below serves as a UI placeholder / example; users may   #
+    # register additional entries for specific CLI tools in their own   #
+    # application config.                                               #
+    # ------------------------------------------------------------------ #
+    "cli": {
+        "name": "CLI Subprocess Provider",
+        "description": (
+            "Drives any command-line LLM tool as a stateless text model via "
+            "subprocess.  Configure the executable and arguments at runtime "
+            "using the 'command' kwarg."
+        ),
+        "model_help": "https://github.com/msu-denver/bili-core",
+        "models": [
+            {
+                "model_name": "CLI LLM (Custom Command)",
+                # The model_id is a sentinel; the real executable is set via
+                # the "command" kwarg when calling CliProvider.load().
+                "model_id": "cli:custom",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                # CLI tools run as a subprocess -- tool-calling via the
+                # LangChain bind_tools() API is not available.
+                "supports_tools": False,
+            },
+        ],
+    },
     "local_llamacpp": {
         "name": "Local LlamaCpp Compatible Model",
         "description": "Local LlamaCpp compatible model loaded into memory.",

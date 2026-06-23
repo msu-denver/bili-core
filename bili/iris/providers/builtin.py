@@ -27,6 +27,7 @@ Provider type string               Implementation class
 ``remote_groq``                    :class:`~.groq_provider.GroqProvider`
 ``local_llamacpp``                 :class:`~.llamacpp_provider.LlamaCppProvider`
 ``local_huggingface``              :class:`~.huggingface_provider.HuggingFaceProvider`
+``cli``                            :class:`~.cli_provider.CliProvider`
 ================================  ================================================
 """
 
@@ -35,6 +36,7 @@ import logging
 from .anthropic_provider import AnthropicProvider
 from .azure_openai_provider import AzureOpenAIProvider
 from .bedrock_provider import BedrockProvider
+from .cli_provider import CliProvider
 from .cohere_provider import CohereProvider
 from .deepseek_provider import DeepSeekProvider
 from .google_genai_provider import GoogleGenAIProvider
@@ -63,6 +65,7 @@ _BUILTIN_PROVIDERS = {
     "remote_groq": GroqProvider,
     "local_llamacpp": LlamaCppProvider,
     "local_huggingface": HuggingFaceProvider,
+    "cli": CliProvider,
 }
 
 

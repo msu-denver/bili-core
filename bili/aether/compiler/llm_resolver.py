@@ -60,6 +60,9 @@ _HEURISTIC_RULES = [
     ("llama-3", "remote_groq"),  # Groq-hosted Llama
     ("compound-beta", "remote_groq"),  # Groq compound system
     ("gemma2-", "remote_groq"),  # Groq-hosted Gemma
+    # Subprocess CLI provider -- matches the "cli:" sentinel prefix used
+    # for CLI models in LLM_MODELS and any user-configured cli model_id.
+    ("cli:", "cli"),
     # Broad pre-existing fallbacks -- preserved for backward compatibility.
     # These fire for non-catalog model IDs that match only the bare vendor
     # name (e.g. bare "gemini", legacy Bedrock-style "mistral-..." that did
