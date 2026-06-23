@@ -1,8 +1,8 @@
 """Register all built-in providers in the global ``PROVIDER_REGISTRY``.
 
 Importing this module has the side effect of populating
-:data:`~bili.iris.providers.registry.PROVIDER_REGISTRY` with the six
-provider types shipped with bili-core.  It is imported once inside
+:data:`~bili.iris.providers.registry.PROVIDER_REGISTRY` with the provider
+types shipped with bili-core.  It is imported once inside
 :func:`bili.iris.loaders.llm_loader.load_model` at first call.
 
 External provider authors do NOT import this module; they call
@@ -11,27 +11,41 @@ own code at application startup.
 
 Built-in provider types
 -----------------------
-=========================  ============================================
-Provider type string        Implementation class
-=========================  ============================================
-``remote_aws_bedrock``      :class:`~.bedrock_provider.BedrockProvider`
-``remote_google_vertex``    :class:`~.vertex_provider.VertexAIProvider`
-``remote_azure_openai``     :class:`~.azure_openai_provider.AzureOpenAIProvider`
-``remote_openai``           :class:`~.openai_provider.OpenAIProvider`
-``local_llamacpp``          :class:`~.llamacpp_provider.LlamaCppProvider`
-``local_huggingface``       :class:`~.huggingface_provider.HuggingFaceProvider`
-=========================  ============================================
+================================  ================================================
+Provider type string               Implementation class
+================================  ================================================
+``remote_aws_bedrock``             :class:`~.bedrock_provider.BedrockProvider`
+``remote_google_vertex``           :class:`~.vertex_provider.VertexAIProvider`
+``remote_azure_openai``            :class:`~.azure_openai_provider.AzureOpenAIProvider`
+``remote_openai``                  :class:`~.openai_provider.OpenAIProvider`
+``remote_anthropic``               :class:`~.anthropic_provider.AnthropicProvider`
+``remote_mistral``                 :class:`~.mistral_provider.MistralProvider`
+``remote_cohere``                  :class:`~.cohere_provider.CohereProvider`
+``remote_google_genai``            :class:`~.google_genai_provider.GoogleGenAIProvider`
+``remote_deepseek``                :class:`~.deepseek_provider.DeepSeekProvider`
+``remote_xai``                     :class:`~.xai_provider.XAIProvider`
+``remote_groq``                    :class:`~.groq_provider.GroqProvider`
+``local_llamacpp``                 :class:`~.llamacpp_provider.LlamaCppProvider`
+``local_huggingface``              :class:`~.huggingface_provider.HuggingFaceProvider`
+================================  ================================================
 """
 
 import logging
 
+from .anthropic_provider import AnthropicProvider
 from .azure_openai_provider import AzureOpenAIProvider
 from .bedrock_provider import BedrockProvider
+from .cohere_provider import CohereProvider
+from .deepseek_provider import DeepSeekProvider
+from .google_genai_provider import GoogleGenAIProvider
+from .groq_provider import GroqProvider
 from .huggingface_provider import HuggingFaceProvider
 from .llamacpp_provider import LlamaCppProvider
+from .mistral_provider import MistralProvider
 from .openai_provider import OpenAIProvider
 from .registry import PROVIDER_REGISTRY
 from .vertex_provider import VertexAIProvider
+from .xai_provider import XAIProvider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +54,13 @@ _BUILTIN_PROVIDERS = {
     "remote_google_vertex": VertexAIProvider,
     "remote_azure_openai": AzureOpenAIProvider,
     "remote_openai": OpenAIProvider,
+    "remote_anthropic": AnthropicProvider,
+    "remote_mistral": MistralProvider,
+    "remote_cohere": CohereProvider,
+    "remote_google_genai": GoogleGenAIProvider,
+    "remote_deepseek": DeepSeekProvider,
+    "remote_xai": XAIProvider,
+    "remote_groq": GroqProvider,
     "local_llamacpp": LlamaCppProvider,
     "local_huggingface": HuggingFaceProvider,
 }

@@ -27,17 +27,25 @@ from typing import Any
 # the registry itself is the authoritative source of which types are active.
 KNOWN_PROVIDER_TYPES = frozenset(
     {
-        # LangChain-native remote API providers
+        # LangChain-native remote API providers (original)
         "remote_aws_bedrock",
         "remote_google_vertex",
         "remote_azure_openai",
         "remote_openai",
+        # LangChain-native remote API providers (expanded catalog)
+        "remote_anthropic",
+        "remote_mistral",
+        "remote_cohere",
+        "remote_google_genai",
+        "remote_deepseek",
+        "remote_xai",
+        "remote_groq",
         # Local in-process providers
         "local_llamacpp",
         "local_huggingface",
         # Future provider shapes (not yet implemented)
-        # "cli"   — subprocess / stdin-stdout transport
-        # "mcp"   — Model Context Protocol server transport
+        # "cli"   -- subprocess / stdin-stdout transport
+        # "mcp"   -- Model Context Protocol server transport
     }
 )
 
