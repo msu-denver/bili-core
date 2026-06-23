@@ -33,14 +33,24 @@ _HEURISTIC_RULES = [
     ("o1", "remote_openai"),
     ("o3-", "remote_openai"),
     ("o3", "remote_openai"),
-    ("gemini", "remote_google_vertex"),
+    # Bedrock-hosted models (prefix check before bare provider name checks)
+    ("anthropic.claude", "remote_aws_bedrock"),
     ("amazon.nova", "remote_aws_bedrock"),
     ("amazon.titan", "remote_aws_bedrock"),
-    ("anthropic.claude", "remote_aws_bedrock"),  # Bedrock-hosted Claude
     ("meta.llama", "remote_aws_bedrock"),
-    ("mistral", "remote_aws_bedrock"),
     ("cohere.command", "remote_aws_bedrock"),
-    ("claude-", "remote_openai"),  # Direct Anthropic API (after Bedrock check)
+    ("mistral.mistral", "remote_aws_bedrock"),
+    # Direct provider API heuristics
+    ("claude-", "remote_anthropic"),  # Anthropic direct API
+    ("mistral-", "remote_mistral"),  # Mistral AI direct
+    ("codestral", "remote_mistral"),  # Mistral's code model
+    ("command-", "remote_cohere"),  # Cohere Command family
+    ("gemini-", "remote_google_genai"),  # Google GenAI developer API
+    ("deepseek-", "remote_deepseek"),  # DeepSeek direct API
+    ("grok-", "remote_xai"),  # xAI Grok
+    ("llama-3", "remote_groq"),  # Groq-hosted Llama
+    ("compound-beta", "remote_groq"),  # Groq compound system
+    ("gemma2-", "remote_groq"),  # Groq-hosted Gemma
 ]
 
 

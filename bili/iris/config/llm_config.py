@@ -1094,6 +1094,423 @@ LLM_MODELS = {
             },
         ],
     },
+    # -------------------------------------------------------------------------
+    # Anthropic direct API
+    # https://docs.anthropic.com/en/docs/about-claude/models
+    # https://pypi.org/project/langchain-anthropic/
+    # -------------------------------------------------------------------------
+    "remote_anthropic": {
+        "name": "Anthropic",
+        "description": "Remote models accessed via the Anthropic API directly. "
+        "Supports Claude Opus, Sonnet, and Haiku model families. "
+        "See https://docs.anthropic.com/en/docs/about-claude/models for the "
+        "full model list.",
+        "model_help": "https://docs.anthropic.com/en/docs/about-claude/models",
+        "models": [
+            {
+                "model_name": "Claude Opus 4.8",
+                "model_id": "claude-opus-4-8",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 32000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Claude Sonnet 4.6",
+                "model_id": "claude-sonnet-4-6",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 16000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Claude Haiku 4.5",
+                "model_id": "claude-haiku-4-5",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 8096,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Claude Fable 5",
+                "model_id": "claude-fable-5",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 16000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Mistral AI
+    # https://docs.mistral.ai/models/overview
+    # https://pypi.org/project/langchain-mistralai/
+    # -------------------------------------------------------------------------
+    "remote_mistral": {
+        "name": "Mistral AI",
+        "description": "Remote models accessed via the Mistral AI API. "
+        "Supports Mistral Large, Small, and Codestral model families. "
+        "See https://docs.mistral.ai/models/overview for the full model list.",
+        "model_help": "https://docs.mistral.ai/models/overview",
+        "models": [
+            {
+                "model_name": "Mistral Large Latest",
+                "model_id": "mistral-large-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Mistral Small Latest",
+                "model_id": "mistral-small-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Codestral Latest",
+                "model_id": "codestral-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 262144,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Cohere
+    # https://docs.cohere.com/docs/models
+    # https://pypi.org/project/langchain-cohere/
+    # -------------------------------------------------------------------------
+    "remote_cohere": {
+        "name": "Cohere",
+        "description": "Remote models accessed via the Cohere API. "
+        "Supports Command A+, Command A, Command R+, and Command R model "
+        "families. See https://docs.cohere.com/docs/models for the full list.",
+        "model_help": "https://docs.cohere.com/docs/models",
+        "models": [
+            {
+                "model_name": "Command A+",
+                "model_id": "command-a-plus-05-2026",
+                "custom_model_path": False,
+                "max_input_tokens": 256000,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Command R+",
+                "model_id": "command-r-plus",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Command R",
+                "model_id": "command-r",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Google Generative AI (Gemini developer API -- not Vertex AI)
+    # https://ai.google.dev/gemini-api/docs/models
+    # https://pypi.org/project/langchain-google-genai/
+    # -------------------------------------------------------------------------
+    "remote_google_genai": {
+        "name": "Google Generative AI (Gemini API)",
+        "description": "Remote Gemini models accessed via the Google AI Developer "
+        "API (GOOGLE_API_KEY). Complements the 'remote_google_vertex' provider "
+        "which routes through Google Cloud Vertex AI. "
+        "See https://ai.google.dev/gemini-api/docs/models for the model list.",
+        "model_help": "https://ai.google.dev/gemini-api/docs/models",
+        "models": [
+            {
+                "model_name": "Gemini 2.5 Flash",
+                "model_id": "gemini-2.5-flash",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 65536,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.0 Flash",
+                "model_id": "gemini-2.0-flash",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.0 Flash Lite",
+                "model_id": "gemini-2.0-flash-lite",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # DeepSeek
+    # https://api-docs.deepseek.com/
+    # https://pypi.org/project/langchain-deepseek/
+    # -------------------------------------------------------------------------
+    "remote_deepseek": {
+        "name": "DeepSeek",
+        "description": "Remote models accessed via the DeepSeek API. "
+        "Supports the DeepSeek-V3/V4 chat family and the DeepSeek-R1 "
+        "reasoning family. "
+        "See https://api-docs.deepseek.com/ for the full model list.",
+        "model_help": "https://api-docs.deepseek.com/",
+        "models": [
+            {
+                "model_name": "DeepSeek Chat",
+                "model_id": "deepseek-chat",
+                "custom_model_path": False,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "DeepSeek Reasoner",
+                "model_id": "deepseek-reasoner",
+                "custom_model_path": False,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 32768,
+                "supports_temperature": False,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "supports_tools": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # xAI (Grok)
+    # https://docs.x.ai/
+    # https://pypi.org/project/langchain-xai/
+    # -------------------------------------------------------------------------
+    "remote_xai": {
+        "name": "xAI (Grok)",
+        "description": "Remote Grok models accessed via the xAI API. "
+        "Supports the Grok model family including reasoning variants. "
+        "See https://docs.x.ai/ for the full model list.",
+        "model_help": "https://docs.x.ai/",
+        "models": [
+            {
+                "model_name": "Grok 3 Latest",
+                "model_id": "grok-3-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 131072,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Grok Beta",
+                "model_id": "grok-beta",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 131072,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Groq
+    # https://console.groq.com/docs/models
+    # https://pypi.org/project/langchain-groq/
+    # -------------------------------------------------------------------------
+    "remote_groq": {
+        "name": "Groq",
+        "description": "Remote models served on Groq's low-latency inference "
+        "hardware. Supports Llama, Gemma, and compound-beta model families. "
+        "See https://console.groq.com/docs/models for the full model list.",
+        "model_help": "https://console.groq.com/docs/models",
+        "models": [
+            {
+                "model_name": "Llama 3.3 70B Versatile",
+                "model_id": "llama-3.3-70b-versatile",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 32768,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Llama 3.1 8B Instant",
+                "model_id": "llama-3.1-8b-instant",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Compound Beta",
+                "model_id": "compound-beta",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Compound Beta Mini",
+                "model_id": "compound-beta-mini",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
     "local_llamacpp": {
         "name": "Local LlamaCpp Compatible Model",
         "description": "Local LlamaCpp compatible model loaded into memory.",

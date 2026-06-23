@@ -112,6 +112,27 @@ setup(
         ],
     },
     install_requires=read_requirements(),  # Load only standard dependencies
+    extras_require={
+        # Provider extras — install the optional SDK for each new provider.
+        # Usage: pip install bili-core[anthropic,mistral]
+        "anthropic": ["langchain-anthropic>=0.3.0"],
+        "mistral": ["langchain-mistralai>=0.2.0"],
+        "cohere": ["langchain-cohere>=0.3.0"],
+        "google-genai": ["langchain-google-genai>=2.0.0"],
+        "deepseek": ["langchain-deepseek>=0.1.0"],
+        "xai": ["langchain-xai>=0.2.0"],
+        "groq": ["langchain-groq>=0.2.0"],
+        # Convenience bundle for all new API providers
+        "all-providers": [
+            "langchain-anthropic>=0.3.0",
+            "langchain-mistralai>=0.2.0",
+            "langchain-cohere>=0.3.0",
+            "langchain-google-genai>=2.0.0",
+            "langchain-deepseek>=0.1.0",
+            "langchain-xai>=0.2.0",
+            "langchain-groq>=0.2.0",
+        ],
+    },
     cmdclass={
         "install": PostInstallCommand,
     },
