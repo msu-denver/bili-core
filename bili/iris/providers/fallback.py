@@ -106,6 +106,15 @@ _DEFAULT_RETRYABLE_NAMES: Tuple[str, ...] = (
     "ConnectionError",
     "ConnectionResetError",
     "BrokenPipeError",
+    # bili-core subprocess provider -- transient failures from the CLI tool
+    # (non-zero exit, OS timeout) should fall through to the next provider so
+    # a CLI provider can sit at the front of a fallback chain with an API
+    # provider as the safety net.  Config/usage errors from the CLI are still
+    # CliLLMError; treating all CliLLMErrors as retryable is acceptable for v1
+    # because a config error will simply exhaust the chain rather than masking
+    # a specific fatal exception type (unlike API-provider errors where 401
+    # AuthError vs RateLimitError have different semantics).
+    "CliLLMError",
 )
 
 
