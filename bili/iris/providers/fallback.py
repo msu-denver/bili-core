@@ -459,17 +459,23 @@ class FallbackLLM:
     def stream(
         self, input: Any, **kwargs: Any  # pylint: disable=redefined-builtin
     ) -> Iterator[Any]:
-        """Stream responses, falling back on retryable errors.
+        """Stream responses, falling back only on clean start-failures.
 
-        Falls back at stream-open time (before the first chunk).  Once a
-        provider starts streaming, errors mid-stream propagate normally.
+        Fallback is attempted **only** when the provider fails before yielding
+        any tokens (a "clean" failure at stream-open time).  Once a provider
+        has emitted one or more tokens, any subsequent failure is propagated
+        immediately — falling over at that point would produce a partially-
+        consumed stream followed by the fallback's full output, which
+        constitutes corrupted output from the caller's perspective.
 
         :param input: Messages or prompt to pass to the LLM.
         :param kwargs: Additional keyword arguments forwarded to each
             provider's ``.stream()`` call.
-        :returns: An iterator of response chunks from the first successful
-            provider.
-        :raises: The last provider's exception if all candidates fail.
+        :returns: An iterator of response chunks from the first provider that
+            successfully opens a stream.
+        :raises: The original exception immediately if the failure occurs
+            mid-stream (after >= 1 token was already yielded).  The last
+            provider's exception if all candidates fail before the first token.
         """
         candidates = self._candidates()
         max_attempts = self._policy.max_attempts or len(candidates)
@@ -477,10 +483,25 @@ class FallbackLLM:
 
         for i, candidate in enumerate(candidates[:max_attempts]):
             llm = self._resolve_candidate(candidate)
+            tokens_yielded = 0
             try:
-                yield from llm.stream(input, **kwargs)
+                for chunk in llm.stream(input, **kwargs):
+                    tokens_yielded += 1
+                    yield chunk
                 return
             except Exception as exc:  # pylint: disable=broad-exception-caught
+                if tokens_yielded > 0:
+                    # Mid-stream failure: propagate immediately.  Falling over
+                    # here would give the caller a partial primary response
+                    # followed by the fallback's complete response.
+                    LOGGER.debug(
+                        "Provider %d raised %s mid-stream after %d token(s); "
+                        "propagating — cannot fall back on partial output.",
+                        i + 1,
+                        type(exc).__name__,
+                        tokens_yielded,
+                    )
+                    raise
                 if not self._policy.should_fallback(exc):
                     raise
                 last_exc = exc
@@ -496,13 +517,21 @@ class FallbackLLM:
     async def astream(
         self, input: Any, **kwargs: Any  # pylint: disable=redefined-builtin
     ) -> AsyncIterator[Any]:
-        """Async-stream responses, falling back on retryable errors.
+        """Async-stream responses, falling back only on clean start-failures.
+
+        Fallback is attempted **only** when the provider fails before yielding
+        any tokens (a "clean" failure at stream-open time).  Once a provider
+        has emitted one or more tokens, any subsequent failure is propagated
+        immediately to avoid returning corrupted (partial + restart) output.
 
         :param input: Messages or prompt to pass to the LLM.
         :param kwargs: Additional keyword arguments forwarded to each
             provider's ``.astream()`` call.
-        :returns: An async iterator of response chunks.
-        :raises: The last provider's exception if all candidates fail.
+        :returns: An async iterator of response chunks from the first provider
+            that successfully opens a stream.
+        :raises: The original exception immediately if the failure occurs
+            mid-stream (after >= 1 token was already yielded).  The last
+            provider's exception if all candidates fail before the first token.
         """
         candidates = self._candidates()
         max_attempts = self._policy.max_attempts or len(candidates)
@@ -510,11 +539,23 @@ class FallbackLLM:
 
         for i, candidate in enumerate(candidates[:max_attempts]):
             llm = self._resolve_candidate(candidate)
+            tokens_yielded = 0
             try:
                 async for chunk in llm.astream(input, **kwargs):
+                    tokens_yielded += 1
                     yield chunk
                 return
             except Exception as exc:  # pylint: disable=broad-exception-caught
+                if tokens_yielded > 0:
+                    # Mid-stream failure: propagate immediately.
+                    LOGGER.debug(
+                        "Provider %d raised %s mid-stream after %d token(s); "
+                        "propagating — cannot fall back on partial output.",
+                        i + 1,
+                        type(exc).__name__,
+                        tokens_yielded,
+                    )
+                    raise
                 if not self._policy.should_fallback(exc):
                     raise
                 last_exc = exc

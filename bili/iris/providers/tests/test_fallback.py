@@ -15,7 +15,7 @@ Covers:
   FallbackLLM; resolver propagation
 """
 
-# pylint: disable=too-few-public-methods,duplicate-code
+# pylint: disable=too-few-public-methods,duplicate-code,no-member,too-many-lines
 
 import asyncio
 from unittest.mock import MagicMock, patch
@@ -427,6 +427,64 @@ class TestFallbackLLMStream:
 
         with pytest.raises(_RetryableError):
             list(llm.stream(["msg"]))
+
+    def test_stream_mid_stream_failure_propagates_no_fallback(self):
+        """A failure after >= 1 token propagates immediately; fallback NOT tried.
+
+        Once the primary has yielded tokens, falling over to a fallback would
+        produce the primary's partial output followed by the fallback's full
+        output — corrupted from the caller's perspective.  The exception must
+        propagate instead.
+        """
+        mid_err = _RetryableError("connection reset mid-stream")
+
+        def _partial_stream(*_args, **_kwargs):
+            yield MagicMock(content="tok1")
+            raise mid_err
+
+        primary = MagicMock()
+        primary.stream = _partial_stream
+        fallback = _mock_llm("fallback-ok")
+        policy = FallbackPolicy(retryable_exceptions=(_RetryableError,))
+        llm = FallbackLLM(primary=primary, fallbacks=[fallback], policy=policy)
+
+        collected = []
+        with pytest.raises(_RetryableError) as exc_info:
+            for chunk in llm.stream(["msg"]):
+                collected.append(chunk)
+
+        # The one token before the failure was already yielded to the caller.
+        assert len(collected) == 1
+        assert collected[0].content == "tok1"
+        # The raised exception is the original mid-stream error.
+        assert exc_info.value is mid_err
+        # Fallback was never called.
+        fallback.stream.assert_not_called()
+
+    def test_stream_pre_token_retryable_falls_to_fallback(self):
+        """A retryable failure before the first token triggers fallback.
+
+        This is the clean start-failure path: the primary raises before yielding
+        anything, so the fallback can safely re-stream from the beginning.
+        """
+
+        def _fail_before_first_token(*_args, **_kwargs):
+            raise _RetryableError("connect timeout")
+            yield  # make it a generator  # pylint: disable=unreachable
+
+        primary = MagicMock()
+        primary.stream = _fail_before_first_token
+        fb_chunk = MagicMock(content="fb-tok")
+        fallback = MagicMock()
+        fallback.stream.return_value = iter([fb_chunk])
+        policy = FallbackPolicy(retryable_exceptions=(_RetryableError,))
+        llm = FallbackLLM(primary=primary, fallbacks=[fallback], policy=policy)
+
+        chunks = list(llm.stream(["msg"]))
+
+        assert len(chunks) == 1
+        assert chunks[0].content == "fb-tok"
+        fallback.stream.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -883,3 +941,80 @@ class TestFallbackLLMAstream:
         chunks = asyncio.run(_run())
         assert len(chunks) == 1
         assert chunks[0].content == "fb-async"
+
+    def test_astream_mid_stream_failure_propagates_no_fallback(self):
+        """astream() mid-stream failure propagates; fallback NOT tried.
+
+        Once the primary has yielded >= 1 token via astream(), any subsequent
+        failure must propagate immediately.  Falling over would concatenate the
+        primary's partial output with the fallback's full output.
+        """
+        mid_err = _RetryableError("async connection reset mid-stream")
+
+        async def _run():
+            async def _astream_partial(*_args, **_kwargs):
+                yield MagicMock(content="async-tok1")
+                raise mid_err
+
+            fallback_call_count = [0]
+
+            async def _astream_fb(*_args, **_kwargs):
+                fallback_call_count[0] += 1
+                yield MagicMock(content="should-not-appear")
+
+            primary = MagicMock()
+            primary.astream = _astream_partial
+            fallback = MagicMock()
+            fallback.astream = _astream_fb
+            policy = FallbackPolicy(retryable_exceptions=(_RetryableError,))
+            llm = FallbackLLM(primary=primary, fallbacks=[fallback], policy=policy)
+
+            collected = []
+            raised = None
+            try:
+                async for chunk in llm.astream(["msg"]):
+                    collected.append(chunk)
+            except _RetryableError as exc:
+                raised = exc
+            return collected, raised, fallback_call_count[0]
+
+        collected, raised, fb_calls = asyncio.run(_run())
+
+        assert len(collected) == 1
+        assert collected[0].content == "async-tok1"
+        assert raised is mid_err
+        assert fb_calls == 0  # fallback was never entered
+
+    def test_astream_pre_token_retryable_falls_to_fallback(self):
+        """astream() pre-token retryable failure falls back cleanly.
+
+        The primary raises before yielding any token, so the fallback can
+        safely re-stream from the beginning with no output duplication.
+        """
+
+        async def _run():
+            async def _astream_fail_early(*_args, **_kwargs):
+                raise _RetryableError("async connect timeout")
+                yield  # make it a generator  # pylint: disable=unreachable
+
+            fb_chunk = MagicMock(content="async-fb-tok")
+            fallback_call_count = [0]
+
+            async def _astream_fb_ok(*_args, **_kwargs):
+                fallback_call_count[0] += 1
+                yield fb_chunk
+
+            primary = MagicMock()
+            primary.astream = _astream_fail_early
+            fallback = MagicMock()
+            fallback.astream = _astream_fb_ok
+            policy = FallbackPolicy(retryable_exceptions=(_RetryableError,))
+            llm = FallbackLLM(primary=primary, fallbacks=[fallback], policy=policy)
+            chunks = [c async for c in llm.astream(["msg"])]
+            return chunks, fallback_call_count[0]
+
+        chunks, fb_calls = asyncio.run(_run())
+
+        assert len(chunks) == 1
+        assert chunks[0].content == "async-fb-tok"
+        assert fb_calls == 1  # fallback was called exactly once
