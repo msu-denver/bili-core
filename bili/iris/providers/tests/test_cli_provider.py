@@ -40,6 +40,11 @@ from bili.iris.providers.cli_provider import (
     render_messages,
     strip_ansi,
 )
+from bili.iris.providers.fallback import (
+    _DEFAULT_RETRYABLE_NAMES,
+    DEFAULT_POLICY,
+    FallbackLLM,
+)
 from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 # ---------------------------------------------------------------------------
@@ -571,6 +576,41 @@ class TestAStream:
         assert len(chunks) == 1
         assert chunks[0].message.content == "async result"
 
+    def test_astream_does_not_block_event_loop(self):
+        """_astream runs the blocking subprocess in a thread executor.
+
+        Verify that _call_cli is invoked via asyncio.to_thread by patching
+        asyncio.to_thread and asserting it is awaited with the correct
+        callable.  This ensures the event loop is not blocked for the
+        duration of the subprocess call.
+        """
+
+        async def _run():
+            """Async inner coroutine that patches asyncio.to_thread."""
+            llm = _llm()
+            to_thread_calls = []
+
+            async def fake_to_thread(func, *args, **kwargs):
+                """Capture the call and return a fixed value."""
+                to_thread_calls.append((func, args, kwargs))
+                return "threaded result"
+
+            with patch("asyncio.to_thread", side_effect=fake_to_thread):
+                chunks = []
+                async for chunk in llm._astream(messages=[_human("hi")]):
+                    chunks.append(chunk)
+            return to_thread_calls, chunks
+
+        calls, chunks = asyncio.run(_run())
+        # asyncio.to_thread must have been called exactly once
+        assert len(calls) == 1
+        # The first positional arg to to_thread is the callable (_call_cli)
+        func, _args, _ = calls[0]
+        assert callable(func)
+        # The result from to_thread is used as the chunk content
+        assert len(chunks) == 1
+        assert chunks[0].message.content == "threaded result"
+
 
 # ---------------------------------------------------------------------------
 # Integration: full invoke() path
@@ -720,3 +760,83 @@ class TestLLMType:
         """The _llm_type property returns 'cli'."""
         llm = _llm()
         assert llm._llm_type == "cli"
+
+
+# ---------------------------------------------------------------------------
+# FallbackLLM integration: CliLLMError retryability
+# ---------------------------------------------------------------------------
+
+
+class TestCliLLMErrorRetryability:
+    """Verify CliLLMError is treated as retryable by the fallback engine.
+
+    The fallback engine's DEFAULT_POLICY must classify CliLLMError as
+    retryable so that a CLI provider can be placed at the front of a fallback
+    chain (e.g. try the CLI first, fall through to an API provider if it
+    fails) without requiring consumers to write a custom FallbackPolicy.
+    """
+
+    def test_default_policy_treats_cli_llm_error_as_retryable(self):
+        """DEFAULT_POLICY.should_fallback(CliLLMError(...)) returns True."""
+        err = CliLLMError("subprocess exited with code 1")
+        assert DEFAULT_POLICY.should_fallback(err) is True
+
+    def test_cli_llm_error_name_in_retryable_names(self):
+        """'CliLLMError' appears in the fallback engine's retryable name set."""
+        assert "CliLLMError" in _DEFAULT_RETRYABLE_NAMES
+
+    def test_fallback_llm_falls_over_on_cli_error(self):
+        """A FallbackLLM with a failing CliLLM primary falls through to the next
+        provider.
+
+        Construct a FallbackLLM where:
+        - primary is a CliLLM that always raises CliLLMError
+        - fallback is a mock LLM that succeeds
+
+        Assert that the FallbackLLM's invoke() returns the fallback's response,
+        not the primary's error.
+        """
+        # Primary: a CliLLM configured to always fail
+        primary = _llm()
+        primary._call_cli = MagicMock(  # type: ignore[method-assign]
+            side_effect=CliLLMError("CLI tool crashed")
+        )
+
+        # Fallback: a simple mock that succeeds
+        fallback_response = AIMessage(content="API fallback succeeded")
+        fallback_llm = MagicMock()
+        fallback_llm.invoke = MagicMock(return_value=fallback_response)
+
+        chain = FallbackLLM(primary=primary, fallbacks=[fallback_llm])
+        result = chain.invoke([_human("hello")])
+
+        # The fallback response must be returned
+        assert result is fallback_response
+        # The primary must have been tried
+        primary._call_cli.assert_called_once()
+        # The fallback must have been invoked
+        fallback_llm.invoke.assert_called_once()
+
+    def test_fallback_not_triggered_for_non_retryable_errors(self):
+        """A FallbackLLM does NOT fall over on a ValueError from the primary.
+
+        ValueError is not in the retryable set, so the chain must re-raise it
+        immediately rather than trying the fallback.
+        """
+        primary = _llm()
+        primary._call_cli = MagicMock(  # type: ignore[method-assign]
+            side_effect=ValueError("bad configuration")
+        )
+
+        fallback_llm = MagicMock()
+        fallback_llm.invoke = MagicMock(
+            return_value=AIMessage(content="should not reach")
+        )
+
+        chain = FallbackLLM(primary=primary, fallbacks=[fallback_llm])
+
+        with pytest.raises(ValueError, match="bad configuration"):
+            chain.invoke([_human("hello")])
+
+        # The fallback must NOT have been called
+        fallback_llm.invoke.assert_not_called()

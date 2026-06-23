@@ -68,12 +68,13 @@ No new optional dependency is required; the module uses stdlib ``subprocess``
 and ``re`` only.
 """
 
+import asyncio
 import logging
 import os
 import re
 import subprocess
 import tempfile
-from typing import Any, Iterator, List, Optional, Tuple
+from typing import Any, AsyncIterator, Iterator, List, Optional, Tuple
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -456,12 +457,16 @@ class CliLLM(BaseChatModel):
         stop: Optional[List[str]] = None,  # pylint: disable=unused-argument
         run_manager: Optional[Any] = None,  # pylint: disable=unused-argument
         **kwargs: Any,  # pylint: disable=unused-argument
-    ):
-        """Async stream — delegates to the sync path (subprocess is blocking).
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """Async stream the CLI response as a single chunk without blocking
+        the event loop.
 
-        Yields the full response as a single :class:`AIMessageChunk`.
+        The subprocess is run in a thread via :func:`asyncio.to_thread` so the
+        event loop remains free for other coroutines while the CLI tool
+        executes.  Yields the full response as a single
+        :class:`ChatGenerationChunk` once the subprocess completes.
         """
-        content = self._call_cli(messages)
+        content = await asyncio.to_thread(self._call_cli, messages)
         yield ChatGenerationChunk(message=AIMessageChunk(content=content))
 
 
