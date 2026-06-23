@@ -592,6 +592,142 @@ class TestMcpClientConfig:
 
 
 # ---------------------------------------------------------------------------
+# Loader branch coverage: aopen, exception paths, overwrite warning,
+# server_configs=None default, legacy __aexit__ session close path
+# ---------------------------------------------------------------------------
+
+
+class TestLoaderBranchCoverage:
+    """Cover branches in loader.py that are not hit by the main scenario tests."""
+
+    def test_lifecycle_aopen(self):
+        """McpLifecycle.aopen() returns the registered tool names."""
+        ss = _make_server_session("aopen_srv", ["t1"])
+        lifecycle = register_mcp_tools([ss])
+        try:
+            names = asyncio.run(lifecycle.aopen())
+            assert "aopen_srv__t1" in names
+        finally:
+            asyncio.run(lifecycle.close())
+
+    def test_lifecycle_close_handles_session_close_failure(self):
+        """McpLifecycle.close() logs and continues when a session fails to close."""
+        from bili.iris.loaders.tools_loader import TOOL_REGISTRY
+
+        # Build a server session whose close() raises
+        ss = _make_server_session("fail_srv", ["tool"])
+        ss._client.aclose = AsyncMock(
+            side_effect=RuntimeError("close failed")
+        )  # pylint: disable=protected-access
+
+        lifecycle = register_mcp_tools([ss])
+        # close() must NOT propagate the exception -- it logs and continues
+        asyncio.run(lifecycle.close())
+        # Tool must still be removed from TOOL_REGISTRY despite the session error
+        assert "fail_srv__tool" not in TOOL_REGISTRY
+
+    def test_register_mcp_tools_overwrites_existing_entry(self):
+        """register_mcp_tools logs a warning when overwriting an existing TOOL_REGISTRY key."""
+        from bili.iris.loaders.tools_loader import TOOL_REGISTRY
+
+        # Pre-seed a key that will be overwritten
+        TOOL_REGISTRY["overwrite_srv__mytool"] = lambda n, p, params: None
+
+        ss = _make_server_session("overwrite_srv", ["mytool"])
+        lifecycle = register_mcp_tools([ss])
+        try:
+            # No exception; the warning was logged (not asserted here -- just coverage)
+            assert "overwrite_srv__mytool" in TOOL_REGISTRY
+        finally:
+            asyncio.run(lifecycle.close())
+
+    def test_initialize_mcp_servers_uses_default_config_when_none(self):
+        """initialize_mcp_servers uses MCP_SERVERS when server_configs=None."""
+
+        # All entries in MCP_SERVERS are disabled by default, so no sessions are
+        # returned -- but the branch (importing MCP_SERVERS) still executes.
+        async def _run():
+            return await initialize_mcp_servers(server_configs=None)
+
+        sessions = asyncio.run(_run())
+        # The built-in example_server is disabled; no sessions should be created
+        assert isinstance(sessions, list)
+
+    def test_initialize_mcp_servers_cleans_up_on_connect_failure(self):
+        """initialize_mcp_servers tears down the exit_stack when a server fails."""
+        bad_client = AsyncMock()
+        bad_client.__aenter__ = AsyncMock(side_effect=RuntimeError("connect failed"))
+        bad_client.__aexit__ = AsyncMock(return_value=False)
+
+        configs = {
+            "fail_srv": {
+                "transport": "stdio",
+                "command": "fake",
+                "args": [],
+                "enabled": True,
+            }
+        }
+
+        with patch("bili.iris.mcp.loader.McpClient", return_value=bad_client):
+
+            async def _run():
+                return await initialize_mcp_servers(server_configs=configs)
+
+            with pytest.raises(RuntimeError, match="connect failed"):
+                asyncio.run(_run())
+
+    def test_initialize_mcp_servers_cleanup_survives_aclose_failure(self):
+        """The inner except in initialize_mcp_servers swallows aclose() errors.
+
+        When exit_stack.aclose() itself raises, the inner except: pass swallows
+        it and the original connection error propagates.
+        """
+        import contextlib
+
+        bad_client = AsyncMock()
+        bad_client.__aenter__ = AsyncMock(side_effect=RuntimeError("enter failed"))
+        bad_client.__aexit__ = AsyncMock(return_value=False)
+
+        configs = {
+            "double_fail": {
+                "transport": "stdio",
+                "command": "fake",
+                "args": [],
+                "enabled": True,
+            }
+        }
+
+        async def _broken_aclose(self):
+            raise RuntimeError("aclose also failed")
+
+        with patch("bili.iris.mcp.loader.McpClient", return_value=bad_client):
+            with patch.object(contextlib.AsyncExitStack, "aclose", _broken_aclose):
+
+                async def _run():
+                    return await initialize_mcp_servers(server_configs=configs)
+
+                # Original "enter failed" propagates; "aclose also failed" is swallowed
+                with pytest.raises(RuntimeError, match="enter failed"):
+                    asyncio.run(_run())
+
+    def test_mcpserversession_close_legacy_path(self):
+        """McpServerSession.close() uses __aexit__ when _client has no aclose."""
+        # Build a mock client WITHOUT aclose to hit the legacy __aexit__ branch
+        legacy_client = MagicMock(spec=["__aexit__"])
+        legacy_client.__aexit__ = AsyncMock(return_value=False)
+
+        session, mcp_tools = _make_mock_session(["t"])
+        ss = McpServerSession(
+            server_name="legacy",
+            session=session,
+            mcp_tools=mcp_tools,
+            client=legacy_client,
+        )
+        asyncio.run(ss.close())
+        legacy_client.__aexit__.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
 # Real-CLI integration test (gated)
 # ---------------------------------------------------------------------------
 

@@ -8,6 +8,7 @@ without requiring the real ``mcp`` package to be installed in a special state.
 # pylint: disable=too-few-public-methods, not-callable
 
 import asyncio
+import sys
 import threading
 import time
 from typing import Any, Optional
@@ -317,6 +318,72 @@ class TestBuildArgsSchema:
         """A missing properties key returns None."""
         result = _build_args_schema("t", {})
         assert result is None
+
+    def test_pydantic_import_error_returns_none(self):
+        """Returns None gracefully when pydantic is not installed."""
+        saved = sys.modules.get("pydantic")
+        sys.modules["pydantic"] = None  # type: ignore[assignment]
+        try:
+            schema = {
+                "type": "object",
+                "properties": {"x": {"type": "string"}},
+                "required": ["x"],
+            }
+            result = _build_args_schema("t", schema)
+            assert result is None
+        finally:
+            if saved is None:
+                sys.modules.pop("pydantic", None)
+            else:
+                sys.modules["pydantic"] = saved
+
+    def test_create_model_failure_returns_none(self):
+        """Returns None when create_model raises an unexpected exception."""
+        with patch(
+            "bili.iris.mcp.adapters.tool_adapter._build_args_schema",
+            wraps=_build_args_schema,
+        ):
+            # Patch create_model to raise
+            with patch("pydantic.create_model", side_effect=TypeError("bad schema")):
+                schema = {
+                    "type": "object",
+                    "properties": {"x": {"type": "string"}},
+                    "required": ["x"],
+                }
+                result = _build_args_schema("t", schema)
+                assert result is None
+
+
+# ---------------------------------------------------------------------------
+# mcp_tool_to_langchain (ImportError path)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpToolToLangchainImportError:
+    """Verify ImportError is raised when langchain_core is absent."""
+
+    def test_langchain_core_missing_raises_import_error(self):
+        """mcp_tool_to_langchain raises ImportError when langchain_core is absent."""
+        saved = sys.modules.get("langchain_core")
+        sys.modules["langchain_core"] = None  # type: ignore[assignment]
+        # Also clear the tools submodule if cached
+        saved_tools = sys.modules.pop("langchain_core.tools", None)
+
+        try:
+
+            async def _call(_n, _a):
+                return ""
+
+            tool = _make_mcp_tool("t")
+            with pytest.raises(ImportError, match="langchain_core"):
+                mcp_tool_to_langchain("srv", tool, _call)
+        finally:
+            if saved is None:
+                sys.modules.pop("langchain_core", None)
+            else:
+                sys.modules["langchain_core"] = saved
+            if saved_tools is not None:
+                sys.modules["langchain_core.tools"] = saved_tools
 
 
 # ---------------------------------------------------------------------------
