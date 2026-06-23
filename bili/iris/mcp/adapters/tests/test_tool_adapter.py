@@ -8,6 +8,8 @@ without requiring the real ``mcp`` package to be installed in a special state.
 # pylint: disable=too-few-public-methods, not-callable
 
 import asyncio
+import threading
+import time
 from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +19,7 @@ from bili.iris.mcp.adapters.tool_adapter import (
     MCP_TOOL_NAMESPACE_SEP,
     _build_args_schema,
     _run_async_sync,
+    _run_on_loop,
     extract_text_from_result,
     mcp_tool_to_langchain,
     mcp_tools_to_langchain,
@@ -104,6 +107,112 @@ class TestRunAsyncSync:
             return {"key": "value", "count": 99}
 
         assert _run_async_sync(_coro()) == {"key": "value", "count": 99}
+
+
+# ---------------------------------------------------------------------------
+# _run_on_loop
+# ---------------------------------------------------------------------------
+
+
+class TestRunOnLoop:
+    """Tests for the session-loop-aware sync bridge."""
+
+    def test_runs_on_idle_loop(self):
+        """A coroutine runs to completion when the loop is not running."""
+        loop = asyncio.new_event_loop()
+        try:
+
+            async def _coro():
+                return "idle_result"
+
+            result = _run_on_loop(loop, _coro())
+            assert result == "idle_result"
+        finally:
+            loop.close()
+
+    def test_propagates_exception_on_idle_loop(self):
+        """Exceptions from the coroutine propagate to the sync caller."""
+        loop = asyncio.new_event_loop()
+        try:
+
+            async def _coro():
+                raise ValueError("loop error")
+
+            with pytest.raises(ValueError, match="loop error"):
+                _run_on_loop(loop, _coro())
+        finally:
+            loop.close()
+
+    def test_runs_from_different_thread_on_running_loop(self):
+        """When the loop is running in another thread, run_coroutine_threadsafe is used."""
+        results = []
+        loop = asyncio.new_event_loop()
+
+        async def _session_coro():
+            return "cross_thread"
+
+        def _run_loop():
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(target=_run_loop, daemon=True)
+        thread.start()
+
+        # Give the loop a moment to start
+        time.sleep(0.05)
+
+        try:
+            # Call from the main thread onto the running loop
+            result = _run_on_loop(loop, _session_coro())
+            results.append(result)
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=2)
+            loop.close()
+
+        assert results == ["cross_thread"]
+
+    def test_sync_tool_uses_session_loop(self):
+        """The sync func path of a StructuredTool calls back on the session's loop.
+
+        This is the key regression test for cross-loop session misuse.  The
+        call_tool_fn checks that it is running on the expected loop.  A wrong
+        loop would cause the session's asyncio objects to raise errors.
+        """
+        expected_loop = asyncio.new_event_loop()
+        observed_loops = []
+
+        async def _call(_tool_name: str, _arguments: dict) -> str:
+            # Record which loop is running this coroutine
+            observed_loops.append(asyncio.get_event_loop())
+            return "ok"
+
+        # Create the adapter while the expected_loop is set as "current"
+        # so it is captured as _session_loop.
+        original_loop = None
+        try:
+            original_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            pass
+
+        asyncio.set_event_loop(expected_loop)
+        try:
+            tool = _make_mcp_tool("t")
+            lc_tool = mcp_tool_to_langchain("srv", tool, _call)
+        finally:
+            # Restore the original loop (or clear it)
+            if original_loop is not None:
+                asyncio.set_event_loop(original_loop)
+            else:
+                asyncio.set_event_loop(None)
+
+        # Now call the sync path -- it should route back to expected_loop
+        result = lc_tool.func()  # type: ignore[operator]
+        assert result == "ok"
+        assert len(observed_loops) == 1
+        assert observed_loops[0] is expected_loop
+
+        expected_loop.close()
 
 
 # ---------------------------------------------------------------------------

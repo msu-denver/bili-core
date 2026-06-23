@@ -107,9 +107,9 @@ class TestMcpServerSession:
         ss = _make_server_session("srv", ["t"])
         asyncio.run(ss.close())
         # AsyncMock auto-creates aclose; the production path calls aclose().
-        assert (
-            ss._client.aclose.called or ss._client.__aexit__.called
-        )  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        assert ss._client.aclose.called or ss._client.__aexit__.called
+        # pylint: enable=protected-access
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +160,9 @@ class TestRegisterMcpTools:
         lifecycle = register_mcp_tools([ss])
         asyncio.run(lifecycle.close())
         # aclose or __aexit__ called confirms teardown
-        assert (
-            ss._client.aclose.called or ss._client.__aexit__.called
-        )  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        assert ss._client.aclose.called or ss._client.__aexit__.called
+        # pylint: enable=protected-access
 
     def test_async_context_manager_returns_tool_names(self):
         """async with lifecycle as tool_names yields the registered names."""
@@ -285,14 +285,15 @@ class TestToolRoundTrip:
 # ---------------------------------------------------------------------------
 
 
+def _make_patched_client(tool_names: List[str]):
+    """Return a mock McpClient tuple (client, session, mcp_tools)."""
+    session, mcp_tools = _make_mock_session(tool_names)
+    client = _make_mock_client(session)
+    return client, session, mcp_tools
+
+
 class TestInitializeMcpServers:
     """Tests for initialize_mcp_servers() with a mock McpClient."""
-
-    def _make_patched_client(self, tool_names: List[str]):
-        """Return a mock McpClient that advertises the given tools."""
-        session, mcp_tools = _make_mock_session(tool_names)
-        client = _make_mock_client(session)
-        return client, session, mcp_tools
 
     def test_disabled_server_skipped(self):
         """A server with enabled=False is not initialized."""
@@ -332,7 +333,7 @@ class TestInitializeMcpServers:
 
     def test_enabled_server_initialized(self):
         """An enabled server in active_servers returns a McpServerSession."""
-        client_mock, _session, _tools = self._make_patched_client(["tool_a"])
+        client_mock, _session, _tools = _make_patched_client(["tool_a"])
 
         configs = {
             "live_srv": {
@@ -361,7 +362,7 @@ class TestInitializeMcpServers:
 
     def test_session_has_discovered_tools(self):
         """The returned McpServerSession holds the tools from list_tools()."""
-        client_mock, _s, _t = self._make_patched_client(["tool_x", "tool_y", "tool_z"])
+        client_mock, _s, _t = _make_patched_client(["tool_x", "tool_y", "tool_z"])
         configs = {
             "multi_srv": {
                 "transport": "stdio",
@@ -383,8 +384,8 @@ class TestInitializeMcpServers:
 
     def test_multiple_servers_all_initialized(self):
         """Multiple enabled servers all produce McpServerSessions."""
-        client1, _s1, _t1 = self._make_patched_client(["t1"])
-        client2, _s2, _t2 = self._make_patched_client(["t2"])
+        client1, _s1, _t1 = _make_patched_client(["t1"])
+        client2, _s2, _t2 = _make_patched_client(["t2"])
 
         configs = {
             "srv1": {
@@ -431,10 +432,7 @@ class TestInitializeMcpServersSync:
 
     def test_sync_wrapper_returns_sessions(self):
         """initialize_mcp_servers_sync returns the same result as the async version."""
-        helper = TestInitializeMcpServers()
-        client_mock, _s, _t = helper._make_patched_client(
-            ["t"]
-        )  # pylint: disable=protected-access
+        client_mock, _s, _t = _make_patched_client(["t"])
         configs = {
             "sync_srv": {
                 "transport": "stdio",
@@ -478,51 +476,119 @@ class TestMcpConfig:
 
 
 # ---------------------------------------------------------------------------
+# McpClient environment building
+# ---------------------------------------------------------------------------
+
+
+class TestMcpClientEnv:
+    """Tests for McpClient._build_env() -- no real subprocess spawned."""
+
+    def test_inherited_no_passthrough_returns_none(self):
+        """auth='inherited' with no env_passthrough returns None (full env inherit)."""
+        from bili.iris.mcp.client import McpClient
+
+        client = McpClient(
+            "srv", {"transport": "stdio", "command": "fake", "auth": "inherited"}
+        )
+        result = client._build_env()  # pylint: disable=protected-access
+        assert result is None
+
+    def test_default_auth_returns_none(self):
+        """No auth key (defaults to 'inherited') returns None."""
+        from bili.iris.mcp.client import McpClient
+
+        client = McpClient("srv", {"transport": "stdio", "command": "fake"})
+        result = client._build_env()  # pylint: disable=protected-access
+        assert result is None
+
+    def test_auth_none_also_returns_none(self):
+        """auth='none' with no env_passthrough still returns None.
+
+        'none' means no auth credentials, not no environment.  The subprocess
+        must inherit at least PATH so it can locate executables.
+        """
+        from bili.iris.mcp.client import McpClient
+
+        client = McpClient(
+            "srv", {"transport": "stdio", "command": "fake", "auth": "none"}
+        )
+        result = client._build_env()  # pylint: disable=protected-access
+        # Must NOT return {} (empty env) -- the subprocess needs PATH etc.
+        assert result is None
+
+    def test_env_passthrough_restricts_to_listed_vars_plus_baseline(self):
+        """env_passthrough forwards only listed vars and the safety baseline."""
+        from bili.iris.mcp.client import McpClient
+
+        client = McpClient(
+            "srv",
+            {
+                "transport": "stdio",
+                "command": "fake",
+                "env_passthrough": ["MY_API_KEY"],
+            },
+        )
+        env = client._build_env()  # pylint: disable=protected-access
+        assert env is not None
+        # "PATH" is always in the baseline (if present in os.environ)
+        if "PATH" in os.environ:
+            assert "PATH" in env
+        # Listed var is forwarded if present
+        if "MY_API_KEY" in os.environ:
+            assert "MY_API_KEY" in env
+
+    def test_env_passthrough_never_empty(self):
+        """env_passthrough result always contains at least the PATH baseline."""
+        from bili.iris.mcp.client import McpClient
+
+        client = McpClient(
+            "srv",
+            {
+                "transport": "stdio",
+                "command": "fake",
+                "env_passthrough": [],  # empty explicit list
+            },
+        )
+        env = client._build_env()  # pylint: disable=protected-access
+        # Even with an empty passthrough list, PATH (if set) must be present
+        if "PATH" in os.environ:
+            assert env is not None
+            assert "PATH" in env
+
+
+# ---------------------------------------------------------------------------
 # McpClient config validation
 # ---------------------------------------------------------------------------
 
 
 class TestMcpClientConfig:
-    """Tests for McpClient's config validation (no real connection)."""
+    """Tests for McpClient's config validation.
+
+    Validation is pure Python (no mcp SDK import), so these tests pass
+    even when the mcp optional extra is NOT installed.  Errors are raised
+    at construction time, not at connect time.
+    """
 
     def test_stdio_missing_command_raises(self):
-        """A stdio config without 'command' raises ValueError on open."""
+        """A stdio config without 'command' raises ValueError at construction."""
         from bili.iris.mcp.client import McpClient
-
-        client = McpClient("bad_srv", {"transport": "stdio", "args": []})
-
-        async def _run():
-            async with client:
-                pass
 
         with pytest.raises(ValueError, match="'command' is required"):
-            asyncio.run(_run())
+            McpClient("bad_srv", {"transport": "stdio", "args": []})
 
     def test_http_missing_url_raises(self):
-        """An http config without 'url' raises ValueError on open."""
+        """An http config without 'url' raises ValueError at construction."""
         from bili.iris.mcp.client import McpClient
-
-        client = McpClient("bad_http", {"transport": "http"})
-
-        async def _run():
-            async with client:
-                pass
 
         with pytest.raises(ValueError, match="'url' is required"):
-            asyncio.run(_run())
+            McpClient("bad_http", {"transport": "http"})
 
     def test_unsupported_transport_raises(self):
-        """An unknown transport raises ValueError."""
+        """An unknown transport raises ValueError at construction."""
         from bili.iris.mcp.client import McpClient
 
-        client = McpClient("bad_t", {"transport": "grpc"})
-
-        async def _run():
-            async with client:
-                pass
-
         with pytest.raises(ValueError, match="unsupported transport"):
-            asyncio.run(_run())
+            McpClient("bad_t", {"transport": "grpc"})
 
 
 # ---------------------------------------------------------------------------

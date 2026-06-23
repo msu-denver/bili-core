@@ -17,19 +17,40 @@ Sync/async bridge
 The ``mcp`` SDK is fully async.  AETHER and IRIS agents may invoke tools
 synchronously (via LangChain's ``tool.invoke(...)``).  The bridge strategy:
 
-1. Try ``asyncio.get_event_loop().run_until_complete(coro)``.  This works
-   when there is no currently running event loop in the caller's thread
-   (the typical case for sync LangChain agent execution).
+1. If no loop is running in this thread, run via ``loop.run_until_complete(coro)``.
+   This is the normal sync-agent case (e.g. LangChain ``AgentExecutor`` without
+   ``arun``).  The MCP session is always invoked on the same loop it was created
+   on because the session object is captured at construction time; the loop
+   that created the session is the one that runs this call.
 
 2. If a loop IS already running (e.g. inside ``asyncio.run`` or Jupyter),
    ``run_until_complete`` raises ``RuntimeError: This event loop is already
-   running.``  In that case, submit the coroutine to a fresh
-   ``concurrent.futures.ThreadPoolExecutor`` thread, which has its own fresh
-   event loop.  ``asyncio.run(coro)`` inside the thread handles it cleanly.
+   running.``  In that case, submit to a fresh background thread via
+   ``concurrent.futures.ThreadPoolExecutor`` and call ``asyncio.run(coro)``
+   there.  **Important limitation:** the coroutine passed here must be
+   self-contained and must NOT hold references to asyncio primitives
+   (streams, locks, queues) that were created on the outer event loop.  MCP
+   ``ClientSession`` objects carry such primitives internally, so calling a
+   real MCP session through this path will fail.  The correct approach for an
+   async caller is to use the ``coroutine`` path on the ``StructuredTool``
+   directly, which avoids the bridge entirely.  The thread-executor branch is
+   preserved for callers that genuinely have a running loop AND only pass
+   self-contained coroutines (e.g. test helpers, simple async wrappers).
 
 This approach requires no extra dependencies (stdlib only) and avoids
 ``nest_asyncio``, which patches the running loop globally and can cause
 subtle interference in multi-agent scenarios.
+
+Loop binding for MCP sessions
+------------------------------
+MCP ``ClientSession`` objects are bound to the event loop they were created
+on (they hold internal asyncio streams and primitives).  The sync bridge
+:func:`_run_async_sync` is safe for real MCP sessions ONLY when there is no
+running loop in the calling thread (branch 1 above).  For the session-aware
+sync invocation path, :func:`mcp_tool_to_langchain` captures the running
+loop at adapter-creation time (via ``asyncio.get_event_loop()``) and uses
+that specific loop for all sync calls.  This ensures the session is always
+called on its own loop regardless of the caller's context.
 
 Namespacing
 -----------
@@ -64,7 +85,7 @@ MCP_TOOL_NAMESPACE_SEP = "__"
 
 
 # ---------------------------------------------------------------------------
-# Async → sync bridge
+# Async -> sync bridge
 # ---------------------------------------------------------------------------
 
 
@@ -72,9 +93,17 @@ def _run_async_sync(coro) -> Any:
     """Run *coro* to completion in a sync context without blocking an active loop.
 
     Strategy:
-    1. If no loop is running in this thread, run in the thread's event loop.
-    2. If a loop IS already running, submit to a fresh background thread
-       (which has no running loop) and wait for the result.
+
+    1. If no loop is running in this thread, run via
+       ``loop.run_until_complete(coro)``.  Safe for coroutines that reference
+       asyncio objects (streams, locks) created on this loop.
+
+    2. If a loop IS already running, submit to a fresh background thread and
+       call ``asyncio.run(coro)`` there.  The coroutine must NOT reference
+       asyncio objects from the outer loop -- only self-contained coroutines
+       are safe through this path.  For real MCP sessions (which are bound
+       to their creation loop), use the async ``coroutine`` path on the
+       ``StructuredTool`` instead.
 
     :param coro: An awaitable coroutine.
     :returns: The coroutine's return value.
@@ -90,9 +119,39 @@ def _run_async_sync(coro) -> Any:
     if loop.is_running():
         # Already inside a running loop (e.g. async agent, Jupyter).
         # Run in a fresh thread so we get a clean loop context.
+        # NOTE: coroutine must be self-contained (no outer-loop asyncio refs).
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(asyncio.run, coro)
             return future.result()
+
+    return loop.run_until_complete(coro)
+
+
+def _run_on_loop(loop: asyncio.AbstractEventLoop, coro) -> Any:
+    """Run *coro* on the specific *loop*, regardless of the caller's thread.
+
+    Used by the sync invocation path for MCP tools so that session methods
+    are always called on the event loop the session was created on.
+
+    - If the loop is NOT running (caller is in a sync context): uses
+      ``loop.run_until_complete(coro)``.
+    - If the loop IS running (caller is inside an async context in another
+      thread, or the loop was resumed): submits to the loop via
+      ``asyncio.run_coroutine_threadsafe`` and blocks the calling thread
+      until the result is ready.  The coroutine runs on the session's own
+      loop, so session-internal asyncio objects remain on their home loop.
+
+    :param loop: The event loop the session was created on.
+    :param coro: An awaitable coroutine that uses objects bound to *loop*.
+    :returns: The coroutine's return value.
+    :raises Exception: Propagates any exception raised by *coro*.
+    """
+    if loop.is_running():
+        # Submit to the running loop from this (presumably different) thread
+        # and block until done.  This is the correct cross-thread call pattern
+        # for asyncio objects that are bound to a specific loop.
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
 
     return loop.run_until_complete(coro)
 
@@ -204,8 +263,17 @@ def mcp_tool_to_langchain(
 
     args_schema = _build_args_schema(namespaced_name, input_schema)
 
+    # Capture the event loop that is current at adapter-creation time.
+    # The MCP session (and all its internal asyncio objects) was created on
+    # this loop, so the sync invocation path MUST call back onto the same
+    # loop to avoid cross-loop errors with real sessions.
+    try:
+        _session_loop: Optional[asyncio.AbstractEventLoop] = asyncio.get_event_loop()
+    except RuntimeError:
+        _session_loop = None
+
     async def _async_invoke(**kwargs: Any) -> str:
-        """Async tool invocation path — called by async LangChain agents."""
+        """Async tool invocation path -- called by async LangChain agents."""
         LOGGER.debug(
             "MCP tool '%s' async call with args: %s",
             namespaced_name,
@@ -214,7 +282,13 @@ def mcp_tool_to_langchain(
         return await call_tool_fn(tool_name, kwargs)
 
     def _sync_invoke(**kwargs: Any) -> str:
-        """Sync tool invocation path — bridges async MCP call for sync agents."""
+        """Sync tool invocation path -- calls back onto the session's own loop.
+
+        Uses :func:`_run_on_loop` with the event loop captured at adapter-
+        creation time so that the MCP session's internal asyncio objects
+        (streams, read/write primitives) are always called on their home loop,
+        regardless of which thread or loop the sync caller is on.
+        """
         LOGGER.debug(
             "MCP tool '%s' sync call with args: %s",
             namespaced_name,
@@ -224,6 +298,10 @@ def mcp_tool_to_langchain(
         async def _coro():
             return await call_tool_fn(tool_name, kwargs)
 
+        if _session_loop is not None:
+            return _run_on_loop(_session_loop, _coro())
+        # No loop was running at adapter-creation time; fall back to
+        # _run_async_sync which creates a fresh loop.
         return _run_async_sync(_coro())
 
     structured_tool = StructuredTool(
