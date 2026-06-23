@@ -548,6 +548,7 @@ _MUST_BE_EXTRAS_ONLY = {
     # DB adapters
     "pymongo",
     "motor",
+    "langchain_mongodb",
     "langgraph_checkpoint_mongodb",
     "psycopg2",
     "langgraph_checkpoint_postgres",
@@ -655,6 +656,7 @@ class TestInstallRequiresIsLean:
             "firebase_admin",
             "flask",
             "transformers",
+            "langchain_mongodb",
             "langgraph_checkpoint_mongodb",
             "langgraph_checkpoint_postgres",
         }

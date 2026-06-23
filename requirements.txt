@@ -60,7 +60,6 @@ requests~=2.32.3
 # of the lean-core packages above.
 
 # LangChain ecosystem
-langchain-mongodb==0.8.0
 langgraph-prebuilt==1.0.8  # Pin: 1.0.9 imports ExecutionInfo absent in langgraph==1.0.2
 
 # Runtime glue
@@ -78,5 +77,3 @@ googleapis-common-protos==1.72.0
 grpc-google-iam-v1==0.14.3
 proto-plus==1.26.1
 
-# YAML / pydantic
-pylint-pydantic==0.3.2
