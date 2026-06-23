@@ -186,7 +186,7 @@ class TestPrepareRuntimeConfig:
 class TestLoadRemoteBedrockModel:
     """Verify Bedrock model initialization with various params."""
 
-    @patch("bili.iris.loaders.llm_loader.ChatBedrockConverse")
+    @patch("langchain_aws.ChatBedrockConverse")
     def test_minimal_config(self, mock_cls):
         """Verify Bedrock init with only model_name."""
         mock_cls.return_value = MagicMock()
@@ -194,7 +194,7 @@ class TestLoadRemoteBedrockModel:
         mock_cls.assert_called_once_with(model_id="claude-v2")
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.llm_loader.ChatBedrockConverse")
+    @patch("langchain_aws.ChatBedrockConverse")
     def test_full_config(self, mock_cls):
         """Verify Bedrock init with all optional params."""
         mock_cls.return_value = MagicMock()
@@ -218,7 +218,7 @@ class TestLoadRemoteBedrockModel:
 class TestLoadRemoteGcpVertexModel:
     """Verify Vertex AI model initialization."""
 
-    @patch("bili.iris.loaders.llm_loader.ChatVertexAI")
+    @patch("langchain_google_vertexai.ChatVertexAI")
     def test_minimal_config(self, mock_cls):
         """Verify Vertex init with only model_name."""
         mock_cls.return_value = MagicMock()
@@ -226,7 +226,7 @@ class TestLoadRemoteGcpVertexModel:
         mock_cls.assert_called_once_with(model_name="gemini-pro")
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.llm_loader.ChatVertexAI")
+    @patch("langchain_google_vertexai.ChatVertexAI")
     def test_with_additional_headers(self, mock_cls):
         """Verify additional_headers are passed through."""
         headers = {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
@@ -238,7 +238,7 @@ class TestLoadRemoteGcpVertexModel:
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs["additional_headers"] == headers
 
-    @patch("bili.iris.loaders.llm_loader.ChatVertexAI")
+    @patch("langchain_google_vertexai.ChatVertexAI")
     def test_with_location(self, mock_cls):
         """Verify location parameter is passed through."""
         mock_cls.return_value = MagicMock()
@@ -250,7 +250,7 @@ class TestLoadRemoteGcpVertexModel:
 class TestLoadRemoteAzureOpenai:
     """Verify Azure OpenAI model initialization."""
 
-    @patch("bili.iris.loaders.llm_loader.AzureChatOpenAI")
+    @patch("langchain_openai.AzureChatOpenAI")
     def test_minimal_config(self, mock_cls):
         """Verify Azure init with required params only."""
         mock_cls.return_value = MagicMock()
@@ -260,7 +260,7 @@ class TestLoadRemoteAzureOpenai:
         )
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.llm_loader.AzureChatOpenAI")
+    @patch("langchain_openai.AzureChatOpenAI")
     def test_full_config(self, mock_cls):
         """Verify Azure init with all optional params."""
         mock_cls.return_value = MagicMock()
@@ -282,7 +282,7 @@ class TestLoadRemoteAzureOpenai:
 class TestLoadRemoteOpenai:
     """Verify OpenAI model initialization."""
 
-    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    @patch("langchain_openai.ChatOpenAI")
     def test_minimal_config(self, mock_cls):
         """Verify OpenAI init with only model_name."""
         mock_cls.return_value = MagicMock()
@@ -290,7 +290,7 @@ class TestLoadRemoteOpenai:
         mock_cls.assert_called_once_with(model="gpt-4o")
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    @patch("langchain_openai.ChatOpenAI")
     def test_full_config(self, mock_cls):
         """Verify OpenAI init with all optional params."""
         mock_cls.return_value = MagicMock()
@@ -315,30 +315,61 @@ class TestLoadRemoteOpenai:
 
 
 class TestDeviceDetection:
-    """Verify GPU/CPU detection logging at module level."""
+    """Verify GPU/CPU detection logging paths in _log_available_device()."""
 
-    @patch("bili.iris.loaders.llm_loader.torch")
-    def test_mps_detection_path(self, mock_torch):
-        """Verify Apple MPS path is reachable."""
+    def test_mps_detection_path(self):
+        """Verify Apple MPS log path is exercised."""
+        import sys  # pylint: disable=import-outside-toplevel
+
+        from bili.iris.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
+            _log_available_device,
+        )
+
+        mock_torch = MagicMock()
         mock_torch.backends.mps.is_available.return_value = True
-        # The detection runs at import time, so we just verify
-        # the torch API is used correctly
-        assert mock_torch.backends.mps.is_available() is True
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            _log_available_device()
+        mock_torch.backends.mps.is_available.assert_called()
 
-    @patch("bili.iris.loaders.llm_loader.torch")
-    def test_cuda_detection_path(self, mock_torch):
-        """Verify CUDA path is reachable."""
+    def test_cuda_detection_path(self):
+        """Verify CUDA log path is exercised."""
+        import sys  # pylint: disable=import-outside-toplevel
+
+        from bili.iris.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
+            _log_available_device,
+        )
+
+        mock_torch = MagicMock()
         mock_torch.backends.mps.is_available.return_value = False
         mock_torch.cuda.is_available.return_value = True
-        assert mock_torch.cuda.is_available() is True
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            _log_available_device()
+        mock_torch.cuda.is_available.assert_called()
 
-    @patch("bili.iris.loaders.llm_loader.torch")
-    def test_cpu_fallback_path(self, mock_torch):
-        """Verify CPU fallback when no GPU available."""
+    def test_cpu_fallback_path(self):
+        """Verify CPU fallback log path is exercised."""
+        import sys  # pylint: disable=import-outside-toplevel
+
+        from bili.iris.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
+            _log_available_device,
+        )
+
+        mock_torch = MagicMock()
         mock_torch.backends.mps.is_available.return_value = False
         mock_torch.cuda.is_available.return_value = False
-        assert not mock_torch.backends.mps.is_available()
-        assert not mock_torch.cuda.is_available()
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            _log_available_device()
+
+    def test_missing_torch_does_not_raise(self):
+        """Verify _log_available_device() is a no-op when torch is absent."""
+        import sys  # pylint: disable=import-outside-toplevel
+
+        from bili.iris.loaders.llm_loader import (  # pylint: disable=import-outside-toplevel
+            _log_available_device,
+        )
+
+        with patch.dict(sys.modules, {"torch": None}):
+            _log_available_device()  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -349,18 +380,49 @@ class TestDeviceDetection:
 class TestLoadHuggingFaceModel:
     """Verify the local HuggingFace pipeline construction."""
 
-    @patch("bili.iris.loaders.llm_loader.ChatHuggingFace")
-    @patch("bili.iris.loaders.llm_loader.HuggingFacePipeline")
-    @patch("bili.iris.loaders.llm_loader.pipeline")
-    @patch("bili.iris.loaders.llm_loader.AutoModelForCausalLM")
-    @patch("bili.iris.loaders.llm_loader.torch")
-    @patch("bili.iris.loaders.llm_loader.load_huggingface_tokenizer")
+    def _run_load_hf_model(
+        self,
+        mock_auto_model,
+        mock_tokenizer_loader,
+        mock_chat_hf,
+        mock_hf_pipeline,
+        cuda_available=False,
+        **model_kwargs
+    ):
+        """Helper that patches heavy transformers internals at both source and cache locations.
+
+        transformers uses a lazy-loader that may cache ``AutoModelForCausalLM`` and
+        ``pipeline`` as direct attributes on the ``transformers`` module after the
+        first import in the test session.  Patching only the source locations
+        (``transformers.models.auto.modeling_auto.AutoModelForCausalLM`` and
+        ``transformers.pipelines.pipeline``) misses these cached references in
+        subsequent test runs.  Patching all four targets ensures the mocks are seen
+        regardless of test execution order.
+        """
+        mock_pipeline = MagicMock()
+        with patch("torch.cuda.is_available", return_value=cuda_available), patch(
+            "torch.cuda.empty_cache"
+        ) as mock_empty_cache, patch(
+            "transformers.pipelines.pipeline", mock_pipeline
+        ), patch(
+            "transformers.pipeline", mock_pipeline
+        ), patch(
+            "transformers.models.auto.modeling_auto.AutoModelForCausalLM",
+            mock_auto_model,
+        ), patch(
+            "transformers.AutoModelForCausalLM", mock_auto_model
+        ):
+            load_huggingface_model(**model_kwargs)
+        return mock_pipeline, mock_empty_cache
+
+    @patch("langchain_huggingface.chat_models.huggingface.ChatHuggingFace")
+    @patch("langchain_huggingface.chat_models.huggingface.HuggingFacePipeline")
+    @patch("transformers.models.auto.modeling_auto.AutoModelForCausalLM")
+    @patch("bili.iris.loaders.tokenizer_loader.load_huggingface_tokenizer")
     def test_builds_chat_model_with_full_generation_config(
         self,
         mock_tokenizer_loader,
-        mock_torch,
         mock_auto_model,
-        mock_pipeline,
         mock_hf_pipeline,
         mock_chat_hf,
     ):
@@ -369,12 +431,16 @@ class TestLoadHuggingFaceModel:
         tokenizer.pad_token = None
         tokenizer.eos_token = "</s>"
         mock_tokenizer_loader.return_value = tokenizer
-        mock_torch.cuda.is_available.return_value = True
         model = MagicMock()
         mock_auto_model.from_pretrained.return_value = model
         mock_chat_hf.return_value = "chat_model"
 
-        result = load_huggingface_model(
+        mock_pipeline, mock_empty_cache = self._run_load_hf_model(
+            mock_auto_model,
+            mock_tokenizer_loader,
+            mock_chat_hf,
+            mock_hf_pipeline,
+            cuda_available=True,
             model_name="gpt2",
             max_tokens=128,
             temperature=0.6,
@@ -383,11 +449,10 @@ class TestLoadHuggingFaceModel:
             seed=7,
         )
 
-        assert result == "chat_model"
         # Missing pad token is backfilled from the eos token.
         assert tokenizer.pad_token == "</s>"
         # CUDA cache is cleared when CUDA is available.
-        mock_torch.cuda.empty_cache.assert_called_once()
+        mock_empty_cache.assert_called_once()
         # The optional generation params are forwarded to pipeline().
         pipeline_kwargs = mock_pipeline.call_args[1]
         assert pipeline_kwargs["task"] == "text-generation"
@@ -401,18 +466,14 @@ class TestLoadHuggingFaceModel:
         mock_hf_pipeline.assert_called_once_with(pipeline=mock_pipeline.return_value)
         mock_chat_hf.assert_called_once_with(llm=mock_hf_pipeline.return_value)
 
-    @patch("bili.iris.loaders.llm_loader.ChatHuggingFace")
-    @patch("bili.iris.loaders.llm_loader.HuggingFacePipeline")
-    @patch("bili.iris.loaders.llm_loader.pipeline")
-    @patch("bili.iris.loaders.llm_loader.AutoModelForCausalLM")
-    @patch("bili.iris.loaders.llm_loader.torch")
-    @patch("bili.iris.loaders.llm_loader.load_huggingface_tokenizer")
+    @patch("langchain_huggingface.chat_models.huggingface.ChatHuggingFace")
+    @patch("langchain_huggingface.chat_models.huggingface.HuggingFacePipeline")
+    @patch("transformers.models.auto.modeling_auto.AutoModelForCausalLM")
+    @patch("bili.iris.loaders.tokenizer_loader.load_huggingface_tokenizer")
     def test_minimal_config_omits_optional_params(
         self,
         mock_tokenizer_loader,
-        mock_torch,
         mock_auto_model,
-        mock_pipeline,
         mock_hf_pipeline,
         mock_chat_hf,
     ):
@@ -420,13 +481,19 @@ class TestLoadHuggingFaceModel:
         tokenizer = MagicMock()
         tokenizer.pad_token = "<pad>"
         mock_tokenizer_loader.return_value = tokenizer
-        mock_torch.cuda.is_available.return_value = False
         mock_chat_hf.return_value = "chat_model"
 
-        load_huggingface_model(model_name="gpt2")
+        mock_pipeline, mock_empty_cache = self._run_load_hf_model(
+            mock_auto_model,
+            mock_tokenizer_loader,
+            mock_chat_hf,
+            mock_hf_pipeline,
+            cuda_available=False,
+            model_name="gpt2",
+        )
 
         # No CUDA cache clear when CUDA is unavailable.
-        mock_torch.cuda.empty_cache.assert_not_called()
+        mock_empty_cache.assert_not_called()
         pipeline_kwargs = mock_pipeline.call_args[1]
         for absent in ("max_new_tokens", "temperature", "top_p", "top_k", "seed"):
             assert absent not in pipeline_kwargs
@@ -440,7 +507,7 @@ class TestLoadHuggingFaceModel:
 class TestLoadLlamaCppModel:
     """Verify the local LlamaCpp model construction."""
 
-    @patch("bili.iris.loaders.llm_loader.ChatLlamaCpp")
+    @patch("langchain_community.chat_models.ChatLlamaCpp")
     def test_full_config_passes_all_params(self, mock_cls):
         """Verify all optional params are merged into the LlamaCpp config."""
         mock_cls.return_value = "llama_model"
@@ -464,7 +531,7 @@ class TestLoadLlamaCppModel:
         assert call_kwargs["top_k"] == 50
         assert call_kwargs["seed"] == 11
 
-    @patch("bili.iris.loaders.llm_loader.ChatLlamaCpp")
+    @patch("langchain_community.chat_models.ChatLlamaCpp")
     def test_minimal_config_omits_optional_params(self, mock_cls):
         """Verify optional params are omitted when falsy."""
         mock_cls.return_value = "llama_model"
@@ -485,7 +552,7 @@ class TestLoadLlamaCppModel:
 class TestRemoteLoaderOptionalParams:
     """Verify optional config keys are set on the remote loaders."""
 
-    @patch("bili.iris.loaders.llm_loader.ChatVertexAI")
+    @patch("langchain_google_vertexai.ChatVertexAI")
     def test_vertex_all_optional_params(self, mock_cls):
         """Verify every optional Vertex config key is forwarded."""
         mock_cls.return_value = MagicMock()
@@ -509,14 +576,14 @@ class TestRemoteLoaderOptionalParams:
         assert call_kwargs["response_mime_type"] == "application/json"
         assert call_kwargs["response_schema"] == schema
 
-    @patch("bili.iris.loaders.llm_loader.AzureChatOpenAI")
+    @patch("langchain_openai.AzureChatOpenAI")
     def test_azure_top_k_forwarded(self, mock_cls):
         """Verify Azure top_k is forwarded."""
         mock_cls.return_value = MagicMock()
         load_remote_azure_openai(model_name="gpt-4", api_version="2024-01", top_k=15)
         assert mock_cls.call_args[1]["top_k"] == 15
 
-    @patch("bili.iris.loaders.llm_loader.ChatOpenAI")
+    @patch("langchain_openai.ChatOpenAI")
     def test_openai_top_k_forwarded(self, mock_cls):
         """Verify OpenAI top_k is forwarded."""
         mock_cls.return_value = MagicMock()

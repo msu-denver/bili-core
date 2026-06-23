@@ -87,18 +87,22 @@ jobs:
               uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
               with:
                 python-version: '3.11'
-                # Cache the pip download/build artifacts keyed on requirements.txt
-                # so the heavy ML stack (torch, tensorflow, transformers) only
-                # fully reinstalls when dependencies change.
+                # Cache the pip download/build artifacts keyed on both
+                # requirements.txt (lean core) and setup.py (extras pins)
+                # so the cache invalidates when either changes.
                 cache: 'pip'
-                cache-dependency-path: requirements.txt
+                cache-dependency-path: |
+                  requirements.txt
+                  setup.py
 
-            # Full dependency install is required: the tests import the real
-            # bili modules, which import langchain, langgraph, pymongo, etc.
+            # Full dependency install: [all] brings the complete runtime stack
+            # (torch, transformers, faiss, mongo, etc.) that the test suite
+            # exercises; [dev] adds pytest, pytest-cov, mongomock, and pympler
+            # which are no longer in requirements.txt (they are dev-only tools).
             - name: Install dependencies
               run: |
                 python -m pip install --upgrade pip
-                pip install -r requirements.txt
+                pip install -e ".[all,dev]"
               shell: bash
 
             # Run the full test suite with coverage. No skips or errors are
