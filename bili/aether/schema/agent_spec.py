@@ -106,6 +106,20 @@ class AgentSpec(BaseModel):
         None, ge=1, description="Maximum tokens in LLM response"
     )
 
+    fallback_models: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Ordered list of fallback model names to try when the primary "
+            "model fails with a transient error (rate limit, provider "
+            "unavailable, API timeout).  Each entry is resolved exactly like "
+            "``model_name`` — display name or model_id, looked up in "
+            "``LLM_MODELS`` then by heuristic.  The same ``temperature`` and "
+            "``max_tokens`` values from this AgentSpec are applied to each "
+            "fallback.  Leave empty (the default) to disable fallback "
+            "behaviour entirely."
+        ),
+    )
+
     # =========================================================================
     # CAPABILITIES & TOOLS
     # =========================================================================

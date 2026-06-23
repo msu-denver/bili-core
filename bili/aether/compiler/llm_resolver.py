@@ -124,24 +124,38 @@ def resolve_provider(model_name: str) -> str:
 
 
 def create_llm(agent: AgentSpec) -> Any:
-    """Create a LangChain chat model instance from an ``AgentSpec``.
+    """Create a LangChain-compatible chat model from an ``AgentSpec``.
 
-    Lazy-imports ``bili.loaders.llm_loader.load_model`` and
-    ``bili.config.llm_config.LLM_MODELS`` so the compiler module can be
-    loaded without heavy dependencies.
+    Lazy-imports ``bili.iris.loaders.llm_loader.load_model`` and
+    ``bili.iris.config.llm_config.LLM_MODELS`` so the compiler module can
+    be loaded without heavy provider dependencies.
 
     The function resolves the display ``model_name`` to the actual
-    ``model_id`` expected by the provider, then delegates to
-    ``load_model`` with the correct parameter name for each provider.
+    ``model_id`` expected by the provider, then delegates to ``load_model``.
+
+    When ``agent.fallback_models`` is non-empty, the returned object is a
+    :class:`~bili.iris.providers.fallback.FallbackLLM` that transparently
+    tries each fallback provider on retryable errors (rate limits, transient
+    API failures).  The same ``temperature`` and ``max_tokens`` values are
+    applied to each fallback.  Callers see no difference — the returned
+    object always exposes ``.invoke()`` / ``.stream()`` / ``.astream()``.
+
+    When ``agent.fallback_models`` is empty (the default), this function
+    returns the primary LLM object directly — behaviour is identical to
+    before the fallback engine was introduced.
 
     Args:
         agent: An ``AgentSpec`` with ``model_name`` set.
 
     Returns:
-        A LangChain-compatible chat model ready for ``.invoke()``.
+        A chat model ready for ``.invoke()``.  Will be a plain LLM object
+        when no fallbacks are configured, or a
+        :class:`~bili.iris.providers.fallback.FallbackLLM` proxy when
+        ``agent.fallback_models`` is populated.
 
     Raises:
-        ValueError: If ``agent.model_name`` is ``None`` or unresolvable.
+        ValueError: If ``agent.model_name`` is ``None`` or unresolvable,
+            or if any fallback model name cannot be resolved.
     """
     if not agent.model_name:
         raise ValueError(
@@ -170,7 +184,43 @@ def create_llm(agent: AgentSpec) -> Any:
         load_model,
     )
 
-    return load_model(provider, **kwargs)
+    primary_llm = load_model(provider, **kwargs)
+
+    # --- Fallback engine (opt-in) -------------------------------------------
+    # If AgentSpec.fallback_models is empty, return the primary LLM directly.
+    # No change in behaviour for callers that do not configure fallbacks.
+    if not agent.fallback_models:
+        return primary_llm
+
+    # Build the ordered fallback chain from the AgentSpec's fallback_models
+    # list.  Each model name is resolved exactly like the primary model_name.
+    fallback_chain: List[Tuple[str, Dict[str, Any]]] = []
+    for fb_model_name in agent.fallback_models:
+        fb_provider, fb_model_id, fb_extra = _resolve_model_full(fb_model_name)
+        fb_kwargs: Dict[str, Any] = {**fb_extra, "model_name": fb_model_id}
+        if agent.temperature is not None:
+            fb_kwargs["temperature"] = agent.temperature
+        if agent.max_tokens is not None:
+            fb_kwargs["max_tokens"] = agent.max_tokens
+        fallback_chain.append((fb_provider, fb_kwargs))
+        LOGGER.debug(
+            "Agent '%s': registered fallback provider=%s, model_id=%s",
+            agent.agent_id,
+            fb_provider,
+            fb_model_id,
+        )
+
+    from bili.iris.providers.fallback import (  # noqa: E402  pylint: disable=import-outside-toplevel
+        build_fallback_llm,
+    )
+
+    LOGGER.info(
+        "Agent '%s': wrapping primary LLM with %d fallback(s): %s",
+        agent.agent_id,
+        len(fallback_chain),
+        [entry[0] for entry in fallback_chain],
+    )
+    return build_fallback_llm(primary_llm=primary_llm, fallback_chain=fallback_chain)
 
 
 def resolve_tools(agent: AgentSpec) -> list:

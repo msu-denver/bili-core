@@ -13,6 +13,12 @@ Public API
 - :data:`PROVIDER_REGISTRY` — the module-level singleton registry instance
 - :func:`register_provider` — convenience for runtime provider registration
 - :func:`get_provider` — look up a registered provider class
+- :class:`FallbackLLM` — transparent proxy that falls through an ordered
+  provider chain on retryable errors
+- :class:`FallbackPolicy` — classifies exceptions as retryable vs fatal
+- :class:`ProviderChain` — ordered ``(provider_type, kwargs)`` sequence
+- :func:`build_fallback_llm` — wrap an existing LLM with a fallback chain
+- :data:`DEFAULT_POLICY` — default name-based exception classification policy
 
 Design contract
 ---------------
@@ -40,6 +46,13 @@ from . import (  # noqa: F401  pylint: disable=wrong-import-position  # isort: s
     builtin as _builtin,
 )
 from .base import LLMProvider
+from .fallback import (
+    DEFAULT_POLICY,
+    FallbackLLM,
+    FallbackPolicy,
+    ProviderChain,
+    build_fallback_llm,
+)
 from .registry import (
     PROVIDER_REGISTRY,
     ProviderRegistry,
@@ -53,4 +66,9 @@ __all__ = [
     "PROVIDER_REGISTRY",
     "register_provider",
     "get_provider",
+    "FallbackLLM",
+    "FallbackPolicy",
+    "ProviderChain",
+    "build_fallback_llm",
+    "DEFAULT_POLICY",
 ]
