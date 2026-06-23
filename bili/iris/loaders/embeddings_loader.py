@@ -40,11 +40,6 @@ Example:
         model_name="vertex_text-embedding-005")
 """
 
-from langchain_aws import BedrockEmbeddings
-from langchain_community.embeddings import SentenceTransformerEmbeddings
-from langchain_google_vertexai import VertexAIEmbeddings
-from langchain_openai import AzureOpenAIEmbeddings, OpenAIEmbeddings
-
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
@@ -123,6 +118,13 @@ def create_sentence_transformer_embedding_function(
     # that capture their semantic meaning.
     # It's a larger and more accurate model. More:
     # https://huggingface.co/sentence-transformers/bert-large-nli-mean-tokens
+
+    # Lazy import: sentence-transformers (via langchain_community) is a heavy
+    # optional dependency; it is only needed for sentence-transformer embeddings.
+    from langchain_community.embeddings import (  # pylint: disable=import-outside-toplevel
+        SentenceTransformerEmbeddings,
+    )
+
     return SentenceTransformerEmbeddings(model_name=model_name)
 
 
@@ -142,6 +144,12 @@ def create_azure_openai_embedding_function(model_name="azure_text-embedding-3-la
     :return: An instance of AzureOpenAIEmbeddings configured with the specified model.
     :rtype: AzureOpenAIEmbeddings
     """
+    # Lazy import: langchain_openai is only needed when Azure OpenAI embeddings
+    # are actually requested.
+    from langchain_openai import (  # pylint: disable=import-outside-toplevel
+        AzureOpenAIEmbeddings,
+    )
+
     # https://python.langchain.com/docs/integrations/text_embedding/azureopenai/
     return AzureOpenAIEmbeddings(model=model_name)
 
@@ -161,6 +169,12 @@ def create_openai_embedding_function(model_name="text-embedding-3-large"):
     :return: An instance of OpenAIEmbeddings configured with the specified model.
     :rtype: OpenAIEmbeddings
     """
+    # Lazy import: langchain_openai is only needed when OpenAI embeddings are
+    # actually requested.
+    from langchain_openai import (  # pylint: disable=import-outside-toplevel
+        OpenAIEmbeddings,
+    )
+
     # https://python.langchain.com/docs/integrations/text_embedding/openai/
     return OpenAIEmbeddings(model=model_name)
 
@@ -175,6 +189,11 @@ def create_amazon_bedrock_embedding_function(model_name="amazon_titan-embed-text
     :return: An instance of BedrockEmbeddings initialized with the specified model.
     :rtype: BedrockEmbeddings
     """
+    # Lazy import: langchain_aws is only needed when Bedrock embeddings are used.
+    from langchain_aws import (  # pylint: disable=import-outside-toplevel
+        BedrockEmbeddings,
+    )
+
     # https://python.langchain.com/docs/integrations/text_embedding/bedrock/
     return BedrockEmbeddings(model_id=model_name)
 
@@ -198,5 +217,11 @@ def create_google_vertexai_embedding_function(
     :return: An instance of `VertexAIEmbeddings` configured with the specified model name.
     :rtype: VertexAIEmbeddings
     """
+    # Lazy import: langchain_google_vertexai is only needed when Vertex AI
+    # embeddings are actually requested.
+    from langchain_google_vertexai import (  # pylint: disable=import-outside-toplevel
+        VertexAIEmbeddings,
+    )
+
     # https://python.langchain.com/docs/integrations/text_embedding/google_vertex_ai_palm/
     return VertexAIEmbeddings(model=model_name)

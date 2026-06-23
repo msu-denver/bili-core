@@ -59,46 +59,95 @@ Example:
     )
 """
 
-from langchain_classic.agents.agent_toolkits import create_retriever_tool
-
 from bili.iris.config.tool_config import TOOLS
-from bili.iris.loaders.embeddings_loader import load_embedding_function
-from bili.iris.tools.amazon_opensearch import init_amazon_opensearch
-from bili.iris.tools.api_free_weather_api import init_weather_tool
-from bili.iris.tools.api_open_weather import init_weather_api_tool
-from bili.iris.tools.api_serp import init_serp_api_tool
-from bili.iris.tools.api_weather_gov import init_weather_gov_api_tool
-from bili.iris.tools.faiss_memory_indexing import init_faiss
-from bili.iris.tools.mock_tool import init_mock_tool
 from bili.utils.logging_utils import get_logger
 
 # Get the logger instance for the module
 LOGGER = get_logger(__name__)
 
-# Define a registry of tool initialization functions
-# This allows for dynamic initialization of tools based on the provided configuration
-# and for users to override the default tool initialization behavior or define new tools
-TOOL_REGISTRY = {
-    "faiss_retriever": lambda name, prompt, params: create_retriever_tool(
+
+# ---------------------------------------------------------------------------
+# Lazy tool factories
+#
+# Each factory function defers its heavy imports until the tool is actually
+# requested.  This keeps importing tools_loader itself lightweight — only
+# the tool the caller activates incurs its SDK's import cost.
+# ---------------------------------------------------------------------------
+
+
+def _init_faiss_retriever(name, prompt, params):
+    """Initialize a FAISS-backed LangChain retriever tool (lazy import)."""
+    from langchain_classic.agents.agent_toolkits import (  # pylint: disable=import-outside-toplevel
+        create_retriever_tool,
+    )
+
+    from bili.iris.tools.faiss_memory_indexing import (  # pylint: disable=import-outside-toplevel
+        init_faiss,
+    )
+
+    return create_retriever_tool(
         init_faiss(params.get("path", "data")),
         name,
         prompt,
         **params,
-    ),
-    "weather_api_tool": lambda name, prompt, params: init_weather_api_tool(
-        name, prompt, **params
-    ),
-    "serp_api_tool": lambda name, prompt, params: init_serp_api_tool(
-        name, prompt, **params
-    ),
-    "weather_gov_api_tool": lambda name, prompt, params: init_weather_gov_api_tool(
-        name, prompt, **params
-    ),
-    "free_weather_api_tool": lambda name, prompt, params: init_weather_tool(
-        name, prompt, **params
-    ),
-    "mock_tool": lambda name, prompt, params: init_mock_tool(name, prompt, **params),
-    "aws_opensearch_retriever": lambda name, prompt, params: init_amazon_opensearch(
+    )
+
+
+def _init_weather_api_tool(name, prompt, params):
+    """Initialize the OpenWeather API tool (lazy import)."""
+    from bili.iris.tools.api_open_weather import (  # pylint: disable=import-outside-toplevel
+        init_weather_api_tool,
+    )
+
+    return init_weather_api_tool(name, prompt, **params)
+
+
+def _init_serp_api_tool(name, prompt, params):
+    """Initialize the SERP API tool (lazy import)."""
+    from bili.iris.tools.api_serp import (  # pylint: disable=import-outside-toplevel
+        init_serp_api_tool,
+    )
+
+    return init_serp_api_tool(name, prompt, **params)
+
+
+def _init_weather_gov_api_tool(name, prompt, params):
+    """Initialize the weather.gov API tool (lazy import)."""
+    from bili.iris.tools.api_weather_gov import (  # pylint: disable=import-outside-toplevel
+        init_weather_gov_api_tool,
+    )
+
+    return init_weather_gov_api_tool(name, prompt, **params)
+
+
+def _init_free_weather_api_tool(name, prompt, params):
+    """Initialize the free weather API tool (lazy import)."""
+    from bili.iris.tools.api_free_weather_api import (  # pylint: disable=import-outside-toplevel
+        init_weather_tool,
+    )
+
+    return init_weather_tool(name, prompt, **params)
+
+
+def _init_mock_tool(name, prompt, params):
+    """Initialize the mock tool (lazy import)."""
+    from bili.iris.tools.mock_tool import (  # pylint: disable=import-outside-toplevel
+        init_mock_tool,
+    )
+
+    return init_mock_tool(name, prompt, **params)
+
+
+def _init_aws_opensearch_retriever(name, prompt, params):
+    """Initialize an AWS OpenSearch retriever tool (lazy import)."""
+    from bili.iris.loaders.embeddings_loader import (  # pylint: disable=import-outside-toplevel
+        load_embedding_function,
+    )
+    from bili.iris.tools.amazon_opensearch import (  # pylint: disable=import-outside-toplevel
+        init_amazon_opensearch,
+    )
+
+    return init_amazon_opensearch(
         name,
         prompt,
         _embedding_function=load_embedding_function(
@@ -106,7 +155,20 @@ TOOL_REGISTRY = {
             params["index_mapping"][params["index_name"]]["model_name"],
         ),
         **params,
-    ),
+    )
+
+
+# Define a registry of tool initialization functions.
+# This allows for dynamic initialization of tools based on the provided
+# configuration and for users to override or extend the default behaviour.
+TOOL_REGISTRY = {
+    "faiss_retriever": _init_faiss_retriever,
+    "weather_api_tool": _init_weather_api_tool,
+    "serp_api_tool": _init_serp_api_tool,
+    "weather_gov_api_tool": _init_weather_gov_api_tool,
+    "free_weather_api_tool": _init_free_weather_api_tool,
+    "mock_tool": _init_mock_tool,
+    "aws_opensearch_retriever": _init_aws_opensearch_retriever,
 }
 
 

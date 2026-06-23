@@ -113,8 +113,10 @@ setup(
     },
     install_requires=read_requirements(),  # Load only standard dependencies
     extras_require={
-        # Provider extras — install the optional SDK for each new provider.
-        # Usage: pip install bili-core[anthropic,mistral]
+        # ------------------------------------------------------------------ #
+        # Provider extras — install the optional SDK for each new provider.  #
+        # Usage: pip install bili-core[anthropic,mistral]                     #
+        # ------------------------------------------------------------------ #
         "anthropic": ["langchain-anthropic>=0.3.0"],
         "mistral": ["langchain-mistralai>=0.2.0"],
         "cohere": ["langchain-cohere>=0.3.0"],
@@ -132,10 +134,135 @@ setup(
             "langchain-xai>=0.2.0",
             "langchain-groq>=0.2.0",
         ],
-        # MCP client subsystem -- lets bili-core agents consume tools from
-        # MCP servers (stdio subprocess or HTTP/SSE transport).
-        # Usage: pip install bili-core[mcp]
+        # ------------------------------------------------------------------ #
+        # Surface extras — optional UI and API layers.                        #
+        # ------------------------------------------------------------------ #
+        # Streamlit web UI (bili/streamlit_app.py + bili/streamlit_ui/).
+        # Usage: pip install bili-core[streamlit]
+        "streamlit": [
+            "streamlit~=1.51.0",
+            "streamlit-flow-component>=1.3.0",
+            "pillow~=10.4.0",
+            "pandas==2.2.3",
+        ],
+        # Flask REST API (bili/flask_app.py + bili/flask_api/).
+        # Usage: pip install bili-core[flask]
+        "flask": [
+            "flask~=3.1.2",
+            "pyjwt==2.10.1",
+        ],
+        # ------------------------------------------------------------------ #
+        # Security / adversarial testing (AEGIS).                             #
+        # Usage: pip install bili-core[aegis]                                 #
+        # ------------------------------------------------------------------ #
+        "aegis": [
+            "langchain-anthropic>=0.3.0",
+        ],
+        # ------------------------------------------------------------------ #
+        # Tool-backend extras — heavy retrieval / search SDKs.               #
+        # ------------------------------------------------------------------ #
+        # FAISS in-memory vector search.
+        # Usage: pip install bili-core[faiss]
+        "faiss": [
+            "faiss-cpu~=1.12.0",
+            "sentence-transformers~=5.1.2",
+        ],
+        # Amazon OpenSearch vector search.
+        # Usage: pip install bili-core[opensearch]
+        "opensearch": [
+            "opensearch-py~=3.0.0",
+            "requests-aws4auth==1.3.1",
+            "boto3~=1.40.19",
+        ],
+        # ------------------------------------------------------------------ #
+        # Checkpointer-backend extras — database state persistence.          #
+        # ------------------------------------------------------------------ #
+        # MongoDB checkpointer (bili/iris/checkpointers/mongo_checkpointer.py).
+        # Usage: pip install bili-core[mongo]
+        "mongo": [
+            "pymongo~=4.15.3",
+            "motor~=3.7.0",
+            "langgraph-checkpoint-mongodb~=0.3.0",
+        ],
+        # PostgreSQL checkpointer (bili/iris/checkpointers/pg_checkpointer.py).
+        # Usage: pip install bili-core[postgres]
+        "postgres": [
+            "psycopg2~=2.9.11",
+            "langgraph-checkpoint-postgres~=3.0.0",
+        ],
+        # ------------------------------------------------------------------ #
+        # Local-model extras — heavy ML frameworks.                           #
+        # ------------------------------------------------------------------ #
+        # HuggingFace local inference (llm_loader + tokenizer_loader +
+        # embeddings_loader sentence-transformer path).
+        # Usage: pip install bili-core[huggingface]
+        "huggingface": [
+            "torch==2.6.0",
+            "transformers~=4.57.1",
+            "langchain-huggingface~=1.0.0",
+            "sentence-transformers~=5.1.2",
+            "accelerate~=1.11.0",
+            "datasets~=4.3.0",
+        ],
+        # ------------------------------------------------------------------ #
+        # Auth extras                                                          #
+        # ------------------------------------------------------------------ #
+        # Firebase auth provider.
+        # Usage: pip install bili-core[firebase]
+        "firebase": [
+            "firebase-admin~=6.6.0",
+        ],
+        # ------------------------------------------------------------------ #
+        # MCP client subsystem — lets bili-core agents consume tools from     #
+        # MCP servers (stdio subprocess or HTTP/SSE transport).               #
+        # Usage: pip install bili-core[mcp]                                   #
+        # ------------------------------------------------------------------ #
         "mcp": ["mcp>=1.0"],
+        # ------------------------------------------------------------------ #
+        # Convenience bundle — installs all optional extras so that existing  #
+        # consumers migrate from the old monolithic install with a single     #
+        # word change:  pip install bili-core  →  pip install bili-core[all]  #
+        # ------------------------------------------------------------------ #
+        "all": [
+            # Surfaces
+            "streamlit~=1.51.0",
+            "streamlit-flow-component>=1.3.0",
+            "pillow~=10.4.0",
+            "pandas==2.2.3",
+            "flask~=3.1.2",
+            "pyjwt==2.10.1",
+            # AEGIS / security
+            "langchain-anthropic>=0.3.0",
+            # Provider extras
+            "langchain-mistralai>=0.2.0",
+            "langchain-cohere>=0.3.0",
+            "langchain-google-genai>=2.0.0",
+            "langchain-deepseek>=0.1.0",
+            "langchain-xai>=0.2.0",
+            "langchain-groq>=0.2.0",
+            # Tools
+            "faiss-cpu~=1.12.0",
+            "sentence-transformers~=5.1.2",
+            "opensearch-py~=3.0.0",
+            "requests-aws4auth==1.3.1",
+            "boto3~=1.40.19",
+            # Checkpointers
+            "pymongo~=4.15.3",
+            "motor~=3.7.0",
+            "langgraph-checkpoint-mongodb~=0.3.0",
+            "psycopg2~=2.9.11",
+            "langgraph-checkpoint-postgres~=3.0.0",
+            # Local models
+            "torch==2.6.0",
+            "transformers~=4.57.1",
+            "langchain-huggingface~=1.0.0",
+            "accelerate~=1.11.0",
+            "datasets~=4.3.0",
+            # Auth
+            "firebase-admin~=6.6.0",
+            # MCP
+            "mcp>=1.0",
+        ],
     },
     cmdclass={
         "install": PostInstallCommand,

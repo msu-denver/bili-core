@@ -70,35 +70,32 @@ Example:
 
 import gc
 
-import torch
-from langchain_aws import ChatBedrockConverse
-from langchain_community.chat_models import ChatLlamaCpp
-from langchain_google_vertexai import ChatVertexAI
-from langchain_huggingface.chat_models.huggingface import (
-    ChatHuggingFace,
-    HuggingFacePipeline,
-)
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
-from transformers import AutoModelForCausalLM, pipeline
-
-from bili.iris.loaders.tokenizer_loader import load_huggingface_tokenizer
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)
 
-# This snippet is used to detect what devices are available for inference.
-# The model itself will automatically choose the best device, but this
-# will help us know if we have a GPU available.
-if torch.backends.mps.is_available():
-    # Detect if Apple MPS is available
-    LOGGER.info("Apple MPS device found")
-elif torch.cuda.is_available():
-    # Detect if Nvidia GPU is available
-    LOGGER.info("Nvidia GPU device found")
-else:
-    # If no GPU is available, use CPU
-    LOGGER.info("No compatible GPU device found, CPU will be used for inference.")
+
+def _log_available_device() -> None:
+    """Log which compute device is available (Apple MPS, CUDA GPU, or CPU).
+
+    Deferred to call-time so that importing this module does not eagerly pull
+    in ``torch``, which is only needed for the local HuggingFace/LlamaCpp
+    backends.  Cloud-only deployments (Bedrock, Vertex, OpenAI) pay no cost.
+    """
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+
+        if torch.backends.mps.is_available():
+            LOGGER.info("Apple MPS device found")
+        elif torch.cuda.is_available():
+            LOGGER.info("Nvidia GPU device found")
+        else:
+            LOGGER.info(
+                "No compatible GPU device found, CPU will be used for inference."
+            )
+    except ImportError:
+        LOGGER.debug("torch not installed; skipping device detection.")
 
 
 # This function initializes and loads the Llama model.
@@ -288,6 +285,24 @@ def load_huggingface_model(
     :return: An instance of `HuggingFacePipeline`, configured for generating text
              using the HuggingFace Llama model.
     """
+    # Lazy imports: torch, transformers, and langchain_huggingface are only
+    # needed for local HuggingFace inference.  Cloud-only deployments never
+    # reach this branch, so they pay no import cost.
+    import torch  # pylint: disable=import-outside-toplevel
+    from langchain_huggingface.chat_models.huggingface import (  # pylint: disable=import-outside-toplevel
+        ChatHuggingFace,
+        HuggingFacePipeline,
+    )
+    from transformers import (  # pylint: disable=import-outside-toplevel
+        AutoModelForCausalLM,
+        pipeline,
+    )
+
+    from bili.iris.loaders.tokenizer_loader import (  # pylint: disable=import-outside-toplevel
+        load_huggingface_tokenizer,
+    )
+
+    _log_available_device()
     LOGGER.info("Loading HuggingFace model from %s...", model_name)
     tokenizer = load_huggingface_tokenizer(model_name)
 
@@ -418,6 +433,13 @@ def load_llamacpp_model(
     :return: Loaded LlamaCpp model object configured with specified parameters.
     :rtype: LlamaCpp
     """
+    # Lazy import: langchain_community's ChatLlamaCpp is only needed for
+    # local LlamaCpp inference; cloud-only deployments pay no import cost.
+    from langchain_community.chat_models import (  # pylint: disable=import-outside-toplevel
+        ChatLlamaCpp,
+    )
+
+    _log_available_device()
     LOGGER.info("Loading LlamaCpp model from %s...", model_name)
 
     # Load the Llama model using the LlamaCpp library
@@ -540,6 +562,12 @@ def load_remote_gcp_vertex_model(
     :rtype: ChatVertexAI
     """
 
+    # Lazy import: langchain_google_vertexai is only needed when the Vertex AI
+    # backend is actually used; installing google-cloud-aiplatform is heavy.
+    from langchain_google_vertexai import (  # pylint: disable=import-outside-toplevel
+        ChatVertexAI,
+    )
+
     llm_config = {
         "model_name": model_name,
     }
@@ -597,6 +625,11 @@ def load_remote_bedrock_model(
     :return: An instance of the language model configured with provided parameters.
     :rtype: ChatBedrockConverse
     """
+    # Lazy import: langchain_aws is only needed when the Bedrock backend is used.
+    from langchain_aws import (  # pylint: disable=import-outside-toplevel
+        ChatBedrockConverse,
+    )
+
     LOGGER.info("Initializing AWS Bedrock model: %s...", model_name)
 
     llm_config = {
@@ -652,6 +685,12 @@ def load_remote_azure_openai(
     :param seed: Optional. Random seed for deterministic outputs in sampling.
     :return: An initialized Azure OpenAI language model instance.
     """
+    # Lazy import: langchain_openai is only needed when the Azure OpenAI backend
+    # is actually used.
+    from langchain_openai import (  # pylint: disable=import-outside-toplevel
+        AzureChatOpenAI,
+    )
+
     LOGGER.info(
         "Initializing Azure OpenAI model: %s, API version: %s", model_name, api_version
     )
@@ -710,6 +749,9 @@ def load_remote_openai(
     :param seed: Optional. Random seed for deterministic outputs in sampling.
     :return: An initialized OpenAI language model instance.
     """
+    # Lazy import: langchain_openai is only needed when the OpenAI backend is used.
+    from langchain_openai import ChatOpenAI  # pylint: disable=import-outside-toplevel
+
     LOGGER.info("Initializing OpenAI model: %s", model_name)
 
     # Define OpenAI-specific parameters
