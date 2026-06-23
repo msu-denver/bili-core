@@ -282,3 +282,211 @@ class TestLeanCoreImports:
             )
 
             assert QueryableMemorySaver is not None
+
+
+# ---------------------------------------------------------------------------
+# PEP 562 lazy-loader __init__.py coverage
+#
+# Each lazy-loader __init__.py has three reachable branches:
+#   1. __getattr__ with a known lazy submodule name: imports + caches + returns
+#   2. __getattr__ with an unknown name: raises AttributeError
+#   3. __dir__: returns the advertised submodule set
+#
+# These tests exercise all three branches for every package that uses the
+# pattern so the per-file coverage gate passes.
+# ---------------------------------------------------------------------------
+
+
+class TestLazyLoaderInits:
+    """PEP 562 __getattr__ branches in every lazy-loader __init__.py."""
+
+    # ------------------------------------------------------------------
+    # bili/utils/__init__.py
+    # ------------------------------------------------------------------
+
+    def test_utils_getattr_loads_known_submodule(self):
+        """Accessing a known submodule via bili.utils.__getattr__ imports it."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        # Evict cached module so __getattr__ is invoked fresh.
+        saved = sys.modules.pop("bili.utils", None)
+        try:
+            pkg = importlib.import_module("bili.utils")
+            # Trigger the lazy path by accessing a known submodule name.
+            mod = pkg.__getattr__("logging_utils")
+            assert mod is not None
+            assert hasattr(mod, "get_logger")
+        finally:
+            if saved is not None:
+                sys.modules["bili.utils"] = saved
+
+    def test_utils_getattr_raises_for_unknown_name(self):
+        """Accessing an unknown attribute via bili.utils.__getattr__ raises AttributeError."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.utils")
+        import pytest as _pytest  # pylint: disable=import-outside-toplevel
+
+        with _pytest.raises(AttributeError, match="has no attribute"):
+            pkg.__getattr__("_nonexistent_submodule_xyz")
+
+    def test_utils_dir_returns_submodule_names(self):
+        """bili.utils.__dir__() returns the declared lazy submodule names."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.utils")
+        names = pkg.__dir__()
+        assert "logging_utils" in names
+        assert "file_utils" in names
+        assert "opensearch_utils" in names
+
+    # ------------------------------------------------------------------
+    # bili/iris/checkpointers/__init__.py
+    # ------------------------------------------------------------------
+
+    def test_checkpointers_getattr_loads_known_submodule(self):
+        """Accessing a known submodule via bili.iris.checkpointers.__getattr__ imports it."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        saved = sys.modules.pop("bili.iris.checkpointers", None)
+        try:
+            pkg = importlib.import_module("bili.iris.checkpointers")
+            mod = pkg.__getattr__("memory_checkpointer")
+            assert mod is not None
+            assert hasattr(mod, "QueryableMemorySaver")
+        finally:
+            if saved is not None:
+                sys.modules["bili.iris.checkpointers"] = saved
+
+    def test_checkpointers_getattr_raises_for_unknown_name(self):
+        """Accessing an unknown attribute via bili.iris.checkpointers.__getattr__ raises."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        import pytest as _pytest  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.iris.checkpointers")
+        with _pytest.raises(AttributeError, match="has no attribute"):
+            pkg.__getattr__("_nonexistent_xyz")
+
+    def test_checkpointers_dir_returns_submodule_names(self):
+        """bili.iris.checkpointers.__dir__() returns the declared lazy submodule names."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.iris.checkpointers")
+        names = pkg.__dir__()
+        assert "memory_checkpointer" in names
+        assert "mongo_checkpointer" in names
+        assert "pg_checkpointer" in names
+
+    # ------------------------------------------------------------------
+    # bili/iris/loaders/__init__.py
+    # ------------------------------------------------------------------
+
+    def test_loaders_getattr_loads_known_submodule(self):
+        """Accessing a known submodule via bili.iris.loaders.__getattr__ imports it."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        saved = sys.modules.pop("bili.iris.loaders", None)
+        try:
+            pkg = importlib.import_module("bili.iris.loaders")
+            mod = pkg.__getattr__("streaming_utils")
+            assert mod is not None
+            assert hasattr(mod, "stream_agent")
+        finally:
+            if saved is not None:
+                sys.modules["bili.iris.loaders"] = saved
+
+    def test_loaders_getattr_raises_for_unknown_name(self):
+        """Accessing an unknown attribute via bili.iris.loaders.__getattr__ raises."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        import pytest as _pytest  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.iris.loaders")
+        with _pytest.raises(AttributeError, match="has no attribute"):
+            pkg.__getattr__("_nonexistent_xyz")
+
+    def test_loaders_dir_returns_submodule_names(self):
+        """bili.iris.loaders.__dir__() returns the declared lazy submodule names."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.iris.loaders")
+        names = pkg.__dir__()
+        assert "llm_loader" in names
+        assert "tools_loader" in names
+        assert "streaming_utils" in names
+
+    # ------------------------------------------------------------------
+    # bili/streamlit_ui/__init__.py
+    # ------------------------------------------------------------------
+
+    def test_streamlit_ui_getattr_raises_for_unknown_name(self):
+        """Accessing an unknown attribute via bili.streamlit_ui.__getattr__ raises."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        import pytest as _pytest  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.streamlit_ui")
+        with _pytest.raises(AttributeError, match="has no attribute"):
+            pkg.__getattr__("_nonexistent_xyz")
+
+    def test_streamlit_ui_dir_returns_submodule_names(self):
+        """bili.streamlit_ui.__dir__() returns the declared lazy submodule names."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.streamlit_ui")
+        names = pkg.__dir__()
+        assert "query" in names
+        assert "ui" in names
+        assert "utils" in names
+
+    def test_streamlit_ui_getattr_loads_known_submodule(self):
+        """Accessing a known submodule via bili.streamlit_ui.__getattr__ imports it."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        # Evict cached entry so __getattr__ path is exercised fresh.
+        saved = sys.modules.pop("bili.streamlit_ui", None)
+        try:
+            pkg = importlib.import_module("bili.streamlit_ui")
+            mod = pkg.__getattr__("utils")
+            assert mod is not None
+        finally:
+            if saved is not None:
+                sys.modules["bili.streamlit_ui"] = saved
+
+    # ------------------------------------------------------------------
+    # bili/streamlit_ui/utils/__init__.py
+    # ------------------------------------------------------------------
+
+    def test_streamlit_ui_utils_getattr_loads_known_submodule(self):
+        """Accessing a known submodule via bili.streamlit_ui.utils.__getattr__ imports it."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        saved = sys.modules.pop("bili.streamlit_ui.utils", None)
+        try:
+            pkg = importlib.import_module("bili.streamlit_ui.utils")
+            mod = pkg.__getattr__("streamlit_utils")
+            assert mod is not None
+            assert hasattr(mod, "conditional_cache_resource")
+        finally:
+            if saved is not None:
+                sys.modules["bili.streamlit_ui.utils"] = saved
+
+    def test_streamlit_ui_utils_getattr_raises_for_unknown_name(self):
+        """Accessing an unknown attribute via bili.streamlit_ui.utils.__getattr__ raises."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        import pytest as _pytest  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.streamlit_ui.utils")
+        with _pytest.raises(AttributeError, match="has no attribute"):
+            pkg.__getattr__("_nonexistent_xyz")
+
+    def test_streamlit_ui_utils_dir_returns_submodule_names(self):
+        """bili.streamlit_ui.utils.__dir__() returns the declared lazy submodule names."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.streamlit_ui.utils")
+        names = pkg.__dir__()
+        assert "state_management" in names
+        assert "streamlit_utils" in names
