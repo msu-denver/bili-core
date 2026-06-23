@@ -71,19 +71,28 @@ LOGGER = logging.getLogger(__name__)
 # hard imports of provider SDKs — providers that are not installed produce no
 # ImportError here.
 #
+# Only genuinely *transient* failures belong here: rate limits, timeouts,
+# connection drops, and provider-unavailable (HTTP 5xx).  Do NOT add base
+# exception classes that cover 4xx responses (auth failure, bad request,
+# not found, validation error); those are fatal and must not silently trigger
+# fallback, as that would mask misconfiguration and waste quota against every
+# fallback provider.
+#
+# In particular, ``APIStatusError`` (openai/anthropic) is the base class for
+# *all* status-coded errors including 401/403/400/422, so it must not be
+# listed here.  The specific subclasses below are the safe subset.
+#
 # Consumers can override the classification entirely via FallbackPolicy.
 _DEFAULT_RETRYABLE_NAMES: Tuple[str, ...] = (
-    # LangChain / LangChain-community base classes
-    "OutputParserException",  # transient parsing glitch
-    # openai SDK
+    # openai SDK — transient only
     "RateLimitError",
     "APIConnectionError",
     "APITimeoutError",
     "InternalServerError",
     "ServiceUnavailableError",
-    # anthropic SDK
+    # anthropic SDK — transient only
+    # "OverloadedError" is the Anthropic analogue of RateLimitError (HTTP 529)
     "OverloadedError",
-    "APIStatusError",
     # google-cloud / vertexai SDK
     "ResourceExhausted",
     "ServiceUnavailable",
@@ -92,8 +101,7 @@ _DEFAULT_RETRYABLE_NAMES: Tuple[str, ...] = (
     "ThrottlingException",
     "ServiceUnavailableException",
     "ModelTimeoutException",
-    "ModelErrorException",
-    # generic Python
+    # generic Python network/IO
     "TimeoutError",
     "ConnectionError",
     "ConnectionResetError",
@@ -102,12 +110,16 @@ _DEFAULT_RETRYABLE_NAMES: Tuple[str, ...] = (
 
 
 def _is_retryable_by_name(exc: BaseException) -> bool:
-    """Return True if the exception's class name is in the default retryable set."""
-    exc_type_name = type(exc).__name__
+    """Return True if the exception's class name (or any base class name) is in
+    the default retryable set.
+
+    The MRO check lets named subclasses inherit retryability (e.g. a
+    ``GoogleRateLimitError`` subclassing ``ResourceExhausted`` is also
+    treated as retryable).  The direct name check is subsumed by the MRO
+    set intersection — listed separately only for clarity.
+    """
     exc_base_names = {c.__name__ for c in type(exc).__mro__}
-    return bool(exc_base_names & set(_DEFAULT_RETRYABLE_NAMES)) or (
-        exc_type_name in _DEFAULT_RETRYABLE_NAMES
-    )
+    return bool(exc_base_names & set(_DEFAULT_RETRYABLE_NAMES))
 
 
 # ---------------------------------------------------------------------------
@@ -264,31 +276,61 @@ class FallbackLLM:
     ``.invoke()`` / ``.stream()`` / ``.astream()`` interface as any
     LangChain chat model.
 
+    Fallback providers are loaded **lazily** — on first use, not at
+    construction time.  This means a misconfigured fallback (missing
+    credentials, wrong region) only surfaces as an error when the chain
+    actually reaches it after the primary fails.  A healthy primary will
+    never trigger loading of any fallback provider.
+
     Parameters
     ----------
     primary : object
         The first LLM to try (must have ``.invoke()``).
-    fallbacks : list of objects
-        Subsequent LLMs to try, in priority order.
+    fallbacks : list of objects, optional
+        Pre-loaded subsequent LLMs, in priority order.  Use this when you
+        have already-instantiated LLM objects.
+    fallback_specs : list of (str, dict), optional
+        Lazy-loaded fallback specs as ``(provider_type, load_kwargs)`` pairs.
+        Each entry is loaded via :data:`~bili.iris.providers.registry.PROVIDER_REGISTRY`
+        on first use.  Mutually exclusive with *fallbacks*.
     policy : FallbackPolicy, optional
         Exception classification policy.  Defaults to
         :data:`DEFAULT_POLICY`.
 
     Class methods
     -------------
-    :meth:`from_chain` — convenience constructor that loads all providers
-    from a :class:`ProviderChain` at construction time.
+    :meth:`from_chain` — convenience constructor that loads the primary from
+    a :class:`ProviderChain` and stores the rest as lazy specs.
     """
 
     def __init__(
         self,
         primary: Any,
         fallbacks: Optional[List[Any]] = None,
+        fallback_specs: Optional[List[Tuple[str, dict]]] = None,
         policy: Optional[FallbackPolicy] = None,
     ) -> None:
+        if fallbacks and fallback_specs:
+            raise ValueError(
+                "Provide either 'fallbacks' (pre-loaded LLMs) or "
+                "'fallback_specs' (lazy (provider_type, kwargs) pairs), not both."
+            )
         self._primary = primary
         self._fallbacks: List[Any] = list(fallbacks) if fallbacks else []
+        # Lazy-loading state: specs to load + cache of loaded objects
+        self._fallback_specs: List[Tuple[str, dict]] = (
+            list(fallback_specs) if fallback_specs else []
+        )
+        self._loaded_fallbacks: List[Optional[Any]] = [None] * len(self._fallback_specs)
         self._policy = policy if policy is not None else DEFAULT_POLICY
+
+    def _get_fallback(self, spec_index: int) -> Any:
+        """Return the fallback LLM at *spec_index*, loading it on first use."""
+        if self._loaded_fallbacks[spec_index] is None:
+            provider_type, kwargs = self._fallback_specs[spec_index]
+            provider_class = PROVIDER_REGISTRY.get_or_raise(provider_type)
+            self._loaded_fallbacks[spec_index] = provider_class().load(**kwargs)
+        return self._loaded_fallbacks[spec_index]
 
     @classmethod
     def from_chain(
@@ -298,27 +340,48 @@ class FallbackLLM:
     ) -> "FallbackLLM":
         """Construct a ``FallbackLLM`` from a :class:`ProviderChain`.
 
-        Loads all provider LLM objects immediately (at construction time, not
-        at call time).
+        The primary LLM is loaded immediately.  Fallback providers are stored
+        as lazy specs and loaded on first use.
 
-        :param chain: An ordered :class:`ProviderChain`.
+        :param chain: An ordered :class:`ProviderChain` with at least one
+            entry.  The first entry is the primary; the rest are fallbacks.
         :param policy: Optional :class:`FallbackPolicy`.  Defaults to
             :data:`DEFAULT_POLICY`.
         :returns: A ``FallbackLLM`` ready to use.
         :raises ValueError: If the chain is empty or a type is unregistered.
         """
-        llms = chain.load_all()
-        primary = llms[0]
-        fallbacks = llms[1:]
-        return cls(primary=primary, fallbacks=fallbacks, policy=policy)
+        entries = list(chain)
+        if not entries:
+            raise ValueError("ProviderChain must have at least one entry.")
+        primary_type, primary_kwargs = entries[0]
+        primary_class = PROVIDER_REGISTRY.get_or_raise(primary_type)
+        primary_llm = primary_class().load(**primary_kwargs)
+        return cls(
+            primary=primary_llm,
+            fallback_specs=entries[1:] if len(entries) > 1 else None,
+            policy=policy,
+        )
 
     # ------------------------------------------------------------------
     # Core invocation helpers
     # ------------------------------------------------------------------
 
     def _candidates(self) -> List[Any]:
-        """Return the full ordered list of LLM candidates."""
-        return [self._primary] + self._fallbacks
+        """Return the full ordered list of LLM candidates.
+
+        Pre-loaded fallbacks (from the ``fallbacks`` constructor parameter)
+        appear first, followed by lazy-spec fallbacks.  The primary is always
+        index 0.
+        """
+        return (
+            [self._primary] + self._fallbacks + list(range(len(self._fallback_specs)))
+        )
+
+    def _resolve_candidate(self, candidate: Any) -> Any:
+        """Resolve a candidate: load it lazily if it is a spec index."""
+        if isinstance(candidate, int):
+            return self._get_fallback(candidate)
+        return candidate
 
     def _log_fallback(
         self,
@@ -360,7 +423,8 @@ class FallbackLLM:
         max_attempts = self._policy.max_attempts or len(candidates)
         last_exc: Optional[BaseException] = None
 
-        for i, llm in enumerate(candidates[:max_attempts]):
+        for i, candidate in enumerate(candidates[:max_attempts]):
+            llm = self._resolve_candidate(candidate)
             try:
                 result = llm.invoke(input, **kwargs)
                 if i > 0:
@@ -411,7 +475,8 @@ class FallbackLLM:
         max_attempts = self._policy.max_attempts or len(candidates)
         last_exc: Optional[BaseException] = None
 
-        for i, llm in enumerate(candidates[:max_attempts]):
+        for i, candidate in enumerate(candidates[:max_attempts]):
+            llm = self._resolve_candidate(candidate)
             try:
                 yield from llm.stream(input, **kwargs)
                 return
@@ -443,7 +508,8 @@ class FallbackLLM:
         max_attempts = self._policy.max_attempts or len(candidates)
         last_exc: Optional[BaseException] = None
 
-        for i, llm in enumerate(candidates[:max_attempts]):
+        for i, candidate in enumerate(candidates[:max_attempts]):
+            llm = self._resolve_candidate(candidate)
             try:
                 async for chunk in llm.astream(input, **kwargs):
                     yield chunk
@@ -472,13 +538,17 @@ class FallbackLLM:
 
     @property
     def fallbacks(self) -> List[Any]:
-        """The fallback LLMs in priority order."""
+        """Pre-loaded fallback LLMs in priority order.
+
+        Does not include lazy-spec fallbacks that have not been loaded yet.
+        Use :attr:`chain_length` to get the total number of providers.
+        """
         return list(self._fallbacks)
 
     @property
     def chain_length(self) -> int:
-        """Total number of providers in the chain (primary + fallbacks)."""
-        return 1 + len(self._fallbacks)
+        """Total number of providers in the chain (primary + all fallbacks)."""
+        return 1 + len(self._fallbacks) + len(self._fallback_specs)
 
     def __repr__(self) -> str:
         return (
@@ -499,6 +569,11 @@ def build_fallback_llm(
 ) -> FallbackLLM:
     """Build a :class:`FallbackLLM` from a primary LLM and a fallback spec.
 
+    Fallback providers are stored as lazy specs and loaded on first use —
+    only when the chain actually reaches them after the primary fails.  This
+    means a misconfigured fallback (missing credentials, wrong region) will
+    not break agent construction while the primary provider is healthy.
+
     This is the low-level convenience function used by
     :func:`~bili.aether.compiler.llm_resolver.create_llm` when
     ``AgentSpec.fallback_models`` is populated.  It can also be used
@@ -507,12 +582,14 @@ def build_fallback_llm(
 
     :param primary_llm: An already-instantiated primary LLM object.
     :param fallback_chain: Ordered list of ``(provider_type, load_kwargs)``
-        pairs for the fallback providers.  Each entry is loaded via
-        :data:`~bili.iris.providers.registry.PROVIDER_REGISTRY`.
+        pairs for the fallback providers.  Each entry is validated (provider
+        type must be registered) and then stored; the provider's
+        :meth:`~bili.iris.providers.base.LLMProvider.load` is called only
+        on first use.
     :param policy: Optional :class:`FallbackPolicy`.  Defaults to
         :data:`DEFAULT_POLICY`.
-    :returns: A :class:`FallbackLLM` wrapping the primary and all
-        loaded fallback LLMs.
+    :returns: A :class:`FallbackLLM` wrapping the primary with lazy
+        fallback specs.
     :raises ValueError: If a provider type in *fallback_chain* is not
         registered.
 
@@ -528,10 +605,14 @@ def build_fallback_llm(
             ],
         )
     """
-    fallback_llms: List[Any] = []
+    specs: List[Tuple[str, dict]] = []
     for provider_type, kwargs in fallback_chain:
-        provider_class = PROVIDER_REGISTRY.get_or_raise(provider_type)
-        fallback_llm = provider_class().load(**kwargs)
-        fallback_llms.append(fallback_llm)
+        # Validate the type is registered now (fail fast at build time, not
+        # during a live request); load() is deferred until first use.
+        PROVIDER_REGISTRY.get_or_raise(provider_type)
+        specs.append((provider_type, dict(kwargs)))
 
-    return FallbackLLM(primary=primary_llm, fallbacks=fallback_llms, policy=policy)
+    if not specs:
+        return FallbackLLM(primary=primary_llm, policy=policy)
+
+    return FallbackLLM(primary=primary_llm, fallback_specs=specs, policy=policy)

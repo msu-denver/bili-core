@@ -33,7 +33,7 @@ from bili.iris.providers.fallback import (
     _is_retryable_by_name,
     build_fallback_llm,
 )
-from bili.iris.providers.registry import PROVIDER_REGISTRY, ProviderRegistry
+from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -154,6 +154,51 @@ class TestIsRetryableByName:
 
         assert _is_retryable_by_name(SpecificTimeoutError()) is True
 
+    def test_api_status_error_base_class_is_fatal(self):
+        """APIStatusError itself is NOT in the retryable set.
+
+        APIStatusError is the base class for all openai/anthropic status-coded
+        errors including auth (401), bad request (400), and permission (403).
+        It must NOT be treated as retryable — doing so would silently fall
+        through to other providers on auth failures, masking misconfiguration.
+        """
+
+        class APIStatusError(Exception):
+            """Simulated openai/anthropic base status error."""
+
+        assert _is_retryable_by_name(APIStatusError()) is False
+
+    def test_api_status_error_subclass_auth_failure_is_fatal(self):
+        """AuthenticationError (subclass of APIStatusError) is classified fatal.
+
+        Because APIStatusError is not in the retryable set, any subclass
+        (AuthenticationError, BadRequestError, PermissionDeniedError, etc.)
+        is also fatal unless its own class name is explicitly listed.
+        """
+
+        class APIStatusError(Exception):
+            """Simulated base."""
+
+        class AuthenticationError(APIStatusError):
+            """Simulated 401 auth failure."""
+
+        assert _is_retryable_by_name(AuthenticationError()) is False
+
+    def test_rate_limit_error_subclass_of_api_status_is_retryable(self):
+        """RateLimitError is retryable even though it inherits APIStatusError.
+
+        RateLimitError is listed explicitly in the retryable set.  The MRO
+        check finds it by the direct class name.
+        """
+
+        class APIStatusError(Exception):
+            """Simulated base."""
+
+        class RateLimitError(APIStatusError):
+            """Simulated 429 rate limit."""
+
+        assert _is_retryable_by_name(RateLimitError()) is True
+
 
 # ---------------------------------------------------------------------------
 # ProviderChain
@@ -186,19 +231,18 @@ class TestProviderChain:
 
     def test_load_all_calls_registry(self):
         """load_all() calls get_or_raise and each provider's load()."""
-        import bili.iris.providers.fallback as _fallback_mod  # pylint: disable=import-outside-toplevel
-
         mock_llm = MagicMock()
 
-        registry = ProviderRegistry()
-        registry.register(
-            "test_chain_type",
+        type_key = "_test_chain_load_type"
+        PROVIDER_REGISTRY.register(
+            type_key,
             type("P", (LLMProvider,), {"load": lambda self, **kw: mock_llm}),
         )
-
-        with patch.object(_fallback_mod, "PROVIDER_REGISTRY", registry):
-            chain = ProviderChain([("test_chain_type", {"model_name": "m"})])
+        try:
+            chain = ProviderChain([(type_key, {"model_name": "m"})])
             llms = chain.load_all()
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
 
         assert len(llms) == 1
         assert llms[0] is mock_llm
@@ -394,9 +438,13 @@ class TestFallbackLLMFromChain:
     """Verify FallbackLLM.from_chain() end-to-end construction."""
 
     def test_from_chain_loads_providers(self):
-        """from_chain() loads all providers and builds FallbackLLM correctly."""
-        import bili.iris.providers.fallback as _fallback_mod  # pylint: disable=import-outside-toplevel
+        """from_chain() loads the primary eagerly and stores fallbacks lazily.
 
+        The primary LLM is loaded at construction time.  Fallback providers
+        are stored as specs (chain_length reflects them) but not loaded until
+        actually needed.  Invoking the FallbackLLM triggers lazy loading of
+        the fallback when the primary fails.
+        """
         mock_llm_a = MagicMock(name="llm_a")
         mock_llm_b = MagicMock(name="llm_b")
 
@@ -408,22 +456,28 @@ class TestFallbackLLMFromChain:
             def load(self, **kwargs):
                 return mock_llm_b
 
-        registry = ProviderRegistry()
-        registry.register("test_chain_a", _ProvA)
-        registry.register("test_chain_b", _ProvB)
-
-        with patch.object(_fallback_mod, "PROVIDER_REGISTRY", registry):
+        type_a = "_test_from_chain_a"
+        type_b = "_test_from_chain_b"
+        PROVIDER_REGISTRY.register(type_a, _ProvA)
+        PROVIDER_REGISTRY.register(type_b, _ProvB)
+        try:
             chain = ProviderChain(
                 [
-                    ("test_chain_a", {"model_name": "m1"}),
-                    ("test_chain_b", {"model_name": "m2"}),
+                    (type_a, {"model_name": "m1"}),
+                    (type_b, {"model_name": "m2"}),
                 ]
             )
             fb_llm = FallbackLLM.from_chain(chain)
+        finally:
+            PROVIDER_REGISTRY.unregister(type_a)
+            PROVIDER_REGISTRY.unregister(type_b)
 
+        # Primary was loaded eagerly.
         assert fb_llm.primary is mock_llm_a
-        assert fb_llm.fallbacks == [mock_llm_b]
+        # chain_length counts both primary and the lazy fallback spec.
         assert fb_llm.chain_length == 2
+        # fallbacks property returns only pre-loaded LLMs, not lazy specs.
+        assert not fb_llm.fallbacks
 
 
 # ---------------------------------------------------------------------------
@@ -435,31 +489,45 @@ class TestBuildFallbackLLM:
     """Verify the build_fallback_llm() convenience function."""
 
     def test_wraps_primary_with_fallback(self):
-        """build_fallback_llm() wraps primary with loaded fallback providers."""
-        import bili.iris.providers.fallback as _fallback_mod  # pylint: disable=import-outside-toplevel
+        """build_fallback_llm() wraps primary with a lazy fallback spec.
 
-        primary = _mock_llm("primary")
-        fallback_llm_obj = _mock_llm("fallback")
+        The returned FallbackLLM has the correct chain_length and is
+        functional: when the primary fails, the fallback is loaded and used.
+        """
+        primary = _mock_llm(side_effect=_RetryableError("rate limited"))
+        fallback_llm_obj = _mock_llm("fallback-result")
 
         class _FallbackProv(LLMProvider):
             def load(self, **kwargs):
                 return fallback_llm_obj
 
-        registry = ProviderRegistry()
-        registry.register("test_build_type", _FallbackProv)
-
-        with patch.object(_fallback_mod, "PROVIDER_REGISTRY", registry):
+        type_key = "_test_build_fb_type"
+        PROVIDER_REGISTRY.register(type_key, _FallbackProv)
+        try:
             result = build_fallback_llm(
                 primary_llm=primary,
-                fallback_chain=[("test_build_type", {"model_name": "m"})],
+                fallback_chain=[(type_key, {"model_name": "m"})],
+                policy=FallbackPolicy(retryable_exceptions=(_RetryableError,)),
             )
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
 
         assert isinstance(result, FallbackLLM)
         assert result.primary is primary
-        assert result.fallbacks == [fallback_llm_obj]
+        # chain_length = 1 (primary) + 1 (lazy spec) = 2
+        assert result.chain_length == 2
+        # fallbacks property returns only pre-loaded LLMs; lazy specs are not listed.
+        assert not result.fallbacks
+        # Re-register so invoke() can load the lazy spec.
+        PROVIDER_REGISTRY.register(type_key, _FallbackProv)
+        try:
+            response = result.invoke(["hello"])
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
+        assert response.content == "fallback-result"
 
     def test_unknown_fallback_type_raises(self):
-        """Unknown provider type in fallback_chain raises ValueError."""
+        """Unknown provider type in fallback_chain raises ValueError at build time."""
         primary = _mock_llm("primary")
         with pytest.raises(ValueError, match="Invalid model type"):
             build_fallback_llm(
@@ -473,6 +541,36 @@ class TestBuildFallbackLLM:
         result = build_fallback_llm(primary_llm=primary, fallback_chain=[])
         assert isinstance(result, FallbackLLM)
         assert not result.fallbacks
+
+    def test_misconfigured_fallback_does_not_break_construction(self):
+        """A fallback whose load() would fail does not break agent construction.
+
+        The fallback spec is validated (type must be registered) at build time,
+        but load() is deferred.  When the primary succeeds, the fallback is
+        never loaded and the broken configuration is never surfaced.
+        """
+
+        class _BrokenProv(LLMProvider):
+            def load(self, **kwargs):
+                raise RuntimeError("missing credentials — misconfigured fallback")
+
+        type_key = "_test_broken_fb_type"
+        PROVIDER_REGISTRY.register(type_key, _BrokenProv)
+        try:
+            primary = _mock_llm("primary-ok")
+            # Construction must succeed even though the fallback's load() would fail.
+            result = build_fallback_llm(
+                primary_llm=primary,
+                fallback_chain=[(type_key, {"model_name": "broken"})],
+            )
+            assert isinstance(result, FallbackLLM)
+            assert result.chain_length == 2
+
+            # Invoking with a healthy primary must succeed without touching the fallback.
+            response = result.invoke(["hello"])
+            assert response.content == "primary-ok"
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
 
 
 # ---------------------------------------------------------------------------
@@ -628,11 +726,18 @@ class TestCreateLLMIntegration:
 
         assert isinstance(result, FallbackLLM)
         assert result.primary is primary_llm
-        assert result.fallbacks == [fallback_llm_obj]
+        # Fallbacks are now lazy specs; chain_length counts them.
+        assert result.chain_length == 2
 
     def test_fallback_resolution_propagates_temperature(self):
-        """Temperature from AgentSpec is forwarded to each fallback's load kwargs."""
+        """Temperature from AgentSpec is forwarded to each fallback's load kwargs.
+
+        Because fallbacks are lazy, load() is only called when the chain
+        actually reaches that fallback.  The test triggers a primary failure
+        so that the fallback provider is loaded and temperature is captured.
+        """
         primary_llm = MagicMock(name="primary")
+        primary_llm.invoke.side_effect = _RetryableError("rate limited")
         captured_kwargs: list = []
 
         class _CapturingProv(LLMProvider):
@@ -661,7 +766,14 @@ class TestCreateLLMIntegration:
                         temperature=0.3,
                         fallback_models=["test-fallback-id"],
                     )
-                    create_llm(spec)
+                    result_llm = create_llm(spec)
+                    # Trigger a primary failure so the lazy fallback is loaded.
+                    policy = FallbackPolicy(retryable_exceptions=(_RetryableError,))
+                    result_llm._policy = policy  # pylint: disable=protected-access
+                    try:
+                        result_llm.invoke(["msg"])
+                    except _RetryableError:
+                        pass  # all-fail path is fine; we just need load() called
         finally:
             PROVIDER_REGISTRY.unregister(type_key)
 
@@ -669,7 +781,11 @@ class TestCreateLLMIntegration:
         assert captured_kwargs[0].get("temperature") == 0.3
 
     def test_create_llm_fallback_invokes_correctly(self):
-        """FallbackLLM returned by create_llm() correctly falls back on failure."""
+        """FallbackLLM returned by create_llm() correctly falls back on failure.
+
+        The provider type must remain registered through the invoke() call
+        so the lazy fallback spec can be loaded when the primary fails.
+        """
         primary_llm = MagicMock(name="primary")
         primary_llm.invoke.side_effect = _RetryableError("rate limited")
         fallback_llm_obj = MagicMock(name="fallback")
@@ -684,6 +800,7 @@ class TestCreateLLMIntegration:
         import bili.iris.providers.fallback as _fallback_mod  # pylint: disable=import-outside-toplevel
 
         type_key = "_test_cllm_invoke_type"
+        # Keep the type registered through the full test (including invoke).
         PROVIDER_REGISTRY.register(type_key, _FbProv)
         try:
             with patch(
@@ -702,10 +819,13 @@ class TestCreateLLMIntegration:
                             fallback_models=["test-fallback-id"],
                         )
                         result_llm = create_llm(spec)
+
+            # invoke() is outside the load_model/resolve patches but
+            # inside the PROVIDER_REGISTRY registration.
+            response = result_llm.invoke(["hello"])
         finally:
             PROVIDER_REGISTRY.unregister(type_key)
 
-        response = result_llm.invoke(["hello"])
         assert response.content == "fallback-content"
 
 
