@@ -45,6 +45,10 @@ KNOWN_PROVIDER_TYPES = frozenset(
         "local_huggingface",
         # Subprocess / transport-level providers
         "cli",
+        # Named CLI presets (each preset is a CliPresetProvider subclass)
+        "cli_claude_code",
+        "cli_codex",
+        "cli_gemini_cli",
         # Future provider shapes (not yet implemented)
         # "mcp"   -- Model Context Protocol server transport
     }

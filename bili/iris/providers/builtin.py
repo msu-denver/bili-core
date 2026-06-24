@@ -28,6 +28,9 @@ Provider type string               Implementation class
 ``local_llamacpp``                 :class:`~.llamacpp_provider.LlamaCppProvider`
 ``local_huggingface``              :class:`~.huggingface_provider.HuggingFaceProvider`
 ``cli``                            :class:`~.cli_provider.CliProvider`
+``cli_claude_code``                :class:`~.preset_provider.CliPresetProvider` (Claude Code preset)
+``cli_codex``                      :class:`~.preset_provider.CliPresetProvider` (Codex CLI preset)
+``cli_gemini_cli``                 :class:`~.preset_provider.CliPresetProvider` (Gemini CLI preset)
 ================================  ================================================
 """
 
@@ -36,6 +39,7 @@ import logging
 from .anthropic_provider import AnthropicProvider
 from .azure_openai_provider import AzureOpenAIProvider
 from .bedrock_provider import BedrockProvider
+from .cli_presets import CLI_PRESET_CATALOG
 from .cli_provider import CliProvider
 from .cohere_provider import CohereProvider
 from .deepseek_provider import DeepSeekProvider
@@ -45,6 +49,7 @@ from .huggingface_provider import HuggingFaceProvider
 from .llamacpp_provider import LlamaCppProvider
 from .mistral_provider import MistralProvider
 from .openai_provider import OpenAIProvider
+from .preset_provider import CliPresetProvider
 from .registry import PROVIDER_REGISTRY
 from .vertex_provider import VertexAIProvider
 from .xai_provider import XAIProvider
@@ -81,6 +86,17 @@ def _register_builtins() -> None:
             LOGGER.debug("Built-in provider registered: '%s'", provider_type)
         else:
             LOGGER.debug("Built-in provider already registered: '%s'", provider_type)
+
+    # Register CLI preset providers.  Each preset gets a dynamically-generated
+    # CliPresetProvider subclass so the registry holds a distinct class per
+    # preset, which is required by ProviderRegistry's deduplication logic.
+    for preset_type, preset in CLI_PRESET_CATALOG.items():
+        if preset_type not in PROVIDER_REGISTRY:
+            preset_class = CliPresetProvider.for_preset(preset)
+            PROVIDER_REGISTRY.register(preset_type, preset_class)
+            LOGGER.debug("CLI preset provider registered: '%s'", preset_type)
+        else:
+            LOGGER.debug("CLI preset provider already registered: '%s'", preset_type)
 
 
 _register_builtins()

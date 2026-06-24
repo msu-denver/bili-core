@@ -1553,6 +1553,82 @@ LLM_MODELS = {
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # CLI preset providers                                                #
+    # ------------------------------------------------------------------ #
+    # Each entry below is a named preset for a specific CLI LLM tool.   #
+    # The preset supplies the known one-shot invocation, prompt-delivery #
+    # strategy, and output config so callers need no per-tool knowledge. #
+    # The subprocess inherits os.environ; whatever credential the tool   #
+    # holds (OAuth session, API key env var, etc.) is reused.            #
+    # ------------------------------------------------------------------ #
+    "cli_claude_code": {
+        "name": "Claude Code CLI (Preset)",
+        "description": (
+            "Drives 'claude -p <prompt>' (Anthropic Claude Code CLI) in "
+            "one-shot print mode.  No API key configuration is required "
+            "beyond having the Claude CLI installed and authenticated.  "
+            "The subprocess reuses the calling process's OAuth session or "
+            "ANTHROPIC_API_KEY environment variable."
+        ),
+        "model_help": "https://docs.anthropic.com/en/docs/claude-code/cli-usage",
+        "models": [
+            {
+                "model_name": "Claude Code CLI",
+                "model_id": "cli:claude_code",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "supports_tools": False,
+            },
+        ],
+    },
+    "cli_codex": {
+        "name": "OpenAI Codex CLI (Preset)",
+        "description": (
+            "Drives 'codex exec <prompt>' (OpenAI Codex CLI) in "
+            "non-interactive mode.  Requires the Codex CLI to be installed "
+            "and authenticated via OPENAI_API_KEY or its interactive login "
+            "flow.  The subprocess reuses the calling process's environment."
+        ),
+        "model_help": "https://developers.openai.com/codex/noninteractive",
+        "models": [
+            {
+                "model_name": "Codex CLI",
+                "model_id": "cli:codex",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "supports_tools": False,
+            },
+        ],
+    },
+    "cli_gemini_cli": {
+        "name": "Google Gemini CLI (Preset)",
+        "description": (
+            "Drives 'gemini -p <prompt>' (Google Gemini CLI) in "
+            "non-interactive headless mode.  Requires the Gemini CLI to be "
+            "installed and authenticated via Google OAuth or GEMINI_API_KEY.  "
+            "The subprocess reuses the calling process's environment."
+        ),
+        "model_help": "https://github.com/google-gemini/gemini-cli",
+        "models": [
+            {
+                "model_name": "Gemini CLI",
+                "model_id": "cli:gemini_cli",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "supports_tools": False,
+            },
+        ],
+    },
     "local_llamacpp": {
         "name": "Local LlamaCpp Compatible Model",
         "description": "Local LlamaCpp compatible model loaded into memory.",
