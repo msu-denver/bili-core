@@ -1,7 +1,7 @@
 """IRIS — Interactive Reasoning and Integration Services.
 
 Single-agent orchestration framework. Provides LLM configuration for 97
-model configurations across 16 provider types (11 remote API providers:
+model configurations across 17 provider types (11 remote API providers:
 AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI,
 Cohere, Google Generative AI, DeepSeek, xAI, Groq; 3 CLI presets: Claude
 Code, Codex CLI, Gemini CLI; generic CLI subprocess; and 2 local providers:
