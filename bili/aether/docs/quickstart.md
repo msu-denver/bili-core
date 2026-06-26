@@ -322,14 +322,19 @@ In `simple_chain.yaml`, `policy_expert` sits downstream of the injected `content
 
 ## Other providers
 
-To use AWS Bedrock or Google Vertex instead of OpenAI, substitute the `model_name` value in your YAML and store credentials in the appropriate location:
+To use a different provider, substitute the `model_name` value in your YAML and supply credentials for that provider. The full list of provider types is in `bili/iris/providers/builtin.py`; here are the most common ones:
 
 | Provider                           | `model_name` value                          | Credentials                                    |
 | ---------------------------------- | ------------------------------------------- | ---------------------------------------------- |
 | OpenAI                             | `gpt-4o`                                    | `OPENAI_API_KEY` in `.env`                     |
+| Anthropic direct                   | `claude-opus-4-8`                           | `ANTHROPIC_API_KEY` in `.env`                  |
 | AWS Bedrock (Claude 3.5 Sonnet v2) | `anthropic.claude-3-5-sonnet-20241022-v2:0` | AWS credentials in `env/bili_root/.aws/`       |
 | AWS Bedrock (Claude 3.7 Sonnet)    | `anthropic.claude-3-7-sonnet-20250219-v1:0` | AWS credentials in `env/bili_root/.aws/`       |
 | Google Vertex (Gemini 2.5 Flash)   | `gemini-2.5-flash`                          | Google credentials in `env/bili_root/.google/` |
+| Google Generative AI (Gemini)      | `gemini-2.0-flash`                          | `GOOGLE_API_KEY` in `.env`                     |
+| Mistral AI                         | `mistral-large-latest`                      | `MISTRAL_API_KEY` in `.env`                    |
+| Groq                               | `llama-3.3-70b-versatile`                   | `GROQ_API_KEY` in `.env`                       |
+| Claude Code CLI (no API key)       | `claude-code-cli`                           | Inherits active `claude` CLI session           |
 
 > **Bedrock gotcha:** Do not use the short-form Anthropic model ID (e.g. `claude-3-5-sonnet-20241022`) without the `anthropic.` prefix and `:0` suffix. The resolver will route `claude-` prefixed strings to the direct Anthropic API path, which will fail unless you have Anthropic API credentials configured separately. Always use the full Bedrock model ID shown above.
 

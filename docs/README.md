@@ -25,10 +25,10 @@ Developed as part of the [Colorado Sustainability Hub](https://sustainabilityhub
 
 ### What Makes BiliCore Different
 
-- **Multi-Provider Support**: Test LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models using a unified interface
+- **Multi-Provider Support**: 97 model configurations across 16 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 2 local providers (llama.cpp, HuggingFace)
 - **Dynamic Configuration**: Switch LLMs mid-conversation without losing chat history
 - **Three-Component Design**: Cleanly separated concerns across IRIS (single-agent), AETHER (multi-agent), and AEGIS (security)
-- **Modular Architecture**: Extensible authentication, tools, checkpointing, and workflow systems
+- **Modular Architecture**: Extensible authentication, tools, checkpointing, and workflow systems; lean core with optional extras (`[mcp]`, `[streamlit]`, `[flask]`, `[mongo]`, `[postgres]`, provider extras, etc.)
 - **Research-Ready**: Built for benchmarking with reproducible configurations and comprehensive logging
 
 ---
@@ -67,7 +67,10 @@ from bili.aegis.evaluator import Evaluator
 
 | Feature | Description |
 |---------|-------------|
-| **60+ LLM Configurations** | Pre-configured models across major cloud providers (via `bili.iris.config`) |
+| **97 LLM Configurations** | Pre-configured models across 16 provider types — API, CLI, and local (via `bili.iris.config`) |
+| **BYO-LLM / CLI Providers** | Use Claude Code, Codex CLI, or Gemini CLI as first-class LLM providers via subprocess; fallback to prompted ReAct for tool calling when native function-calling is unavailable |
+| **Fallback Engine** | `FallbackLLM` silently retries across a provider chain on transient failures; declared via `AgentSpec.fallback_models` |
+| **MCP Client Subsystem** | `bili/iris/mcp/` lets agents consume tools from any MCP server (stdio or HTTP/SSE), adapted as LangChain tools (install with `pip install bili-core[mcp]`) |
 | **LangGraph Workflows** | Node-based workflow system with customizable execution pipelines (via `bili.iris.loaders`) |
 | **Extensible Tools** | FAISS, OpenSearch, weather APIs, web search, and custom tool support (via `bili.iris.tools`) |
 | **Multi-Agent Orchestration** | Declarative YAML-driven multi-agent workflows with 7 workflow types (via `bili.aether`) |

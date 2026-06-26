@@ -430,7 +430,7 @@ def is_authenticated():
 The LLM configuration panel (`display_configuration_panels()` in `configuration_panels.py`) provides comprehensive model configuration:
 
 #### Model Selection
-- **LLM Type**: Dropdown for provider selection (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Local models)
+- **LLM Type**: Dropdown for provider selection (all registered provider types: AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq, Claude Code CLI, Codex CLI, Gemini CLI, generic CLI, llama.cpp, HuggingFace)
 - **LLM Model**: Dropdown for specific model selection within provider
 
 #### Model Parameters (dynamically shown based on model capabilities)
@@ -488,8 +488,19 @@ LLM_MODELS = {
             "GPT-3.5 Turbo"
         ]
     },
-    "local_llamacpp": { "models": ["LlamaCpp Local Model"] },
-    "local_huggingface": { "models": ["HuggingFace Local Model"] }
+    "remote_anthropic":    { "models": ["Claude Opus 4.8", "Claude Sonnet 4.6", "Claude Haiku 4.5", "Claude Fable 5"] },
+    "remote_mistral":      { "models": ["Mistral Large", "Mistral Small", "Codestral"] },
+    "remote_cohere":       { "models": ["Command A+", "Command R+", "Command R"] },
+    "remote_google_genai": { "models": ["Gemini 2.5/2.0 Flash"] },
+    "remote_deepseek":     { "models": ["DeepSeek Chat", "DeepSeek Reasoner"] },
+    "remote_xai":          { "models": ["Grok 3 Latest", "Grok Beta"] },
+    "remote_groq":         { "models": ["Llama 3.3 70B", "Llama 3.1 8B", "Compound Beta"] },
+    "cli":                 { "models": ["Generic CLI subprocess"] },
+    "cli_claude_code":     { "models": ["Claude Code CLI (claude -p)"] },
+    "cli_codex":           { "models": ["OpenAI Codex CLI (codex exec)"] },
+    "cli_gemini_cli":      { "models": ["Google Gemini CLI (gemini -p)"] },
+    "local_llamacpp":      { "models": ["LlamaCpp Local Model (GGUF)"] },
+    "local_huggingface":   { "models": ["HuggingFace Local Model (GPTQ/transformers)"] }
 }
 ```
 

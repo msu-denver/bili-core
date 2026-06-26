@@ -4,7 +4,7 @@ This guide covers running AETHER with local LLMs instead of cloud API calls. No 
 
 Read [quickstart-stub.md](quickstart-stub.md) first if you haven't. This guide only covers what's different from the stub and cloud API flows.
 
-> **Tool calling caveat:** Local models (`ChatLlamaCpp`, `ChatHuggingFace`) do not support automatic tool calling. Agents with `tools` defined in their config will fail silently. For `simple_chain.yaml` — which has no tools — local models are a direct drop-in replacement.
+> **Tool calling caveat:** Local models (`ChatLlamaCpp`, `ChatHuggingFace`) do not support native function-calling via `bind_tools`. Set `supports_tools: false` in the agent's `node_kwargs` to route through the prompted ReAct path instead (hand-rolled Action/Observation loop injected into the system prompt). For `simple_chain.yaml` — which has no tools — local models are a direct drop-in replacement with no extra config needed.
 
 ---
 
@@ -93,7 +93,7 @@ Apply whichever `model_name` form you choose to all four agents (`community_mana
 
 > **Changing the default path:** If your model is stored elsewhere, edit `bili/iris/config/llm_config.py` directly to update the path that the display name resolves to.
 
-> **`capabilities` note:** Remove `tool_calling` from any agent's `capabilities` list when using local models. Local models don't dispatch tools — leaving it in won't cause an error, but it is misleading.
+> **`capabilities` note:** Local models do not support native tool calling via `bind_tools`. Use the prompted ReAct path by passing `supports_tools: false` in `node_kwargs` — the node auto-selects a hand-rolled Action/Observation loop that works with any text-in/text-out model. If you add `tool_calling` to the agent's `capabilities` list, keep `supports_tools: false` set so the native path is not attempted.
 
 ---
 
