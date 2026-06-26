@@ -66,6 +66,12 @@ Functions
 - ``_build_tool_preamble(tools)``:
   Internal helper; renders the tool-description block injected into the system message.
 
+- ``_extract_json_object(text)``:
+  Internal helper; returns the first brace-balanced JSON object or array found in
+  *text*.  Used by ``_parse_react_response`` to correctly handle nested object args
+  (e.g. ``{"filters": {"type": "exact"}}``).  A non-greedy regex alternative would
+  truncate at the first inner ``}``.
+
 Dependencies
 ------------
 - ``langchain_core.messages``: ``AIMessage``, ``HumanMessage``, ``SystemMessage``
@@ -183,11 +189,64 @@ def _build_tool_preamble(tools: list) -> str:
 
 # Regex patterns used by the response parser.  Compiled once at module load.
 _ACTION_RE = re.compile(r"Action\s*:\s*(.+?)(?:\n|$)", re.IGNORECASE)
-_ACTION_INPUT_RE = re.compile(
-    r"Action\s+Input\s*:\s*(\{.*?\}|\[.*?\]|\".*?\"|'.*?'|\S+)",
+# Anchors on the "Action Input:" label and captures everything that follows to
+# end-of-string.  The actual JSON boundary is determined by _extract_json_object
+# so that brace-balanced nested objects parse correctly.  A non-greedy \{.*?\}
+# regex would truncate at the first "}" inside a nested object.
+_ACTION_INPUT_ANCHOR_RE = re.compile(
+    r"Action\s+Input\s*:\s*(.*)",
     re.IGNORECASE | re.DOTALL,
 )
 _FINAL_ANSWER_RE = re.compile(r"Final\s+Answer\s*:\s*(.*)", re.IGNORECASE | re.DOTALL)
+
+
+def _extract_json_object(text: str) -> str | None:
+    """Return the first brace-balanced JSON object (or array) from *text*.
+
+    Scans forward from the first ``{`` (or ``[``), counting opening and closing
+    brackets until the nesting depth returns to zero.  Returns the full balanced
+    substring, which correctly handles nested objects such as::
+
+        {"filters": {"type": "exact", "value": "foo"}, "limit": 5}
+
+    Returns ``None`` if no ``{`` or ``[`` is found, or if the brackets are
+    unbalanced (unclosed).
+
+    :param text: String that may contain a JSON object or array.
+    :type text: str
+    :return: The balanced JSON substring, or ``None``.
+    :rtype: str or None
+    """
+    open_chars = {"{": "}", "[": "]"}
+    for start_idx, ch in enumerate(text):
+        if ch not in open_chars:
+            continue
+        close_ch = open_chars[ch]
+        depth = 0
+        in_string = False
+        escape_next = False
+        for end_idx in range(start_idx, len(text)):
+            c = text[end_idx]
+            if escape_next:
+                escape_next = False
+                continue
+            if c == "\\" and in_string:
+                escape_next = True
+                continue
+            if c == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == ch:
+                depth += 1
+            elif c == close_ch:
+                depth -= 1
+                if depth == 0:
+                    return text[start_idx : end_idx + 1]
+        # Unbalanced — stop looking
+        return None
+    return None
 
 
 def _parse_react_response(text: str):
@@ -221,9 +280,17 @@ def _parse_react_response(text: str):
     action_match = _ACTION_RE.search(text)
     if action_match:
         tool_name = action_match.group(1).strip()
-        input_match = _ACTION_INPUT_RE.search(text)
+        input_match = _ACTION_INPUT_ANCHOR_RE.search(text)
         if input_match:
-            raw = input_match.group(1).strip()
+            # Extract the brace-balanced JSON object from the remainder.
+            # _extract_json_object handles nested structures correctly; the
+            # old non-greedy \{.*?\} approach truncated at the first inner "}"
+            # and broke tools that accept object-valued arguments.
+            remainder = input_match.group(1)
+            raw = _extract_json_object(remainder)
+            if raw is None:
+                # No { or [ found — fall through to the parse_error path
+                raw = remainder.strip()
             try:
                 args = json.loads(raw)
             except json.JSONDecodeError as exc:

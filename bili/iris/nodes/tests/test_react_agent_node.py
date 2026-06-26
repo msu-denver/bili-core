@@ -11,6 +11,9 @@ Tests the ReAct agent node builder:
   ReAct loop: tool injection, Action/Final Answer parsing, tool execution,
   error handling, iteration cap, and consecutive-parse-failure escape hatch.
 - Auto-selection between native, prompted, and fallback paths.
+- _extract_json_object: brace-balanced extraction for nested/complex JSON args.
+- _parse_react_response: nested Action Input objects parse completely (the
+  regression guarded by this fix).
 """
 
 from unittest.mock import MagicMock, patch
@@ -19,6 +22,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from bili.iris.nodes.react_agent_node import (
     _build_prompted_react_loop,
+    _extract_json_object,
     _parse_react_response,
     build_react_agent_node,
     react_agent_node,
@@ -297,6 +301,81 @@ class TestParseReactResponse:
         assert kind == "final"
         assert value == "result text"
 
+    def test_action_with_nested_json_object(self):
+        """Nested object-valued Action Input parses completely (regression for #304 follow-up).
+
+        A non-greedy regex like \\{.*?\\} stops at the FIRST closing brace and
+        produces ``{"filters": {"type"`` instead of the full object.  The brace-
+        balanced extractor must return the complete nested structure.
+        """
+        text = (
+            "Thought: I need to search with filters.\n"
+            "Action: search\n"
+            'Action Input: {"query": "climate", "filters": {"type": "exact", "field": "title"}, "limit": 5}'
+        )
+        kind, value, extra = _parse_react_response(text)
+        assert kind == "action"
+        assert value == "search"
+        assert extra == {
+            "query": "climate",
+            "filters": {"type": "exact", "field": "title"},
+            "limit": 5,
+        }
+
+
+# ---------------------------------------------------------------------------
+# _extract_json_object unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractJsonObject:
+    """Unit tests for the brace-balanced JSON extractor."""
+
+    def test_simple_object(self):
+        """A flat single-level object is returned whole."""
+        assert _extract_json_object('{"a": 1, "b": 2}') == '{"a": 1, "b": 2}'
+
+    def test_nested_object(self):
+        """A nested object is returned complete, not truncated at the first '}'."""
+        src = '{"outer": {"inner": "value"}}'
+        assert _extract_json_object(src) == src
+
+    def test_deeply_nested_object(self):
+        """Three levels of nesting are handled."""
+        src = '{"a": {"b": {"c": 1}}}'
+        assert _extract_json_object(src) == src
+
+    def test_object_with_text_before_and_after(self):
+        """Prefix text is ignored; suffix text after the closing brace is dropped."""
+        result = _extract_json_object('some prefix {"key": "val"} trailing text')
+        assert result == '{"key": "val"}'
+
+    def test_array(self):
+        """A JSON array (starting with '[') is also extracted correctly."""
+        assert _extract_json_object("[1, 2, 3]") == "[1, 2, 3]"
+
+    def test_nested_array_inside_object(self):
+        """Arrays nested inside objects are balanced correctly."""
+        src = '{"items": [1, 2, 3], "count": 3}'
+        assert _extract_json_object(src) == src
+
+    def test_string_containing_braces(self):
+        """Braces inside string values do not confuse the depth counter."""
+        src = '{"msg": "hello {world}"}'
+        assert _extract_json_object(src) == src
+
+    def test_empty_object(self):
+        """An empty object ``{}`` is a valid balanced result."""
+        assert _extract_json_object("{}") == "{}"
+
+    def test_no_json_returns_none(self):
+        """Text with no opening brace or bracket returns None."""
+        assert _extract_json_object("no json here") is None
+
+    def test_unbalanced_returns_none(self):
+        """An unclosed opening brace returns None."""
+        assert _extract_json_object('{"unclosed": "value"') is None
+
 
 # ---------------------------------------------------------------------------
 # _build_prompted_react_loop integration tests
@@ -539,6 +618,42 @@ class TestPromptedReactLoop:
         assert "lookup" in first_call_messages[0].content
 
     # -- 12. Observations injected as HumanMessage (strict-turn compat) -------
+
+    def test_nested_json_action_input_parsed_and_invoked(self):
+        """Nested object args in Action Input are passed intact to the tool.
+
+        Regression for the #304 follow-up: the old non-greedy \\{.*?\\} regex
+        would stop at the first inner '}' and truncate the argument object.
+        The brace-balanced extractor must deliver the full dict to tool.invoke().
+        """
+        search_tool = _make_tool("search", return_value="3 results found")
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = [
+            AIMessage(
+                content=(
+                    "Thought: I need a filtered search.\n"
+                    "Action: search\n"
+                    'Action Input: {"query": "climate", '
+                    '"filters": {"type": "exact", "field": "title"}, '
+                    '"limit": 5}'
+                )
+            ),
+            AIMessage(content="Final Answer: found 3 results"),
+        ]
+
+        loop = _build_prompted_react_loop(mock_llm, [search_tool])
+        result = loop({"messages": [HumanMessage(content="search for climate")]})
+
+        # The tool must receive the COMPLETE nested dict, not a truncated one
+        search_tool.invoke.assert_called_once_with(
+            {
+                "query": "climate",
+                "filters": {"type": "exact", "field": "title"},
+                "limit": 5,
+            }
+        )
+        assert result["messages"][0].content == "found 3 results"
 
     def test_observation_injected_as_human_message(self):
         """Tool observations are fed back as HumanMessage, not ToolMessage."""
