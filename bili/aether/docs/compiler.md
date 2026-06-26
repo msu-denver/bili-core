@@ -118,15 +118,35 @@ Each compiled graph gets a dynamic `TypedDict` state schema. Base fields are alw
 
 ### Agent Nodes
 
-Agent nodes are generated in one of three modes based on `AgentSpec` configuration:
+Agent nodes are generated in one of four modes based on `AgentSpec` configuration and the
+model's capability flags:
 
-1. **Tool-enabled LLM node** — `model_name` set and `tools` configured. Uses `create_agent()` from `langchain.agents` with resolved tool instances. Middleware applies here.
+1. **Tool-enabled LLM node (native)** — `model_name` set, `tools` configured, and the model
+   supports `bind_tools` (i.e. `supports_tools: true` in `LLM_MODELS`, the default for all
+   API providers). Uses `create_agent()` from `langchain.agents` with resolved tool instances.
+   Middleware applies here.
 
-2. **Direct LLM node** — `model_name` set but no tools. Calls `llm.invoke(messages)` directly. Messages are filtered to compatible types (`AIMessage`, `HumanMessage`, `SystemMessage`).
+2. **Tool-enabled LLM node (prompted)** — `model_name` set, `tools` configured, and the model
+   does **not** support `bind_tools` (`supports_tools: false` in `LLM_MODELS`, set for CLI
+   models and some legacy providers). Uses the shared prompted ReAct loop from
+   `bili/iris/nodes/react_agent_node._build_prompted_react_loop`. Tools are described in a
+   system-message preamble; the model's text output is parsed for `Action:` / `Final Answer:`
+   markers. Works with any model that can follow text instructions. The iteration cap can be
+   tuned via `AgentSpec.metadata["max_react_iterations"]` (default 10). Middleware is not
+   applicable on this path.
 
-3. **Stub node** — `model_name` is `None`. Emits a placeholder `AIMessage` without LLM calls. Allows full compilation and graph execution without API keys. All example YAMLs use this mode.
+3. **Direct LLM node** — `model_name` set but no tools. Calls `llm.invoke(messages)` directly.
+   Messages are filtered to compatible types (`AIMessage`, `HumanMessage`, `SystemMessage`).
 
-Model resolution is handled by `llm_resolver.py`, which maps `model_name` to a `(provider_type, model_id)` pair by searching `bili.iris.config.llm_config.LLM_MODELS` and falling back to heuristic prefix-based detection. LLMs are created via `bili.iris.loaders.llm_loader.load_model()`. Tools are resolved via `bili.iris.loaders.tools_loader.initialize_tools()`.
+4. **Stub node** — `model_name` is `None`. Emits a placeholder `AIMessage` without LLM calls.
+   Allows full compilation and graph execution without API keys. All example YAMLs use this mode.
+
+Model resolution is handled by `llm_resolver.py`, which maps `model_name` to a
+`(provider_type, model_id)` pair by searching `bili.iris.config.llm_config.LLM_MODELS` and
+falling back to heuristic prefix-based detection. The `supports_tools` flag is also read from
+the `LLM_MODELS` entry to select native vs prompted path. LLMs are created via
+`bili.iris.loaders.llm_loader.load_model()`. Tools are resolved via
+`bili.iris.loaders.tools_loader.initialize_tools()`.
 
 Each agent node callable has an `.agent_spec` attribute for introspection:
 

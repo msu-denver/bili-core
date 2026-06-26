@@ -656,15 +656,36 @@ Each compiled graph gets a dynamic `TypedDict` state schema. Base fields are alw
 
 ### Agent Nodes
 
-Agent nodes are generated in one of three modes based on the `AgentSpec` configuration:
+Agent nodes are generated in one of four modes based on the `AgentSpec` configuration and the
+model's capability flags:
 
-1. **Tool-enabled LLM node** — When `model_name` is set and `tools` are configured, the node uses `create_agent()` from `langchain.agents` with resolved tool instances. This mirrors the pattern used by `bili/iris/nodes/react_agent_node.py`.
+1. **Tool-enabled LLM node (native)** — `model_name` set, `tools` configured, and the model
+   supports `bind_tools` (`supports_tools: true` in `LLM_MODELS`, the default for all API
+   providers). Uses `create_agent()` from `langchain.agents` with resolved tool instances.
 
-2. **Direct LLM node** — When `model_name` is set but no tools are configured, the node calls `llm.invoke(messages)` directly. Messages are filtered to compatible types (`AIMessage`, `HumanMessage`, `SystemMessage`).
+2. **Tool-enabled LLM node (prompted)** — `model_name` set, `tools` configured, and the model
+   does **not** support `bind_tools` (`supports_tools: false` in `LLM_MODELS`, set for CLI
+   models and some legacy providers). Uses the shared prompted ReAct loop from IRIS
+   (`_build_prompted_react_loop` in `bili/iris/nodes/react_agent_node.py`). Tools are described
+   in a system-message preamble; the model's text output is parsed for `Action:` /
+   `Final Answer:` markers — the same protocol IRIS uses. This path works with any model that
+   can follow text instructions, including `CliLLM` instances. Tune the iteration cap via
+   `AgentSpec.metadata["max_react_iterations"]` (default 10).
 
-3. **Stub node** — When `model_name` is `None`, the node emits a placeholder `AIMessage` without making LLM calls. This allows compilation and graph execution without API keys (all example YAMLs use this mode).
+3. **Direct LLM node** — When `model_name` is set but no tools are configured, the node calls
+   `llm.invoke(messages)` directly. Messages are filtered to compatible types (`AIMessage`,
+   `HumanMessage`, `SystemMessage`).
 
-Model resolution is handled by `llm_resolver.py`, which maps `AgentSpec.model_name` to a `(provider_type, model_id)` pair. It searches `bili.iris.config.llm_config.LLM_MODELS` first (by `model_id`, then by display name), and falls back to heuristic prefix-based detection. LLM instances are created via `bili.iris.loaders.llm_loader.load_model()`. Tool names are resolved via `bili.iris.loaders.tools_loader.initialize_tools()`.
+4. **Stub node** — When `model_name` is `None`, the node emits a placeholder `AIMessage`
+   without making LLM calls. This allows compilation and graph execution without API keys (all
+   example YAMLs use this mode).
+
+Model resolution is handled by `llm_resolver.py`, which maps `AgentSpec.model_name` to a
+`(provider_type, model_id)` pair. It searches `bili.iris.config.llm_config.LLM_MODELS` first
+(by `model_id`, then by display name), and falls back to heuristic prefix-based detection. The
+`supports_tools` flag is also read from `LLM_MODELS` to select native vs prompted path. LLM
+instances are created via `bili.iris.loaders.llm_loader.load_model()`. Tool names are resolved
+via `bili.iris.loaders.tools_loader.initialize_tools()`.
 
 Each agent node callable has an `.agent_spec` attribute attached for introspection:
 
@@ -826,7 +847,7 @@ graph = compiled.compile_graph(checkpointer=get_pg_checkpointer(keep_last_n=5))
 
 ### Per-Agent Middleware
 
-Agents can configure middleware to intercept and modify their execution. Middleware is resolved via bili-core's `initialize_middleware()` and passed to `create_agent()` for tool-enabled agents.
+Agents can configure middleware to intercept and modify their execution. Middleware is resolved via bili-core's `initialize_middleware()` and passed to `create_agent()` for tool-enabled agents on the **native** path.
 
 ```yaml
 agents:
@@ -862,7 +883,7 @@ agents:
 | `model_call_limit` | Circuit-breaker for runaway agent loops | `run_limit` (default: 10), `exit_behavior` (`"end"` or `"error"`) |
 
 **Limitations:**
-- Middleware only applies to **tool-enabled agents** (agents with `tools` configured). If middleware is set on an agent without tools, a warning is logged and middleware is skipped.
+- Middleware only applies to **native tool-enabled agents** (agents with `tools` configured and a model that supports `bind_tools`). If middleware is set on an agent without tools, or on an agent using the prompted ReAct path (`supports_tools: false`), a warning is logged and middleware is skipped.
 - Middleware requires `langchain.agents.middleware` — if unavailable, agents run without middleware.
 
 ### CLI Tool (Compiler)
