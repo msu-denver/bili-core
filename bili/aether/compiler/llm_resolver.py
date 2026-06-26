@@ -254,6 +254,56 @@ def create_llm(agent: AgentSpec) -> Any:
     return build_fallback_llm(primary_llm=primary_llm, fallback_chain=fallback_chain)
 
 
+def resolve_supports_tools(model_name: str) -> bool:
+    """Return the ``supports_tools`` flag for *model_name* from ``LLM_MODELS``.
+
+    Checks the ``supports_tools`` top-level field on the matching model entry.
+    Returns ``True`` (the default for all API-backed models) when the entry is
+    not found in the catalog or when the entry does not declare the flag
+    explicitly.  Returns ``False`` only when the entry explicitly sets
+    ``"supports_tools": False``, as CLI and some legacy models do.
+
+    This is the same source that ``bili/iris/nodes/react_agent_node.py`` reads
+    via its ``supports_tools`` node-kwarg: AETHER uses this lookup to drive the
+    same 3-way path selection without requiring YAML authors to declare the flag.
+
+    Args:
+        model_name: The model identifier from ``AgentSpec.model_name``.
+            Can be a display name (``"GPT-4o"``) or a model ID
+            (``"gpt-4o"``).
+
+    Returns:
+        ``True`` if the model supports native ``bind_tools`` (use native
+        ``create_agent`` path); ``False`` if it does not (use prompted ReAct
+        path).
+    """
+    try:
+        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
+            LLM_MODELS,
+        )
+    except ImportError:
+        LOGGER.debug(
+            "bili.iris.config.llm_config not available; "
+            "assuming supports_tools=True for '%s'",
+            model_name,
+        )
+        return True
+
+    for provider_info in LLM_MODELS.values():
+        for entry in provider_info.get("models", []):
+            if (
+                entry.get("model_id") == model_name
+                or entry.get("model_name") == model_name
+            ):
+                return entry.get("supports_tools", True)
+
+    LOGGER.debug(
+        "'%s' not found in LLM_MODELS; assuming supports_tools=True",
+        model_name,
+    )
+    return True
+
+
 def resolve_tools(agent: AgentSpec) -> list:
     """Resolve an ``AgentSpec``'s tool names to tool instances.
 

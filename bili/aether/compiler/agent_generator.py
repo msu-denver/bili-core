@@ -2,8 +2,26 @@
 
 When an ``AgentSpec`` has ``model_name`` set, the generated node makes
 real LLM calls using bili-core's ``llm_loader``.  If the agent also has
-``tools`` configured, the node is built with ``langchain.agents.create_agent``
-— the same pattern used by ``bili/iris/nodes/react_agent_node.py``.
+``tools`` configured, the node execution path is selected based on the
+model's ``supports_tools`` flag (sourced from ``LLM_MODELS``), mirroring
+the 3-way selection in ``bili/iris/nodes/react_agent_node.py``:
+
+1. **Native tool-calling** (``supports_tools=True``, the default for API
+   providers): uses ``langchain.agents.create_agent`` + ``bind_tools``.
+
+2. **Prompted tool-calling** (``supports_tools=False``, set for CLI and
+   some legacy models): uses the shared
+   :func:`~bili.iris.nodes.react_agent_node._build_prompted_react_loop`
+   factory imported from IRIS.  Tools are described in a system-message
+   preamble; the model's text output is parsed for ``Action:`` /
+   ``Final Answer:`` markers.  Works with any model that can follow text
+   instructions, including ``CliLLM`` instances that do not implement
+   ``bind_tools``.
+
+3. **No tools**: calls ``llm.invoke()`` directly (unchanged).
+
+The prompted-loop implementation is shared with IRIS via a direct import
+from ``bili.iris.nodes.react_agent_node`` — no code is duplicated.
 """
 
 import json
@@ -110,14 +128,23 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     resolved and passed to ``create_agent`` for tool-enabled agents.
     """
     # pylint: disable=import-outside-toplevel
-    from bili.aether.compiler.llm_resolver import create_llm, resolve_tools
+    from bili.aether.compiler.llm_resolver import (
+        create_llm,
+        resolve_supports_tools,
+        resolve_tools,
+    )
 
     llm = create_llm(agent)
     tools = resolve_tools(agent)
     middleware = _resolve_middleware(agent)
+    supports_tools = (
+        resolve_supports_tools(agent.model_name) if agent.model_name else True
+    )
 
     if tools:
-        return _generate_tool_agent_node(agent, llm, tools, middleware)
+        return _generate_tool_agent_node(
+            agent, llm, tools, middleware, supports_tools=supports_tools
+        )
 
     if middleware:
         LOGGER.warning(
@@ -134,17 +161,65 @@ def _generate_tool_agent_node(
     llm: object,
     tools: List,
     middleware: Optional[List] = None,
+    supports_tools: bool = True,
 ) -> Callable[[dict], dict]:
-    """Create a node using ``create_agent()`` for tool-enabled agents.
+    """Create a node for tool-enabled agents, selecting native or prompted path.
 
-    Mirrors the tool-enabled path in ``bili/iris/nodes/react_agent_node.py``.
-    Middleware (if provided) is forwarded to ``create_agent()``.
+    When ``supports_tools`` is ``True`` (the default for API-backed models),
+    delegates to ``langchain.agents.create_agent`` — the same native path as
+    before.  When ``supports_tools`` is ``False`` (CLI models, some legacy
+    providers), uses the shared prompted ReAct loop imported from
+    ``bili/iris/nodes/react_agent_node.py`` instead.  Middleware is forwarded
+    to ``create_agent()`` on the native path; it is not applicable on the
+    prompted path and is silently ignored there.
+
+    ``max_react_iterations`` for the prompted path can be tuned via
+    ``agent.metadata["max_react_iterations"]``; the default is 10.
     """
-    from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
-        create_agent,
-    )
+    # ── Build the executor at node-construction time ──────────────────────────
+    if supports_tools:
+        from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
+            create_agent,
+        )
 
-    react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
+        react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
+        executor_mode = "tool-agent (native)"
+
+        def _invoke_executor(messages: list) -> list:
+            result = react_agent.invoke({"messages": messages})
+            return result.get("messages", [])
+
+    else:
+        # Prompted path: model cannot bind_tools; run the hand-rolled ReAct loop.
+        # Imported from IRIS so the implementation is shared, not duplicated.
+        from bili.iris.nodes.react_agent_node import (  # pylint: disable=import-outside-toplevel
+            _DEFAULT_MAX_REACT_ITERATIONS,
+            _build_prompted_react_loop,
+        )
+
+        if middleware:
+            LOGGER.warning(
+                "Agent '%s' has middleware configured but supports_tools=False; "
+                "middleware is only applicable on the native create_agent path "
+                "and will be ignored for the prompted ReAct path.",
+                agent.agent_id,
+            )
+
+        max_react_iterations = int(
+            agent.metadata.get("max_react_iterations", _DEFAULT_MAX_REACT_ITERATIONS)
+        )
+        prompted_loop = _build_prompted_react_loop(
+            llm_model=llm,
+            tools=tools,
+            max_react_iterations=max_react_iterations,
+        )
+        executor_mode = "tool-agent (prompted)"
+
+        def _invoke_executor(messages: list) -> list:
+            result = prompted_loop({"messages": messages})
+            return result.get("messages", [])
+
+    # ── Shared node callable ──────────────────────────────────────────────────
 
     def _agent_node(state: dict) -> dict:  # pylint: disable=too-many-locals
         start_time = time.time()
@@ -196,18 +271,18 @@ def _generate_tool_agent_node(
 
         _ensure_human_last(messages, agent)
 
-        # Invoke the react agent — it handles tool calls internally
-        result = react_agent.invoke({"messages": messages})
+        # Invoke via the pre-selected executor (native react_agent or prompted loop)
+        response_messages = _invoke_executor(messages)
 
         execution_ms = (time.time() - start_time) * 1000
         LOGGER.info(
-            "Agent node '%s' executed in %.2f ms (tool-agent)",
+            "Agent node '%s' executed in %.2f ms (%s)",
             agent.agent_id,
             execution_ms,
+            executor_mode,
         )
 
         # Extract the final response content
-        response_messages = result.get("messages", [])
         content = ""
         if response_messages:
             content = _normalise_content_value(response_messages[-1].content)
