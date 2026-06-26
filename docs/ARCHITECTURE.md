@@ -4,7 +4,7 @@ This document describes the architecture and organization of the BiliCore framew
 
 ## Overview
 
-BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across 16 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 2 local providers (llama.cpp, HuggingFace).
+BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across 17 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 2 local providers (llama.cpp, HuggingFace).
 
 The codebase is split into **three major subsystems** plus a set of shared modules:
 
@@ -29,7 +29,7 @@ bili-core/
 │   │   │   ├── pg_checkpointer.py
 │   │   │   └── memory_checkpointer.py
 │   │   ├── config/                #   Configuration management
-│   │   │   ├── llm_config.py      #     LLM model configurations (97 models, 16 provider types)
+│   │   │   ├── llm_config.py      #     LLM model configurations (97 models, 17 provider types)
 │   │   │   ├── tool_config.py     #     Tool configurations
 │   │   │   └── middleware_config.py
 │   │   ├── graph_builder/         #   LangGraph construction utilities
@@ -208,7 +208,7 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 
 The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
-97 model configurations across 16 provider types registered in `llm_config.py`:
+97 model configurations across 17 provider types registered in `llm_config.py`:
 
 | Provider type | Description |
 |---|---|
@@ -266,8 +266,8 @@ Set `supports_tools=False` in `node_kwargs` for CLI presets (`cli_claude_code`, 
 from bili.iris.providers.fallback import FallbackLLM, ProviderChain
 
 chain = ProviderChain([
-    ("remote_anthropic", "claude-sonnet-4-6"),
-    ("remote_openai", "gpt-4o"),
+    ("remote_anthropic", {"model_name": "claude-sonnet-4-6"}),
+    ("remote_openai",    {"model_name": "gpt-4o"}),
 ])
 llm = FallbackLLM.from_chain(chain)
 ```
@@ -281,10 +281,21 @@ In AETHER, declare `fallback_models` on an `AgentSpec` and the compiler builds t
 Install the optional dependency: `pip install bili-core[mcp]`
 
 ```python
+import asyncio
 from bili.iris.mcp import initialize_mcp_servers, register_mcp_tools
+from bili.iris.mcp.config import MCP_SERVERS
 
-async with McpLifecycle(config) as sessions:
-    register_mcp_tools(sessions)   # tools now in TOOL_REGISTRY
+async def run():
+    servers = await initialize_mcp_servers(
+        active_servers=["my_server"],
+        server_configs=MCP_SERVERS,
+    )
+    async with register_mcp_tools(servers) as tool_names:
+        # tool_names: ["my_server__tool_a", ...]
+        # tools are now registered in TOOL_REGISTRY
+        ...
+
+asyncio.run(run())
 ```
 
 Useful for BYO-CLI integration: start a CLI LLM as an MCP server (e.g. `claude mcp serve`) and let a bili-core agent call its tools over stdio with `auth: inherited`.

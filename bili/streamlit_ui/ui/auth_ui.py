@@ -79,7 +79,7 @@ def display_login_signup():
     )
     st.markdown(
         "**IRIS** (Interactive Reasoning and Integration Services) — "
-        "Single-agent orchestration across 97 model configurations and 16 "
+        "Single-agent orchestration across 97 model configurations and 17 "
         "provider types (API, CLI, and local). "
         "Extensible tools, middleware, and state persistence."
     )
