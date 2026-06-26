@@ -22,14 +22,19 @@ Originally developed for the [**Colorado Sustainability Hub**](https://sustainab
 BiliCore is organized into three named components, each solving a distinct problem:
 
 ### IRIS — Interactive Reasoning and Integration Services
-**Single-agent orchestration.** 60+ models across 6 providers.
+**Single-agent orchestration.** 97 model configurations across 16 provider types.
 
 IRIS bridges users to LLMs, tools, and data sources. It provides a node-based workflow pipeline where each step (persona injection, tool execution, memory management, response normalization) is a composable node. Switch models mid-conversation, configure tools on the fly, and persist state across sessions.
 
-- **Providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local models
+- **API providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic (direct), Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI (Grok), Groq
+- **CLI providers:** Claude Code CLI, OpenAI Codex CLI, Google Gemini CLI (subprocess via `supports_tools=False`), plus a generic CLI subprocess provider for any text-in/text-out LLM tool
+- **Local providers:** llama.cpp (GGUF models), HuggingFace (GPTQ/transformers)
+- **Fallback engine:** `FallbackLLM` chains multiple providers so a transient error on the primary silently retries the next in the list
+- **Tool-calling modes:** native (bind_tools, all API providers) and prompted ReAct (hand-rolled loop for CLI and other text-only models — `supports_tools=False`)
 - **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
 - **Middleware:** Summarization, model call limiting, custom middleware
 - **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management
+- **MCP client:** `bili/iris/mcp/` lets agents consume tools from MCP servers (stdio subprocess or HTTP/SSE) as LangChain tools (install with `pip install bili-core[mcp]`)
 - **Streaming:** Token-by-token responses via sync and async APIs
 - **Location:** `bili/iris/`
 

@@ -4,7 +4,7 @@ This document describes the architecture and organization of the BiliCore framew
 
 ## Overview
 
-BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments.
+BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across 16 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 2 local providers (llama.cpp, HuggingFace).
 
 The codebase is split into **three major subsystems** plus a set of shared modules:
 
@@ -29,7 +29,7 @@ bili-core/
 │   │   │   ├── pg_checkpointer.py
 │   │   │   └── memory_checkpointer.py
 │   │   ├── config/                #   Configuration management
-│   │   │   ├── llm_config.py      #     LLM model configurations (60+ models)
+│   │   │   ├── llm_config.py      #     LLM model configurations (97 models, 16 provider types)
 │   │   │   ├── tool_config.py     #     Tool configurations
 │   │   │   └── middleware_config.py
 │   │   ├── graph_builder/         #   LangGraph construction utilities
@@ -208,15 +208,32 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 
 The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
-Configurations for 60+ LLMs across providers:
+97 model configurations across 16 provider types registered in `llm_config.py`:
 
-| Provider | Examples |
-|----------|----------|
-| AWS Bedrock | Claude 3/3.5, Llama, Mistral |
-| Google Vertex AI | Gemini Pro/Flash |
-| Azure OpenAI | GPT-4, GPT-4o |
-| OpenAI | GPT-4, GPT-4o, o1 |
-| Local | Ollama models |
+| Provider type | Description |
+|---|---|
+| `remote_aws_bedrock` | AWS Bedrock — Claude, Nova, Llama, Mistral, Cohere, DeepSeek |
+| `remote_google_vertex` | Google Vertex AI — Gemini 1.0–2.5 Pro/Flash/Flash-Lite |
+| `remote_azure_openai` | Azure OpenAI — GPT-4.1, GPT-4o, o1, o3, o3-mini, o4-mini |
+| `remote_openai` | OpenAI direct API — GPT-4o, GPT-4, o1, o3-mini |
+| `remote_anthropic` | Anthropic direct API — Claude Opus 4.8, Sonnet 4.6, Haiku 4.5, Fable 5 |
+| `remote_mistral` | Mistral AI — Large, Small, Codestral |
+| `remote_cohere` | Cohere — Command A+, Command R+, Command R |
+| `remote_google_genai` | Google Generative AI (developer API) — Gemini 2.0/2.5 Flash |
+| `remote_deepseek` | DeepSeek — Chat, Reasoner |
+| `remote_xai` | xAI (Grok) — Grok 3 Latest, Grok Beta |
+| `remote_groq` | Groq inference — Llama 3.3 70B, Llama 3.1 8B, Compound Beta |
+| `local_llamacpp` | llama.cpp in-memory (GGUF files) |
+| `local_huggingface` | HuggingFace local (GPTQ / transformers) |
+| `cli` | Generic CLI subprocess (any text-in/text-out LLM tool) |
+| `cli_claude_code` | Claude Code CLI preset (`claude -p`) |
+| `cli_codex` | OpenAI Codex CLI preset (`codex exec`) |
+| `cli_gemini_cli` | Google Gemini CLI preset (`gemini -p`) |
+
+Each model entry carries a `supports_tools` boolean (default `True`). CLI and
+local models set it to `False`; callers pass it as `supports_tools` in
+`node_kwargs` to auto-select the native or prompted ReAct path in
+`build_react_agent_node`.
 
 Factory pattern initialization via `llm_loader.py`.
 
@@ -229,7 +246,50 @@ The heart of single-agent RAG execution. The loaders module (`bili/iris/loaders/
 START → persona_summary → datetime → react_agent → timestamp → trim_summarize → normalize → END
 ```
 
-### 5. Tools Framework (`bili/iris/tools/`) -- IRIS
+**Tool-calling modes in `react_agent_node.py`:**
+
+`build_react_agent_node` selects one of three execution paths automatically based on `node_kwargs`:
+
+| Condition | Path | Mechanism |
+|---|---|---|
+| `tools` provided + `supports_tools=True` (default) | Native | `create_agent` via `model.bind_tools` — all API providers |
+| `tools` provided + `supports_tools=False` | Prompted ReAct | Hand-rolled Action/Observation loop injected into system message — CLI, local, and text-only models |
+| `tools=None` | Tool-less fallback | Direct `llm_model.invoke` call, no tool dispatch |
+
+Set `supports_tools=False` in `node_kwargs` for CLI presets (`cli_claude_code`, `cli_codex`, `cli_gemini_cli`), local models (`local_llamacpp`, `local_huggingface`), or any model that cannot call `bind_tools`. Both paths accept the same agent definition; the node selects the path at runtime.
+
+### 5. Fallback Engine (`bili/iris/providers/fallback.py`) -- IRIS
+
+`FallbackLLM` is a transparent proxy that tries each provider in a `ProviderChain` in order. If the primary raises a retryable exception (rate limit, transient server error), it silently retries with the next provider. Fatal errors (auth failure, bad request) re-raise immediately.
+
+```python
+from bili.iris.providers.fallback import FallbackLLM, ProviderChain
+
+chain = ProviderChain([
+    ("remote_anthropic", "claude-sonnet-4-6"),
+    ("remote_openai", "gpt-4o"),
+])
+llm = FallbackLLM.from_chain(chain)
+```
+
+In AETHER, declare `fallback_models` on an `AgentSpec` and the compiler builds the chain automatically. `FallbackLLM` implements the same `.invoke()` / `.stream()` duck type as `BaseChatModel`, so it is a drop-in replacement anywhere an LLM is expected.
+
+### 6. MCP Client Subsystem (`bili/iris/mcp/`) -- IRIS
+
+`bili/iris/mcp/` lets agents consume tools from any MCP server (stdio subprocess or HTTP/SSE transport). Discovered tools are adapted as LangChain `Tool` objects and registered in `TOOL_REGISTRY`, so they are indistinguishable from built-in tools at the agent layer.
+
+Install the optional dependency: `pip install bili-core[mcp]`
+
+```python
+from bili.iris.mcp import initialize_mcp_servers, register_mcp_tools
+
+async with McpLifecycle(config) as sessions:
+    register_mcp_tools(sessions)   # tools now in TOOL_REGISTRY
+```
+
+Useful for BYO-CLI integration: start a CLI LLM as an MCP server (e.g. `claude mcp serve`) and let a bili-core agent call its tools over stdio with `auth: inherited`.
+
+### 7. Tools Framework (`bili/iris/tools/`) -- IRIS
 
 Tools give agents the ability to call external services (weather APIs, search engines) or query internal data stores (FAISS, OpenSearch). Each tool is a LangChain `Tool` object created by a factory function in `bili/iris/loaders/tools_loader.py` and registered in the `TOOL_REGISTRY`. See [TOOLS.md](./TOOLS.md) for details.
 

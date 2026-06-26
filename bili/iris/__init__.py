@@ -1,9 +1,13 @@
 """IRIS — Interactive Reasoning and Integration Services.
 
-Single-agent orchestration framework. Provides LLM configuration for 60+
-models across 6 providers (AWS Bedrock, Google Vertex AI, Azure OpenAI,
-OpenAI, Ollama, local), a node-based workflow pipeline, extensible tool
-system, middleware framework, and state persistence via checkpointers.
+Single-agent orchestration framework. Provides LLM configuration for 97
+model configurations across 16 provider types (11 remote API providers:
+AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI,
+Cohere, Google Generative AI, DeepSeek, xAI, Groq; 3 CLI presets: Claude
+Code, Codex CLI, Gemini CLI; generic CLI subprocess; and 2 local providers:
+llama.cpp, HuggingFace), a node-based workflow pipeline with native and
+prompted ReAct tool-calling paths, extensible tool system, middleware
+framework, and state persistence via checkpointers.
 
 Provider abstraction
 --------------------
