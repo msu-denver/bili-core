@@ -620,9 +620,6 @@ LLM_MODELS = {
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-large-2407.html
             # https://docs.mistral.ai/getting-started/models/models_overview/
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-text-completion.html
-            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-large-2407.html
-            # https://docs.mistral.ai/getting-started/models/models_overview/
-            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-text-completion.html
             {
                 # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Large",

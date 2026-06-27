@@ -1061,15 +1061,18 @@ class TestPromptedToolCalling:
             assert resolve_supports_tools("unknown-model-xyz") is True
 
     def test_resolve_supports_tools_returns_true_on_import_error(self):
-        """resolve_supports_tools returns True when LLM_MODELS cannot be imported."""
+        """resolve_supports_tools returns True when bili.iris.config.llm_config is absent.
+
+        Setting sys.modules["bili.iris.config.llm_config"] = None forces Python's
+        import machinery to raise ImportError on the lazy ``from bili.iris.config...
+        import LLM_MODELS`` inside resolve_tool_strategy, exercising the real
+        except-ImportError branch.  The previous patch of the module attribute did
+        not trigger that branch (the import succeeded from cache).
+        """
         from bili.aether.compiler.llm_resolver import resolve_supports_tools
 
-        with patch(
-            "bili.iris.config.llm_config.LLM_MODELS",
-            side_effect=ImportError("no module"),
-            create=True,
-        ):
-            # Should not raise; defaults to True
+        with patch.dict(sys.modules, {"bili.iris.config.llm_config": None}):
+            # Should not raise; ImportError path defaults to True (via "native").
             result = resolve_supports_tools("any-model")
             assert result is True
 

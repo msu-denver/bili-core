@@ -868,3 +868,21 @@ class TestToolStrategyRouting:
 
         mock_create_agent.assert_not_called()
         assert callable(result)
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_unknown_strategy_with_tools_raises_value_error(self, mock_create_agent):
+        """A non-canonical tool_strategy with tools raises ValueError, not UnboundLocalError.
+
+        Before the guard was added, an unknown strategy value combined with a
+        non-None tools list would silently skip all routing branches and then
+        reach ``return agent`` with ``agent`` unbound, producing an opaque
+        UnboundLocalError.  The guard now raises a clear ValueError instead.
+        """
+        tool = _make_tool("t")
+
+        import pytest  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(ValueError, match="Unknown tool_strategy"):
+            build_react_agent_node(
+                tools=[tool], llm_model=MagicMock(), tool_strategy="bogus_strategy"
+            )

@@ -327,6 +327,11 @@ def resolve_supports_tools(model_name: str) -> bool:
     legacy code or the Streamlit UI — can continue using this function without
     change.  Prefer :func:`resolve_tool_strategy` for new code.
 
+    Note: this function inspects only the primary *model_name*.  When a
+    ``FallbackLLM`` chain mixes a tool-capable primary with a non-tool-capable
+    fallback, this function reports the primary's capability only; the fallback
+    model's strategy is not checked here.
+
     Args:
         model_name: The model identifier from ``AgentSpec.model_name``.
 

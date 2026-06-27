@@ -82,8 +82,22 @@ class CliPreset:
     :param prompt_via: How the rendered prompt is delivered to the process.
         ``"arg"`` (default for most CLIs -- appended as a positional argument),
         ``"stdin"``, or ``"file"``.
+
+        **Security note:** ``"arg"`` exposes the full prompt text as a
+        command-line argument.  On shared or multi-user hosts, process listings
+        (``ps aux``, ``/proc/<pid>/cmdline``) may reveal prompt content to
+        other users.  Use ``"stdin"`` instead when the CLI supports it and
+        prompt confidentiality matters.
+
     :param message_format: How the LangChain message list is rendered before
         delivery.  ``"last"`` (default) sends only the final human message.
+
+        **Note:** ``"last"`` silently drops all prior conversation turns.
+        This is intentional for single-shot CLI tools that have no session
+        state, but it means a CLI-backed model used in a multi-turn
+        conversation will not see its own earlier responses.  If conversation
+        continuity matters, set ``message_format="all"`` (if the CLI supports
+        multi-turn input) or maintain context in the prompt itself.
     :param output_format: How the subprocess stdout is parsed.  ``"text"``
         (default) returns the raw stripped output; ``"json"`` parses JSON and
         extracts the value at ``json_path``.
