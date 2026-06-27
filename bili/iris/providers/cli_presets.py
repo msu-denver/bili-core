@@ -96,8 +96,10 @@ class CliPreset:
         This is intentional for single-shot CLI tools that have no session
         state, but it means a CLI-backed model used in a multi-turn
         conversation will not see its own earlier responses.  If conversation
-        continuity matters, set ``message_format="all"`` (if the CLI supports
-        multi-turn input) or maintain context in the prompt itself.
+        continuity matters, use ``"roles"`` (renders each turn as
+        ``Human: … / Assistant: …`` lines) or ``"chatml"`` (ChatML
+        ``<|im_start|>`` / ``<|im_end|>`` tokens) where the CLI accepts
+        structured multi-turn input.
     :param output_format: How the subprocess stdout is parsed.  ``"text"``
         (default) returns the raw stripped output; ``"json"`` parses JSON and
         extracts the value at ``json_path``.
