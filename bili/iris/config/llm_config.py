@@ -62,6 +62,8 @@ LLM_MODELS = {
                 "supports_tools": True,
             },
             {
+                # NOTE: Amazon Nova Premier EOL announced 2026-09-14. Migrate to Nova 2.
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-premier.html
                 "model_name": "Amazon Nova Premier",
                 "model_id": "us.amazon.nova-premier-v1:0",
                 "custom_model_path": False,
@@ -188,7 +190,7 @@ LLM_MODELS = {
                 "tool_strategy": "native",
                 "supports_tools": True,
             },
-            # Anthropic Models (10)
+            # Anthropic Models (11)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-claude.html
             # https://docs.anthropic.com/en/docs/about-claude/models
             {
@@ -341,6 +343,23 @@ LLM_MODELS = {
                 "tool_strategy": "native",
                 "supports_tools": True,
             },
+            {
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-4-7.html
+                # Launched 2026-04-16. 1M-token context, 128K output.
+                "model_name": "Anthropic Claude Opus 4.7",
+                "model_id": "us.anthropic.claude-opus-4-7",
+                "custom_model_path": False,
+                "max_input_tokens": 1000000,
+                "max_output_tokens": 128000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
             # Cohere Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-cohere-command.html
             # https://aws.amazon.com/bedrock/cohere/#:~:text=With%20a%20context%20window%20of,advanced%20retrieval%2C%20and%20tool%20use.
@@ -375,11 +394,11 @@ LLM_MODELS = {
                 "tool_strategy": "native",
                 "supports_tools": True,
             },
-            # DeepSeek Models (1)
+            # DeepSeek Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-deepseek.html
             {
                 "model_name": "DeepSeek-R1",
-                "model_id": "deepseek.r1-v1:0",
+                "model_id": "us.deepseek.r1-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32000,
@@ -391,7 +410,24 @@ LLM_MODELS = {
                 "tool_strategy": "native",
                 "supports_tools": True,
             },
-            # Meta LLama Models (11)
+            {
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-deepseek-deepseek-v3-1.html
+                # NOTE: DeepSeek V3.x does NOT support tool use via the Bedrock Converse API
+                # as of 2026-06. See https://repost.aws/questions/QU83cNU6P_Q0iJnkD9Tl4JIw
+                "model_name": "DeepSeek-V3.1",
+                "model_id": "deepseek.v3-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 32768,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "facilitated",
+                "supports_tools": False,
+            },
+            # Meta LLama Models (12)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-meta.html
             # https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
             {
@@ -443,6 +479,24 @@ LLM_MODELS = {
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "tool_strategy": "facilitated",
+                "supports_tools": False,
+            },
+            {
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-meta-llama-3-1-405b.html
+                # NOTE: AWS classifies this model as "Legacy". Same Llama bind_tools limitation
+                # as all Llama models via ChatBedrockConverse (langchain-aws #175).
+                "model_name": "Meta Llama 3.1 405B Instruct",
+                "model_id": "us.meta.llama3-1-405b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
                 "supports_temperature": True,
                 "supports_seed": True,
                 "supports_max_output_tokens": True,
@@ -539,7 +593,10 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
-                # TODO: verify Llama 4 bind_tools on Bedrock Converse API; may upgrade to "native"
+                # Llama 4 supports tool calling in principle, but langchain-aws #175 confirms
+                # that bind_tools/create_react_agent produces malformed chains for all Llama
+                # models via ChatBedrockConverse. Keep "facilitated" until the upstream bug
+                # is fixed. Track: https://github.com/langchain-ai/langchain-aws/issues/175
                 "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
@@ -555,15 +612,19 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
-                # TODO: verify Llama 4 bind_tools on Bedrock Converse API; may upgrade to "native"
+                # Same langchain-aws #175 bind_tools limitation as Scout above.
                 "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
-            # Minstral AI Models (5)
+            # Mistral AI Models (11)
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-large-2407.html
+            # https://docs.mistral.ai/getting-started/models/models_overview/
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-text-completion.html
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-large-2407.html
             # https://docs.mistral.ai/getting-started/models/models_overview/
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-text-completion.html
             {
+                # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Large",
                 "model_id": "mistral.mistral-large-2402-v1:0",
                 "custom_model_path": False,
@@ -578,6 +639,7 @@ LLM_MODELS = {
                 "supports_tools": False,
             },
             {
+                # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Small",
                 "model_id": "mistral.mistral-small-2402-v1:0",
                 "custom_model_path": False,
@@ -626,6 +688,98 @@ LLM_MODELS = {
                 "model_id": "us.mistral.pixtral-large-2502-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-mistral-large-24-07-model/
+                "model_name": "Mistral Large 24.07",
+                "model_id": "mistral.mistral-large-2407-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 131000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                # Mistral Large 3 — 675B MoE, 256K context, function calling via Converse API.
+                "model_name": "Mistral Large 3",
+                "model_id": "mistral.mistral-large-3-675b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 256000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                "model_name": "Mistral Ministral 3 3B",
+                "model_id": "mistral.ministral-3-3b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                "model_name": "Mistral Ministral 3 8B",
+                "model_id": "mistral.ministral-3-8b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                "model_name": "Mistral Ministral 3 14B",
+                "model_id": "mistral.ministral-3-14b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                # Devstral 2 — 123B code-specialist MoE, optimized for agentic coding tasks.
+                "model_name": "Mistral Devstral 2 123B",
+                "model_id": "mistral.devstral-2-123b",
+                "custom_model_path": False,
+                "max_input_tokens": 131000,
                 "max_output_tokens": 8192,
                 "supports_temperature": True,
                 "supports_seed": True,
