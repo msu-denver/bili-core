@@ -14,10 +14,11 @@ All tests verify:
   - No unauthenticated exposure (token always present in config)
 """
 
-# pylint: disable=too-few-public-methods,protected-access
+# pylint: disable=too-few-public-methods,protected-access,missing-function-docstring,missing-class-docstring,import-outside-toplevel
 
 import json
 import os
+import re
 from pathlib import Path
 
 from bili.iris.mcp.cli_injectors import (
@@ -39,11 +40,13 @@ from bili.iris.mcp.server import EphemeralMcpHandle
 
 
 def _make_handle(
-    sse_url: str = "http://127.0.0.1:9001/sse",
+    server_url: str = "http://127.0.0.1:9001/mcp",
     token: str = "test-secret-token-xyz",
     server_name: str = "bili_tools_a1b2",
 ) -> EphemeralMcpHandle:
-    return EphemeralMcpHandle(sse_url=sse_url, token=token, server_name=server_name)
+    return EphemeralMcpHandle(
+        server_url=server_url, token=token, server_name=server_name
+    )
 
 
 BASE_CMD = ["claude", "-p"]
@@ -111,12 +114,14 @@ class TestClaudeCodeInjector:
 
     def test_config_file_contains_server_url(self):
         injector = ClaudeCodeInjector()
-        handle = _make_handle(sse_url="http://127.0.0.1:12345/sse")
+        handle = _make_handle(server_url="http://127.0.0.1:12345/mcp")
         result = injector.inject(command=BASE_CMD, handle=handle)
         idx = result.augmented_command.index("--mcp-config") + 1
-        config = json.loads(Path(result.augmented_command[idx]).read_text())
+        config = json.loads(
+            Path(result.augmented_command[idx]).read_text(encoding="utf-8")
+        )
         urls = [v["url"] for v in config.get("mcpServers", {}).values()]
-        assert "http://127.0.0.1:12345/sse" in urls
+        assert "http://127.0.0.1:12345/mcp" in urls
         result.cleanup()
 
     def test_config_file_embeds_bearer_token(self):
@@ -125,7 +130,9 @@ class TestClaudeCodeInjector:
         handle = _make_handle(token="super-secret-bearer")
         result = injector.inject(command=BASE_CMD, handle=handle)
         idx = result.augmented_command.index("--mcp-config") + 1
-        config = json.loads(Path(result.augmented_command[idx]).read_text())
+        config = json.loads(
+            Path(result.augmented_command[idx]).read_text(encoding="utf-8")
+        )
         auth_headers = [
             v.get("headers", {}).get("Authorization", "")
             for v in config.get("mcpServers", {}).values()
@@ -138,8 +145,23 @@ class TestClaudeCodeInjector:
         handle = _make_handle(server_name="bili_tools_c3d4")
         result = injector.inject(command=BASE_CMD, handle=handle)
         idx = result.augmented_command.index("--mcp-config") + 1
-        config = json.loads(Path(result.augmented_command[idx]).read_text())
+        config = json.loads(
+            Path(result.augmented_command[idx]).read_text(encoding="utf-8")
+        )
         assert "bili_tools_c3d4" in config.get("mcpServers", {})
+        result.cleanup()
+
+    def test_config_declares_http_transport_type(self):
+        """The 'type':'http' field is required; without it Claude Code defaults to stdio."""
+        injector = ClaudeCodeInjector()
+        handle = _make_handle()
+        result = injector.inject(command=BASE_CMD, handle=handle)
+        idx = result.augmented_command.index("--mcp-config") + 1
+        config = json.loads(
+            Path(result.augmented_command[idx]).read_text(encoding="utf-8")
+        )
+        types = [v.get("type") for v in config.get("mcpServers", {}).values()]
+        assert "http" in types, "Claude Code config must declare type='http'"
         result.cleanup()
 
     def test_no_extra_env(self):
@@ -168,12 +190,12 @@ class TestCodexInjector:
         result = injector.inject(command=["codex", "exec"], handle=handle)
         assert "-c" in result.augmented_command
 
-    def test_config_flag_contains_sse_url(self):
+    def test_config_flag_contains_server_url(self):
         injector = CodexInjector()
-        handle = _make_handle(sse_url="http://127.0.0.1:9999/sse")
+        handle = _make_handle(server_url="http://127.0.0.1:9999/mcp")
         result = injector.inject(command=["codex", "exec"], handle=handle)
         combined = " ".join(result.augmented_command)
-        assert "http://127.0.0.1:9999/sse" in combined
+        assert "http://127.0.0.1:9999/mcp" in combined
 
     def test_config_flag_contains_bearer_token_env_var(self):
         injector = CodexInjector()
@@ -189,11 +211,9 @@ class TestCodexInjector:
         result = injector.inject(command=["codex", "exec"], handle=handle)
         # Find the env var name from the -c flag.
         env_var_name = None
-        for i, part in enumerate(result.augmented_command):
+        for part in result.augmented_command:
             if "bearer_token_env_var" in part:
                 # Extract the var name from the TOML value e.g. BILI_MCP_TOKEN_ABCD
-                import re
-
                 m = re.search(r'bearer_token_env_var="(BILI_MCP_TOKEN_\w+)"', part)
                 if m:
                     env_var_name = m.group(1)
@@ -271,12 +291,14 @@ class TestGeminiCliInjector:
 
     def test_gemini_settings_contains_server_url(self):
         injector = GeminiCliInjector()
-        handle = _make_handle(sse_url="http://127.0.0.1:54321/sse")
+        handle = _make_handle(server_url="http://127.0.0.1:54321/mcp")
         result = injector.inject(command=["gemini", "-p"], handle=handle)
         cwd = result.extra_env[_GEMINI_CWD_KEY]
-        settings = json.loads((Path(cwd) / ".gemini" / "settings.json").read_text())
+        settings = json.loads(
+            (Path(cwd) / ".gemini" / "settings.json").read_text(encoding="utf-8")
+        )
         urls = [v.get("httpUrl", "") for v in settings.get("mcpServers", {}).values()]
-        assert "http://127.0.0.1:54321/sse" in urls
+        assert "http://127.0.0.1:54321/mcp" in urls
         result.cleanup()
 
     def test_gemini_settings_embeds_bearer_token(self):
@@ -285,7 +307,9 @@ class TestGeminiCliInjector:
         handle = _make_handle(token="gemini-bearer-secret")
         result = injector.inject(command=["gemini", "-p"], handle=handle)
         cwd = result.extra_env[_GEMINI_CWD_KEY]
-        settings = json.loads((Path(cwd) / ".gemini" / "settings.json").read_text())
+        settings = json.loads(
+            (Path(cwd) / ".gemini" / "settings.json").read_text(encoding="utf-8")
+        )
         auth_headers = [
             v.get("headers", {}).get("Authorization", "")
             for v in settings.get("mcpServers", {}).values()

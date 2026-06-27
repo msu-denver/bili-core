@@ -98,7 +98,7 @@ class InjectionResult:
 # ---------------------------------------------------------------------------
 
 
-class McpCliInjector:
+class McpCliInjector:  # pylint: disable=too-few-public-methods
     """Base class for per-CLI MCP configuration injectors.
 
     Subclasses implement :meth:`inject` to produce an :class:`InjectionResult`
@@ -116,7 +116,7 @@ class McpCliInjector:
 
         :param command: The base CLI command list (e.g. ``["claude", "-p"]``).
         :param handle: An :class:`~bili.iris.mcp.server.EphemeralMcpHandle`
-            carrying ``sse_url``, ``token``, and ``server_name``.
+            carrying ``server_url``, ``token``, and ``server_name``.
         :returns: An :class:`InjectionResult`.
         """
         raise NotImplementedError  # pragma: no cover
@@ -127,18 +127,20 @@ class McpCliInjector:
 # ---------------------------------------------------------------------------
 
 
-class ClaudeCodeInjector(McpCliInjector):
+class ClaudeCodeInjector(McpCliInjector):  # pylint: disable=too-few-public-methods
     """MCP injector for the Claude Code CLI (``claude``).
 
     Writes a temporary JSON file in the format consumed by ``--mcp-config``
     and injects ``--mcp-config <path> --strict-mcp-config`` into the command.
 
-    Config format::
+    Config format (Streamable HTTP transport — ``"type": "http"`` is required;
+    without it, Claude Code defaults to ``stdio`` transport and ignores ``url``)::
 
         {
           "mcpServers": {
             "<server_name>": {
-              "url": "<sse_url>",
+              "type": "http",
+              "url": "<server_url>",
               "headers": {
                 "Authorization": "Bearer <token>"
               }
@@ -159,7 +161,8 @@ class ClaudeCodeInjector(McpCliInjector):
         config_payload = {
             "mcpServers": {
                 handle.server_name: {
-                    "url": handle.sse_url,
+                    "type": "http",
+                    "url": handle.server_url,
                     "headers": {
                         "Authorization": f"Bearer {handle.token}",
                     },
@@ -210,7 +213,7 @@ class ClaudeCodeInjector(McpCliInjector):
 # ---------------------------------------------------------------------------
 
 
-class CodexInjector(McpCliInjector):
+class CodexInjector(McpCliInjector):  # pylint: disable=too-few-public-methods
     """MCP injector for the OpenAI Codex CLI (``codex``).
 
     Codex has no per-call ``--mcp-config`` flag.  Instead it reads MCP server
@@ -224,7 +227,7 @@ class CodexInjector(McpCliInjector):
     2. Sets that variable to the Bearer token in the subprocess environment
        (via :attr:`InjectionResult.extra_env`).
     3. Injects two ``-c`` flags:
-       ``-c mcp_servers.<name>.url="<sse_url>"``
+       ``-c mcp_servers.<name>.url="<server_url>"`` (Streamable HTTP endpoint)
        ``-c mcp_servers.<name>.bearer_token_env_var="<var_name>"``
 
     Codex reads the env var at startup and sends ``Authorization: Bearer
@@ -251,7 +254,7 @@ class CodexInjector(McpCliInjector):
 
         augmented = list(command) + [
             "-c",
-            f'mcp_servers.{server_key}.url="{handle.sse_url}"',
+            f'mcp_servers.{server_key}.url="{handle.server_url}"',
             "-c",
             f'mcp_servers.{server_key}.bearer_token_env_var="{env_var_name}"',
         ]
@@ -268,7 +271,7 @@ class CodexInjector(McpCliInjector):
 # ---------------------------------------------------------------------------
 
 
-class GeminiCliInjector(McpCliInjector):
+class GeminiCliInjector(McpCliInjector):  # pylint: disable=too-few-public-methods
     """MCP injector for the Google Gemini CLI (``gemini``).
 
     Gemini CLI has no per-call ``--mcp-config`` flag.  It reads
@@ -279,10 +282,12 @@ class GeminiCliInjector(McpCliInjector):
     This injector:
 
     1. Creates a temporary directory.
-    2. Writes ``<tmpdir>/.gemini/settings.json`` with the server URL and
-       Bearer token in the ``headers`` map.
-    3. Returns ``subprocess_kwargs={"cwd": tmpdir}`` so the subprocess runs
-       in the temp directory and picks up the project-scoped settings file.
+    2. Writes ``<tmpdir>/.gemini/settings.json`` using the ``httpUrl`` key,
+       which maps to Gemini's Streamable HTTP transport (``httpUrl`` = MCP
+       Streamable HTTP; ``url`` = deprecated SSE transport in the Gemini config
+       schema).  The Bearer token is embedded in the ``headers`` map.
+    3. Sets the subprocess ``cwd`` to *tmpdir* so Gemini picks up the
+       project-scoped settings file automatically.
 
     The ``cleanup`` callable removes the temp directory and its contents.
 
@@ -296,7 +301,7 @@ class GeminiCliInjector(McpCliInjector):
         settings_payload = {
             "mcpServers": {
                 handle.server_name: {
-                    "httpUrl": handle.sse_url,
+                    "httpUrl": handle.server_url,
                     "headers": {
                         "Authorization": f"Bearer {handle.token}",
                     },

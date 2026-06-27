@@ -592,7 +592,8 @@ def build_react_agent_node(
     elif tools is not None and tool_strategy == "mcp":
         # MCP path: expose the agent's tools as an ephemeral authenticated
         # MCP server so the CLI model can call them via its own native
-        # tool-calling interface.
+        # tool-calling interface.  The CLI self-orchestrates (no middleware
+        # or LangGraph loop on this path); bili-core takes the final stdout.
         from bili.iris.mcp.server import (  # pylint: disable=import-outside-toplevel
             build_mcp_node,
             resolve_mcp_injector,

@@ -15,7 +15,7 @@ Tests the ephemeral MCP server and its components:
 All tests run without a real MCP server or CLI binary.  Network I/O is mocked.
 """
 
-# pylint: disable=too-few-public-methods,protected-access
+# pylint: disable=too-few-public-methods,protected-access,missing-function-docstring,missing-class-docstring,import-outside-toplevel
 
 import asyncio
 import inspect
@@ -192,7 +192,7 @@ class TestTokenAuthMiddleware:
 
     def _make_scope(self, scope_type: str = "http", auth_header: bytes = b"") -> dict:
         headers = [(b"authorization", auth_header)] if auth_header else []
-        return {"type": scope_type, "path": "/sse", "headers": headers}
+        return {"type": scope_type, "path": "/mcp", "headers": headers}
 
     async def _collect_response(self, scope, middleware) -> dict:
         """Run the middleware and collect the ASGI response events."""
@@ -252,6 +252,19 @@ class TestTokenAuthMiddleware:
         body = events[1]["body"]
         assert json.loads(body)  # Must be valid JSON
 
+    def test_401_content_length_matches_body(self):
+        """Declared Content-Length must equal actual body length (prevents uvicorn error)."""
+        inner = AsyncMock()
+        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        scope = self._make_scope()
+        events = asyncio.run(self._collect_response(scope, mw))
+        headers = dict(events[0]["headers"])
+        declared = int(headers[b"content-length"])
+        actual = len(events[1]["body"])
+        assert (
+            declared == actual
+        ), f"Content-Length {declared} does not match body length {actual}"
+
     def test_header_case_insensitive_lookup(self):
         """Auth header lookup must be case-insensitive (ASGI headers are bytes)."""
         inner = AsyncMock()
@@ -259,13 +272,13 @@ class TestTokenAuthMiddleware:
         # ASGI normalizes header names to lowercase bytes, but test explicitly.
         scope = {
             "type": "http",
-            "path": "/sse",
+            "path": "/mcp",
             "headers": [(b"Authorization", f"Bearer {self.TOKEN}".encode())],
         }
         # With the standard lowercase key used by our middleware:
         scope2 = {
             "type": "http",
-            "path": "/sse",
+            "path": "/mcp",
             "headers": [(b"authorization", f"Bearer {self.TOKEN}".encode())],
         }
         asyncio.run(mw(scope2, AsyncMock(), AsyncMock()))
@@ -322,11 +335,11 @@ class TestWaitForServerReady:
 class TestEphemeralMcpHandle:
     def test_fields_accessible(self):
         h = EphemeralMcpHandle(
-            sse_url="http://127.0.0.1:9999/sse",
+            server_url="http://127.0.0.1:9999/mcp",
             token="tok",
             server_name="bili_tools_abc",
         )
-        assert h.sse_url == "http://127.0.0.1:9999/sse"
+        assert h.server_url == "http://127.0.0.1:9999/mcp"
         assert h.token == "tok"
         assert h.server_name == "bili_tools_abc"
 
@@ -362,7 +375,7 @@ class TestEphemeralMcpServer:
         """Return a context-manager-compatible patch dict."""
 
         fake_fmcp = MagicMock()
-        fake_fmcp.sse_app.return_value = MagicMock()
+        fake_fmcp.streamable_http_app.return_value = MagicMock()
 
         class FakeUvicornConfig:
             def __init__(self, app, host, port, **kwargs):
@@ -397,8 +410,8 @@ class TestEphemeralMcpServer:
 
             with EphemeralMcpServer([tool]) as handle:
                 assert isinstance(handle, EphemeralMcpHandle)
-                assert f"127.0.0.1:{port}" in handle.sse_url
-                assert handle.sse_url.endswith("/sse")
+                assert f"127.0.0.1:{port}" in handle.server_url
+                assert handle.server_url.endswith("/mcp")
                 assert len(handle.token) > 20
                 assert "bili_tools_" in handle.server_name
 
@@ -656,7 +669,7 @@ class TestBuildMcpNode:
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
 
         mock_handle = EphemeralMcpHandle(
-            sse_url="http://127.0.0.1:9001/sse",
+            server_url="http://127.0.0.1:9001/mcp",
             token="tok",
             server_name="bili_tools_abc",
         )
@@ -692,7 +705,7 @@ class TestBuildMcpNode:
         assert result["messages"][0].content == "hello"
 
     def test_subprocess_called_with_augmented_command(self):
-        _, mock_run, injector = self._run_node_with_mocks()
+        _, mock_run, _ = self._run_node_with_mocks()
         called_cmd = mock_run.call_args[0][0]
         assert called_cmd == ["claude", "-p", "--mcp-config", "/tmp/x.json"]
 
@@ -700,7 +713,7 @@ class TestBuildMcpNode:
         _, _, injector = self._run_node_with_mocks()
         injector.inject.assert_called_once()
         call_kwargs = injector.inject.call_args.kwargs
-        assert call_kwargs["handle"].sse_url == "http://127.0.0.1:9001/sse"
+        assert call_kwargs["handle"].server_url == "http://127.0.0.1:9001/mcp"
 
     def test_cleanup_called_after_subprocess(self):
         cleanup = MagicMock()
@@ -756,7 +769,7 @@ class TestBuildMcpNode:
         injector = self._make_injector()
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
 
-        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/sse", "tok", "srv")
+        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
         with (
             patch("bili.iris.mcp.server.EphemeralMcpServer") as mock_srv,
             patch(
@@ -781,7 +794,7 @@ class TestBuildMcpNode:
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
 
         ansi_output = "\x1b[32mGreen text\x1b[0m"
-        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/sse", "tok", "srv")
+        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = ansi_output
@@ -809,7 +822,7 @@ class TestBuildMcpNode:
         injector = self._make_injector()
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
 
-        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/sse", "tok", "srv")
+        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
         with (
             patch("bili.iris.mcp.server.EphemeralMcpServer") as mock_srv,
             patch("bili.iris.mcp.server.subprocess.run"),

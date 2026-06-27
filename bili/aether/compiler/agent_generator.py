@@ -240,8 +240,8 @@ def _generate_tool_agent_node(
 
     elif tool_strategy == "mcp":
         # MCP path: expose tools as an ephemeral authenticated MCP server.
-        # The CLI model self-orchestrates and calls tools via MCP; bili-core
-        # takes the final stdout as the agent's response.
+        # The CLI self-orchestrates (no middleware or LangGraph loop on this
+        # path); bili-core takes the final stdout as the agent's response.
         from bili.iris.mcp.server import (  # pylint: disable=import-outside-toplevel
             build_mcp_node,
             resolve_mcp_injector,

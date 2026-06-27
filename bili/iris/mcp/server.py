@@ -19,7 +19,7 @@ Architecture overview
     │                                                  │   │
     │  EphemeralMcpServer (FastMCP + auth middleware)  │   │
     │    ─ registers each LangChain tool as MCP tool ◄─┘   │
-    │    ─ listens on 127.0.0.1:<port> (SSE transport)     │
+    │    ─ listens on 127.0.0.1:<port> (Streamable HTTP)    │
     │    ─ enforces per-call Bearer-token auth              │
     │    ─ background thread (uvicorn + asyncio.run)        │
     │                                                  │   │
@@ -126,7 +126,7 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mGKHF]")
 # ---------------------------------------------------------------------------
 
 
-class _TokenAuthMiddleware:
+class _TokenAuthMiddleware:  # pylint: disable=too-few-public-methods
     """ASGI middleware that enforces per-call ephemeral Bearer-token auth.
 
     Every HTTP request to the wrapped application must carry the header::
@@ -163,7 +163,7 @@ class _TokenAuthMiddleware:
                 auth_value = value
                 break
 
-        if auth_value == self._bearer_value:
+        if secrets.compare_digest(auth_value, self._bearer_value):
             await self._app(scope, receive, send)
             return
 
@@ -173,20 +173,21 @@ class _TokenAuthMiddleware:
             "(path=%s)",
             scope.get("path", "?"),
         )
+        body = b'{"error":"Unauthorized"}'
         await send(
             {
                 "type": "http.response.start",
                 "status": 401,
                 "headers": [
                     (b"content-type", b"application/json"),
-                    (b"content-length", b"25"),
+                    (b"content-length", str(len(body)).encode()),
                 ],
             }
         )
         await send(
             {
                 "type": "http.response.body",
-                "body": b'{"error":"Unauthorized"}',
+                "body": body,
                 "more_body": False,
             }
         )
@@ -334,13 +335,14 @@ class EphemeralMcpHandle:
     Carries the information that CLI injectors need to configure the CLI
     subprocess to connect to the ephemeral server.
 
-    :param sse_url: The SSE endpoint URL (``http://127.0.0.1:<port>/sse``).
+    :param server_url: The MCP endpoint URL
+        (``http://127.0.0.1:<port>/mcp`` for Streamable HTTP transport).
         Clients must include ``Authorization: Bearer <token>`` on every request.
     :param token: The cryptographically-random per-call Bearer token.
     :param server_name: The FastMCP server name used for this call.
     """
 
-    sse_url: str
+    server_url: str
     token: str
     server_name: str
 
@@ -350,7 +352,7 @@ class EphemeralMcpHandle:
 # ---------------------------------------------------------------------------
 
 
-class EphemeralMcpServer:
+class EphemeralMcpServer:  # pylint: disable=too-many-instance-attributes
     """Synchronous context manager that serves LangChain tools as an MCP server.
 
     On entry:
@@ -358,8 +360,10 @@ class EphemeralMcpServer:
     1. Generates a cryptographically-random per-call Bearer token
        (:func:`secrets.token_urlsafe`).
     2. Allocates a free localhost port (:func:`_find_free_port`).
-    3. Builds a FastMCP application and registers each tool via
-       :func:`_build_mcp_fn`.
+    3. Builds a FastMCP Streamable HTTP application and registers each tool via
+       :func:`_build_mcp_fn`.  (Streamable HTTP — ``POST /mcp`` — is the
+       current MCP transport standard; SSE is deprecated as of MCP spec
+       2025-03-26.)
     4. Wraps the app in :class:`_TokenAuthMiddleware` to enforce per-call auth.
     5. Starts uvicorn in a background daemon thread (``asyncio.run`` in the
        thread creates a dedicated event loop — no interference with the caller's
@@ -436,9 +440,12 @@ class EphemeralMcpServer:
             fmcp.add_tool(mcp_fn, name=tool.name, description=tool.description or "")
             LOGGER.debug("EphemeralMcpServer: registered tool '%s'", tool.name)
 
-        # Wrap the SSE Starlette app with auth middleware.
-        sse_app = fmcp.sse_app()
-        auth_app = _TokenAuthMiddleware(sse_app, self._token)
+        # Wrap the Streamable HTTP Starlette app with auth middleware.
+        # Streamable HTTP (POST /mcp) is the current MCP transport standard;
+        # it is supported by Claude Code ("type":"http"), Gemini CLI ("httpUrl"),
+        # and Codex ("url").  SSE (/sse) is deprecated in the MCP 2025 spec.
+        mcp_app = fmcp.streamable_http_app()
+        auth_app = _TokenAuthMiddleware(mcp_app, self._token)
 
         # Build and start uvicorn server in a background daemon thread.
         config = uvicorn.Config(
@@ -476,7 +483,7 @@ class EphemeralMcpServer:
             len(self._tools),
         )
         return EphemeralMcpHandle(
-            sse_url=f"http://{self._host}:{self._port}/sse",
+            server_url=f"http://{self._host}:{self._port}/mcp",
             token=self._token,
             server_name=self._call_name,
         )
@@ -592,7 +599,7 @@ def build_mcp_node(
         render_messages,
     )
 
-    def _node(state: Dict) -> Dict:
+    def _node(state: Dict) -> Dict:  # pylint: disable=too-many-locals
         from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
             AIMessage,
         )
@@ -635,7 +642,7 @@ def build_mcp_node(
             LOGGER.debug(
                 "EphemeralMcpServer: running CLI %s with MCP server %s",
                 augmented_cmd[0],
-                handle.sse_url,
+                handle.server_url,
             )
 
             try:
