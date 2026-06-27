@@ -27,10 +27,10 @@ BiliCore is organized into three named components, each solving a distinct probl
 IRIS bridges users to LLMs, tools, and data sources. It provides a node-based workflow pipeline where each step (persona injection, tool execution, memory management, response normalization) is a composable node. Switch models mid-conversation, configure tools on the fly, and persist state across sessions.
 
 - **API providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic (direct), Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI (Grok), Groq
-- **CLI providers:** Claude Code CLI, OpenAI Codex CLI, Google Gemini CLI (subprocess via `supports_tools=False`), plus a generic CLI subprocess provider for any text-in/text-out LLM tool
+- **CLI providers:** Claude Code CLI, OpenAI Codex CLI, Google Gemini CLI (subprocess, `tool_strategy="mcp"`), plus a generic CLI subprocess provider for any text-in/text-out LLM tool
 - **Local providers:** llama.cpp (GGUF models), HuggingFace (GPTQ/transformers)
 - **Fallback engine:** `FallbackLLM` chains multiple providers so a transient error on the primary silently retries the next in the list
-- **Tool-calling modes:** native (bind_tools, all API providers) and prompted ReAct (hand-rolled loop for CLI and other text-only models — `supports_tools=False`)
+- **Tool-calling modes:** `native` (bind_tools, API providers), `facilitated` (prompted ReAct hand-rolled loop for text-only/local models), `mcp` (agentic CLI tools; plain path until MCP mechanism lands), `none` (no tool support — plain path)
 - **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
 - **Middleware:** Summarization, model call limiting, custom middleware
 - **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management

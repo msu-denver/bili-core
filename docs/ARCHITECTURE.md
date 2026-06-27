@@ -230,10 +230,12 @@ The configuration module holds declarative metadata for every supported LLM mode
 | `cli_codex` | OpenAI Codex CLI preset (`codex exec`) |
 | `cli_gemini_cli` | Google Gemini CLI preset (`gemini -p`) |
 
-Each model entry carries a `supports_tools` boolean (default `True`). CLI and
-local models set it to `False`; callers pass it as `supports_tools` in
-`node_kwargs` to auto-select the native or prompted ReAct path in
-`build_react_agent_node`.
+Each model entry carries a `tool_strategy` field (one of `"native"`,
+`"facilitated"`, `"mcp"`, `"none"`) and a derived `supports_tools` boolean
+(`True` only when `tool_strategy == "native"`). The strategy drives automatic
+path selection in `build_react_agent_node`. Pass `tool_strategy` explicitly in
+`node_kwargs` to override the catalog value; the legacy `supports_tools` kwarg
+is still accepted as a backward-compatible fallback.
 
 Factory pattern initialization via `llm_loader.py`.
 
@@ -248,15 +250,20 @@ START → persona_summary → datetime → react_agent → timestamp → trim_su
 
 **Tool-calling modes in `react_agent_node.py`:**
 
-`build_react_agent_node` selects one of three execution paths automatically based on `node_kwargs`:
+`build_react_agent_node` selects the execution path from `tool_strategy` in `node_kwargs` (or infers it from the legacy `supports_tools` bool):
 
-| Condition | Path | Mechanism |
+| `tool_strategy` | Condition | Mechanism |
 |---|---|---|
-| `tools` provided + `supports_tools=True` (default) | Native | `create_agent` via `model.bind_tools` — all API providers |
-| `tools` provided + `supports_tools=False` | Prompted ReAct | Hand-rolled Action/Observation loop injected into system message — CLI, local, and text-only models |
-| `tools=None` | Tool-less fallback | Direct `llm_model.invoke` call, no tool dispatch |
+| `"native"` (default) | `tools` provided | `create_agent` via `model.bind_tools` — all API providers |
+| `"facilitated"` | `tools` provided | Hand-rolled Action/Observation loop injected into system message — local and text-only models |
+| `"mcp"` | `tools` provided | Tools dropped; model runs plain (interim until MCP mechanism lands) — agentic CLI tools |
+| `"none"` | `tools` provided | Tools dropped; model runs plain — models that reject tool kwargs (e.g. some reasoning models) |
+| any | `tools=None` | Direct `llm_model.invoke` call, no tool dispatch |
 
-Set `supports_tools=False` in `node_kwargs` for CLI presets (`cli_claude_code`, `cli_codex`, `cli_gemini_cli`), local models (`local_llamacpp`, `local_huggingface`), or any model that cannot call `bind_tools`. Both paths accept the same agent definition; the node selects the path at runtime.
+AETHER resolves `tool_strategy` automatically from the catalog via
+`resolve_tool_strategy(model_name)`. IRIS callers can pass `tool_strategy`
+explicitly in `node_kwargs`; the legacy `supports_tools` kwarg remains
+accepted for backward compatibility.
 
 ### 5. Fallback Engine (`bili/iris/providers/fallback.py`) -- IRIS
 

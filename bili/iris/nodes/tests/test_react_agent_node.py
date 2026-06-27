@@ -768,3 +768,103 @@ class TestAutoSelection:
         mock_prompted_factory.assert_called_once()
         call_kwargs = mock_prompted_factory.call_args.kwargs
         assert call_kwargs["max_react_iterations"] == 5
+
+
+class TestToolStrategyRouting:
+    """Verify tool_strategy kwarg routing in build_react_agent_node.
+
+    These tests exercise the tool_strategy parameter directly.  The legacy
+    supports_tools tests in TestAutoSelection continue to cover the backward-
+    compat fallback path.
+    """
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_native_strategy_calls_create_agent(self, mock_create_agent):
+        """tool_strategy='native' -> create_agent called (same as supports_tools=True)."""
+        mock_create_agent.return_value = MagicMock()
+        tool = _make_tool("t")
+
+        build_react_agent_node(
+            tools=[tool], llm_model=MagicMock(), tool_strategy="native"
+        )
+
+        mock_create_agent.assert_called_once()
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_facilitated_strategy_skips_create_agent(self, mock_create_agent):
+        """tool_strategy='facilitated' -> create_agent NOT called; callable returned."""
+        tool = _make_tool("t")
+
+        result = build_react_agent_node(
+            tools=[tool], llm_model=MagicMock(), tool_strategy="facilitated"
+        )
+
+        mock_create_agent.assert_not_called()
+        assert callable(result)
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_mcp_strategy_drops_tools_runs_plain(self, mock_create_agent):
+        """tool_strategy='mcp' -> tools dropped, model runs tool-less."""
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="mcp plain")
+        tool = _make_tool("t")
+
+        result = build_react_agent_node(
+            tools=[tool], llm_model=mock_llm, tool_strategy="mcp"
+        )
+
+        mock_create_agent.assert_not_called()
+        assert callable(result)
+        # Invoke the returned callable to confirm it runs the tool-less path.
+        state = {"messages": [HumanMessage(content="hi")]}
+        out = result(state)
+        assert "messages" in out
+        mock_llm.invoke.assert_called_once()
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_none_strategy_drops_tools_runs_plain(self, mock_create_agent):
+        """tool_strategy='none' -> tools dropped, model runs tool-less."""
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="none plain")
+        tool = _make_tool("t")
+
+        result = build_react_agent_node(
+            tools=[tool], llm_model=mock_llm, tool_strategy="none"
+        )
+
+        mock_create_agent.assert_not_called()
+        assert callable(result)
+        state = {"messages": [HumanMessage(content="hello")]}
+        out = result(state)
+        assert "messages" in out
+        mock_llm.invoke.assert_called_once()
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_tool_strategy_takes_precedence_over_supports_tools(
+        self, mock_create_agent
+    ):
+        """When tool_strategy is explicit, supports_tools is ignored."""
+        tool = _make_tool("t")
+
+        # tool_strategy='facilitated' must win even though supports_tools=True.
+        result = build_react_agent_node(
+            tools=[tool],
+            llm_model=MagicMock(),
+            tool_strategy="facilitated",
+            supports_tools=True,
+        )
+
+        mock_create_agent.assert_not_called()
+        assert callable(result)
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_supports_tools_false_still_routes_facilitated(self, mock_create_agent):
+        """Legacy supports_tools=False infers 'facilitated' when tool_strategy absent."""
+        tool = _make_tool("t")
+
+        result = build_react_agent_node(
+            tools=[tool], llm_model=MagicMock(), supports_tools=False
+        )
+
+        mock_create_agent.assert_not_called()
+        assert callable(result)

@@ -279,7 +279,7 @@ The Streamlit application uses `st.session_state` extensively to maintain state 
 | Variable | Type | Description |
 |----------|------|-------------|
 | `selected_tools` | `list[str]` | List of enabled tool names |
-| `supports_tools` | `bool` | Whether selected model supports tools |
+| `supports_tools` | `bool` | Whether selected model supports native tool-calling (derived from `tool_strategy` in the catalog) |
 | `{tool}_enabled` | `bool` | Enable flag for each tool |
 | `{tool}_prompt` | `str` | Custom prompt for each tool |
 | `{tool}_{param}` | `varies` | Tool-specific parameters |
@@ -1075,7 +1075,7 @@ graph_definition.insert(index, custom_node(edges=["next_node"]))
 | Configuration not loading | Check console for errors, verify API credentials |
 | Authentication loop | Clear browser cookies, check auth provider config |
 | Memory issues with large conversations | Reduce `k` value or use `trim` strategy |
-| Tools not appearing | Verify `supports_tools` for selected model |
+| Tools not appearing | Check `tool_strategy` for selected model in the catalog (`supports_tools` is derived from it) |
 
 ### Debug Mode
 
