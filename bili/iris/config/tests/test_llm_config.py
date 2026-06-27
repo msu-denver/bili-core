@@ -89,3 +89,128 @@ class TestModelEntryStructure:
         """Verify model_id is a non-empty string."""
         assert isinstance(model_entry["model_id"], str)
         assert len(model_entry["model_id"].strip()) > 0
+
+
+# ---------------------------------------------------------------------------
+# Catalog-wide hardening: uniqueness, enum correctness, Bedrock ID format
+# ---------------------------------------------------------------------------
+
+#: The Bedrock model_id prefixes that are known valid.  Every entry in
+#: remote_aws_bedrock must start with one of these.  Extend this set when
+#: AWS adds a new vendor or a new geo prefix (eu., global.) to the catalog.
+_BEDROCK_VALID_PREFIXES = (
+    "amazon.",
+    "us.amazon.",
+    "ai21.",
+    "us.ai21.",
+    "anthropic.",
+    "us.anthropic.",
+    "cohere.",
+    "us.cohere.",
+    "deepseek.",
+    "us.deepseek.",
+    "eu.deepseek.",
+    "global.deepseek.",
+    "meta.",
+    "us.meta.",
+    "eu.meta.",
+    "mistral.",
+    "us.mistral.",
+    "eu.mistral.",
+    "us.twelvelabs.",
+)
+
+#: Legal tool_strategy values from PR #215.
+_KNOWN_TOOL_STRATEGIES = {"native", "facilitated", "mcp", "none"}
+
+
+def _all_model_entries():
+    """Yield (provider_key, model_dict) for every entry in LLM_MODELS."""
+    for pkey, pval in LLM_MODELS.items():
+        for entry in pval["models"]:
+            yield pkey, entry
+
+
+class TestCatalogHardening:
+    """Cross-catalog invariants that CI must enforce to catch typos early."""
+
+    def test_model_ids_are_unique_within_each_provider(self):
+        """Within each provider section, every model_id must be unique.
+
+        The same model_id can legitimately appear in more than one provider
+        (e.g., gpt-4o in both remote_openai and remote_azure_openai) because
+        the same upstream model may be accessible through different API paths.
+        The dangerous error is a duplicate within a SINGLE provider section,
+        which almost always means a copy-paste block where the model_id was
+        not updated.
+        """
+        for pkey, pval in LLM_MODELS.items():
+            ids = [entry["model_id"] for entry in pval["models"]]
+            seen: set = set()
+            dupes = []
+            for mid in ids:
+                if mid in seen:
+                    dupes.append(mid)
+                seen.add(mid)
+            assert not dupes, f"Duplicate model_ids within provider '{pkey}': {dupes}"
+
+    def test_tool_strategy_values_are_valid_enum(self):
+        """Every model entry that declares tool_strategy uses a known value.
+
+        Invalid values silently fall through the routing logic and route as
+        though the model has no tool support — wrong behavior, hard to debug.
+        """
+        bad = []
+        for pkey, entry in _all_model_entries():
+            strat = entry.get("tool_strategy")
+            if strat is not None and strat not in _KNOWN_TOOL_STRATEGIES:
+                bad.append(
+                    f"{pkey}/{entry['model_name']}: "
+                    f"tool_strategy={strat!r} not in {_KNOWN_TOOL_STRATEGIES}"
+                )
+        assert not bad, "Unknown tool_strategy values:\n" + "\n".join(bad)
+
+    def test_supports_tools_matches_tool_strategy(self):
+        """supports_tools must equal (tool_strategy == 'native') when both present.
+
+        This invariant is the backward-compat contract from PR #215.
+        """
+        mismatches = []
+        for pkey, entry in _all_model_entries():
+            strat = entry.get("tool_strategy")
+            stated = entry.get("supports_tools")
+            if strat is None or stated is None:
+                continue
+            expected = strat == "native"
+            if stated != expected:
+                mismatches.append(
+                    f"{pkey}/{entry['model_name']}: "
+                    f"tool_strategy={strat!r} implies supports_tools={expected}, "
+                    f"but got {stated!r}"
+                )
+        assert not mismatches, "supports_tools/tool_strategy mismatch:\n" + "\n".join(
+            mismatches
+        )
+
+    def test_bedrock_model_ids_start_with_known_vendor_prefix(self):
+        """Every remote_aws_bedrock entry must start with a recognized prefix.
+
+        Note: newer Bedrock model IDs do NOT always end with a version
+        qualifier (e.g., Mistral Ministral 3 / Large 3 / Devstral 2, and the
+        Claude 4 family omit -v1:0).  The prefix check catches wrong IDs
+        (e.g., a GCP / OpenAI ID accidentally listed under Bedrock) without
+        falsely rejecting the no-suffix convention.
+        """
+        bad = []
+        for entry in LLM_MODELS["remote_aws_bedrock"]["models"]:
+            mid = entry["model_id"]
+            if not any(mid.startswith(p) for p in _BEDROCK_VALID_PREFIXES):
+                bad.append(
+                    f"{entry['model_name']}: model_id={mid!r} does not start "
+                    f"with a known Bedrock vendor prefix"
+                )
+        assert not bad, (
+            "Bedrock model_ids with unrecognized vendor prefix "
+            "(add the new prefix to _BEDROCK_VALID_PREFIXES if correct):\n"
+            + "\n".join(bad)
+        )
