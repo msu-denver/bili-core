@@ -414,6 +414,10 @@ LLM_MODELS = {
                 # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-deepseek-deepseek-v3-1.html
                 # NOTE: DeepSeek V3.x does NOT support tool use via the Bedrock Converse API
                 # as of 2026-06. See https://repost.aws/questions/QU83cNU6P_Q0iJnkD9Tl4JIw
+                # model_id: bedrock-runtime Converse API ID per AWS docs. DeepSeek-R1 uses the
+                # cross-region inference profile us.deepseek.r1-v1:0; if V3.1 similarly requires
+                # the us. prefix, update to us.deepseek.v3-v1:0 once AWS inference-profiles-support
+                # docs confirm that cross-region profile ID for V3.1.
                 "model_name": "DeepSeek-V3.1",
                 "model_id": "deepseek.v3-v1:0",
                 "custom_model_path": False,
