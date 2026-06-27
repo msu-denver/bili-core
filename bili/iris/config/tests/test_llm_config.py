@@ -173,24 +173,46 @@ class TestCatalogHardening:
     def test_supports_tools_matches_tool_strategy(self):
         """supports_tools must equal (tool_strategy == 'native') when both present.
 
+        Additionally, the two fields must appear together: an entry that declares
+        one but omits the other violates the schema and would silently hide a
+        real mismatch.  Entries that omit BOTH are fine (legacy entries that
+        predate the tool_strategy field).
+
         This invariant is the backward-compat contract from PR #215.
         """
-        mismatches = []
+        errors = []
         for pkey, entry in _all_model_entries():
             strat = entry.get("tool_strategy")
             stated = entry.get("supports_tools")
-            if strat is None or stated is None:
+            name = f"{pkey}/{entry['model_name']}"
+
+            # Skip entries that declare neither field (pre-tool_strategy legacy rows).
+            if strat is None and stated is None:
                 continue
+
+            # If only one field is present the schema is incomplete.
+            if strat is None:
+                errors.append(
+                    f"{name}: supports_tools={stated!r} present but tool_strategy missing"
+                )
+                continue
+            if stated is None:
+                errors.append(
+                    f"{name}: tool_strategy={strat!r} present but supports_tools missing"
+                )
+                continue
+
+            # Both present — verify they agree.
             expected = strat == "native"
             if stated != expected:
-                mismatches.append(
-                    f"{pkey}/{entry['model_name']}: "
-                    f"tool_strategy={strat!r} implies supports_tools={expected}, "
+                errors.append(
+                    f"{name}: tool_strategy={strat!r} implies supports_tools={expected}, "
                     f"but got {stated!r}"
                 )
-        assert not mismatches, "supports_tools/tool_strategy mismatch:\n" + "\n".join(
-            mismatches
-        )
+
+        assert (
+            not errors
+        ), "supports_tools/tool_strategy invariant violations:\n" + "\n".join(errors)
 
     def test_bedrock_model_ids_start_with_known_vendor_prefix(self):
         """Every remote_aws_bedrock entry must start with a recognized prefix.
