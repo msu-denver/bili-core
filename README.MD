@@ -30,11 +30,12 @@ IRIS bridges users to LLMs, tools, and data sources. It provides a node-based wo
 - **CLI providers:** Claude Code CLI, OpenAI Codex CLI, Google Gemini CLI (subprocess, `tool_strategy="mcp"`), plus a generic CLI subprocess provider for any text-in/text-out LLM tool
 - **Local providers:** llama.cpp (GGUF models), HuggingFace (GPTQ/transformers)
 - **Fallback engine:** `FallbackLLM` chains multiple providers so a transient error on the primary silently retries the next in the list
-- **Tool-calling modes:** `native` (bind_tools, API providers), `facilitated` (prompted ReAct hand-rolled loop for text-only/local models), `mcp` (agentic CLI tools; plain path until MCP mechanism lands), `none` (no tool support — plain path)
+- **Tool-calling modes:** `native` (bind_tools, API providers), `facilitated` (prompted ReAct hand-rolled loop for text-only/local models), `mcp` (agent tools exposed as an ephemeral authenticated MCP server; CLI self-orchestrates), `none` (no tool support — plain path)
+- **Ephemeral MCP server:** `tool_strategy="mcp"` starts a per-call in-process MCP server (FastMCP + uvicorn, SSE transport) on a random loopback port; per-call Bearer-token auth; per-CLI injectors for Claude Code, Codex, and Gemini CLI; falls back to tool-less if no injector registered (never starts unauthenticated)
 - **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
 - **Middleware:** Summarization, model call limiting, custom middleware
 - **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management
-- **MCP client:** `bili/iris/mcp/` lets agents consume tools from MCP servers (stdio subprocess or HTTP/SSE) as LangChain tools (install with `pip install bili-core[mcp]`)
+- **MCP subsystem:** `bili/iris/mcp/` covers two directions: (1) MCP client — agents consume tools from external MCP servers (stdio or HTTP/SSE) as LangChain tools; (2) MCP server — expose an agent's tools to a spawned CLI LLM via the ephemeral server. Install: `pip install bili-core[mcp]`
 - **Streaming:** Token-by-token responses via sync and async APIs
 - **Location:** `bili/iris/`
 

@@ -803,19 +803,47 @@ class TestToolStrategyRouting:
         assert callable(result)
 
     @patch("bili.iris.nodes.react_agent_node.create_agent")
-    def test_mcp_strategy_drops_tools_runs_plain(self, mock_create_agent):
-        """tool_strategy='mcp' -> tools dropped, model runs tool-less."""
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value = AIMessage(content="mcp plain")
+    def test_mcp_strategy_with_known_cli_calls_build_mcp_node(self, mock_create_agent):
+        """tool_strategy='mcp' + known CLI -> build_mcp_node is called."""
         tool = _make_tool("t")
+        mock_llm = MagicMock()
+        mock_llm.command = ["claude", "-p"]  # known CLI
 
-        result = build_react_agent_node(
-            tools=[tool], llm_model=mock_llm, tool_strategy="mcp"
-        )
+        mock_node = MagicMock(return_value={"messages": [AIMessage(content="ok")]})
+
+        with (
+            patch(
+                "bili.iris.mcp.server.build_mcp_node", return_value=mock_node
+            ) as mock_build,
+            patch("bili.iris.mcp.server.resolve_mcp_injector") as mock_resolve,
+        ):
+            from bili.iris.mcp.cli_injectors import ClaudeCodeInjector
+
+            mock_resolve.return_value = ClaudeCodeInjector()
+
+            result = build_react_agent_node(
+                tools=[tool], llm_model=mock_llm, tool_strategy="mcp"
+            )
 
         mock_create_agent.assert_not_called()
         assert callable(result)
-        # Invoke the returned callable to confirm it runs the tool-less path.
+        mock_build.assert_called_once()
+
+    @patch("bili.iris.nodes.react_agent_node.create_agent")
+    def test_mcp_strategy_unknown_cli_falls_back_to_tool_less(self, mock_create_agent):
+        """tool_strategy='mcp' + unknown CLI -> falls back to tool-less path."""
+        mock_llm = MagicMock()
+        mock_llm.command = ["unknown-llm-cli"]  # no registered injector
+        mock_llm.invoke.return_value = AIMessage(content="tool-less fallback")
+        tool = _make_tool("t")
+
+        with patch("bili.iris.mcp.server.resolve_mcp_injector", return_value=None):
+            result = build_react_agent_node(
+                tools=[tool], llm_model=mock_llm, tool_strategy="mcp"
+            )
+
+        mock_create_agent.assert_not_called()
+        assert callable(result)
         state = {"messages": [HumanMessage(content="hi")]}
         out = result(state)
         assert "messages" in out

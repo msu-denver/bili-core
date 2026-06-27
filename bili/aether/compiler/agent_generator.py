@@ -17,9 +17,12 @@ mirroring the routing in ``bili/iris/nodes/react_agent_node.py``:
    ``Final Answer:`` markers.  Works with any model that can follow text
    instructions.
 
-3. **MCP / agentic CLI** (``tool_strategy="mcp"``): interim behaviour --
-   tools are dropped and the model runs tool-less until the MCP mechanism
-   (#311) is in place.
+3. **MCP / agentic CLI** (``tool_strategy="mcp"``): the agent's tools are
+   exposed as an ephemeral, per-call authenticated MCP server
+   (:class:`~bili.iris.mcp.server.EphemeralMcpServer`) on a dynamic
+   localhost port.  The CLI model connects to this server and calls tools
+   via its own native tool-calling interface.  If no injector is registered
+   for the CLI, the agent falls back to the direct-LLM path.
 
 4. **No-tool model** (``tool_strategy="none"``): the model has no tool
    support; tools are dropped and the model runs tool-less.
@@ -179,10 +182,15 @@ def _generate_tool_agent_node(
     - ``"facilitated"``: uses the shared prompted ReAct loop imported from
       ``bili/iris/nodes/react_agent_node.py``.  Middleware is not applicable
       on this path and is silently ignored.
-    - ``"mcp"`` or ``"none"``: tools are dropped and the agent runs on the
-      direct-LLM path.  ``"mcp"`` is the interim behaviour until the MCP
-      mechanism (#311) is in place; ``"none"`` covers models that reject tool
-      kwargs entirely.
+    - ``"mcp"``: the agent's tools are exposed as an ephemeral, per-call
+      authenticated MCP server on a dynamic localhost port.  The CLI model
+      (Claude Code, Codex, Gemini CLI) connects to the server and calls
+      tools via its own native tool-calling interface.  If no injector is
+      registered for the CLI, falls back to the direct-LLM path with a
+      warning.
+    - ``"none"``: the model has no tool support (e.g. some reasoning models
+      reject tool kwargs entirely); tools are dropped and the agent runs on
+      the direct-LLM path.
 
     ``max_react_iterations`` for the ``"facilitated"`` path can be tuned via
     ``agent.metadata["max_react_iterations"]``; the default is 10.
@@ -230,14 +238,42 @@ def _generate_tool_agent_node(
             result = prompted_loop({"messages": messages})
             return result.get("messages", [])
 
-    else:
-        # "mcp" or "none": drop tools; delegate to the direct-LLM node.
-        # This is an interim path -- "mcp" models are agentic CLIs that
-        # self-orchestrate; "none" models reject tool kwargs entirely.
-        LOGGER.debug(
-            "Agent '%s': tool_strategy='%s' -- dropping tools; routing to direct-LLM node.",
+    elif tool_strategy == "mcp":
+        # MCP path: expose tools as an ephemeral authenticated MCP server.
+        # The CLI self-orchestrates (no middleware or LangGraph loop on this
+        # path); bili-core takes the final stdout as the agent's response.
+        from bili.iris.mcp.server import (  # pylint: disable=import-outside-toplevel
+            build_mcp_node,
+            resolve_mcp_injector,
+        )
+
+        injector = resolve_mcp_injector(llm)
+        if injector is not None:
+            LOGGER.debug(
+                "Agent '%s': tool_strategy='mcp' -- serving %d tool(s) via "
+                "ephemeral MCP server for CLI '%s'.",
+                agent.agent_id,
+                len(tools),
+                getattr(llm, "command", ["?"])[0],
+            )
+            return build_mcp_node(llm_model=llm, tools=tools, injector=injector)
+
+        LOGGER.warning(
+            "Agent '%s': tool_strategy='mcp' but no injector found for CLI '%s'; "
+            "falling back to direct-LLM node.  Register an injector via "
+            "bili.iris.mcp.cli_injectors.register_cli_mcp_injector() to enable "
+            "MCP tool-calling for this CLI.",
             agent.agent_id,
-            tool_strategy,
+            getattr(llm, "command", ["?"])[0],
+        )
+        return _generate_direct_llm_node(agent, llm)
+
+    else:
+        # "none": model has no tool support (e.g. reasoning models that reject
+        # tool kwargs entirely).  Drop tools; delegate to the direct-LLM node.
+        LOGGER.debug(
+            "Agent '%s': tool_strategy='none' -- dropping tools; routing to direct-LLM node.",
+            agent.agent_id,
         )
         return _generate_direct_llm_node(agent, llm)
 

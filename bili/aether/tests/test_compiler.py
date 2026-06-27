@@ -1190,24 +1190,58 @@ class TestPromptedToolCalling:
     # mcp and none routing in _generate_tool_agent_node
     # ------------------------------------------------------------------
 
-    def test_mcp_strategy_drops_tools_and_uses_direct_llm(self):
-        """An 'mcp' strategy drops tools and routes to the direct-LLM node."""
+    def test_mcp_strategy_with_known_cli_calls_build_mcp_node(self):
+        """An 'mcp' strategy with a known CLI -> build_mcp_node is invoked."""
         agent = _agent("cli_agent", model_name="cli:claude_code", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        mock_node = MagicMock(
+            return_value={
+                "messages": [],
+                "agent_outputs": {},
+                "current_agent": "cli_agent",
+            }
+        )
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="mcp"),
+            patch(
+                "bili.iris.mcp.server.build_mcp_node", return_value=mock_node
+            ) as mock_build,
+            patch("bili.iris.mcp.server.resolve_mcp_injector") as mock_resolve,
+        ):
+            from bili.iris.mcp.cli_injectors import ClaudeCodeInjector
+
+            mock_llm = MagicMock()
+            mock_llm.command = ["claude", "-p"]
+            mock_create_llm.return_value = mock_llm
+            mock_resolve.return_value = ClaudeCodeInjector()
+
+            generate_agent_node(agent)
+
+            mock_build.assert_called_once()
+
+    def test_mcp_strategy_unknown_cli_falls_back_to_direct_llm(self):
+        """An 'mcp' strategy with no injector falls back to the direct-LLM node."""
+        agent = _agent("cli_agent", model_name="cli:custom", tools=["mock_tool"])
         mock_tool = self._make_mock_tool("mock_tool", "some output")
 
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[mock_tool]),
             patch(_MOCK_TOOL_STRATEGY, return_value="mcp"),
+            patch("bili.iris.mcp.server.resolve_mcp_injector", return_value=None),
         ):
             mock_llm = MagicMock()
-            mock_llm.invoke.return_value = MagicMock(content="direct mcp answer")
+            mock_llm.command = ["unknown-cli"]
+            mock_llm.invoke.return_value = MagicMock(content="fallback answer")
             mock_create_llm.return_value = mock_llm
 
             node_fn = generate_agent_node(agent)
             result = node_fn({"messages": [], "agent_outputs": {}})
 
-            # Direct LLM path: llm.invoke was called; result carries the response.
             mock_llm.invoke.assert_called_once()
             assert result["current_agent"] == "cli_agent"
 
