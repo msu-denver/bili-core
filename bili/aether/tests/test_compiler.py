@@ -818,9 +818,12 @@ class TestEnsureHumanLast:
 # PROMPTED TOOL-CALLING TESTS (supports_tools=False path, #304)
 # =========================================================================
 
-# Shared mock targets for resolve_supports_tools.
-# resolve_supports_tools is imported lazily from llm_resolver inside
+# Shared mock targets for resolve_tool_strategy.
+# resolve_tool_strategy is imported lazily from llm_resolver inside
 # _generate_llm_agent_node, so we patch it at the llm_resolver source.
+_MOCK_TOOL_STRATEGY = "bili.aether.compiler.llm_resolver.resolve_tool_strategy"
+
+# Backward-compat alias: tests that still call the wrapper function patch here.
 _MOCK_SUPPORTS_TOOLS = "bili.aether.compiler.llm_resolver.resolve_supports_tools"
 
 
@@ -847,14 +850,14 @@ class TestPromptedToolCalling:
     # ------------------------------------------------------------------
 
     def test_prompted_path_does_not_call_create_agent(self):
-        """A non-tool-calling model with tools must NOT invoke create_agent."""
+        """A facilitated-strategy model with tools must NOT invoke create_agent."""
         agent = _agent("cli_agent", model_name="cli:claude", tools=["mock_tool"])
         mock_tool = self._make_mock_tool("weather", "sunny")
 
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[mock_tool]),
-            patch(_MOCK_SUPPORTS_TOOLS, return_value=False),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
             patch(
                 "bili.iris.nodes.react_agent_node.create_agent"
             ) as patched_create_agent,
@@ -878,7 +881,7 @@ class TestPromptedToolCalling:
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[weather_tool]),
-            patch(_MOCK_SUPPORTS_TOOLS, return_value=False),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
         ):
             mock_llm = MagicMock()
             # First call: model requests the weather tool
@@ -912,7 +915,7 @@ class TestPromptedToolCalling:
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[mock_tool]),
-            patch(_MOCK_SUPPORTS_TOOLS, return_value=False),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
         ):
             mock_llm = MagicMock()
             mock_llm.invoke.return_value = MagicMock(
@@ -942,7 +945,7 @@ class TestPromptedToolCalling:
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[mock_tool]),
-            patch(_MOCK_SUPPORTS_TOOLS, return_value=False),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
         ):
             mock_llm = MagicMock()
             # Always return an unparseable response — loop should cap at 2
@@ -979,7 +982,7 @@ class TestPromptedToolCalling:
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[mock_tool]),
-            patch(_MOCK_SUPPORTS_TOOLS, return_value=True),
+            patch(_MOCK_TOOL_STRATEGY, return_value="native"),
             patch.dict(
                 sys.modules,
                 {"langchain": langchain_stub, "langchain.agents": agents_stub},
@@ -999,13 +1002,13 @@ class TestPromptedToolCalling:
     # ------------------------------------------------------------------
 
     def test_no_tools_path_unchanged(self):
-        """Agent without tools calls LLM directly regardless of supports_tools."""
+        """Agent without tools calls LLM directly regardless of tool_strategy."""
         agent = _agent("direct_agent", model_name="gpt-4o")
 
         with (
             patch(_MOCK_CREATE) as mock_create_llm,
             patch(_MOCK_TOOLS, return_value=[]),
-            patch(_MOCK_SUPPORTS_TOOLS, return_value=False),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
         ):
             mock_llm = MagicMock()
             mock_llm.invoke.return_value = MagicMock(content="direct answer")
@@ -1069,3 +1072,158 @@ class TestPromptedToolCalling:
             # Should not raise; defaults to True
             result = resolve_supports_tools("any-model")
             assert result is True
+
+    # ------------------------------------------------------------------
+    # resolve_tool_strategy
+    # ------------------------------------------------------------------
+
+    def test_resolve_tool_strategy_returns_field_when_present(self):
+        """resolve_tool_strategy reads the tool_strategy field directly."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {
+            "remote_openai": {
+                "models": [
+                    {
+                        "model_name": "OpenAI GPT-4o Omni",
+                        "model_id": "gpt-4o",
+                        "tool_strategy": "native",
+                        "supports_tools": True,
+                    },
+                ]
+            },
+            "remote_deepseek": {
+                "models": [
+                    {
+                        "model_name": "DeepSeek Reasoner",
+                        "model_id": "deepseek-reasoner",
+                        "tool_strategy": "none",
+                        "supports_tools": False,
+                    },
+                ]
+            },
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("gpt-4o") == "native"
+            assert resolve_tool_strategy("deepseek-reasoner") == "none"
+            # Lookup by display name also works.
+            assert resolve_tool_strategy("OpenAI GPT-4o Omni") == "native"
+
+    def test_resolve_tool_strategy_infers_from_supports_tools_when_field_absent(self):
+        """resolve_tool_strategy infers from supports_tools when tool_strategy absent."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {
+            "remote_aws_bedrock": {
+                "models": [
+                    {
+                        "model_name": "Legacy True",
+                        "model_id": "legacy-true",
+                        "supports_tools": True,
+                    },
+                    {
+                        "model_name": "Legacy False",
+                        "model_id": "legacy-false",
+                        "supports_tools": False,
+                    },
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("legacy-true") == "native"
+            assert resolve_tool_strategy("legacy-false") == "facilitated"
+
+    def test_resolve_tool_strategy_defaults_to_native_for_unknown_model(self):
+        """resolve_tool_strategy defaults to 'native' when model is not in catalog."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {"remote_openai": {"models": []}}
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("unknown-model-xyz") == "native"
+
+    def test_resolve_tool_strategy_returns_native_on_import_error(self):
+        """resolve_tool_strategy defaults to 'native' when LLM_MODELS cannot be imported."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        with patch(
+            "bili.iris.config.llm_config.LLM_MODELS",
+            side_effect=ImportError("no module"),
+            create=True,
+        ):
+            result = resolve_tool_strategy("any-model")
+            assert result == "native"
+
+    def test_resolve_tool_strategy_mcp_and_none_values(self):
+        """resolve_tool_strategy returns 'mcp' and 'none' for the new strategy values."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {
+            "cli_claude_code": {
+                "models": [
+                    {
+                        "model_name": "Claude Code CLI",
+                        "model_id": "cli:claude_code",
+                        "tool_strategy": "mcp",
+                        "supports_tools": False,
+                    },
+                ]
+            },
+            "remote_openai": {
+                "models": [
+                    {
+                        "model_name": "OpenAI o1-mini",
+                        "model_id": "o1-mini",
+                        "tool_strategy": "none",
+                        "supports_tools": False,
+                    },
+                ]
+            },
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("cli:claude_code") == "mcp"
+            assert resolve_tool_strategy("o1-mini") == "none"
+
+    # ------------------------------------------------------------------
+    # mcp and none routing in _generate_tool_agent_node
+    # ------------------------------------------------------------------
+
+    def test_mcp_strategy_drops_tools_and_uses_direct_llm(self):
+        """An 'mcp' strategy drops tools and routes to the direct-LLM node."""
+        agent = _agent("cli_agent", model_name="cli:claude_code", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="mcp"),
+        ):
+            mock_llm = MagicMock()
+            mock_llm.invoke.return_value = MagicMock(content="direct mcp answer")
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            # Direct LLM path: llm.invoke was called; result carries the response.
+            mock_llm.invoke.assert_called_once()
+            assert result["current_agent"] == "cli_agent"
+
+    def test_none_strategy_drops_tools_and_uses_direct_llm(self):
+        """A 'none' strategy drops tools and routes to the direct-LLM node."""
+        agent = _agent("reasoner", model_name="deepseek-reasoner", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="none"),
+        ):
+            mock_llm = MagicMock()
+            mock_llm.invoke.return_value = MagicMock(content="reasoner answer")
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            mock_llm.invoke.assert_called_once()
+            assert result["current_agent"] == "reasoner"

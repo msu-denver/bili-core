@@ -254,28 +254,40 @@ def create_llm(agent: AgentSpec) -> Any:
     return build_fallback_llm(primary_llm=primary_llm, fallback_chain=fallback_chain)
 
 
-def resolve_supports_tools(model_name: str) -> bool:
-    """Return the ``supports_tools`` flag for *model_name* from ``LLM_MODELS``.
+def resolve_tool_strategy(model_name: str) -> str:
+    """Return the ``tool_strategy`` for *model_name* from ``LLM_MODELS``.
 
-    Checks the ``supports_tools`` top-level field on the matching model entry.
-    Returns ``True`` (the default for all API-backed models) when the entry is
-    not found in the catalog or when the entry does not declare the flag
-    explicitly.  Returns ``False`` only when the entry explicitly sets
-    ``"supports_tools": False``, as CLI and some legacy models do.
+    The ``tool_strategy`` field classifies how agents should invoke tools for a
+    given model:
 
-    This is the same source that ``bili/iris/nodes/react_agent_node.py`` reads
-    via its ``supports_tools`` node-kwarg: AETHER uses this lookup to drive the
-    same 3-way path selection without requiring YAML authors to declare the flag.
+    - ``"native"``     -- the model implements ``bind_tools``; use
+                          ``create_agent`` + LangChain tool-calling.
+    - ``"facilitated"`` -- the model cannot bind tools natively; route to the
+                           prompted ReAct loop (hand-rolled Thought/Action/
+                           Observation cycle described in the system message).
+    - ``"mcp"``        -- the model is an agentic CLI best consumed as an MCP
+                           server; until the MCP mechanism lands (#311) it runs
+                           on the tool-less plain path so the model can self-
+                           orchestrate.
+    - ``"none"``       -- the model has no tool support at all (e.g. reasoning
+                           models that reject extra kwargs); runs tool-less.
+
+    Fall-back behaviour when the field is absent from the catalog entry:
+
+    - If the entry has ``"supports_tools": False`` the strategy is inferred as
+      ``"facilitated"`` (preserves pre-migration behaviour).
+    - If the entry has ``"supports_tools": True`` or omits the field entirely,
+      the strategy defaults to ``"native"``.
+    - If the model is not in the catalog at all, ``"native"`` is returned so
+      unknown API models continue to work as before.
 
     Args:
         model_name: The model identifier from ``AgentSpec.model_name``.
-            Can be a display name (``"GPT-4o"``) or a model ID
-            (``"gpt-4o"``).
+            Can be a display name (e.g. ``"GPT-4o"``) or a model ID
+            (e.g. ``"gpt-4o"``).
 
     Returns:
-        ``True`` if the model supports native ``bind_tools`` (use native
-        ``create_agent`` path); ``False`` if it does not (use prompted ReAct
-        path).
+        One of ``"native"``, ``"facilitated"``, ``"mcp"``, or ``"none"``.
     """
     try:
         from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
@@ -284,10 +296,10 @@ def resolve_supports_tools(model_name: str) -> bool:
     except ImportError:
         LOGGER.debug(
             "bili.iris.config.llm_config not available; "
-            "assuming supports_tools=True for '%s'",
+            "assuming tool_strategy='native' for '%s'",
             model_name,
         )
-        return True
+        return "native"
 
     for provider_info in LLM_MODELS.values():
         for entry in provider_info.get("models", []):
@@ -295,13 +307,34 @@ def resolve_supports_tools(model_name: str) -> bool:
                 entry.get("model_id") == model_name
                 or entry.get("model_name") == model_name
             ):
-                return entry.get("supports_tools", True)
+                if "tool_strategy" in entry:
+                    return entry["tool_strategy"]
+                # Backward-compat: infer from legacy supports_tools flag.
+                return "native" if entry.get("supports_tools", True) else "facilitated"
 
     LOGGER.debug(
-        "'%s' not found in LLM_MODELS; assuming supports_tools=True",
+        "'%s' not found in LLM_MODELS; assuming tool_strategy='native'",
         model_name,
     )
-    return True
+    return "native"
+
+
+def resolve_supports_tools(model_name: str) -> bool:
+    """Return whether *model_name* supports native ``bind_tools``.
+
+    This is a backward-compatible convenience wrapper around
+    :func:`resolve_tool_strategy`.  Callers that only need a boolean — e.g.
+    legacy code or the Streamlit UI — can continue using this function without
+    change.  Prefer :func:`resolve_tool_strategy` for new code.
+
+    Args:
+        model_name: The model identifier from ``AgentSpec.model_name``.
+
+    Returns:
+        ``True`` when the resolved strategy is ``"native"``; ``False``
+        otherwise.
+    """
+    return resolve_tool_strategy(model_name) == "native"
 
 
 def resolve_tools(agent: AgentSpec) -> list:

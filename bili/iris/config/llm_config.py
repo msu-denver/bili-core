@@ -58,6 +58,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Amazon Nova Premier",
@@ -71,6 +73,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Amazon Nova Lite",
@@ -84,6 +88,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Amazon Nova Micro",
@@ -97,6 +103,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # Amazon Titan Models (3)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-text.html
@@ -113,6 +121,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "none",
                 "supports_tools": False,
             },
             {
@@ -127,6 +136,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "none",
                 "supports_tools": False,
             },
             {
@@ -141,6 +151,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "none",
                 "supports_tools": False,
             },
             # AI21 Labs Models (2)
@@ -158,6 +169,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "AI21 Jamba 1.5 Mini",
@@ -172,6 +185,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # Anthropic Models (10)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-claude.html
@@ -188,6 +203,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.5 Haiku",
@@ -201,6 +218,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3 Opus",
@@ -214,6 +233,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude Opus 4",
@@ -227,6 +248,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude Opus 4.1",
@@ -240,6 +263,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3 Sonnet",
@@ -253,6 +278,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet",
@@ -266,6 +293,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet v2",
@@ -279,6 +308,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.7 Sonnet",
@@ -292,6 +323,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude Sonnet 4.6",
@@ -305,6 +338,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # Cohere Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-cohere-command.html
@@ -322,6 +357,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 500,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Cohere Command R+",
@@ -335,6 +372,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 500,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # DeepSeek Models (1)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-deepseek.html
@@ -349,6 +388,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # Meta LLama Models (11)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-meta.html
@@ -364,6 +405,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -377,6 +419,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -391,6 +434,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -405,6 +449,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -419,6 +464,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -433,6 +479,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -447,6 +494,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -461,6 +509,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -475,6 +524,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -489,6 +539,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                # TODO: verify Llama 4 bind_tools on Bedrock Converse API; may upgrade to "native"
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -503,6 +555,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                # TODO: verify Llama 4 bind_tools on Bedrock Converse API; may upgrade to "native"
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             # Minstral AI Models (5)
@@ -520,6 +574,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -533,6 +588,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -547,6 +603,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 200,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -561,6 +618,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 200,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Mistral Pixtral Large",
@@ -573,6 +632,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
                 "supports_tools": True,
             },
             # TwelveLabs Models (1)
@@ -588,6 +648,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
         ],
     },
@@ -618,6 +680,8 @@ LLM_MODELS = {
                 "supports_thinking_budget": True,
                 "thinking_budget_max": 24576,
                 "thinking_budget_default": 0,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.5 Flash",
@@ -637,6 +701,8 @@ LLM_MODELS = {
                 "supports_thinking_budget": True,
                 "thinking_budget_max": 24576,
                 "thinking_budget_default": 0,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.5 Flash Lite",
@@ -656,6 +722,8 @@ LLM_MODELS = {
                 "supports_thinking_budget": True,
                 "thinking_budget_max": 24576,
                 "thinking_budget_default": 0,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.0 Flash",
@@ -669,6 +737,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.0 Flash Lite",
@@ -682,6 +752,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Pro 002",
@@ -695,6 +767,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Pro",
@@ -708,6 +782,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Flash",
@@ -721,6 +797,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Flash 002",
@@ -734,6 +812,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.0 Pro",
@@ -747,6 +827,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
         ],
     },
@@ -774,6 +856,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -789,6 +873,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -804,6 +890,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -819,6 +907,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -834,6 +924,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -849,6 +941,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -864,6 +958,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -879,10 +975,11 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "none",
+                "supports_tools": False,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
-                "supports_tools": False,
             },
             {
                 "model_name": "Azure OpenAI o3",
@@ -895,6 +992,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -910,6 +1009,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -925,6 +1026,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -940,6 +1043,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -955,6 +1060,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
@@ -971,6 +1077,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
@@ -996,6 +1103,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1011,6 +1120,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1026,6 +1137,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1041,6 +1154,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1056,6 +1171,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "none",
                 "supports_tools": False,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
@@ -1072,6 +1188,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1087,6 +1205,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
@@ -1118,6 +1237,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1133,6 +1254,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1148,6 +1271,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1163,6 +1288,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1192,6 +1319,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1207,6 +1336,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1222,6 +1353,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1251,6 +1384,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1266,6 +1401,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1281,6 +1418,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1317,6 +1456,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1332,6 +1473,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1347,6 +1490,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1377,6 +1522,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1392,6 +1539,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": False,
                 "supports_top_k": False,
+                "tool_strategy": "none",
                 "supports_tools": False,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
@@ -1422,6 +1570,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1437,6 +1587,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1466,6 +1618,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1481,6 +1635,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1496,6 +1652,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1511,6 +1669,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 2,
                 "max_retries_max": 10,
@@ -1548,7 +1708,9 @@ LLM_MODELS = {
                 "supports_top_p": False,
                 "supports_top_k": False,
                 # CLI tools run as a subprocess -- tool-calling via the
-                # LangChain bind_tools() API is not available.
+                # LangChain bind_tools() API is not available.  These models
+                # are agentic CLIs best driven as MCP servers (#311).
+                "tool_strategy": "mcp",
                 "supports_tools": False,
             },
         ],
@@ -1581,6 +1743,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": False,
                 "supports_top_k": False,
+                "tool_strategy": "mcp",
                 "supports_tools": False,
             },
         ],
@@ -1603,6 +1766,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": False,
                 "supports_top_k": False,
+                "tool_strategy": "mcp",
                 "supports_tools": False,
             },
         ],
@@ -1625,6 +1789,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": False,
                 "supports_top_k": False,
+                "tool_strategy": "mcp",
                 "supports_tools": False,
             },
         ],
@@ -1652,6 +1817,7 @@ LLM_MODELS = {
                 # If you wanted to manually use tools, you can create the LLM and bind
                 # tool calls differently than create_react_agent does in the default
                 # implementation in bili.loaders.langchain_loader.load_langgraph_agent
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
         ],
@@ -1677,6 +1843,7 @@ LLM_MODELS = {
                 # If you wanted to manually use tools, you can create the LLM and bind
                 # tool calls differently than create_react_agent does in the default
                 # implementation in bili.loaders.langchain_loader.load_langgraph_agent
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
         ],

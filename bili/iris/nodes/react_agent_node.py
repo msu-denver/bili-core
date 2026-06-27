@@ -476,36 +476,51 @@ def build_react_agent_node(
 ):
     """Construct a REACT agent node, selecting the appropriate execution mode.
 
-    Three modes are available, selected automatically:
+    Four modes are available, selected by ``tool_strategy`` (or the legacy
+    ``supports_tools`` kwarg):
 
-    **Native tool-calling** (``tools`` is not ``None`` and ``supports_tools`` is
-    ``True`` or omitted):
+    **Native tool-calling** (``tool_strategy="native"``, the default):
         Builds a compiled LangGraph sub-graph via ``create_agent`` + ``bind_tools``.
         Requires the model to implement ``BaseChatModel.bind_tools`` (all major API
         providers do).
 
-    **Prompted tool-calling** (``tools`` is not ``None`` and ``supports_tools=False``
-    is passed via ``**kwargs``):
+    **Prompted tool-calling** (``tool_strategy="facilitated"``):
         Runs a hand-rolled ReAct loop inside the node.  Tools are described in a
         system-message preamble; the model's text output is parsed for
         ``Action:`` / ``Final Answer:`` markers.  Compatible with any model that
-        can follow text instructions, including CLI-backed models that do not
-        implement ``bind_tools``.  Does not call ``create_agent`` and never invokes
-        ``bind_tools``.
+        can follow text instructions.  Does not call ``create_agent`` and never
+        invokes ``bind_tools``.
 
-        Extra ``**kwargs`` for this mode:
+    **MCP / agentic CLI** (``tool_strategy="mcp"``):
+        Interim behaviour until the MCP mechanism is implemented: tools are dropped
+        and the model runs on the plain tool-less path so it can self-orchestrate.
+        Passing ``bind_tools`` kwargs to an agentic CLI raises; dropping tools is
+        the safe interim behaviour.
 
-        - ``supports_tools`` (``bool``, default ``True``): set ``False`` to engage
-          the prompted path.
-        - ``max_react_iterations`` (``int``, default 10): cap on
-          Thought/Action/Observation iterations.
+    **No-tool model** (``tool_strategy="none"``):
+        The model has no tool support (e.g. some reasoning models).  Tools are
+        dropped and the model runs on the plain tool-less path.
 
     **Tool-less fallback** (``tools`` is ``None``):
         Calls the model directly, filtering ToolMessages from history for
         compatibility with models that reject them.
 
-    :param tools: List of tools for the agent.  ``None`` engages the tool-less
-        fallback regardless of ``supports_tools``.
+    Backward compatibility: the legacy ``supports_tools`` (``bool``) kwarg is
+    still accepted.  When ``tool_strategy`` is absent, the router infers the
+    strategy: ``supports_tools=True`` (or absent) maps to ``"native"``; ``False``
+    maps to ``"facilitated"``.  Prefer passing ``tool_strategy`` explicitly.
+
+    Extra ``**kwargs`` recognised:
+
+    - ``tool_strategy`` (``str``): ``"native"`` | ``"facilitated"`` | ``"mcp"`` |
+      ``"none"`` -- the authoritative routing key.
+    - ``supports_tools`` (``bool``): legacy convenience; ignored when
+      ``tool_strategy`` is provided.
+    - ``max_react_iterations`` (``int``, default 10): iteration cap for the
+      prompted (``"facilitated"``) path.
+
+    :param tools: List of tools for the agent.  ``None`` (or a strategy of
+        ``"mcp"``/``"none"``) engages the tool-less path.
     :type tools: list[Tool] or None
 
     :param state: State schema (must subclass ``AgentState``).  Used only by the
@@ -518,29 +533,32 @@ def build_react_agent_node(
         path.  Ignored on the prompted and fallback paths.
     :type middleware: list or None
 
-    :param kwargs: Additional node configuration.  Recognised keys:
-
-        - ``supports_tools`` (``bool``): capability flag; see above.
-        - ``max_react_iterations`` (``int``): iteration cap for the prompted path.
+    :param kwargs: Additional node configuration; see recognised keys above.
 
     :return: A compiled ``CompiledStateGraph`` (native path) or a plain callable
         ``(state: dict) -> dict`` (prompted and fallback paths).
     :rtype: CompiledStateGraph or Callable
     """
-    supports_tools = kwargs.get("supports_tools", True)
+    # Resolve tool_strategy, falling back to the legacy supports_tools bool.
+    tool_strategy = kwargs.get("tool_strategy")
+    if tool_strategy is None:
+        tool_strategy = (
+            "native" if kwargs.get("supports_tools", True) else "facilitated"
+        )
+
     max_react_iterations = kwargs.get(
         "max_react_iterations", _DEFAULT_MAX_REACT_ITERATIONS
     )
 
     LOGGER.debug(
-        "Using model: %s | Tools provided: %s | supports_tools: %s | Middleware count: %s",
+        "Using model: %s | Tools provided: %s | tool_strategy: %s | Middleware count: %s",
         getattr(llm_model, "__class__", None),
         tools is not None,
-        supports_tools,
+        tool_strategy,
         len(middleware) if middleware else 0,
     )
 
-    if tools is not None and supports_tools:
+    if tools is not None and tool_strategy == "native":
         # Native path: the model implements bind_tools; delegate to create_agent.
         LOGGER.debug(
             "Native tool-calling path: creating REACT agent with tools: %s", tools
@@ -552,7 +570,7 @@ def build_react_agent_node(
             middleware=middleware or (),
         )
 
-    elif tools is not None and not supports_tools:
+    elif tools is not None and tool_strategy == "facilitated":
         # Prompted path: the model cannot bind_tools; run the ReAct loop ourselves.
         LOGGER.debug(
             "Prompted tool-calling path: model does not support bind_tools; "
@@ -566,8 +584,22 @@ def build_react_agent_node(
             max_react_iterations=max_react_iterations,
         )
 
-    else:
-        # Tool-less fallback: no tools provided; call the model directly.
+    elif tools is not None and tool_strategy in ("mcp", "none"):
+        # MCP/none interim path: drop tools; let the model run plain.
+        # "mcp" models are agentic CLIs that self-orchestrate; "none" models
+        # reject tool kwargs entirely.  Both run tool-less until the MCP
+        # mechanism is in place.
+        LOGGER.debug(
+            "Tool-less interim path for strategy '%s': dropping %d tool(s); "
+            "model runs plain.",
+            tool_strategy,
+            len(tools),
+        )
+        tools = None
+        # Fall through to the tool-less branch below.
+
+    if tools is None:
+        # Tool-less fallback: no tools provided (or dropped above); call the model directly.
         LOGGER.debug(
             "Tool-less fallback path: no tools provided; invoking the LLM directly "
             "and converting the state to a format the LLM can understand."

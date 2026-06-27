@@ -3,22 +3,28 @@
 When an ``AgentSpec`` has ``model_name`` set, the generated node makes
 real LLM calls using bili-core's ``llm_loader``.  If the agent also has
 ``tools`` configured, the node execution path is selected based on the
-model's ``supports_tools`` flag (sourced from ``LLM_MODELS``), mirroring
-the 3-way selection in ``bili/iris/nodes/react_agent_node.py``:
+model's ``tool_strategy`` (sourced from ``LLM_MODELS`` via
+:func:`~bili.aether.compiler.llm_resolver.resolve_tool_strategy`),
+mirroring the routing in ``bili/iris/nodes/react_agent_node.py``:
 
-1. **Native tool-calling** (``supports_tools=True``, the default for API
+1. **Native tool-calling** (``tool_strategy="native"``, the default for API
    providers): uses ``langchain.agents.create_agent`` + ``bind_tools``.
 
-2. **Prompted tool-calling** (``supports_tools=False``, set for CLI and
-   some legacy models): uses the shared
-   :func:`~bili.iris.nodes.react_agent_node._build_prompted_react_loop`
+2. **Prompted tool-calling** (``tool_strategy="facilitated"``): uses the
+   shared :func:`~bili.iris.nodes.react_agent_node._build_prompted_react_loop`
    factory imported from IRIS.  Tools are described in a system-message
    preamble; the model's text output is parsed for ``Action:`` /
    ``Final Answer:`` markers.  Works with any model that can follow text
-   instructions, including ``CliLLM`` instances that do not implement
-   ``bind_tools``.
+   instructions.
 
-3. **No tools**: calls ``llm.invoke()`` directly (unchanged).
+3. **MCP / agentic CLI** (``tool_strategy="mcp"``): interim behaviour --
+   tools are dropped and the model runs tool-less until the MCP mechanism
+   (#311) is in place.
+
+4. **No-tool model** (``tool_strategy="none"``): the model has no tool
+   support; tools are dropped and the model runs tool-less.
+
+5. **No tools configured**: calls ``llm.invoke()`` directly (unchanged).
 
 The prompted-loop implementation is shared with IRIS via a direct import
 from ``bili.iris.nodes.react_agent_node`` — no code is duplicated.
@@ -130,20 +136,20 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     # pylint: disable=import-outside-toplevel
     from bili.aether.compiler.llm_resolver import (
         create_llm,
-        resolve_supports_tools,
+        resolve_tool_strategy,
         resolve_tools,
     )
 
     llm = create_llm(agent)
     tools = resolve_tools(agent)
     middleware = _resolve_middleware(agent)
-    supports_tools = (
-        resolve_supports_tools(agent.model_name) if agent.model_name else True
+    tool_strategy = (
+        resolve_tool_strategy(agent.model_name) if agent.model_name else "native"
     )
 
     if tools:
         return _generate_tool_agent_node(
-            agent, llm, tools, middleware, supports_tools=supports_tools
+            agent, llm, tools, middleware, tool_strategy=tool_strategy
         )
 
     if middleware:
@@ -161,23 +167,28 @@ def _generate_tool_agent_node(
     llm: object,
     tools: List,
     middleware: Optional[List] = None,
-    supports_tools: bool = True,
+    tool_strategy: str = "native",
 ) -> Callable[[dict], dict]:
-    """Create a node for tool-enabled agents, selecting native or prompted path.
+    """Create a node for tool-enabled agents, selecting the execution path by strategy.
 
-    When ``supports_tools`` is ``True`` (the default for API-backed models),
-    delegates to ``langchain.agents.create_agent`` — the same native path as
-    before.  When ``supports_tools`` is ``False`` (CLI models, some legacy
-    providers), uses the shared prompted ReAct loop imported from
-    ``bili/iris/nodes/react_agent_node.py`` instead.  Middleware is forwarded
-    to ``create_agent()`` on the native path; it is not applicable on the
-    prompted path and is silently ignored there.
+    ``tool_strategy`` is the authoritative routing key:
 
-    ``max_react_iterations`` for the prompted path can be tuned via
+    - ``"native"`` (default for API-backed models): delegates to
+      ``langchain.agents.create_agent`` + ``bind_tools``.  Middleware is
+      forwarded to ``create_agent()``.
+    - ``"facilitated"``: uses the shared prompted ReAct loop imported from
+      ``bili/iris/nodes/react_agent_node.py``.  Middleware is not applicable
+      on this path and is silently ignored.
+    - ``"mcp"`` or ``"none"``: tools are dropped and the agent runs on the
+      direct-LLM path.  ``"mcp"`` is the interim behaviour until the MCP
+      mechanism (#311) is in place; ``"none"`` covers models that reject tool
+      kwargs entirely.
+
+    ``max_react_iterations`` for the ``"facilitated"`` path can be tuned via
     ``agent.metadata["max_react_iterations"]``; the default is 10.
     """
     # ── Build the executor at node-construction time ──────────────────────────
-    if supports_tools:
+    if tool_strategy == "native":
         from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
             create_agent,
         )
@@ -189,7 +200,7 @@ def _generate_tool_agent_node(
             result = react_agent.invoke({"messages": messages})
             return result.get("messages", [])
 
-    else:
+    elif tool_strategy == "facilitated":
         # Prompted path: model cannot bind_tools; run the hand-rolled ReAct loop.
         # Imported from IRIS so the implementation is shared, not duplicated.
         from bili.iris.nodes.react_agent_node import (  # pylint: disable=import-outside-toplevel
@@ -199,7 +210,7 @@ def _generate_tool_agent_node(
 
         if middleware:
             LOGGER.warning(
-                "Agent '%s' has middleware configured but supports_tools=False; "
+                "Agent '%s' has middleware configured but tool_strategy='facilitated'; "
                 "middleware is only applicable on the native create_agent path "
                 "and will be ignored for the prompted ReAct path.",
                 agent.agent_id,
@@ -218,6 +229,17 @@ def _generate_tool_agent_node(
         def _invoke_executor(messages: list) -> list:
             result = prompted_loop({"messages": messages})
             return result.get("messages", [])
+
+    else:
+        # "mcp" or "none": drop tools; delegate to the direct-LLM node.
+        # This is an interim path -- "mcp" models are agentic CLIs that
+        # self-orchestrate; "none" models reject tool kwargs entirely.
+        LOGGER.debug(
+            "Agent '%s': tool_strategy='%s' -- dropping tools; routing to direct-LLM node.",
+            agent.agent_id,
+            tool_strategy,
+        )
+        return _generate_direct_llm_node(agent, llm)
 
     # ── Shared node callable ──────────────────────────────────────────────────
 
