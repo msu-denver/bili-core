@@ -558,6 +558,11 @@ def build_react_agent_node(
         len(middleware) if middleware else 0,
     )
 
+    # Routing branches set 'agent'; the ValueError branch raises, so 'agent'
+    # is guaranteed to be bound on all non-raising exit paths.  pylint cannot
+    # deduce this from the if/elif chain, so we initialize it here.
+    agent = None
+
     if tools is not None and tool_strategy == "native":
         # Native path: the model implements bind_tools; delegate to create_agent.
         LOGGER.debug(
@@ -597,6 +602,16 @@ def build_react_agent_node(
         )
         tools = None
         # Fall through to the tool-less branch below.
+
+    elif tools is not None:
+        # A non-canonical tool_strategy value was passed with tools set.
+        # Without this guard, none of the branches above would assign 'agent',
+        # causing an UnboundLocalError on 'return agent'.  Raise early with a
+        # clear message so misconfigured callers see the problem immediately.
+        raise ValueError(
+            f"Unknown tool_strategy={tool_strategy!r}.  "
+            f"Expected one of 'native', 'facilitated', 'mcp', or 'none'."
+        )
 
     if tools is None:
         # Tool-less fallback: no tools provided (or dropped above); call the model directly.

@@ -263,15 +263,19 @@ _EXTRAS = {
     ],
 }
 
-# [all] is composed from every individual extra above.  This single source of
+# [all] is composed from every RUNTIME extra above.  This single source of
 # truth means a pin bump in one extra propagates automatically; no separate
-# copy to forget.  The [all-providers] bundle is omitted to avoid duplicating
-# the individual provider entries it already mirrors.
+# copy to forget.  Two extras are excluded:
+#   [all-providers] -- omitted to avoid duplicating individual provider entries.
+#   [dev]           -- excluded because [all] is a runtime bundle; development
+#                      tooling (pylint, black, pytest, …) should not be pulled
+#                      in as transitive dependencies by consumers that install
+#                      bili-core[all].  Install [dev] separately when needed.
 _EXTRAS["all"] = sorted(
     {
         pkg
         for key, pkgs in _EXTRAS.items()
-        if key not in ("all-providers",)
+        if key not in ("all-providers", "dev")
         for pkg in pkgs
     }
 )
