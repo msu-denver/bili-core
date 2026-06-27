@@ -22,7 +22,7 @@ Originally developed for the [**Colorado Sustainability Hub**](https://sustainab
 BiliCore is organized into three named components, each solving a distinct problem:
 
 ### IRIS — Interactive Reasoning and Integration Services
-**Single-agent orchestration.** 97 model configurations across 17 provider types.
+**Single-agent orchestration.** 106 model configurations across 17 provider types.
 
 IRIS bridges users to LLMs, tools, and data sources. It provides a node-based workflow pipeline where each step (persona injection, tool execution, memory management, response normalization) is a composable node. Switch models mid-conversation, configure tools on the fly, and persist state across sessions.
 
