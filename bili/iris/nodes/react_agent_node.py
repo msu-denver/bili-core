@@ -589,15 +589,46 @@ def build_react_agent_node(
             max_react_iterations=max_react_iterations,
         )
 
-    elif tools is not None and tool_strategy in ("mcp", "none"):
-        # MCP/none interim path: drop tools; let the model run plain.
-        # "mcp" models are agentic CLIs that self-orchestrate; "none" models
-        # reject tool kwargs entirely.  Both run tool-less until the MCP
-        # mechanism is in place.
+    elif tools is not None and tool_strategy == "mcp":
+        # MCP path: expose the agent's tools as an ephemeral authenticated
+        # MCP server so the CLI model can call them via its own native
+        # tool-calling interface.
+        from bili.iris.mcp.server import (  # pylint: disable=import-outside-toplevel
+            build_mcp_node,
+            resolve_mcp_injector,
+        )
+
+        injector = resolve_mcp_injector(llm_model)
+        if injector is not None:
+            LOGGER.debug(
+                "MCP tool-strategy path: serving %d tool(s) via ephemeral "
+                "MCP server for CLI '%s'.",
+                len(tools),
+                getattr(llm_model, "command", ["?"])[0],
+            )
+            agent = build_mcp_node(
+                llm_model=llm_model,
+                tools=tools,
+                injector=injector,
+            )
+            tools = None  # Prevent fall-through to tool-less branch.
+        else:
+            LOGGER.warning(
+                "tool_strategy='mcp' but no injector found for CLI '%s'; "
+                "falling back to tool-less path.  Register an injector via "
+                "bili.iris.mcp.cli_injectors.register_cli_mcp_injector() to "
+                "enable MCP tool-calling for this CLI.",
+                getattr(llm_model, "command", ["?"])[0],
+            )
+            tools = None
+            # Fall through to the tool-less branch below.
+
+    elif tools is not None and tool_strategy == "none":
+        # No-tool model: the model has no tool support (e.g. some reasoning
+        # models reject tool kwargs entirely).  Drop tools and run plain.
         LOGGER.debug(
-            "Tool-less interim path for strategy '%s': dropping %d tool(s); "
+            "Tool-less path for strategy 'none': dropping %d tool(s); "
             "model runs plain.",
-            tool_strategy,
             len(tools),
         )
         tools = None
@@ -613,7 +644,7 @@ def build_react_agent_node(
             f"Expected one of 'native', 'facilitated', 'mcp', or 'none'."
         )
 
-    if tools is None:
+    if tools is None and agent is None:
         # Tool-less fallback: no tools provided (or dropped above); call the model directly.
         LOGGER.debug(
             "Tool-less fallback path: no tools provided; invoking the LLM directly "

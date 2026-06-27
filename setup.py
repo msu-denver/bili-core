@@ -238,11 +238,15 @@ _EXTRAS = {
         "firebase-admin~=6.6.0",
     ],
     # ------------------------------------------------------------------ #
-    # MCP client subsystem — lets bili-core agents consume tools from     #
-    # MCP servers (stdio subprocess or HTTP/SSE transport).               #
-    # Usage: pip install bili-core[mcp]                                   #
+    # MCP subsystem — two directions:                                     #
+    # Client: consume tools from external MCP servers (#205).            #
+    # Server: expose an agent's tools as an ephemeral MCP server for     #
+    #   MCP-capable CLI models (#311).                                   #
+    # Both require the mcp SDK; the server side additionally needs       #
+    # uvicorn to run the ephemeral SSE server.                           #
+    # Usage: pip install bili-core[mcp]                                  #
     # ------------------------------------------------------------------ #
-    "mcp": ["mcp>=1.0"],
+    "mcp": ["mcp>=1.0", "uvicorn>=0.30"],
     # ------------------------------------------------------------------ #
     # Development tooling.                                                 #
     # Usage: pip install bili-core[dev]                                   #

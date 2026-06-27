@@ -256,7 +256,8 @@ START → persona_summary → datetime → react_agent → timestamp → trim_su
 |---|---|---|
 | `"native"` (default) | `tools` provided | `create_agent` via `model.bind_tools` — all API providers |
 | `"facilitated"` | `tools` provided | Hand-rolled Action/Observation loop injected into system message — local and text-only models |
-| `"mcp"` | `tools` provided | Tools dropped; model runs plain (interim until MCP mechanism lands) — agentic CLI tools |
+| `"mcp"` | `tools` provided + known CLI | Registered tools exposed via an ephemeral authenticated MCP server; spawned CLI self-orchestrates via tool calls and returns the final answer — see Section 7 |
+| `"mcp"` | `tools` provided + unknown CLI | Falls back to tool-less plain path (no injector registered; unauthenticated servers are never started) |
 | `"none"` | `tools` provided | Tools dropped; model runs plain — models that reject tool kwargs (e.g. some reasoning models) |
 | any | `tools=None` | Direct `llm_model.invoke` call, no tool dispatch |
 
@@ -281,11 +282,13 @@ llm = FallbackLLM.from_chain(chain)
 
 In AETHER, declare `fallback_models` on an `AgentSpec` and the compiler builds the chain automatically. `FallbackLLM` implements the same `.invoke()` / `.stream()` duck type as `BaseChatModel`, so it is a drop-in replacement anywhere an LLM is expected.
 
-### 6. MCP Client Subsystem (`bili/iris/mcp/`) -- IRIS
+### 6. MCP Subsystem (`bili/iris/mcp/`) -- IRIS
 
-`bili/iris/mcp/` lets agents consume tools from any MCP server (stdio subprocess or HTTP/SSE transport). Discovered tools are adapted as LangChain `Tool` objects and registered in `TOOL_REGISTRY`, so they are indistinguishable from built-in tools at the agent layer.
+`bili/iris/mcp/` covers two directions:
 
-Install the optional dependency: `pip install bili-core[mcp]`
+**Direction 1 — MCP Client (agent consumes tools FROM an MCP server)**
+
+Lets agents consume tools from any MCP server (stdio subprocess or HTTP/SSE transport). Discovered tools are adapted as LangChain `Tool` objects and registered in `TOOL_REGISTRY`, so they are indistinguishable from built-in tools at the agent layer.
 
 ```python
 import asyncio
@@ -306,6 +309,52 @@ asyncio.run(run())
 ```
 
 Useful for BYO-CLI integration: start a CLI LLM as an MCP server (e.g. `claude mcp serve`) and let a bili-core agent call its tools over stdio with `auth: inherited`.
+
+**Direction 2 — Ephemeral MCP Server (`tool_strategy="mcp"`, `bili/iris/mcp/server.py`)**
+
+When a `CliLLM` agent node carries `tool_strategy="mcp"`, bili-core exposes its registered LangChain tools as a temporary in-process MCP server for the duration of the CLI call, so the spawned CLI binary can exercise tool-calling via its own native MCP protocol.
+
+```
+bili-core process
+┌─────────────────────────────────────────────────────────┐
+│  IRIS agent node                                         │
+│    tools: [tool_a, tool_b]  ──────────────────────────┐ │
+│                                                        │ │
+│  EphemeralMcpServer (FastMCP + auth middleware)       │ │
+│    ─ SSE transport on 127.0.0.1:<random-port>    ◄────┘ │
+│    ─ per-call Bearer-token auth (256-bit random)        │
+│    ─ uvicorn in background daemon thread                │
+│                                                        │ │
+│  CLI subprocess (claude / codex / gemini)              │ │
+│    ─ spawned with injected MCP config + auth token     │ │
+│    ─ self-orchestrates via MCP tool calls              │ │
+│    ─ returns final answer on stdout                    │ │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Security model:** Every call generates a fresh `secrets.token_urlsafe(32)` token and a unique server name. The token is embedded in the CLI's MCP configuration by a per-CLI injector before the subprocess is spawned. No request can succeed without the correct token (ASGI middleware returns HTTP 401). If no injector is registered for the CLI binary, bili-core falls back to the tool-less path rather than starting an unauthenticated server.
+
+**Per-CLI injection mechanisms:**
+
+| CLI | Token delivery |
+|-----|---------------|
+| `claude` (Claude Code) | Temp JSON written to `--mcp-config <path> --strict-mcp-config`; `Authorization: Bearer <token>` header |
+| `codex` (OpenAI Codex) | `-c mcp_servers.<name>.bearer_token_env_var=...` pointing at a unique per-call env var |
+| `gemini` (Gemini CLI) | Temp `.gemini/settings.json` written in a temp dir; subprocess `cwd` set to that dir |
+
+**Install:** `pip install bili-core[mcp]` (includes both `mcp>=1.0` and `uvicorn>=0.30`)
+
+**Extension point:** Register injectors for additional CLIs at startup:
+
+```python
+from bili.iris.mcp.cli_injectors import register_cli_mcp_injector, McpCliInjector, InjectionResult
+
+class MyCLIInjector(McpCliInjector):
+    def inject(self, command, handle) -> InjectionResult:
+        ...
+
+register_cli_mcp_injector("my-cli", MyCLIInjector())
+```
 
 ### 7. Tools Framework (`bili/iris/tools/`) -- IRIS
 
