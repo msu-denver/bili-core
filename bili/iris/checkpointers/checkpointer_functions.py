@@ -1,41 +1,33 @@
 """
 Module: checkpointer_functions
 
-This module provides functions to manage checkpointing for conversation states
-within a Streamlit application. It includes functions to initialize and manage
-a Postgres connection pool, determine the appropriate checkpointer, and create
-a state configuration for conversation tracking.
+This module provides functions to manage checkpointing for conversation states.
+It determines the appropriate checkpointer backend based on available
+environment variables and returns a ready-to-use checkpointer instance.
 
 Functions:
     - get_checkpointer():
-      Determines and returns the appropriate checkpointer (PostgresSaver,
-      MongoDBSaver, or MemorySaver).
+      Determines and returns the appropriate checkpointer using a
+      priority cascade:
+        1. PostgreSQL (POSTGRES_CONNECTION_STRING)
+        2. MongoDB (MONGO_CONNECTION_STRING)
+        3. JSONL / local-file (JSONL_CHECKPOINT_PATH) — no database server
+        4. In-memory QueryableMemorySaver (fallback)
+
+    - get_async_checkpointer():
+      Async variant of get_checkpointer() for streaming operations.
 
 Dependencies:
-    - streamlit: Provides the Streamlit library for building web applications.
-    - langgraph.checkpoint.memory: Imports MemorySaver for in-memory
-      checkpointing.
-    - langgraph.checkpoint.mongodb: Imports MongoDBSaver for MongoDB-based
-      checkpointing.
-    - langgraph.checkpoint.postgres: Imports PostgresSaver for Postgres-based
-      checkpointing.
-    - bili.streamlit.checkpointer.mongo_checkpointer: Imports functions to get
-      MongoDB client and checkpointer.
-    - bili.streamlit.checkpointer.pg_checkpointer: Imports functions to get
-      Postgres connection pool and checkpointer.
-    - bili.utils.logging_utils: Imports get_logger for logging purposes.
+    - bili.iris.checkpointers.pg_checkpointer: PostgreSQL-backed saver.
+    - bili.iris.checkpointers.mongo_checkpointer: MongoDB-backed saver.
+    - bili.iris.checkpointers.jsonl_checkpointer: Local-file JSONL saver
+      (no server required; triggered by JSONL_CHECKPOINT_PATH env var).
+    - bili.iris.checkpointers.memory_checkpointer: QueryableMemorySaver fallback.
+    - bili.utils.logging_utils: Logging.
 
 Usage:
-    This module is intended to be used within a Streamlit application to manage
-    checkpointing of conversation states. It provides functions to initialize
-    and manage a Postgres connection pool, determine the appropriate
-    checkpointer, and create a state configuration for conversation tracking.
+    from bili.iris.checkpointers.checkpointer_functions import get_checkpointer
 
-Example:
-    from bili.streamlit.checkpointer.checkpointer_functions import \
-        get_checkpointer, get_state_config
-
-    # Get the appropriate checkpointer
     checkpointer = get_checkpointer()
 
 """
@@ -60,52 +52,59 @@ LOGGER = get_logger(__name__)
 def get_checkpointer():
     """
     Determine and return the appropriate checkpointer instance for conversation
-    state checkpointing. The function first attempts to acquire a PostgreSQL
-    checkpointer, then a MongoDB checkpointer, and finally defaults to an in-memory
-    checkpointer if no database persistence options are available. The process
-    is logged for debugging purposes.
+    state checkpointing.
 
-    :returns: An instance of the checkpointer based on availability. The following
-        instances can be returned:
+    Priority cascade:
+        1. PostgreSQL if ``POSTGRES_CONNECTION_STRING`` is set.
+        2. MongoDB if ``MONGO_CONNECTION_STRING`` is set.
+        3. Local-file JSONL if ``JSONL_CHECKPOINT_PATH`` is set — persists to
+           disk without any database server.
+        4. In-memory ``QueryableMemorySaver`` as the zero-config fallback.
 
-        - PostgreSQL checkpointer if available.
-        - MongoDB checkpointer if PostgreSQL is not available.
-        - Memory checkpointer as a fallback if both PostgreSQL and MongoDB are
-          unavailable.
-
+    :returns: A checkpointer instance selected by the cascade above.
     :rtype: Checkpointer
     """
-    # if POSTGRES_CONNECTION_STRING exists, use PostgresSaver
+    # Priority 1: PostgreSQL
     if os.getenv("POSTGRES_CONNECTION_STRING"):
         LOGGER.debug("Using PostgresSaver for conversation state checkpointing.")
         return get_pg_checkpointer()
 
-    # if MONGO_CONNECTION_STRING exists, use MongoDBSaver
+    # Priority 2: MongoDB
     if os.getenv("MONGO_CONNECTION_STRING"):
         LOGGER.debug("Using MongoDBSaver for conversation state checkpointing.")
         return get_mongo_checkpointer()
 
-    # If no database persistence is available, use QueryableMemorySaver as a fallback
+    # Priority 3: Local-file JSONL (no server required)
+    if os.getenv("JSONL_CHECKPOINT_PATH"):
+        from bili.iris.checkpointers.jsonl_checkpointer import (  # pylint: disable=import-outside-toplevel
+            get_jsonl_checkpointer,
+        )
+
+        LOGGER.debug(
+            "Using JSONLCheckpointSaver for conversation state checkpointing "
+            "(path=%s).",
+            os.getenv("JSONL_CHECKPOINT_PATH"),
+        )
+        return get_jsonl_checkpointer()
+
+    # Priority 4: In-memory fallback
     LOGGER.debug("Using QueryableMemorySaver for conversation state checkpointing.")
     return QueryableMemorySaver()
 
 
 async def get_async_checkpointer():
     """
-    Determine and return the appropriate async checkpointer instance for streaming
-    operations. Supports async PostgreSQL, MongoDB, and Memory checkpointers.
+    Determine and return the appropriate async checkpointer instance for
+    streaming operations.
 
-    The priority order matches get_checkpointer():
-    1. PostgreSQL if POSTGRES_CONNECTION_STRING is set
-    2. MongoDB if MONGO_CONNECTION_STRING is set
-    3. MemorySaver as fallback (inherently async-compatible)
+    Priority cascade matches ``get_checkpointer()``:
+        1. PostgreSQL if ``POSTGRES_CONNECTION_STRING`` is set.
+        2. MongoDB if ``MONGO_CONNECTION_STRING`` is set.
+        3. Local-file JSONL if ``JSONL_CHECKPOINT_PATH`` is set.
+        4. In-memory ``QueryableMemorySaver`` as the zero-config fallback.
 
-    :returns: An async checkpointer instance based on availability.
-        - Async PostgreSQL checkpointer if POSTGRES_CONNECTION_STRING is available.
-        - Async MongoDB checkpointer if MONGO_CONNECTION_STRING is available.
-        - MemorySaver as fallback (works in async contexts).
-
-    :rtype: AsyncPostgresSaver | PruningMongoDBSaver | MemorySaver
+    :returns: An async-compatible checkpointer instance.
+    :rtype: AsyncPostgresSaver | PruningMongoDBSaver | JSONLCheckpointSaver | QueryableMemorySaver
     """
     # Priority 1: PostgreSQL async checkpointer
     if os.getenv("POSTGRES_CONNECTION_STRING"):
@@ -117,7 +116,19 @@ async def get_async_checkpointer():
         LOGGER.debug("Using MongoDBSaver for streaming operations.")
         return await get_async_mongo_checkpointer()
 
-    # Priority 3: Memory checkpointer (inherently async-compatible, no await needed)
+    # Priority 3: JSONL local-file (async methods delegate via asyncio.to_thread)
+    if os.getenv("JSONL_CHECKPOINT_PATH"):
+        from bili.iris.checkpointers.jsonl_checkpointer import (  # pylint: disable=import-outside-toplevel
+            get_async_jsonl_checkpointer,
+        )
+
+        LOGGER.debug(
+            "Using JSONLCheckpointSaver for streaming operations (path=%s).",
+            os.getenv("JSONL_CHECKPOINT_PATH"),
+        )
+        return await get_async_jsonl_checkpointer()
+
+    # Priority 4: In-memory fallback (inherently async-compatible)
     LOGGER.debug(
         "Using QueryableMemorySaver for streaming operations (async-compatible fallback)."
     )

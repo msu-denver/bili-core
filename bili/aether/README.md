@@ -822,17 +822,21 @@ The `checkpoint_config` dict in `MASConfig` controls which checkpointer backend 
 | Type | Backend | Notes |
 |------|---------|-------|
 | `memory` (default) | `QueryableMemorySaver` | In-memory, no persistence across restarts |
+| `jsonl` / `file` | `JSONLCheckpointSaver` | Local file — no server required; set `path` key or `JSONL_CHECKPOINT_PATH` env var |
 | `postgres` / `pg` | `PruningPostgresSaver` | Requires `POSTGRES_CONNECTION_STRING` env var |
 | `mongo` / `mongodb` | `PruningMongoDBSaver` | Requires `MONGO_CONNECTION_STRING` env var |
-| `auto` | Auto-detected | Tries postgres, then mongo, then memory (based on env vars) |
+| `auto` | Auto-detected | Tries postgres, then mongo, then jsonl, then memory (based on env vars) |
 
 Additional keys are forwarded to the checkpointer constructor:
 
 ```yaml
 checkpoint_config:
-  type: postgres
-  keep_last_n: 10      # Prune to last 10 checkpoints per thread
+  type: jsonl
+  path: /var/data/run.jsonl  # optional; defaults to JSONL_CHECKPOINT_PATH env var
+  keep_last_n: 10            # prune to last 10 checkpoints per thread
 ```
+
+**Always-on default:** When `checkpoint_enabled: true` (the default), AETHER always attaches a checkpointer — even without a `user_id`. Without a `user_id`, the executor uses `_create_checkpointer_local()` which reads `checkpoint_config` directly. This means a plain `jsonl` config persists run state to disk with no database server and no user identity required.
 
 **Fallback behaviour:** If the requested backend is unavailable (missing dependency or env var), the factory falls back to `MemorySaver` with a warning. The graph always compiles successfully.
 
@@ -844,6 +848,22 @@ from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
 compiled = compile_mas(config)
 graph = compiled.compile_graph(checkpointer=get_pg_checkpointer(keep_last_n=5))
 ```
+
+### Audit View
+
+`audit_view()` builds a human-readable timeline from a MAS run's checkpoint history. It iterates `checkpointer.list()` in chronological order, diffs `agent_outputs` and `communication_log` between consecutive supersteps, and returns one entry per superstep where something changed.
+
+```python
+from bili.iris.checkpointers.jsonl_checkpointer import get_jsonl_checkpointer
+from bili.aether.runtime import audit_view
+
+saver = get_jsonl_checkpointer(path="run.jsonl")
+timeline = audit_view(saver, thread_id="run-001")
+for step in timeline:
+    print(step["ts"], step["agent_id"], step["output_summary"])
+```
+
+Each entry contains: `step` (1-based), `ts` (ISO-8601), `checkpoint_id`, `agent_id`, `output_summary` (first 200 chars), `messages_sent` (new `communication_log` entries this step), and `raw_agent_outputs` (delta). Works with any checkpointer that exposes `list()` — JSONL, Postgres, Mongo, or in-memory.
 
 ### Per-Agent Middleware
 

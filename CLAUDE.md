@@ -71,7 +71,7 @@ BiliCore is structured around three major components:
 
 The core single-agent pipeline for retrieval-augmented generation:
 
-1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
+1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, local-file JSONL, and in-memory storage (4 backends). All checkpointers implement a queryable interface for conversation management with both sync and async APIs. Set `JSONL_CHECKPOINT_PATH` to activate the JSONL backend without a database server.
 
 2. **LLM Configuration** (`bili/iris/config/`): 97 model configurations across 17 provider types (11 remote API: AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq; 3 CLI presets: Claude Code, Codex, Gemini CLI; generic CLI subprocess; local: llama.cpp, HuggingFace). Uses factory pattern for model initialization. Each entry declares `supports_tools` (default `True`); set `False` to route through the prompted ReAct path instead of native `bind_tools`.
 

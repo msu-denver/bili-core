@@ -1,7 +1,7 @@
 """AETHER runtime — agent communication protocol.
 
 Provides structured inter-agent messaging through declared channels,
-with JSONL logging and LangGraph state integration.
+with LangGraph state integration and checkpoint-backed audit views.
 
 Key classes:
     ``Message``              — Pydantic model for a single message.
@@ -13,8 +13,12 @@ Key classes:
     ``BroadcastChannel``     — One-to-many messaging.
     ``RequestResponseChannel`` — Bidirectional request/response.
     ``ChannelManager``       — Top-level orchestrator for all channels.
+
+Key functions:
+    ``audit_view``           — Human-readable timeline from checkpoint history.
 """
 
+from bili.aether.runtime.audit import audit_view
 from bili.aether.runtime.channel_manager import ChannelManager
 from bili.aether.runtime.channels import (
     BroadcastChannel,
@@ -41,6 +45,7 @@ from bili.aether.runtime.streaming import StreamEvent, StreamEventType, StreamFi
 __all__ = [
     "AgentExecutionResult",
     "BroadcastChannel",
+    "audit_view",
     "ChannelManager",
     "CommunicationChannel",
     "CommunicationLogger",

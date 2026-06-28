@@ -17,6 +17,8 @@ _TYPE_ALIASES: dict[str, str] = {
     "mongo": "mongo",
     "mongodb": "mongo",
     "auto": "auto",
+    "jsonl": "jsonl",  # Local-file JSONL saver — no database server required
+    "file": "jsonl",  # Alias for "jsonl"
 }
 
 
@@ -55,6 +57,7 @@ def create_checkpointer_from_config(
         "postgres": _create_postgres_checkpointer,
         "mongo": _create_mongo_checkpointer,
         "auto": _create_auto_checkpointer,
+        "jsonl": _create_jsonl_checkpointer,
     }
     return dispatch[checkpoint_type](config, user_id=user_id)
 
@@ -196,6 +199,48 @@ def _create_auto_checkpointer(
     except ImportError:
         LOGGER.warning(
             "bili.iris.checkpointers.checkpointer_functions not available; "
+            "falling back to memory"
+        )
+    return _create_memory_checkpointer(user_id=user_id)
+
+
+def _create_jsonl_checkpointer(
+    config: dict[str, Any] | None = None, user_id: str | None = None
+) -> Any:
+    """Create a local-file JSONL checkpointer (no database server required).
+
+    Args:
+        config: Dict with optional keys:
+            - ``"path"``: Absolute path to the JSONL file.  Defaults to
+              the ``JSONL_CHECKPOINT_PATH`` env var or
+              ``~/.bili/checkpoints/aether.jsonl``.
+            - ``"keep_last_n"``: Pruning limit (``-1`` = unlimited).
+        user_id: Optional user identifier for thread ownership validation.
+
+    Returns:
+        A ``JSONLCheckpointSaver`` instance.
+    """
+    config = config or {}
+    path = config.get("path")
+    keep_last_n = config.get("keep_last_n", -1)
+    try:
+        from bili.iris.checkpointers.jsonl_checkpointer import (  # pylint: disable=import-outside-toplevel
+            JSONLCheckpointSaver,
+        )
+
+        saver = JSONLCheckpointSaver(
+            path=path, keep_last_n=keep_last_n, user_id=user_id
+        )
+        LOGGER.info(
+            "Created JSONLCheckpointSaver (path=%s, keep_last_n=%d%s)",
+            saver.path,
+            keep_last_n,
+            f", user_id={user_id}" if user_id else "",
+        )
+        return saver
+    except ImportError:  # pragma: no cover  # ImportError only in broken installs
+        LOGGER.warning(
+            "bili.iris.checkpointers.jsonl_checkpointer not available; "
             "falling back to memory"
         )
     return _create_memory_checkpointer(user_id=user_id)
