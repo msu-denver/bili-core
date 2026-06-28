@@ -68,7 +68,7 @@ from bili.aegis.evaluator import Evaluator
 | Feature | Description |
 |---------|-------------|
 | **106 LLM Configurations** | Pre-configured models across 17 provider types — API, CLI, and local (via `bili.iris.config`) |
-| **BYO-LLM / CLI Providers** | Use Claude Code, Codex CLI, or Gemini CLI as first-class LLM providers via subprocess; fallback to prompted ReAct for tool calling when native function-calling is unavailable |
+| **BYO-LLM / CLI Providers** | Use Claude Code, Codex CLI, or Gemini CLI as first-class LLM providers via subprocess. Tool calling routes per model via `tool_strategy`: `native` (bind_tools, API providers), `facilitated` (prompted ReAct loop for text-only/local models), `mcp` (agent tools exposed as an ephemeral MCP server; the CLI self-orchestrates), `none` (plain path, no tools) |
 | **Fallback Engine** | `FallbackLLM` silently retries across a provider chain on transient failures; declared via `AgentSpec.fallback_models` |
 | **MCP Client Subsystem** | `bili/iris/mcp/` lets agents consume tools from any MCP server (stdio or HTTP/SSE), adapted as LangChain tools (install with `pip install bili-core[mcp]`) |
 | **LangGraph Workflows** | Node-based workflow system with customizable execution pipelines (via `bili.iris.loaders`) |
