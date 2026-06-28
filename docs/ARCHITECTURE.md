@@ -29,7 +29,7 @@ bili-core/
 │   │   │   ├── pg_checkpointer.py
 │   │   │   └── memory_checkpointer.py
 │   │   ├── config/                #   Configuration management
-│   │   │   ├── llm_config.py      #     LLM model configurations (97 models, 17 provider types)
+│   │   │   ├── llm_config.py      #     LLM model configurations (106 models, 17 provider types)
 │   │   │   ├── tool_config.py     #     Tool configurations
 │   │   │   └── middleware_config.py
 │   │   ├── graph_builder/         #   LangGraph construction utilities
@@ -208,7 +208,7 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 
 The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
-97 model configurations across 17 provider types registered in `llm_config.py`:
+106 model configurations across 17 provider types registered in `llm_config.py`:
 
 | Provider type | Description |
 |---|---|
