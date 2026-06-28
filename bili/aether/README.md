@@ -817,6 +817,18 @@ agents:
 
 ### Checkpointer Configuration
 
+> **Behavior change (v5.1+):** `checkpoint_enabled: true` (the default) now always attaches a
+> checkpointer — even when no `user_id` is passed to `MASExecutor`. In earlier releases, omitting
+> `user_id` left the graph with no checkpointer, so `thread_id` had no persistence effect. Now,
+> two `run()` calls on the same `MASExecutor` instance passing the **same explicit `thread_id`**
+> will share and accumulate state (`agent_outputs`, `communication_log`). Runs that do **not**
+> supply a `thread_id` still receive an auto-generated `execution_id` per call and are unaffected.
+>
+> **Migration guidance:** If you relied on the previous no-checkpointer behaviour for stateless
+> local runs, either (a) pass a distinct `thread_id` per logically-separate run so executions
+> stay isolated, or (b) set `checkpoint_enabled: false` in your `MASConfig` to opt out
+> entirely. All existing code that already provided a `user_id` is unchanged.
+
 The `checkpoint_config` dict in `MASConfig` controls which checkpointer backend is used when compiling the graph. The factory maps `config["type"]` to a bili-core checkpointer:
 
 | Type | Backend | Notes |
@@ -825,7 +837,7 @@ The `checkpoint_config` dict in `MASConfig` controls which checkpointer backend 
 | `jsonl` / `file` | `JSONLCheckpointSaver` | Local file — no server required; set `path` key or `JSONL_CHECKPOINT_PATH` env var |
 | `postgres` / `pg` | `PruningPostgresSaver` | Requires `POSTGRES_CONNECTION_STRING` env var |
 | `mongo` / `mongodb` | `PruningMongoDBSaver` | Requires `MONGO_CONNECTION_STRING` env var |
-| `auto` | Auto-detected | Tries postgres, then mongo, then jsonl, then memory (based on env vars) |
+| `auto` | Auto-detected | Tries postgres, then mongo, then memory (based on env vars) |
 
 Additional keys are forwarded to the checkpointer constructor:
 
@@ -837,6 +849,8 @@ checkpoint_config:
 ```
 
 **Always-on default:** When `checkpoint_enabled: true` (the default), AETHER always attaches a checkpointer — even without a `user_id`. Without a `user_id`, the executor uses `_create_checkpointer_local()` which reads `checkpoint_config` directly. This means a plain `jsonl` config persists run state to disk with no database server and no user identity required.
+
+**JSONL file growth:** The default `keep_last_n: -1` retains full checkpoint history, which is ideal for a durable audit trail but grows the file and in-memory index as O(supersteps × full_state). For long-lived or high-frequency runs, set `keep_last_n` to a finite value (e.g. `10`) to cap file size and first-load time.
 
 **Fallback behaviour:** If the requested backend is unavailable (missing dependency or env var), the factory falls back to `MemorySaver` with a warning. The graph always compiles successfully.
 

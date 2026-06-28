@@ -482,6 +482,12 @@ class JSONLCheckpointSaver(
 
         Raises:
             PermissionError: If user_id is set and thread_id is foreign.
+
+        Note:
+            There is a narrow partial-write window: the append to the JSONL file
+            succeeds before ``_prune`` rewrites it.  If the process crashes between
+            those two steps, pruned records will reappear on the next
+            ``_load_from_disk`` call, but no data is lost or corrupted.
         """
         self._ensure_loaded()
         thread_id: str = config["configurable"]["thread_id"]

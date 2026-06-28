@@ -154,10 +154,10 @@ def audit_view(
             else:
                 serialized_messages.append({"raw": str(msg)})
 
-        # Extract timestamp from checkpoint metadata or the checkpoint dict itself
-        ts: Optional[str] = None
-        metadata = tup.metadata or {}
-        ts = metadata.get("ts") or checkpoint.get("ts")
+        # Extract timestamp from the checkpoint dict.
+        # LangGraph metadata does not carry a "ts" field; the source of truth
+        # is checkpoint["ts"] set at put() time.
+        ts: Optional[str] = checkpoint.get("ts")
 
         timeline.append(
             {

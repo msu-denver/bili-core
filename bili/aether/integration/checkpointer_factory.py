@@ -163,6 +163,10 @@ def _create_auto_checkpointer(
     Forwards keep_last_n and user_id parameters if specified.
     Mirrors the logic from bili.iris.checkpointers.checkpointer_functions.get_checkpointer
     but passes arguments correctly.
+
+    Note: JSONL is intentionally excluded from auto-detection here.  The 'auto'
+    type targets server-backed stores (Postgres, Mongo); callers that want the
+    local-file backend should declare ``type: jsonl`` explicitly.
     """
     config = config or {}
     keep_last_n = config.get("keep_last_n", 5)
