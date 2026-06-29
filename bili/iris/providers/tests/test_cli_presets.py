@@ -152,9 +152,17 @@ class TestBuiltinPresets:
         """CODEX_PRESET uses plain-text output."""
         assert CODEX_PRESET.output_format == "text"
 
+    def test_claude_code_preset_timeout(self):
+        """CLAUDE_CODE_PRESET uses 600 s to accommodate agentic multi-tool turns."""
+        assert CLAUDE_CODE_PRESET.timeout_seconds == 600.0
+
     def test_codex_preset_timeout(self):
-        """CODEX_PRESET uses a longer default timeout than the base."""
-        assert CODEX_PRESET.timeout_seconds == 180.0
+        """CODEX_PRESET uses 600 s to accommodate agentic multi-tool turns."""
+        assert CODEX_PRESET.timeout_seconds == 600.0
+
+    def test_gemini_cli_preset_timeout(self):
+        """GEMINI_CLI_PRESET uses 600 s to accommodate agentic multi-tool turns."""
+        assert GEMINI_CLI_PRESET.timeout_seconds == 600.0
 
     def test_gemini_cli_preset_command(self):
         """GEMINI_CLI_PRESET uses 'gemini -p' as the command."""

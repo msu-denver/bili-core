@@ -25,6 +25,16 @@ Each preset maps to a :class:`~bili.iris.providers.preset_provider.CliPresetProv
 registered under its type string in
 :data:`~bili.iris.providers.registry.PROVIDER_REGISTRY`.
 
+Timeout defaults
+----------------
+The three built-in agentic-CLI presets all default to ``timeout_seconds=600.0``
+(10 minutes).  A single agentic turn can involve multiple tool calls, extended
+reasoning, and filesystem or network I/O; 120 s (the :class:`~.CliPreset`
+dataclass default for generic custom presets) is too short for that workload in
+practice.  Callers that need a tighter bound can still override per call::
+
+    llm = load_model("cli_claude_code", timeout_seconds=120.0)
+
 Built-in presets
 ----------------
 ``cli_claude_code``
@@ -106,7 +116,11 @@ class CliPreset:
     :param json_path: Extraction path for JSON output.  Default ``"content"``.
     :param strip_ansi: Strip ANSI escape codes from stdout.  Default ``True``.
     :param timeout_seconds: Per-call subprocess timeout in seconds.
-        Default ``120.0``.
+        Default ``120.0`` for generic custom presets.  The three built-in
+        agentic presets (Claude Code, Codex, Gemini CLI) use ``600.0``
+        because a single agentic turn involving multiple tool calls and
+        extended reasoning routinely exceeds 120 s; callers may still
+        override per call via ``load_model(..., timeout_seconds=...)``.
     """
 
     command: List[str] = field(default_factory=list)
@@ -129,6 +143,10 @@ class CliPreset:
 #: subprocess inherits the calling process's environment, so whatever OAuth
 #: session or ``ANTHROPIC_API_KEY`` the CLI holds is reused automatically.
 #:
+#: Timeout is set to 600 s (10 min) because agentic turns involving multiple
+#: tool calls and extended reasoning routinely exceed 120 s.  Callers can
+#: still override per call via ``load_model("cli_claude_code", timeout_seconds=...)``.
+#:
 #: Reference: ``claude --help`` (look for ``-p, --print``).
 CLAUDE_CODE_PRESET = CliPreset(
     command=["claude", "-p"],
@@ -136,7 +154,7 @@ CLAUDE_CODE_PRESET = CliPreset(
     message_format="last",
     output_format="text",
     strip_ansi=True,
-    timeout_seconds=120.0,
+    timeout_seconds=600.0,
 )
 
 #: OpenAI Codex CLI -- ``codex exec <prompt>``
@@ -146,6 +164,10 @@ CLAUDE_CODE_PRESET = CliPreset(
 #: exits.  Requires the Codex CLI to be installed and authenticated via
 #: ``OPENAI_API_KEY`` or its interactive login flow.
 #:
+#: Timeout is set to 600 s (10 min) because agentic turns involving multiple
+#: tool calls and extended reasoning routinely exceed 120 s.  Callers can
+#: still override per call via ``load_model("cli_codex", timeout_seconds=...)``.
+#:
 #: Reference: ``codex --help`` / OpenAI Codex CLI documentation.
 CODEX_PRESET = CliPreset(
     command=["codex", "exec"],
@@ -153,7 +175,7 @@ CODEX_PRESET = CliPreset(
     message_format="last",
     output_format="text",
     strip_ansi=True,
-    timeout_seconds=180.0,
+    timeout_seconds=600.0,
 )
 
 #: Google Gemini CLI -- ``gemini -p <prompt>``
@@ -163,6 +185,10 @@ CODEX_PRESET = CliPreset(
 #: the process exits.  Requires the Gemini CLI to be installed and
 #: authenticated (Google account OAuth or ``GEMINI_API_KEY``).
 #:
+#: Timeout is set to 600 s (10 min) because agentic turns involving multiple
+#: tool calls and extended reasoning routinely exceed 120 s.  Callers can
+#: still override per call via ``load_model("cli_gemini_cli", timeout_seconds=...)``.
+#:
 #: Reference: ``gemini --help`` (look for ``-p, --prompt``).
 GEMINI_CLI_PRESET = CliPreset(
     command=["gemini", "-p"],
@@ -170,7 +196,7 @@ GEMINI_CLI_PRESET = CliPreset(
     message_format="last",
     output_format="text",
     strip_ansi=True,
-    timeout_seconds=120.0,
+    timeout_seconds=600.0,
 )
 
 # ---------------------------------------------------------------------------
