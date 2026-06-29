@@ -21,8 +21,14 @@ mirroring the routing in ``bili/iris/nodes/react_agent_node.py``:
    exposed as an ephemeral, per-call authenticated MCP server
    (:class:`~bili.iris.mcp.server.EphemeralMcpServer`) on a dynamic
    localhost port.  The CLI model connects to this server and calls tools
-   via its own native tool-calling interface.  If no injector is registered
-   for the CLI, the agent falls back to the direct-LLM path.
+   via its own native tool-calling interface.  This path routes through the
+   shared ``_agent_node`` closure so system_prompt injection, comm_context,
+   human-message ordering, timing, and provenance are all inherited.  For
+   CLIs that use ``message_format="last"`` (the default), the executor
+   embeds the per-agent system instruction into the last HumanMessage
+   before the MCP node renders it, because ``render_messages("last")``
+   discards SystemMessage objects.  If no injector is registered for the
+   CLI, the agent falls back to the direct-LLM path.
 
 4. **No-tool model** (``tool_strategy="none"``): the model has no tool
    support; tools are dropped and the model runs tool-less.
@@ -240,34 +246,66 @@ def _generate_tool_agent_node(
 
     elif tool_strategy == "mcp":
         # MCP path: expose tools as an ephemeral authenticated MCP server.
-        # The CLI self-orchestrates (no middleware or LangGraph loop on this
-        # path); bili-core takes the final stdout as the agent's response.
+        # The CLI self-orchestrates; bili-core takes its final stdout as the
+        # agent response.  This branch routes through the shared _agent_node
+        # so every cross-cutting concern (system_prompt injection, comm_context,
+        # human-message ordering, timing, provenance) is inherited in one place.
         from bili.iris.mcp.server import (  # pylint: disable=import-outside-toplevel
             build_mcp_node,
             resolve_mcp_injector,
         )
 
         injector = resolve_mcp_injector(llm)
-        if injector is not None:
-            LOGGER.debug(
-                "Agent '%s': tool_strategy='mcp' -- serving %d tool(s) via "
-                "ephemeral MCP server for CLI '%s'.",
+        if injector is None:
+            LOGGER.warning(
+                "Agent '%s': tool_strategy='mcp' but no injector found for CLI '%s'; "
+                "falling back to direct-LLM node.  Register an injector via "
+                "bili.iris.mcp.cli_injectors.register_cli_mcp_injector() to enable "
+                "MCP tool-calling for this CLI.",
                 agent.agent_id,
-                len(tools),
                 getattr(llm, "command", ["?"])[0],
             )
-            mcp_node = build_mcp_node(llm_model=llm, tools=tools, injector=injector)
-            return _wrap_mcp_node_with_provenance(mcp_node, agent)
+            return _generate_direct_llm_node(agent, llm)
 
-        LOGGER.warning(
-            "Agent '%s': tool_strategy='mcp' but no injector found for CLI '%s'; "
-            "falling back to direct-LLM node.  Register an injector via "
-            "bili.iris.mcp.cli_injectors.register_cli_mcp_injector() to enable "
-            "MCP tool-calling for this CLI.",
+        LOGGER.debug(
+            "Agent '%s': tool_strategy='mcp' -- serving %d tool(s) via "
+            "ephemeral MCP server for CLI '%s'.",
             agent.agent_id,
+            len(tools),
             getattr(llm, "command", ["?"])[0],
         )
-        return _generate_direct_llm_node(agent, llm)
+        mcp_raw_node = build_mcp_node(llm_model=llm, tools=tools, injector=injector)
+        # Capture the CLI's message_format at construction time so the
+        # executor can handle it without referencing the outer llm object.
+        cli_message_format: str = str(getattr(llm, "message_format", "last"))
+        executor_mode = "tool-agent (mcp)"
+
+        def _invoke_executor(messages: list) -> list:
+            # _agent_node injects the per-agent system_prompt as a
+            # SystemMessage.  For "last"-format CLIs, render_messages()
+            # ignores SystemMessage and returns only the last HumanMessage
+            # content.  Embed the system instruction into the last
+            # HumanMessage before passing to the MCP node so the CLI
+            # receives its per-role instructions.
+            if cli_message_format == "last":
+                from langchain_core.messages import (
+                    HumanMessage as _HM,  # pylint: disable=import-error,import-outside-toplevel
+                )
+                from langchain_core.messages import SystemMessage as _SM
+
+                sys_parts = [m.content for m in messages if isinstance(m, _SM)]
+                if sys_parts:
+                    sys_instruction = str(sys_parts[0])
+                    stripped = [m for m in messages if not isinstance(m, _SM)]
+                    for i in range(len(stripped) - 1, -1, -1):
+                        if isinstance(stripped[i], _HM):
+                            orig = str(stripped[i].content)
+                            stripped[i] = _HM(content=f"{sys_instruction}\n\n{orig}")
+                            break
+                    messages = stripped
+
+            result = mcp_raw_node({"messages": messages})
+            return result.get("messages", [])
 
     else:
         # "none": model has no tool support (e.g. reasoning models that reject
@@ -375,22 +413,27 @@ def _wrap_mcp_node_with_provenance(
 ) -> Callable[[dict], dict]:
     """Wrap an IRIS MCP node so it synthesises AETHER per-agent provenance.
 
-    The MCP node returned by :func:`~bili.iris.mcp.server.build_mcp_node` is
-    intentionally generic: it serves an agent's tools to a self-orchestrating
-    CLI and returns only ``{"messages": [AIMessage(content=...)]}`` — it has no
-    knowledge of the AETHER ``agent_id`` or the MAS provenance protocol.
-    Returning it raw leaves the outer MAS state without provenance (unnamed
-    message, empty ``current_agent`` / ``agent_outputs`` /
-    ``communication_log``), so audit views over checkpointed state cannot
-    attribute supersteps to agents.
+    .. note::
+        The main ``tool_strategy="mcp"`` code path in
+        :func:`_generate_tool_agent_node` now routes through the shared
+        ``_agent_node`` closure, which handles provenance (and system_prompt
+        injection, comm_context, human-message ordering) in one place.  This
+        function is retained as a standalone utility for direct use or testing.
 
-    This wrapper restores the same provenance synthesis that plain agent nodes
-    emit (see :func:`_generate_tool_agent_node`'s ``_agent_node`` closure) and
-    that pipeline agents emit in
-    :func:`~bili.aether.compiler.graph_builder.GraphBuilder._wrap_pipeline_as_agent_node`:
-    it takes the inner node's last non-empty message content and returns an
-    ``AIMessage`` tagged ``name=agent_id`` plus ``current_agent``,
+    The MCP node returned by :func:`~bili.iris.mcp.server.build_mcp_node` is
+    intentionally generic: it returns only
+    ``{"messages": [AIMessage(content=...)]}`` with no ``name``, no
+    ``current_agent``, no ``agent_outputs``, and no ``communication_log``.
+    This wrapper synthesises the full AETHER provenance payload from the agent
+    closure, matching what the shared ``_agent_node`` and
+    :func:`~bili.aether.compiler.graph_builder.GraphBuilder._wrap_pipeline_as_agent_node`
+    emit: an ``AIMessage`` tagged ``name=agent_id``, ``current_agent``,
     ``agent_outputs[agent_id]``, and a ``communication_log`` broadcast entry.
+
+    .. warning::
+        This wrapper does **not** inject the agent's ``system_prompt`` or
+        comm_context into the prompt the CLI receives.  The shared ``_agent_node``
+        path is preferred because it applies all cross-cutting per-turn setup.
     """
     from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
         AIMessage,
