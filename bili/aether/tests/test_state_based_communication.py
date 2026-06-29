@@ -323,7 +323,7 @@ class TestCommunicationWithoutChannels:
     """Tests for default communication behavior without explicit channels."""
 
     def test_agents_broadcast_output_without_channels(self):
-        """Test that agents broadcast their output even without channel definitions."""
+        """Test that agents broadcast provenance to communication_log without explicit channels."""
         config = _make_test_config(WorkflowType.SEQUENTIAL, with_channels=False)
         compiled = compile_mas(config)
         graph = compiled.compile_graph()
@@ -333,9 +333,16 @@ class TestCommunicationWithoutChannels:
             config={"configurable": {"thread_id": "test_no_channels"}},
         )
 
-        # Even without explicit channels, agents should NOT have communication fields
-        # because state generator only adds them when config.channels is present
-        assert "communication_log" not in result
+        # communication_log is always present so per-agent provenance is durably
+        # recorded regardless of whether explicit channels are configured.
+        assert "communication_log" in result
+        comm_log = result["communication_log"]
+        assert isinstance(comm_log, list)
+        # All 3 agents broadcast their output on __agent_output__
+        assert len(comm_log) == 3
+        senders = {e["sender"] for e in comm_log}
+        assert senders == {"agent_a", "agent_b", "agent_c"}
+        # Routing auxiliaries are absent when no explicit channels are declared
         assert "channel_messages" not in result
         assert "pending_messages" not in result
 

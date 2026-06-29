@@ -697,31 +697,40 @@ def _get_communication_context(state: dict, agent_id: str) -> str:
 def _build_communication_update(
     state: dict, agent_id: str, content: str
 ) -> Dict[str, Any]:
-    """Record agent output in communication state if communication is active.
+    """Record agent output in the communication log for provenance.
 
-    Uses state-based communication API (send_message_in_state) to properly
-    create messages with full Message structure, timestamps, and IDs.
+    ``communication_log`` is always present in the state schema so this
+    function always records the agent's output as a broadcast event on the
+    ``__agent_output__`` channel.  This produces one entry per agent per
+    superstep, giving a durable per-agent provenance trail regardless of
+    whether the MAS declares explicit inter-agent channels.
 
-    Returns a dict of state fields to merge (empty if communication is
-    not configured). The state schema uses ``operator.add`` / ``_merge_dicts``
-    reducers to combine updates from concurrent agent execution.
+    The returned dict is merged into the LangGraph state update by the
+    caller.  It contains:
+
+    - ``communication_log``: a single-element list with the new entry
+      (the ``operator.add`` reducer appends it to the accumulated log).
+    - ``channel_messages`` / ``pending_messages``: routing auxiliaries;
+      present in the update but ignored by LangGraph when those channels
+      are not in the state schema (MAS without explicit channels).
+
+    Args:
+        state: Current LangGraph state dict.
+        agent_id: ID of the agent that just completed.
+        content: Agent output content to record.
+
+    Returns:
+        State-update dict to merge into the node's return value.
     """
-    if "communication_log" not in state:
-        return {}
-
-    # Use state-based communication API for proper message structure
     # pylint: disable=import-outside-toplevel
     from bili.aether.runtime.communication_state import send_message_in_state
     from bili.aether.runtime.messages import MessageType
 
-    # Send agent output as broadcast message on __agent_output__ channel
-    state_update = send_message_in_state(
+    return send_message_in_state(
         state=state,
         channel_id="__agent_output__",
         sender=agent_id,
         content=content,
-        receiver="__all__",  # Broadcast to all agents
+        receiver="__all__",
         message_type=MessageType.BROADCAST,
     )
-
-    return state_update
