@@ -390,7 +390,9 @@ class TestAuditView:
         """Timeline is chronological (oldest first)."""
         saver = JSONLCheckpointSaver(path=str(tmp_path / "audit.jsonl"))
         for i in range(4):
-            ck = _mk_checkpoint(f"cp-{i}")
+            # Use distinct agent IDs so each checkpoint has new agent activity
+            # and is not filtered by the no-activity guard in audit_view.
+            ck = _mk_checkpoint(f"cp-{i}", agent_id=f"agent_{i}")
             saver.put(_mk_config("run-1"), ck, _mk_metadata(), {})
         timeline = audit_view(saver, thread_id="run-1")
         steps = [e["step"] for e in timeline]
@@ -400,9 +402,11 @@ class TestAuditView:
     def test_checkpoint_id_in_timeline_entry(self, tmp_path):
         """Each timeline entry includes checkpoint_id."""
         saver = JSONLCheckpointSaver(path=str(tmp_path / "audit.jsonl"))
+        # Include agent activity so the entry is not filtered by the
+        # no-activity guard in audit_view.
         saver.put(
             _mk_config("run-1"),
-            _mk_checkpoint("cp-sentinel"),
+            _mk_checkpoint("cp-sentinel", agent_id="agent_sentinel"),
             _mk_metadata(),
             {},
         )
@@ -431,7 +435,9 @@ class TestAuditView:
     def test_ts_extracted_from_checkpoint(self, tmp_path):
         """ts is extracted from the checkpoint dict when not in metadata."""
         saver = JSONLCheckpointSaver(path=str(tmp_path / "audit.jsonl"))
-        ck = _mk_checkpoint("cp-1")
+        # Include agent activity so the entry is not filtered by the
+        # no-activity guard in audit_view.
+        ck = _mk_checkpoint("cp-1", agent_id="agent_ts")
         ck["ts"] = "2024-06-01T12:00:00+00:00"
         saver.put(
             _mk_config("run-1"), ck, {"source": "test", "step": 0, "writes": {}}, {}

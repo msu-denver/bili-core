@@ -1114,11 +1114,16 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         if wtype == WorkflowType.CUSTOM and self._config.human_in_loop:
             state["needs_human_review"] = False
 
-        # Communication fields (only when channels are configured)
+        # communication_log is always initialised so per-agent provenance is
+        # captured for every run, regardless of whether explicit channels are
+        # configured.
+        state["communication_log"] = []
+
+        # channel_messages and pending_messages are only needed for MAS
+        # configurations that declare explicit inter-agent channels.
         if self._config.channels:
             state["channel_messages"] = {}
             state["pending_messages"] = {}
-            state["communication_log"] = []
 
         # Merge user-provided data (overrides defaults)
         if input_data:

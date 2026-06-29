@@ -78,11 +78,17 @@ def generate_state_schema(config: MASConfig) -> Type:
     if wtype == WorkflowType.CUSTOM and config.human_in_loop:
         annotations["needs_human_review"] = bool
 
-    # Communication fields (present when channels are configured)
+    # communication_log is always present so every agent handoff is durably
+    # recorded for provenance, regardless of whether explicit channels are
+    # configured.  Each agent node appends one entry (the delta); the
+    # operator.add reducer accumulates them chronologically across supersteps.
+    annotations["communication_log"] = Annotated[list, operator.add]
+
+    # channel_messages and pending_messages are routing auxiliaries that are
+    # only meaningful when the MAS declares explicit inter-agent channels.
     if config.channels:
         annotations["channel_messages"] = Annotated[Dict[str, list], _merge_dicts]
         annotations["pending_messages"] = Annotated[Dict[str, list], _merge_dicts]
-        annotations["communication_log"] = Annotated[list, operator.add]
 
     # Inheritance state fields (when agents use bili-core inheritance)
     try:

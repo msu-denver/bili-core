@@ -6,11 +6,24 @@ direct reference to the ``ChannelManager``.
 
 State fields used:
     ``channel_messages``  — ``Dict[str, list]``  channel_id -> list of message dicts
-                            (uses _merge_dicts reducer for parallel execution safety)
+                            (uses _merge_dicts reducer for parallel execution safety;
+                            present only when the MAS declares explicit channels)
     ``pending_messages``  — ``Dict[str, list]``  agent_id -> list of message dicts
-                            (uses _merge_dicts reducer for parallel execution safety)
+                            (uses _merge_dicts reducer for parallel execution safety;
+                            present only when the MAS declares explicit channels)
     ``communication_log`` — ``list``             flat list of all message dicts
-                            (uses operator.add reducer, preserves order by completion)
+                            (uses operator.add reducer, preserves order by completion;
+                            ALWAYS present — even without explicit channels — so
+                            per-agent provenance is durably checkpointed for every run)
+
+Reducer contract for ``communication_log``
+------------------------------------------
+The state schema uses ``operator.add`` as the reducer, which *concatenates*
+lists.  This means the state update returned by :func:`send_message_in_state`
+must contain ONLY the *new* message(s) as a single-element list — NOT the
+full accumulated log read from state.  If the full log were returned, the
+reducer would compute ``existing_log + (existing_log + new_msg)``, doubling
+every previous entry on each superstep.
 """
 
 import logging
@@ -30,10 +43,17 @@ def send_message_in_state(
     message_type: MessageType = MessageType.DIRECT,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> dict:
-    """Create a message and return updated communication state fields.
+    """Create a message and return the state-update delta for communication fields.
 
     This is a *pure* helper — it does not mutate *state* in place.
     The caller merges the returned dict into the LangGraph state update.
+
+    ``communication_log`` in the returned dict contains ONLY the new message
+    as a single-element list.  The ``operator.add`` reducer in the state
+    schema concatenates this list onto the accumulated log, producing the
+    correct append-only history.  Do NOT pre-populate it with the existing
+    log from *state* — that would cause the reducer to double-count every
+    prior entry on each subsequent superstep.
 
     Args:
         state: Current LangGraph state dict.
@@ -46,7 +66,7 @@ def send_message_in_state(
 
     Returns:
         Dict with updated ``channel_messages``, ``pending_messages``,
-        and ``communication_log`` fields.
+        and ``communication_log`` (delta-only single-element list).
     """
     msg = Message(
         sender=sender,
@@ -60,13 +80,13 @@ def send_message_in_state(
 
     channel_messages = _update_channel_messages(state, channel_id, msg_dict)
     pending = _update_pending_messages(state, sender, receiver, msg_dict)
-    comm_log = list(state.get("communication_log") or [])
-    comm_log.append(msg_dict)
 
+    # Return only the new message as the communication_log delta.
+    # The operator.add reducer appends this list to the accumulated log.
     return {
         "channel_messages": channel_messages,
         "pending_messages": pending,
-        "communication_log": comm_log,
+        "communication_log": [msg_dict],
     }
 
 

@@ -23,6 +23,14 @@ Example::
     timeline = audit_view(saver, thread_id="run-001")
     for step in timeline:
         print(step["ts"], step["agent_id"], step["output_summary"])
+
+Timeline entries
+----------------
+Only supersteps where at least one agent acted (i.e. ``agent_outputs``
+changed or a ``communication_log`` entry was appended) are included in
+the returned list.  The initial LangGraph checkpoint (written before any
+node runs) and the empty state-initialisation superstep are skipped so
+the timeline starts cleanly with the first agent turn.
 """
 
 from __future__ import annotations
@@ -122,10 +130,22 @@ def audit_view(
         # Diff communication_log: find entries appended this step
         new_messages: List[Any] = current_comm_log[len(prev_comm_log) :]
 
-        # Identify the acting agent (the one that changed outputs this step)
-        acting_agent: Optional[str] = channel_values.get("current_agent")
-        if acting_agent is None and changed_outputs:
+        # Identify the acting agent (the one that changed outputs this step).
+        # ``current_agent`` is set by every agent node; fall back to the first
+        # key in changed_outputs when the channel is absent (e.g. pre-fix
+        # checkpoints).
+        acting_agent: Optional[str] = channel_values.get("current_agent") or None
+        if not acting_agent and changed_outputs:
             acting_agent = next(iter(changed_outputs))
+
+        # Skip supersteps where no agent activity occurred.  These are the
+        # LangGraph-internal initial/state-seed checkpoints written before the
+        # first agent node runs (current_agent is None or '', no new
+        # agent_outputs, no new communication_log entries).
+        if not acting_agent and not changed_outputs and not new_messages:
+            prev_agent_outputs = dict(current_agent_outputs)
+            prev_comm_log = list(current_comm_log)
+            continue
 
         # Summarise the acting agent's output
         output_summary: Optional[str] = None
