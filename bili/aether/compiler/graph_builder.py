@@ -691,15 +691,36 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
 
         Creates a function that:
 
-        1. Maps outer MAS state → inner pipeline state (messages only)
-        2. Invokes the compiled sub-graph
-        3. Maps inner result → outer state update (explicit output mapping:
-           only ``messages`` and ``agent_outputs`` flow back)
-        4. Handles errors with attribution (``agent_id: pipeline error``)
+        1. Maps outer MAS state → inner pipeline state (messages + custom fields).
+        2. Invokes the compiled sub-graph.
+        3. Synthesises the full outer-state update at the outer-graph boundary:
 
-        This explicit output mapping prevents the "blind merge" danger
-        that Monica identified — inner pipeline state does NOT overwrite
-        arbitrary outer MAS state fields.
+           - ``messages``: a single ``AIMessage`` tagged ``name=agent_id``,
+             using the last non-empty content from the inner pipeline.  The
+             inner pipeline may emit unnamed messages (e.g. IRIS react nodes
+             that have no knowledge of AETHER provenance) — this synthesis
+             ensures the outer state always carries a named message for this
+             agent regardless.
+
+           - ``current_agent``: set to ``agent_id`` from the closure.
+
+           - ``agent_outputs[agent_id]``: built from the outer state plus a
+             new entry describing the completed pipeline.
+
+           - ``communication_log``: a single broadcast entry via
+             :func:`_build_pipeline_provenance`, matching what plain agent
+             nodes emit.
+
+           - Custom ``state_fields`` declared in the pipeline spec are
+             propagated from the inner result to the outer state.
+
+        4. Handles errors with the same provenance attribution.
+
+        The inner pipeline's own ``current_agent``, ``agent_outputs``, and
+        ``messages`` values are NOT blindly merged into the outer MAS state —
+        only the synthesized summary above reaches the outer graph.  This
+        prevents inner-pipeline internals (intermediate agent IDs, tool-call
+        messages, etc.) from corrupting the MAS-level provenance record.
         """
         from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
             AIMessage,
