@@ -256,7 +256,8 @@ def _generate_tool_agent_node(
                 len(tools),
                 getattr(llm, "command", ["?"])[0],
             )
-            return build_mcp_node(llm_model=llm, tools=tools, injector=injector)
+            mcp_node = build_mcp_node(llm_model=llm, tools=tools, injector=injector)
+            return _wrap_mcp_node_with_provenance(mcp_node, agent)
 
         LOGGER.warning(
             "Agent '%s': tool_strategy='mcp' but no injector found for CLI '%s'; "
@@ -365,6 +366,67 @@ def _generate_tool_agent_node(
     _agent_node.agent_spec = agent  # type: ignore[attr-defined]
     _agent_node.__name__ = f"agent_{agent.agent_id}"
     _agent_node.__qualname__ = f"agent_{agent.agent_id}"
+
+    return _agent_node
+
+
+def _wrap_mcp_node_with_provenance(
+    inner_node: Callable[[dict], dict], agent: AgentSpec
+) -> Callable[[dict], dict]:
+    """Wrap an IRIS MCP node so it synthesises AETHER per-agent provenance.
+
+    The MCP node returned by :func:`~bili.iris.mcp.server.build_mcp_node` is
+    intentionally generic: it serves an agent's tools to a self-orchestrating
+    CLI and returns only ``{"messages": [AIMessage(content=...)]}`` — it has no
+    knowledge of the AETHER ``agent_id`` or the MAS provenance protocol.
+    Returning it raw leaves the outer MAS state without provenance (unnamed
+    message, empty ``current_agent`` / ``agent_outputs`` /
+    ``communication_log``), so audit views over checkpointed state cannot
+    attribute supersteps to agents.
+
+    This wrapper restores the same provenance synthesis that plain agent nodes
+    emit (see :func:`_generate_tool_agent_node`'s ``_agent_node`` closure) and
+    that pipeline agents emit in
+    :func:`~bili.aether.compiler.graph_builder.GraphBuilder._wrap_pipeline_as_agent_node`:
+    it takes the inner node's last non-empty message content and returns an
+    ``AIMessage`` tagged ``name=agent_id`` plus ``current_agent``,
+    ``agent_outputs[agent_id]``, and a ``communication_log`` broadcast entry.
+    """
+    from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
+        AIMessage,
+    )
+
+    agent_id = agent.agent_id
+
+    def _agent_node(state: dict) -> dict:
+        result = inner_node(state)
+        inner_messages = result.get("messages", []) if isinstance(result, dict) else []
+
+        content = ""
+        for msg in reversed(inner_messages):
+            if getattr(msg, "content", None):
+                content = _normalise_content_value(msg.content)
+                break
+
+        output = _build_output(agent, content)
+        agent_outputs = dict(state.get("agent_outputs") or {})
+        agent_outputs[agent_id] = output
+
+        state_update: Dict[str, Any] = {
+            "messages": [AIMessage(content=content, name=agent_id)],
+            "current_agent": agent_id,
+            "agent_outputs": agent_outputs,
+        }
+
+        if agent.is_supervisor:
+            state_update["next_agent"] = _extract_next_agent(content, agent)
+
+        state_update.update(_build_communication_update(state, agent_id, content))
+        return state_update
+
+    _agent_node.agent_spec = agent  # type: ignore[attr-defined]
+    _agent_node.__name__ = f"agent_{agent_id}"
+    _agent_node.__qualname__ = f"agent_{agent_id}"
 
     return _agent_node
 
