@@ -196,9 +196,15 @@ def create_llm(agent: AgentSpec) -> Any:
 
     provider, model_id, extra_kwargs = _resolve_model_full(agent.model_name)
 
-    # Build kwargs for load_model — extra_kwargs first so the resolved
-    # model_id always wins if extra_kwargs ever contains a "model_name" key.
-    kwargs: Dict[str, Any] = {**extra_kwargs, "model_name": model_id}
+    # Build kwargs for load_model.
+    # Precedence (highest wins): named AgentSpec fields > model_kwargs > catalog
+    # extra_kwargs.  Named fields are set last so they cannot be accidentally
+    # overridden by model_kwargs or catalog defaults.
+    kwargs: Dict[str, Any] = {
+        **extra_kwargs,
+        **agent.model_kwargs,
+        "model_name": model_id,
+    }
     if agent.temperature is not None:
         kwargs["temperature"] = agent.temperature
     if agent.max_tokens is not None:
@@ -228,7 +234,13 @@ def create_llm(agent: AgentSpec) -> Any:
     fallback_chain: List[Tuple[str, Dict[str, Any]]] = []
     for fb_model_name in agent.fallback_models:
         fb_provider, fb_model_id, fb_extra = _resolve_model_full(fb_model_name)
-        fb_kwargs: Dict[str, Any] = {**fb_extra, "model_name": fb_model_id}
+        # Apply model_kwargs to fallbacks with the same precedence as the
+        # primary: named fields win, model_kwargs overrides catalog defaults.
+        fb_kwargs: Dict[str, Any] = {
+            **fb_extra,
+            **agent.model_kwargs,
+            "model_name": fb_model_id,
+        }
         if agent.temperature is not None:
             fb_kwargs["temperature"] = agent.temperature
         if agent.max_tokens is not None:

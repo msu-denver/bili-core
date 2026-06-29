@@ -113,10 +113,26 @@ class AgentSpec(BaseModel):
             "model fails with a transient error (rate limit, provider "
             "unavailable, API timeout).  Each entry is resolved exactly like "
             "``model_name`` — display name or model_id, looked up in "
-            "``LLM_MODELS`` then by heuristic.  The same ``temperature`` and "
-            "``max_tokens`` values from this AgentSpec are applied to each "
-            "fallback.  Leave empty (the default) to disable fallback "
-            "behaviour entirely."
+            "``LLM_MODELS`` then by heuristic.  The same ``temperature``, "
+            "``max_tokens``, and ``model_kwargs`` values from this AgentSpec "
+            "are applied to each fallback.  Leave empty (the default) to "
+            "disable fallback behaviour entirely."
+        ),
+    )
+
+    model_kwargs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Extra keyword arguments forwarded verbatim to ``load_model()`` "
+            "for the resolved provider.  Use this to set provider-specific "
+            "parameters that have no dedicated ``AgentSpec`` field.  For CLI "
+            "providers, ``timeout_seconds`` is the primary use case::\n\n"
+            "    model_kwargs:\n"
+            "      timeout_seconds: 600\n\n"
+            "Named fields (``temperature``, ``max_tokens``) take precedence "
+            "over the same keys in ``model_kwargs`` when both are set.  "
+            "``model_kwargs`` is also applied to every fallback model in "
+            "``fallback_models``."
         ),
     )
 

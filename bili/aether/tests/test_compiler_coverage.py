@@ -267,6 +267,95 @@ class TestCreateLlm:
         assert kwargs["api_version"] == "2024-02-01"
         assert kwargs["model_name"] == "azure-gpt-4o"
 
+    def test_create_llm_model_kwargs_forwarded(self):
+        """model_kwargs are passed through to load_model verbatim."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "cli",
+            model_name="gpt-4o",
+            model_kwargs={"timeout_seconds": 600.0},
+        )
+
+        fake_load_model = MagicMock(return_value="LLM_INST")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert kwargs["timeout_seconds"] == 600.0
+
+    def test_create_llm_named_fields_win_over_model_kwargs(self):
+        """temperature/max_tokens in AgentSpec override the same keys in model_kwargs."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "prio",
+            model_name="gpt-4o",
+            temperature=0.7,
+            model_kwargs={"temperature": 0.1, "timeout_seconds": 300.0},
+        )
+
+        fake_load_model = MagicMock(return_value="LLM_INST")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        # Named field wins.
+        assert kwargs["temperature"] == 0.7
+        # Unrelated model_kwargs key still forwarded.
+        assert kwargs["timeout_seconds"] == 300.0
+
+    def test_create_llm_model_kwargs_forwarded_to_fallbacks(self):
+        """model_kwargs are applied to each fallback model's load_model call."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "fb",
+            model_name="gpt-4o",
+            fallback_models=["gpt-4o"],
+            model_kwargs={"timeout_seconds": 600.0},
+        )
+
+        fake_load_model = MagicMock(return_value="PRIMARY")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        # build_fallback_llm needs to be importable but can be a no-op mock.
+        fake_fallback = MagicMock(return_value="FALLBACK_LLM")
+        fake_fallback_mod = types.ModuleType("bili.iris.providers.fallback")
+        fake_fallback_mod.build_fallback_llm = fake_fallback
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(
+                sys.modules,
+                {
+                    "bili.iris.loaders.llm_loader": fake_loader,
+                    "bili.iris.providers.fallback": fake_fallback_mod,
+                },
+            ):
+                llm_resolver.create_llm(agent)
+
+        # build_fallback_llm is called with the primary LLM and the chain.
+        fb_call_kwargs = fake_fallback.call_args[1]
+        fallback_chain = fb_call_kwargs["fallback_chain"]
+        assert len(fallback_chain) == 1
+        _fb_provider, fb_kwargs = fallback_chain[0]
+        assert fb_kwargs.get("timeout_seconds") == 600.0
+
 
 class TestResolveProvider:
     """Tests for resolve_provider() and the LLM_MODELS ImportError path."""
