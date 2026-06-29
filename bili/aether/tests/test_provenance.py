@@ -10,8 +10,7 @@ post-run observability:
 3. ``communication_log`` — one broadcast entry per agent handoff, present
    even when no explicit inter-agent channels are declared.
 
-Root-cause regression tests are also included to pin the two bugs that
-were fixed:
+Root-cause regression tests are also included to pin the bugs that were fixed:
 
 - Bug A: ``communication_log`` was absent from the state schema (and hence
   never checkpointed) for sequential workflows that declared no explicit
@@ -23,6 +22,14 @@ were fixed:
   produced 7 entries (1+3+7 pattern) instead of 3.  Fix: return only the
   delta (single-element list) for ``communication_log``.
 
+- Bug C: pipeline agents (``AgentSpec.pipeline`` set) compiled as inner
+  sub-graphs did not emit a ``communication_log`` entry to the OUTER MAS
+  state.  The inner sub-graph schema intentionally omits ``communication_log``
+  (it is an outer MAS routing auxiliary), and the inner→outer output mapping
+  in ``_wrap_pipeline_as_agent_node`` never called ``_build_communication_update``.
+  Fix: call ``_build_pipeline_provenance`` at the outer-graph boundary after
+  the sub-graph returns, just as plain agent nodes do.
+
 All tests use stub agents (``model_name`` not set) and a MemorySaver
 checkpointer so no LLM API calls or database servers are needed.
 """
@@ -33,6 +40,7 @@ import operator
 
 from langchain_core.messages import HumanMessage
 
+from bili.aether.compiler import compile_mas
 from bili.aether.runtime.audit import audit_view
 from bili.aether.runtime.executor import MASExecutor
 from bili.aether.schema import (
@@ -41,6 +49,11 @@ from bili.aether.schema import (
     CommunicationProtocol,
     MASConfig,
     WorkflowType,
+)
+from bili.aether.schema.pipeline_spec import (
+    PipelineEdgeSpec,
+    PipelineNodeSpec,
+    PipelineSpec,
 )
 
 # ---------------------------------------------------------------------------
@@ -515,3 +528,214 @@ class TestExecutionResultProvenanceStats:
         assert result.success
         # With or without channels, each agent emits exactly one broadcast.
         assert result.total_messages == 3
+
+
+# ---------------------------------------------------------------------------
+# Pipeline-agent provenance via the compile_mas / GraphBuilder path
+# ---------------------------------------------------------------------------
+
+
+def _pipeline_spec() -> PipelineSpec:
+    """A minimal two-node stub pipeline: step_a → step_b → END."""
+    return PipelineSpec(
+        nodes=[
+            PipelineNodeSpec(
+                node_id="step_a",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_a",
+                    "role": "analyzer",
+                    "objective": "First pipeline step for analysis work",
+                },
+            ),
+            PipelineNodeSpec(
+                node_id="step_b",
+                node_type="agent",
+                agent_spec={
+                    "agent_id": "inner_b",
+                    "role": "formatter",
+                    "objective": "Format pipeline output for delivery",
+                },
+            ),
+        ],
+        edges=[
+            PipelineEdgeSpec(from_node="step_a", to_node="step_b"),
+            PipelineEdgeSpec(from_node="step_b", to_node="END"),
+        ],
+    )
+
+
+def _pipeline_config(mas_id: str = "pip_prov") -> MASConfig:
+    """Sequential MAS with one plain agent and one pipeline agent."""
+    return MASConfig(
+        mas_id=mas_id,
+        name="Pipeline Provenance Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[
+            AgentSpec(
+                agent_id="plain_agent",
+                role="worker",
+                objective="Run a plain agent task without a pipeline",
+            ),
+            AgentSpec(
+                agent_id="pipe_agent",
+                role="worker",
+                objective="Run a pipeline agent task via inner sub-graph",
+                pipeline=_pipeline_spec(),
+            ),
+        ],
+        checkpoint_enabled=True,
+        checkpoint_config={"type": "memory"},
+    )
+
+
+class TestPipelineAgentProvenance:
+    """Per-agent provenance reaches the OUTER checkpointed state for pipeline agents.
+
+    Regression for Bug C: ``_wrap_pipeline_as_agent_node`` compiled each agent as
+    an inner sub-graph but never called ``_build_communication_update`` for the
+    outer MAS state, so pipeline agents produced no ``communication_log`` entry
+    in the OUTER (checkpointed) state even though plain agents did.
+
+    These tests compile through the full ``compile_mas`` → ``GraphBuilder`` →
+    ``_compile_pipeline_node`` → ``_wrap_pipeline_as_agent_node`` path to
+    catch the exact boundary that the fix addresses.
+    """
+
+    def _run_pipeline_mas(self, thread_id: str = "pip-001"):
+        """Run the mixed plain+pipeline MAS and return (checkpointer, result)."""
+        from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+            MemorySaver,
+        )
+
+        config = _pipeline_config()
+        compiled = compile_mas(config)
+        checkpointer = MemorySaver()
+        graph = compiled.compile_graph(checkpointer=checkpointer)
+
+        result = graph.invoke(
+            {"messages": [HumanMessage(content="start")]},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+        return checkpointer, result
+
+    def _outer_checkpoints(self, checkpointer, thread_id: str):
+        """Return outer checkpoint channel_values dicts in chronological order."""
+        cfg = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        tuples = list(checkpointer.list(cfg))
+        return [t.checkpoint["channel_values"] for t in reversed(tuples)]
+
+    # ------------------------------------------------------------------
+    # current_agent
+    # ------------------------------------------------------------------
+
+    def test_pipeline_agent_sets_current_agent_in_outer_checkpoint(self):
+        """current_agent is set correctly in the outer checkpoint for a pipeline agent.
+
+        This test exercises the compile_mas → GraphBuilder → _compile_pipeline_node
+        path and asserts that provenance fields reach the OUTER (checkpointed) state,
+        not just the inner sub-graph's transient state.
+        """
+        checkpointer, result = self._run_pipeline_mas()
+        assert result.get("current_agent") == "pipe_agent"
+
+        cvs = self._outer_checkpoints(checkpointer, "pip-001")
+        agent_steps = [cv.get("current_agent") for cv in cvs if cv.get("current_agent")]
+        assert "plain_agent" in agent_steps
+        assert "pipe_agent" in agent_steps
+
+    # ------------------------------------------------------------------
+    # agent_outputs
+    # ------------------------------------------------------------------
+
+    def test_pipeline_agent_populates_agent_outputs_in_outer_checkpoint(self):
+        checkpointer, result = self._run_pipeline_mas()
+        agent_outputs = result.get("agent_outputs", {})
+
+        # Both the plain agent and the pipeline agent must appear.
+        assert "plain_agent" in agent_outputs
+        assert "pipe_agent" in agent_outputs
+        assert agent_outputs["pipe_agent"].get("status") == "completed"
+        # pipeline_outputs records the inner sub-graph's agent_outputs dict.
+        assert "pipeline_outputs" in agent_outputs["pipe_agent"]
+
+    # ------------------------------------------------------------------
+    # communication_log — Bug C regression
+    # ------------------------------------------------------------------
+
+    def test_pipeline_agent_emits_communication_log_entry(self):
+        """Pipeline agent emits a communication_log entry to the OUTER state.
+
+        Bug C regression: _wrap_pipeline_as_agent_node never called
+        _build_communication_update, so pipeline agents produced no
+        communication_log entry in the outer (checkpointed) state.
+        """
+        checkpointer, result = self._run_pipeline_mas()
+        comm_log = result.get("communication_log", [])
+
+        # One entry per outer agent (plain_agent + pipe_agent)
+        assert len(comm_log) == 2
+        senders = {e["sender"] for e in comm_log}
+        assert senders == {"plain_agent", "pipe_agent"}
+
+    def test_pipeline_agent_communication_log_entry_in_checkpoint(self):
+        """The outer checkpoint carries pipe_agent's communication_log entry."""
+        checkpointer, _ = self._run_pipeline_mas()
+        cvs = self._outer_checkpoints(checkpointer, "pip-001")
+
+        # Find the checkpoint where pipe_agent ran
+        pipe_cvs = [cv for cv in cvs if cv.get("current_agent") == "pipe_agent"]
+        assert pipe_cvs, "No checkpoint with current_agent='pipe_agent'"
+
+        pipe_cv = pipe_cvs[-1]  # use the latest pipe_agent checkpoint
+        log = pipe_cv.get("communication_log", [])
+        senders = [e["sender"] for e in log]
+        assert (
+            "pipe_agent" in senders
+        ), f"pipe_agent missing from communication_log. senders={senders}"
+
+    def test_pipeline_agent_no_duplicate_log_entries(self):
+        """Communication log entries are not duplicated for pipeline agents."""
+        checkpointer, result = self._run_pipeline_mas()
+        comm_log = result.get("communication_log", [])
+
+        ids = [e.get("message_id") for e in comm_log]
+        assert len(set(ids)) == len(ids), f"Duplicate IDs in log: {ids}"
+
+    # ------------------------------------------------------------------
+    # messages.name
+    # ------------------------------------------------------------------
+
+    def test_pipeline_agent_message_name_set(self):
+        """AIMessage emitted by pipeline agent carries name=pipe_agent."""
+        _, result = self._run_pipeline_mas()
+        messages = result.get("messages", [])
+        names = {getattr(m, "name", None) for m in messages if hasattr(m, "name")}
+        assert "pipe_agent" in names, f"pipe_agent name missing from messages: {names}"
+
+    # ------------------------------------------------------------------
+    # audit_view end-to-end
+    # ------------------------------------------------------------------
+
+    def test_pipeline_agent_appears_in_audit_view(self):
+        """audit_view returns one entry per agent, including the pipeline agent."""
+        from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+            MemorySaver,
+        )
+
+        config = _pipeline_config(mas_id="pip_audit")
+        compiled = compile_mas(config)
+        checkpointer = MemorySaver()
+        graph = compiled.compile_graph(checkpointer=checkpointer)
+        graph.invoke(
+            {"messages": [HumanMessage(content="start")]},
+            config={"configurable": {"thread_id": "pip-audit-001"}},
+        )
+
+        timeline = audit_view(checkpointer, "pip-audit-001")
+        agent_ids = [e["agent_id"] for e in timeline]
+        assert "plain_agent" in agent_ids
+        assert "pipe_agent" in agent_ids
+        # Both agents have messages_sent entries
+        for entry in timeline:
+            assert len(entry["messages_sent"]) >= 1
