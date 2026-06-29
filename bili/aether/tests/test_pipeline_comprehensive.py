@@ -327,7 +327,12 @@ class TestErrorAttribution:
         assert "inner node failed" in error_msg
 
     def test_error_returns_all_required_state_fields(self):
-        """Pipeline errors return complete state update (messages, current_agent, agent_outputs)."""
+        """Pipeline errors return a complete state update including provenance fields.
+
+        The error path emits the same provenance fields as the success path so
+        that a faulted pipeline agent still appears in the outer communication_log
+        and can be identified in audit views.
+        """
         agent = _agent("failing", pipeline=_stub_pipeline())
         mock_subgraph = MagicMock()
         mock_subgraph.invoke.side_effect = ValueError("bad input")
@@ -343,10 +348,22 @@ class TestErrorAttribution:
         wrapper = builder._wrap_pipeline_as_agent_node(mock_subgraph, agent)
         result = wrapper({"messages": [], "agent_outputs": {}})
 
-        assert set(result.keys()) == {"messages", "current_agent", "agent_outputs"}
+        # Core fields plus outer-MAS provenance channels (same as success path).
+        expected_keys = {
+            "messages",
+            "current_agent",
+            "agent_outputs",
+            "communication_log",
+            "channel_messages",
+            "pending_messages",
+        }
+        assert set(result.keys()) == expected_keys
         assert len(result["messages"]) == 1
         assert result["current_agent"] == "failing"
         assert result["agent_outputs"]["failing"]["status"] == "error"
+        # The error message is attributed in communication_log too.
+        assert len(result["communication_log"]) == 1
+        assert result["communication_log"][0]["sender"] == "failing"
 
 
 # =========================================================================
