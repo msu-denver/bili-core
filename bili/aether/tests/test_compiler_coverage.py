@@ -267,6 +267,89 @@ class TestCreateLlm:
         assert kwargs["api_version"] == "2024-02-01"
         assert kwargs["model_name"] == "azure-gpt-4o"
 
+    def test_create_llm_cli_subprocess_timeout_forwarded(self):
+        """cli_subprocess_timeout is forwarded to load_model for CLI providers."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "cli_agent", model_name="cli:my-tool", cli_subprocess_timeout=3600.0
+        )
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert kwargs["timeout_seconds"] == 3600.0
+
+    def test_create_llm_cli_timeout_zero_becomes_none(self):
+        """cli_subprocess_timeout=0 translates to timeout_seconds=None (no limit)."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "cli_agent2", model_name="cli:my-tool", cli_subprocess_timeout=0.0
+        )
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert kwargs["timeout_seconds"] is None
+
+    def test_create_llm_cli_timeout_not_forwarded_to_api_provider(self):
+        """cli_subprocess_timeout is NOT forwarded when the provider is not a CLI type."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        # gpt-4o resolves to "remote_openai", not a CLI provider
+        agent = _agent("api_agent", model_name="gpt-4o", cli_subprocess_timeout=3600.0)
+
+        fake_load_model = MagicMock(return_value="API_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert "timeout_seconds" not in kwargs
+
+    def test_create_llm_cli_timeout_none_not_forwarded(self):
+        """When cli_subprocess_timeout is None (default), timeout_seconds is not added."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent("cli_default", model_name="cli:my-tool")
+        # cli_subprocess_timeout defaults to None
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        # timeout_seconds not injected; the CLI provider will use its preset default
+        assert "timeout_seconds" not in kwargs
+
 
 class TestResolveProvider:
     """Tests for resolve_provider() and the LLM_MODELS ImportError path."""

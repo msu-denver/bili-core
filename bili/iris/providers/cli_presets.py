@@ -61,7 +61,7 @@ additional preset under its own provider-type string:
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 # ---------------------------------------------------------------------------
 # CliPreset dataclass
@@ -106,7 +106,8 @@ class CliPreset:
     :param json_path: Extraction path for JSON output.  Default ``"content"``.
     :param strip_ansi: Strip ANSI escape codes from stdout.  Default ``True``.
     :param timeout_seconds: Per-call subprocess timeout in seconds.
-        Default ``120.0``.
+        Default ``1800.0`` (30 min), generous enough for long-running agentic
+        turns.  Set to ``None`` to disable the timeout entirely.
     """
 
     command: List[str] = field(default_factory=list)
@@ -115,7 +116,7 @@ class CliPreset:
     output_format: str = "text"
     json_path: str = "content"
     strip_ansi: bool = True
-    timeout_seconds: float = 120.0
+    timeout_seconds: Optional[float] = 1800.0
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +137,7 @@ CLAUDE_CODE_PRESET = CliPreset(
     message_format="last",
     output_format="text",
     strip_ansi=True,
-    timeout_seconds=120.0,
+    timeout_seconds=1800.0,
 )
 
 #: OpenAI Codex CLI -- ``codex exec <prompt>``
@@ -153,7 +154,7 @@ CODEX_PRESET = CliPreset(
     message_format="last",
     output_format="text",
     strip_ansi=True,
-    timeout_seconds=180.0,
+    timeout_seconds=1800.0,
 )
 
 #: Google Gemini CLI -- ``gemini -p <prompt>``
@@ -170,7 +171,7 @@ GEMINI_CLI_PRESET = CliPreset(
     message_format="last",
     output_format="text",
     strip_ansi=True,
-    timeout_seconds=120.0,
+    timeout_seconds=1800.0,
 )
 
 # ---------------------------------------------------------------------------

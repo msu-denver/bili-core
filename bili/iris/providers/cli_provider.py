@@ -74,7 +74,7 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Any, AsyncIterator, Iterator, List, Optional, Tuple
+from typing import Any, AsyncIterator, Iterator, List, Optional, Tuple, Union
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -289,9 +289,14 @@ class CliLLM(BaseChatModel):
     strip_ansi_output : bool
         Strip ANSI escape codes from stdout before parsing.  Default
         ``True``.
-    timeout_seconds : float
-        Subprocess wall-clock timeout.  Default 120 s.  A timeout raises
-        :class:`CliLLMError`.
+    timeout_seconds : float or None
+        Subprocess wall-clock timeout in seconds.  Default ``1800`` (30 min),
+        which is intentionally generous for long-running agentic turns where
+        the CLI tool may spend several minutes reasoning, searching, or
+        generating large artifacts before producing output.  Set to ``None``
+        to disable the timeout entirely (the subprocess runs until it exits
+        or the process is killed).  A finite timeout raises
+        :class:`CliLLMError` when exceeded.
     """
 
     # ------------------------------------------------------------------
@@ -304,7 +309,7 @@ class CliLLM(BaseChatModel):
     output_format: str = "text"
     json_path: str = "content"
     strip_ansi_output: bool = True
-    timeout_seconds: float = 120.0
+    timeout_seconds: Optional[float] = 1800.0
 
     # ------------------------------------------------------------------
     # BaseChatModel required property
@@ -347,11 +352,14 @@ class CliLLM(BaseChatModel):
         :raises CliLLMError: On non-zero exit code or timeout.
         """
         cmd, stdin_text, tmp_path = self._build_run_args(prompt)
+        timeout_display: Union[str, float] = (
+            self.timeout_seconds if self.timeout_seconds is not None else "none"
+        )
         LOGGER.debug(
             "CliLLM: running %s (prompt_via=%s, timeout=%ss)",
             cmd[0],
             self.prompt_via,
-            self.timeout_seconds,
+            timeout_display,
         )
         try:
             result = subprocess.run(  # pylint: disable=subprocess-run-check
@@ -359,7 +367,7 @@ class CliLLM(BaseChatModel):
                 input=stdin_text,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout_seconds,
+                timeout=self.timeout_seconds,  # None disables the timeout
                 env=os.environ.copy(),
             )
         except subprocess.TimeoutExpired as exc:
@@ -515,8 +523,11 @@ class CliProvider(LLMProvider):
     strip_ansi : bool, optional
         Strip ANSI colour codes from stdout.  Default ``True``.
 
-    timeout_seconds : float, optional
-        Per-call wall-clock timeout in seconds.  Default ``120``.
+    timeout_seconds : float or None, optional
+        Per-call wall-clock timeout in seconds.  Default ``1800`` (30 min).
+        Pass ``None`` to disable the timeout entirely for CLI tools whose
+        runtime is unbounded (e.g. long-form generation or multi-step
+        agentic reasoning).
     """
 
     # The `strip_ansi` parameter intentionally shares its name with the
@@ -532,7 +543,7 @@ class CliProvider(LLMProvider):
         output_format: str = "text",
         json_path: str = "content",
         strip_ansi: bool = True,
-        timeout_seconds: float = 120.0,
+        timeout_seconds: Optional[float] = 1800.0,
         **_extra: Any,
     ) -> CliLLM:
         """Create and return a :class:`CliLLM` instance.
@@ -547,6 +558,7 @@ class CliProvider(LLMProvider):
         :param json_path: Extraction path for JSON output.
         :param strip_ansi: Strip ANSI escape codes from stdout.
         :param timeout_seconds: Per-call subprocess timeout in seconds.
+            ``None`` disables the timeout.
         :returns: A configured :class:`CliLLM` instance.
         :raises ValueError: If ``command`` is empty, or any config value is
             not among the supported options.

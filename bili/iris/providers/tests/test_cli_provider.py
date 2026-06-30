@@ -271,7 +271,12 @@ class TestCliProviderLoad:
         assert llm.message_format == "last"
         assert llm.output_format == "text"
         assert llm.strip_ansi_output is True
-        assert llm.timeout_seconds == 120.0
+        assert llm.timeout_seconds == 1800.0
+
+    def test_none_timeout_accepted(self):
+        """CliProvider.load() accepts timeout_seconds=None to disable the timeout."""
+        llm = CliProvider().load(command=["my-cli"], timeout_seconds=None)
+        assert llm.timeout_seconds is None
 
     def test_custom_values_propagated(self):
         """Custom config values are forwarded to the CliLLM instance."""
@@ -400,6 +405,16 @@ class TestRunSubprocess:
         ):
             with pytest.raises(CliLLMError, match="timed out"):
                 llm._run_subprocess("prompt")
+
+    def test_none_timeout_passes_none_to_subprocess(self):
+        """When timeout_seconds=None, subprocess.run receives timeout=None (no limit)."""
+        llm = _llm(timeout_seconds=None)
+        with patch(
+            "subprocess.run", return_value=_make_completed_proc("ok")
+        ) as mock_run:
+            llm._run_subprocess("prompt")
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs.get("timeout") is None
 
     def test_env_is_passed(self):
         """The subprocess is called with a copy of os.environ."""

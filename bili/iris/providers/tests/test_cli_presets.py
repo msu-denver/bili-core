@@ -80,7 +80,12 @@ class TestCliPreset:
         assert preset.output_format == "text"
         assert preset.json_path == "content"
         assert preset.strip_ansi is True
-        assert preset.timeout_seconds == 120.0
+        assert preset.timeout_seconds == 1800.0
+
+    def test_none_timeout_accepted(self):
+        """timeout_seconds=None disables the per-call timeout."""
+        preset = CliPreset(command=["my-tool"], timeout_seconds=None)
+        assert preset.timeout_seconds is None
 
     def test_custom_values_stored(self):
         """Custom values supplied to the constructor are stored correctly."""
@@ -153,8 +158,16 @@ class TestBuiltinPresets:
         assert CODEX_PRESET.output_format == "text"
 
     def test_codex_preset_timeout(self):
-        """CODEX_PRESET uses a longer default timeout than the base."""
-        assert CODEX_PRESET.timeout_seconds == 180.0
+        """CODEX_PRESET uses the agentic-turn default timeout (1800 s)."""
+        assert CODEX_PRESET.timeout_seconds == 1800.0
+
+    def test_claude_code_preset_timeout(self):
+        """CLAUDE_CODE_PRESET uses the agentic-turn default timeout (1800 s)."""
+        assert CLAUDE_CODE_PRESET.timeout_seconds == 1800.0
+
+    def test_gemini_cli_preset_timeout(self):
+        """GEMINI_CLI_PRESET uses the agentic-turn default timeout (1800 s)."""
+        assert GEMINI_CLI_PRESET.timeout_seconds == 1800.0
 
     def test_gemini_cli_preset_command(self):
         """GEMINI_CLI_PRESET uses 'gemini -p' as the command."""
@@ -257,6 +270,13 @@ class TestCliPresetProvider:
         klass = CliPresetProvider.for_preset(preset)
         llm = klass().load(timeout_seconds=300.0)
         assert llm.timeout_seconds == 300.0
+
+    def test_load_none_timeout_disables_timeout(self):
+        """load() accepts timeout_seconds=None to disable the subprocess timeout."""
+        preset = CliPreset(command=["tool"], timeout_seconds=600.0)
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(timeout_seconds=None)
+        assert llm.timeout_seconds is None
 
     def test_load_without_preset_raises(self):
         """load() raises RuntimeError if _preset is None (base class used directly)."""
@@ -426,6 +446,16 @@ class TestLoadModelRoundtrip:
         """A timeout_seconds override passed to load_model is applied to CliLLM."""
         llm = load_model("cli_claude_code", timeout_seconds=300.0)
         assert llm.timeout_seconds == 300.0
+
+    def test_none_timeout_override_disables_timeout(self):
+        """Passing timeout_seconds=None to load_model disables the subprocess timeout."""
+        llm = load_model("cli_claude_code", timeout_seconds=None)
+        assert llm.timeout_seconds is None
+
+    def test_default_preset_timeout_is_1800(self):
+        """The default timeout for a preset CliLLM loaded via load_model is 1800 s."""
+        llm = load_model("cli_claude_code")
+        assert llm.timeout_seconds == 1800.0
 
     def test_subprocess_error_raises_cli_llm_error(self):
         """A non-zero subprocess exit for a preset raises CliLLMError."""
