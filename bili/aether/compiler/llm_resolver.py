@@ -204,6 +204,16 @@ def create_llm(agent: AgentSpec) -> Any:
     if agent.max_tokens is not None:
         kwargs["max_tokens"] = agent.max_tokens
 
+    # Forward cli_subprocess_timeout to CLI providers only.  Passing it to API
+    # providers would raise an unexpected-keyword-argument error because those
+    # loader functions have explicit signatures without **kwargs.
+    if agent.cli_subprocess_timeout is not None and provider.startswith("cli"):
+        # 0 is the user's signal for "no timeout" (matches the ge=0 constraint
+        # on the field).  Translate it to None so subprocess.run receives
+        # timeout=None rather than timeout=0 (which would expire immediately).
+        raw = agent.cli_subprocess_timeout
+        kwargs["timeout_seconds"] = None if raw == 0.0 else raw
+
     LOGGER.info(
         "Creating LLM for agent '%s': provider=%s, model_id=%s",
         agent.agent_id,

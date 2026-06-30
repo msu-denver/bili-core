@@ -120,6 +120,20 @@ class AgentSpec(BaseModel):
         ),
     )
 
+    cli_subprocess_timeout: Optional[float] = Field(
+        None,
+        ge=0.0,
+        description=(
+            "Per-call subprocess timeout in seconds for CLI-backed providers "
+            "(provider types 'cli', 'cli_claude_code', 'cli_codex', "
+            "'cli_gemini_cli', and any custom CLI preset).  When set, "
+            "overrides the preset default (1800 s).  Set to 0 to disable the "
+            "timeout entirely (equivalent to None — the subprocess runs until "
+            "it exits naturally).  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
     # =========================================================================
     # CAPABILITIES & TOOLS
     # =========================================================================

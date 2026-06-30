@@ -27,6 +27,10 @@ from .cli_provider import CliLLM, CliProvider
 
 LOGGER = logging.getLogger(__name__)
 
+# Sentinel used by _resolve_kwargs to distinguish "caller passed no value"
+# from "caller explicitly passed None" (which means "disable the timeout").
+_UNSET = object()
+
 
 class CliPresetProvider(LLMProvider):
     """An :class:`~bili.iris.providers.base.LLMProvider` that wraps a
@@ -50,19 +54,20 @@ class CliPresetProvider(LLMProvider):
     def _resolve_kwargs(self, overrides: dict) -> dict:
         """Merge caller-supplied *overrides* with preset defaults.
 
-        For each CliProvider parameter, the caller-supplied value is used when
-        not ``None``; otherwise the bound preset's value is the default.
-        Returns a dict ready to pass to
-        :meth:`~bili.iris.providers.cli_provider.CliProvider.load`.
+        Caller-supplied values win over the preset default.  ``None`` is a
+        valid caller value for ``timeout_seconds`` (meaning "no timeout"), so
+        the sentinel :data:`_UNSET` is used to distinguish "not provided" from
+        "explicitly set to None".
 
-        :param overrides: Mapping of parameter name to caller-supplied value
-            (or ``None`` to keep the preset default).
+        :param overrides: Mapping of parameter name to caller-supplied value,
+            where the sentinel :data:`_UNSET` indicates "not provided by
+            caller, use the preset default".
         """
         preset = self._preset
         # command is special: copy the list to avoid mutating the preset.
-        cmd = overrides.get("command")
+        cmd = overrides.get("command", _UNSET)
         resolved: dict = {
-            "command": cmd if cmd is not None else list(preset.command),
+            "command": cmd if cmd is not _UNSET else list(preset.command),
         }
         for field in (
             "prompt_via",
@@ -72,19 +77,19 @@ class CliPresetProvider(LLMProvider):
             "strip_ansi",
             "timeout_seconds",
         ):
-            val = overrides.get(field)
-            resolved[field] = val if val is not None else getattr(preset, field)
+            val = overrides.get(field, _UNSET)
+            resolved[field] = val if val is not _UNSET else getattr(preset, field)
         return resolved
 
     def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
         self,
-        command: Optional[List[str]] = None,
-        prompt_via: Optional[str] = None,
-        message_format: Optional[str] = None,
-        output_format: Optional[str] = None,
-        json_path: Optional[str] = None,
-        strip_ansi: Optional[bool] = None,
-        timeout_seconds: Optional[float] = None,
+        command: Optional[List[str]] = _UNSET,
+        prompt_via: Optional[str] = _UNSET,
+        message_format: Optional[str] = _UNSET,
+        output_format: Optional[str] = _UNSET,
+        json_path: Optional[str] = _UNSET,
+        strip_ansi: Optional[bool] = _UNSET,
+        timeout_seconds: Optional[float] = _UNSET,
         **extra: Any,
     ) -> CliLLM:
         """Create a :class:`~bili.iris.providers.cli_provider.CliLLM` using
@@ -97,6 +102,7 @@ class CliPresetProvider(LLMProvider):
         :param json_path: Override the preset's ``json_path``.
         :param strip_ansi: Override the preset's ``strip_ansi``.
         :param timeout_seconds: Override the preset's ``timeout_seconds``.
+            Pass ``None`` to disable the subprocess timeout entirely.
         :returns: A configured :class:`~bili.iris.providers.cli_provider.CliLLM`.
         :raises RuntimeError: If the provider was not created via
             :meth:`for_preset` (i.e. ``_preset`` is ``None``).
