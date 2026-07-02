@@ -272,6 +272,7 @@ class TestCliProviderLoad:
         assert llm.output_format == "text"
         assert llm.strip_ansi_output is True
         assert llm.timeout_seconds == 1800.0
+        assert llm.cwd is None
 
     def test_none_timeout_accepted(self):
         """CliProvider.load() accepts timeout_seconds=None to disable the timeout."""
@@ -288,6 +289,7 @@ class TestCliProviderLoad:
             json_path="result.text",
             strip_ansi=False,
             timeout_seconds=30.0,
+            cwd="/opt/sandbox",
         )
         assert llm.command == ["my-cli", "--json"]
         assert llm.prompt_via == "arg"
@@ -296,6 +298,12 @@ class TestCliProviderLoad:
         assert llm.json_path == "result.text"
         assert llm.strip_ansi_output is False
         assert llm.timeout_seconds == 30.0
+        assert llm.cwd == "/opt/sandbox"
+
+    def test_custom_cwd_propagated(self):
+        """CliProvider.load() forwards a caller-supplied cwd to the CliLLM."""
+        llm = CliProvider().load(command=["my-cli"], cwd="/workspace/fixed")
+        assert llm.cwd == "/workspace/fixed"
 
     def test_extra_kwargs_ignored(self):
         """Extra kwargs from an llm_config catalog entry do not raise."""
@@ -415,6 +423,28 @@ class TestRunSubprocess:
             llm._run_subprocess("prompt")
         call_kwargs = mock_run.call_args.kwargs
         assert call_kwargs.get("timeout") is None
+
+    def test_default_cwd_inherits_calling_process(self):
+        """By default (cwd unset), subprocess.run receives cwd=None, which
+        makes it inherit the calling process's current working directory --
+        today's behaviour, preserved for backward compatibility."""
+        llm = _llm()
+        with patch(
+            "subprocess.run", return_value=_make_completed_proc("ok")
+        ) as mock_run:
+            llm._run_subprocess("prompt")
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs.get("cwd") is None
+
+    def test_explicit_cwd_is_honored(self):
+        """A caller-supplied cwd is forwarded verbatim to subprocess.run."""
+        llm = _llm(cwd="/opt/fixed-workspace")
+        with patch(
+            "subprocess.run", return_value=_make_completed_proc("ok")
+        ) as mock_run:
+            llm._run_subprocess("prompt")
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs.get("cwd") == "/opt/fixed-workspace"
 
     def test_env_is_passed(self):
         """The subprocess is called with a copy of os.environ."""

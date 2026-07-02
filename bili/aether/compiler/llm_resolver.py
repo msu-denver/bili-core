@@ -214,6 +214,11 @@ def create_llm(agent: AgentSpec) -> Any:
         raw = agent.cli_subprocess_timeout
         kwargs["timeout_seconds"] = None if raw == 0.0 else raw
 
+    # Forward cli_subprocess_cwd to CLI providers only, for the same reason
+    # as cli_subprocess_timeout above.
+    if agent.cli_subprocess_cwd is not None and provider.startswith("cli"):
+        kwargs["cwd"] = agent.cli_subprocess_cwd
+
     LOGGER.info(
         "Creating LLM for agent '%s': provider=%s, model_id=%s",
         agent.agent_id,

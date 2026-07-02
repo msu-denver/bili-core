@@ -55,8 +55,9 @@ class CliPresetProvider(LLMProvider):
         """Merge caller-supplied *overrides* with preset defaults.
 
         Caller-supplied values win over the preset default.  ``None`` is a
-        valid caller value for ``timeout_seconds`` (meaning "no timeout"), so
-        the sentinel :data:`_UNSET` is used to distinguish "not provided" from
+        valid caller value for ``timeout_seconds`` (meaning "no timeout") and
+        for ``cwd`` (meaning "inherit the calling process's cwd"), so the
+        sentinel :data:`_UNSET` is used to distinguish "not provided" from
         "explicitly set to None".
 
         :param overrides: Mapping of parameter name to caller-supplied value,
@@ -76,6 +77,7 @@ class CliPresetProvider(LLMProvider):
             "json_path",
             "strip_ansi",
             "timeout_seconds",
+            "cwd",
         ):
             val = overrides.get(field, _UNSET)
             resolved[field] = val if val is not _UNSET else getattr(preset, field)
@@ -90,6 +92,7 @@ class CliPresetProvider(LLMProvider):
         json_path: Optional[str] = _UNSET,
         strip_ansi: Optional[bool] = _UNSET,
         timeout_seconds: Optional[float] = _UNSET,
+        cwd: Optional[str] = _UNSET,
         **extra: Any,
     ) -> CliLLM:
         """Create a :class:`~bili.iris.providers.cli_provider.CliLLM` using
@@ -103,6 +106,9 @@ class CliPresetProvider(LLMProvider):
         :param strip_ansi: Override the preset's ``strip_ansi``.
         :param timeout_seconds: Override the preset's ``timeout_seconds``.
             Pass ``None`` to disable the subprocess timeout entirely.
+        :param cwd: Override the preset's ``cwd``.  Pass ``None`` to force
+            the subprocess back to inheriting the calling process's current
+            working directory even if the bound preset sets a fixed one.
         :returns: A configured :class:`~bili.iris.providers.cli_provider.CliLLM`.
         :raises RuntimeError: If the provider was not created via
             :meth:`for_preset` (i.e. ``_preset`` is ``None``).
@@ -121,6 +127,7 @@ class CliPresetProvider(LLMProvider):
                 "json_path": json_path,
                 "strip_ansi": strip_ansi,
                 "timeout_seconds": timeout_seconds,
+                "cwd": cwd,
             }
         )
         LOGGER.info(

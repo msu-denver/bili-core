@@ -81,6 +81,7 @@ class TestCliPreset:
         assert preset.json_path == "content"
         assert preset.strip_ansi is True
         assert preset.timeout_seconds == 1800.0
+        assert preset.cwd is None
 
     def test_none_timeout_accepted(self):
         """timeout_seconds=None disables the per-call timeout."""
@@ -97,6 +98,7 @@ class TestCliPreset:
             json_path="result.text",
             strip_ansi=False,
             timeout_seconds=60.0,
+            cwd="/opt/sandbox",
         )
         assert preset.command == ["llm", "--fast"]
         assert preset.prompt_via == "stdin"
@@ -105,6 +107,7 @@ class TestCliPreset:
         assert preset.json_path == "result.text"
         assert preset.strip_ansi is False
         assert preset.timeout_seconds == 60.0
+        assert preset.cwd == "/opt/sandbox"
 
     def test_dataclass_has_expected_fields(self):
         """CliPreset exposes exactly the fields that CliProvider.load accepts."""
@@ -117,6 +120,7 @@ class TestCliPreset:
             "json_path",
             "strip_ansi",
             "timeout_seconds",
+            "cwd",
         }
         assert expected == field_names
 
@@ -277,6 +281,29 @@ class TestCliPresetProvider:
         klass = CliPresetProvider.for_preset(preset)
         llm = klass().load(timeout_seconds=None)
         assert llm.timeout_seconds is None
+
+    def test_load_default_cwd_matches_preset_default(self):
+        """load() with no cwd override falls back to the preset's cwd default
+        (None, i.e. inherit the calling process's cwd)."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        assert llm.cwd is None
+
+    def test_load_overrides_cwd(self):
+        """load() accepts a caller-supplied cwd override."""
+        preset = CliPreset(command=["tool"], cwd="/preset/default/dir")
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(cwd="/caller/override/dir")
+        assert llm.cwd == "/caller/override/dir"
+
+    def test_load_none_cwd_resets_to_inherited(self):
+        """Explicitly passing cwd=None overrides a preset-fixed cwd back to
+        inheriting the calling process's cwd."""
+        preset = CliPreset(command=["tool"], cwd="/preset/default/dir")
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(cwd=None)
+        assert llm.cwd is None
 
     def test_load_without_preset_raises(self):
         """load() raises RuntimeError if _preset is None (base class used directly)."""
@@ -456,6 +483,24 @@ class TestLoadModelRoundtrip:
         """The default timeout for a preset CliLLM loaded via load_model is 1800 s."""
         llm = load_model("cli_claude_code")
         assert llm.timeout_seconds == 1800.0
+
+    def test_default_preset_cwd_is_none(self):
+        """The default cwd for a preset CliLLM loaded via load_model is None,
+        i.e. it inherits the calling process's current working directory."""
+        llm = load_model("cli_claude_code")
+        assert llm.cwd is None
+
+    def test_cwd_override_respected(self):
+        """A cwd override passed to load_model is applied to the CliLLM and
+        forwarded to the subprocess call."""
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed_proc(stdout="ok"),
+        ) as mock_run:
+            llm = load_model("cli_claude_code", cwd="/fixed/workspace")
+            assert llm.cwd == "/fixed/workspace"
+            llm.invoke([HumanMessage(content="hello")])
+        assert mock_run.call_args.kwargs.get("cwd") == "/fixed/workspace"
 
     def test_subprocess_error_raises_cli_llm_error(self):
         """A non-zero subprocess exit for a preset raises CliLLMError."""

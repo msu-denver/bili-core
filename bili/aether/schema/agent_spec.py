@@ -134,6 +134,24 @@ class AgentSpec(BaseModel):
         ),
     )
 
+    cli_subprocess_cwd: Optional[str] = Field(
+        None,
+        description=(
+            "Working directory for CLI-backed providers' subprocess (provider "
+            "types 'cli', 'cli_claude_code', 'cli_codex', 'cli_gemini_cli', "
+            "and any custom CLI preset).  When set, overrides the preset "
+            "default and pins the subprocess to this fixed directory instead "
+            "of inheriting the calling process's current working directory. "
+            "Useful for CLI tools that gate filesystem access per directory "
+            "(a one-time trust decision for a known directory rather than one "
+            "triggered by every caller cwd) or to scope the tool's filesystem "
+            "reach to a dedicated directory.  Leave unset (the default) to "
+            "preserve historical behaviour.  Only applies to agents whose "
+            "resolved provider is a CLI subprocess type; ignored for API "
+            "providers."
+        ),
+    )
+
     # =========================================================================
     # CAPABILITIES & TOOLS
     # =========================================================================

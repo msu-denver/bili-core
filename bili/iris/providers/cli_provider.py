@@ -297,6 +297,17 @@ class CliLLM(BaseChatModel):
         to disable the timeout entirely (the subprocess runs until it exits
         or the process is killed).  A finite timeout raises
         :class:`CliLLMError` when exceeded.
+    cwd : str or None
+        Working directory for the subprocess.  Default ``None``, which
+        preserves historical behaviour: the subprocess inherits the calling
+        process's current working directory (``subprocess.run``'s own
+        default).  Set to a fixed path to pin every invocation to a
+        caller-controlled directory instead -- useful when the CLI tool
+        gates filesystem access by directory (a one-time trust decision per
+        directory rather than one per caller cwd) or when the caller wants
+        to scope the tool's filesystem reach to a dedicated sandbox rather
+        than exposing whatever directory the calling process happens to be
+        running from.
     """
 
     # ------------------------------------------------------------------
@@ -310,6 +321,7 @@ class CliLLM(BaseChatModel):
     json_path: str = "content"
     strip_ansi_output: bool = True
     timeout_seconds: Optional[float] = 1800.0
+    cwd: Optional[str] = None
 
     # ------------------------------------------------------------------
     # BaseChatModel required property
@@ -356,10 +368,11 @@ class CliLLM(BaseChatModel):
             self.timeout_seconds if self.timeout_seconds is not None else "none"
         )
         LOGGER.debug(
-            "CliLLM: running %s (prompt_via=%s, timeout=%ss)",
+            "CliLLM: running %s (prompt_via=%s, timeout=%ss, cwd=%s)",
             cmd[0],
             self.prompt_via,
             timeout_display,
+            self.cwd or "<inherited>",
         )
         try:
             result = subprocess.run(  # pylint: disable=subprocess-run-check
@@ -368,6 +381,7 @@ class CliLLM(BaseChatModel):
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,  # None disables the timeout
+                cwd=self.cwd,  # None inherits the calling process's cwd
                 env=os.environ.copy(),
             )
         except subprocess.TimeoutExpired as exc:
@@ -528,6 +542,17 @@ class CliProvider(LLMProvider):
         Pass ``None`` to disable the timeout entirely for CLI tools whose
         runtime is unbounded (e.g. long-form generation or multi-step
         agentic reasoning).
+
+    cwd : str or None, optional
+        Working directory the subprocess is spawned in.  Default ``None``,
+        which preserves the historical behaviour of inheriting the calling
+        process's current working directory.  Pass a fixed path to pin the
+        subprocess to a caller-controlled directory instead -- for CLI tools
+        that gate filesystem access per directory (so trust is granted once
+        for a known directory rather than re-triggered by every caller cwd)
+        or to scope the tool's filesystem reach to a dedicated directory
+        rather than whatever directory the calling process happens to be
+        running from.
     """
 
     # The `strip_ansi` parameter intentionally shares its name with the
@@ -544,6 +569,7 @@ class CliProvider(LLMProvider):
         json_path: str = "content",
         strip_ansi: bool = True,
         timeout_seconds: Optional[float] = 1800.0,
+        cwd: Optional[str] = None,
         **_extra: Any,
     ) -> CliLLM:
         """Create and return a :class:`CliLLM` instance.
@@ -559,6 +585,10 @@ class CliProvider(LLMProvider):
         :param strip_ansi: Strip ANSI escape codes from stdout.
         :param timeout_seconds: Per-call subprocess timeout in seconds.
             ``None`` disables the timeout.
+        :param cwd: Working directory for the subprocess.  ``None`` (default)
+            inherits the calling process's current working directory,
+            matching historical behaviour.  Pass a fixed path to pin the
+            subprocess to a caller-controlled directory.
         :returns: A configured :class:`CliLLM` instance.
         :raises ValueError: If ``command`` is empty, or any config value is
             not among the supported options.
@@ -591,6 +621,7 @@ class CliProvider(LLMProvider):
             json_path=json_path,
             strip_ansi_output=strip_ansi,
             timeout_seconds=timeout_seconds,
+            cwd=cwd,
         )
         LOGGER.debug(llm)
         return llm

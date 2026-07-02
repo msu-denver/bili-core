@@ -69,7 +69,7 @@ from typing import List, Optional
 
 
 @dataclass
-class CliPreset:
+class CliPreset:  # pylint: disable=too-many-instance-attributes
     """Configuration bundle for a specific CLI LLM tool.
 
     Each field mirrors a parameter of
@@ -108,6 +108,14 @@ class CliPreset:
     :param timeout_seconds: Per-call subprocess timeout in seconds.
         Default ``1800.0`` (30 min), generous enough for long-running agentic
         turns.  Set to ``None`` to disable the timeout entirely.
+    :param cwd: Working directory the subprocess is spawned in.  Default
+        ``None``, which preserves the historical behaviour of inheriting the
+        calling process's current working directory.  Set to a fixed path to
+        pin every invocation of this preset to a caller-controlled directory
+        instead -- useful for CLI tools that gate filesystem access per
+        directory (a one-time trust decision for a known directory rather
+        than one triggered by every caller cwd) or to scope the tool's
+        filesystem reach to a dedicated directory.
     """
 
     command: List[str] = field(default_factory=list)
@@ -117,6 +125,7 @@ class CliPreset:
     json_path: str = "content"
     strip_ansi: bool = True
     timeout_seconds: Optional[float] = 1800.0
+    cwd: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
