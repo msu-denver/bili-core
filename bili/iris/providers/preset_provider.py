@@ -78,6 +78,8 @@ class CliPresetProvider(LLMProvider):
             "strip_ansi",
             "timeout_seconds",
             "cwd",
+            "max_retries",
+            "retry_backoff_seconds",
         ):
             val = overrides.get(field, _UNSET)
             resolved[field] = val if val is not _UNSET else getattr(preset, field)
@@ -93,6 +95,8 @@ class CliPresetProvider(LLMProvider):
         strip_ansi: Optional[bool] = _UNSET,
         timeout_seconds: Optional[float] = _UNSET,
         cwd: Optional[str] = _UNSET,
+        max_retries: Optional[int] = _UNSET,
+        retry_backoff_seconds: Optional[float] = _UNSET,
         **extra: Any,
     ) -> CliLLM:
         """Create a :class:`~bili.iris.providers.cli_provider.CliLLM` using
@@ -109,6 +113,10 @@ class CliPresetProvider(LLMProvider):
         :param cwd: Override the preset's ``cwd``.  Pass ``None`` to force
             the subprocess back to inheriting the calling process's current
             working directory even if the bound preset sets a fixed one.
+        :param max_retries: Override the preset's ``max_retries``.  Pass
+            ``0`` to disable in-process retry entirely.
+        :param retry_backoff_seconds: Override the preset's
+            ``retry_backoff_seconds``.
         :returns: A configured :class:`~bili.iris.providers.cli_provider.CliLLM`.
         :raises RuntimeError: If the provider was not created via
             :meth:`for_preset` (i.e. ``_preset`` is ``None``).
@@ -128,6 +136,8 @@ class CliPresetProvider(LLMProvider):
                 "strip_ansi": strip_ansi,
                 "timeout_seconds": timeout_seconds,
                 "cwd": cwd,
+                "max_retries": max_retries,
+                "retry_backoff_seconds": retry_backoff_seconds,
             }
         )
         LOGGER.info(

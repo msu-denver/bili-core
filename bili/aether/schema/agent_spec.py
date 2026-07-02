@@ -152,6 +152,36 @@ class AgentSpec(BaseModel):
         ),
     )
 
+    cli_subprocess_max_retries: Optional[int] = Field(
+        None,
+        ge=0,
+        description=(
+            "Number of additional in-process attempts for CLI-backed "
+            "providers (provider types 'cli', 'cli_claude_code', "
+            "'cli_codex', 'cli_gemini_cli', and any custom CLI preset) after "
+            "an initial TRANSIENT subprocess failure (rate limit, overload, "
+            "transient 5xx), before giving up.  When set, overrides the "
+            "preset default (2).  Set to 0 to disable in-process retry "
+            "entirely.  Non-transient failures (bad command, auth error, "
+            "malformed output) always fail on the first attempt regardless "
+            "of this setting.  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
+    cli_subprocess_retry_backoff: Optional[float] = Field(
+        None,
+        ge=0.0,
+        description=(
+            "Base delay in seconds before the first in-process retry for "
+            "CLI-backed providers (provider types 'cli', 'cli_claude_code', "
+            "'cli_codex', 'cli_gemini_cli', and any custom CLI preset); each "
+            "subsequent retry doubles the delay.  When set, overrides the "
+            "preset default (1.0 s).  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
     # =========================================================================
     # CAPABILITIES & TOOLS
     # =========================================================================

@@ -17,6 +17,16 @@ propagates up to the caller.  When used with the fallback engine
 (:class:`~bili.iris.providers.fallback.FallbackLLM`), ``CliLLMError`` is
 treated as retryable so the chain can fall through to an API provider.
 
+Before it gets that far, though, the provider itself retries a failure that
+looks *transient* (rate limiting, temporary overload, a transient 5xx from
+whatever backend the CLI tool talks to) in-process, with exponential
+backoff, up to a configurable number of attempts.  This matters most for a
+consumer running a CLI provider with no API-provider fallback configured at
+all: without in-process retry, a single rate-limit blip from the CLI's own
+upstream call fails the whole turn immediately, with nothing to fall through
+to.  See :data:`_TRANSIENT_ERROR_PATTERNS` for the transient-vs-permanent
+detection approach.
+
 The LLM object returned by :meth:`CliProvider.load` is a
 :class:`CliLLM` -- a concrete :class:`~langchain_core.language_models.BaseChatModel`
 subclass.  This makes it a drop-in replacement inside any LangChain/LangGraph
@@ -74,6 +84,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from typing import Any, AsyncIterator, Iterator, List, Optional, Tuple, Union
 
 from langchain_core.language_models import BaseChatModel
@@ -118,6 +129,70 @@ class CliLLMError(RuntimeError):
     ``CliLLMError`` so failed CLI calls fall over to the next provider in
     the chain automatically.
     """
+
+
+# ---------------------------------------------------------------------------
+# Transient-vs-permanent failure detection
+# ---------------------------------------------------------------------------
+
+#: Regex patterns checked (case-insensitively) against the text of a failed
+#: CLI invocation -- the ``CliLLMError`` message built from the captured
+#: stderr -- to decide whether the failure looks TRANSIENT and is therefore
+#: worth retrying in-process, versus PERMANENT (fail fast, no retry).
+#:
+#: Detection approach: text patterns against stderr, not exit codes.  CLI
+#: tools are a heterogeneous grab-bag of processes with no shared convention
+#: for exit codes -- one tool might exit 1 for "rate limited", another might
+#: exit 1 for "bad flag" or "binary not found".  Exit code alone cannot
+#: distinguish those cases across arbitrary CLI tools.  Stderr text is a far
+#: more portable signal: CLI tools that wrap a hosted LLM API commonly
+#: surface the upstream provider's own error text verbatim (e.g. "429",
+#: "rate_limit_error", "Overloaded", "503 Service Unavailable") regardless of
+#: which CLI emits it.
+#:
+#: The list is deliberately narrow and conservative.  A broken command, a
+#: missing binary, a bad flag, an authentication failure, or a malformed-
+#: output parse error are all permanent and must fail on the first attempt;
+#: none of those match these patterns.  When in doubt, a failure is treated
+#: as permanent -- an unnecessary retry is merely slower, but a retry of a
+#: genuinely permanent failure wastes the full backoff schedule for no
+#: benefit and delays the caller from seeing (and acting on) the real error.
+_TRANSIENT_ERROR_PATTERNS: Tuple[re.Pattern, ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"rate[\s_-]?limit",
+        r"too many requests",
+        r"overloaded",
+        r"resource[\s_-]?exhausted",
+        r"quota exceeded",
+        r"throttl",
+        r"service unavailable",
+        r"temporarily unavailable",
+        r"\b429\b",
+        r"\b500\b",
+        r"\b502\b",
+        r"\b503\b",
+        r"\b504\b",
+        r"\b529\b",
+    )
+)
+
+
+def _is_transient_failure(error_text: str) -> bool:
+    """Return ``True`` if *error_text* matches a known transient-failure
+    signature.
+
+    :param error_text: The message text of a raised :class:`CliLLMError`
+        (which embeds the captured stderr snippet for non-zero exits).
+    :returns: ``True`` if *error_text* looks like a transient upstream
+        condition (rate limit, overload, transient 5xx) safe to retry;
+        ``False`` otherwise, including subprocess timeouts, whose messages
+        never match these patterns and are therefore always treated as
+        permanent -- a timeout already waited out the full configured
+        budget, so retrying would only double the wall-clock cost without a
+        clear signal that the retry will fare any better.
+    """
+    return any(pattern.search(error_text) for pattern in _TRANSIENT_ERROR_PATTERNS)
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +383,22 @@ class CliLLM(BaseChatModel):
         to scope the tool's filesystem reach to a dedicated sandbox rather
         than exposing whatever directory the calling process happens to be
         running from.
+    max_retries : int
+        Number of additional attempts after an initial transient failure,
+        before giving up and raising :class:`CliLLMError`.  Default ``2`` --
+        small enough that a persistently-broken CLI does not multiply the
+        caller's wall-clock cost many times over, but enough that a rate
+        limit or overload signal (which typically clears within a few
+        seconds) usually succeeds on retry.  Set to ``0`` to disable retry
+        entirely, matching the historical behaviour of raising immediately
+        on the first failure.  Only failures that match a known transient
+        signature are retried (see :data:`_TRANSIENT_ERROR_PATTERNS`);
+        permanent failures (bad command, auth error, malformed output)
+        always fail on the first attempt regardless of this setting.
+    retry_backoff_seconds : float
+        Base delay, in seconds, before the first retry.  Each subsequent
+        retry doubles the delay (``retry_backoff_seconds * 2 ** attempt``).
+        Default ``1.0``.
     """
 
     # ------------------------------------------------------------------
@@ -322,6 +413,8 @@ class CliLLM(BaseChatModel):
     strip_ansi_output: bool = True
     timeout_seconds: Optional[float] = 1800.0
     cwd: Optional[str] = None
+    max_retries: int = 2
+    retry_backoff_seconds: float = 1.0
 
     # ------------------------------------------------------------------
     # BaseChatModel required property
@@ -359,7 +452,48 @@ class CliLLM(BaseChatModel):
         return list(self.command) + [tmp_path], None, tmp_path
 
     def _run_subprocess(self, prompt: str) -> str:
-        """Execute the CLI with *prompt* and return the captured output text.
+        """Execute the CLI with *prompt*, retrying transient failures.
+
+        Calls :meth:`_run_subprocess_once` up to ``max_retries + 1`` times.
+        A failure is retried (with exponential backoff) only when
+        :func:`_is_transient_failure` matches the raised
+        :class:`CliLLMError`'s message; any other failure -- or the final
+        attempt of a persistently-transient one -- is re-raised immediately.
+
+        :raises CliLLMError: On a non-transient failure, or once transient
+            retries are exhausted.
+        """
+        max_attempts = max(self.max_retries, 0) + 1
+        last_error: Optional[CliLLMError] = None
+        for attempt in range(max_attempts):
+            try:
+                return self._run_subprocess_once(prompt)
+            except CliLLMError as exc:
+                last_error = exc
+                attempts_remaining = max_attempts - attempt - 1
+                if attempts_remaining <= 0 or not _is_transient_failure(str(exc)):
+                    raise
+                delay = self.retry_backoff_seconds * (2**attempt)
+                LOGGER.warning(
+                    "CliLLM: transient failure on attempt %d/%d (%s); "
+                    "retrying in %.1fs",
+                    attempt + 1,
+                    max_attempts,
+                    exc,
+                    delay,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+        # Unreachable: the loop above always returns from a successful
+        # attempt or raises via the `raise` statement above.  Kept only to
+        # satisfy static analysis that every code path returns or raises.
+        raise last_error  # pragma: no cover
+
+    def _run_subprocess_once(self, prompt: str) -> str:
+        """Execute the CLI once with *prompt* and return captured output text.
+
+        A single subprocess invocation, no retry.  Called by
+        :meth:`_run_subprocess`, which wraps this in the retry loop.
 
         :raises CliLLMError: On non-zero exit code or timeout.
         """
@@ -553,6 +687,19 @@ class CliProvider(LLMProvider):
         or to scope the tool's filesystem reach to a dedicated directory
         rather than whatever directory the calling process happens to be
         running from.
+
+    max_retries : int, optional
+        Number of additional in-process attempts after an initial transient
+        failure (rate limit, overload, transient 5xx -- see
+        :data:`_TRANSIENT_ERROR_PATTERNS`), before raising
+        :class:`CliLLMError`.  Default ``2``.  Pass ``0`` to disable retry
+        entirely, matching the historical (pre-retry) behaviour of raising
+        immediately.  Permanent failures always fail on the first attempt
+        regardless of this setting.
+
+    retry_backoff_seconds : float, optional
+        Base delay, in seconds, before the first retry; doubles on each
+        subsequent retry.  Default ``1.0``.
     """
 
     # The `strip_ansi` parameter intentionally shares its name with the
@@ -570,6 +717,8 @@ class CliProvider(LLMProvider):
         strip_ansi: bool = True,
         timeout_seconds: Optional[float] = 1800.0,
         cwd: Optional[str] = None,
+        max_retries: int = 2,
+        retry_backoff_seconds: float = 1.0,
         **_extra: Any,
     ) -> CliLLM:
         """Create and return a :class:`CliLLM` instance.
@@ -589,9 +738,14 @@ class CliProvider(LLMProvider):
             inherits the calling process's current working directory,
             matching historical behaviour.  Pass a fixed path to pin the
             subprocess to a caller-controlled directory.
+        :param max_retries: Additional attempts after an initial transient
+            failure, before raising.  ``0`` disables retry.
+        :param retry_backoff_seconds: Base delay in seconds before the first
+            retry; doubles on each subsequent retry.
         :returns: A configured :class:`CliLLM` instance.
-        :raises ValueError: If ``command`` is empty, or any config value is
-            not among the supported options.
+        :raises ValueError: If ``command`` is empty, any config value is not
+            among the supported options, or ``max_retries``/
+            ``retry_backoff_seconds`` is negative.
         """
         if not command:
             raise ValueError("CliProvider requires a non-empty 'command' list")
@@ -610,6 +764,12 @@ class CliProvider(LLMProvider):
                 f"output_format={output_format!r} is not supported. "
                 f"Choose from: {sorted(SUPPORTED_OUTPUT_FORMATS)}"
             )
+        if max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {max_retries!r}")
+        if retry_backoff_seconds < 0:
+            raise ValueError(
+                f"retry_backoff_seconds must be >= 0, got {retry_backoff_seconds!r}"
+            )
 
         LOGGER.info("Initializing CliLLM: command=%s", command[0])
 
@@ -622,6 +782,8 @@ class CliProvider(LLMProvider):
             strip_ansi_output=strip_ansi,
             timeout_seconds=timeout_seconds,
             cwd=cwd,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
         )
         LOGGER.debug(llm)
         return llm

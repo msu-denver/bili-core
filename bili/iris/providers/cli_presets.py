@@ -116,6 +116,13 @@ class CliPreset:  # pylint: disable=too-many-instance-attributes
         directory (a one-time trust decision for a known directory rather
         than one triggered by every caller cwd) or to scope the tool's
         filesystem reach to a dedicated directory.
+    :param max_retries: Additional in-process attempts after an initial
+        transient failure (rate limit, overload, transient 5xx), before
+        raising ``CliLLMError``.  Default ``2``.  Set to ``0`` to disable
+        retry entirely.  Only clearly-transient failures are retried;
+        permanent failures always fail on the first attempt.
+    :param retry_backoff_seconds: Base delay in seconds before the first
+        retry; doubles on each subsequent retry.  Default ``1.0``.
     """
 
     command: List[str] = field(default_factory=list)
@@ -126,6 +133,8 @@ class CliPreset:  # pylint: disable=too-many-instance-attributes
     strip_ansi: bool = True
     timeout_seconds: Optional[float] = 1800.0
     cwd: Optional[str] = None
+    max_retries: int = 2
+    retry_backoff_seconds: float = 1.0
 
 
 # ---------------------------------------------------------------------------
