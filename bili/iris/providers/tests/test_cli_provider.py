@@ -17,7 +17,7 @@ import json
 import os
 import subprocess
 from typing import Dict
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from langchain_core.messages import (
@@ -36,6 +36,7 @@ from bili.iris.providers.cli_provider import (
     CliLLM,
     CliLLMError,
     CliProvider,
+    _is_transient_failure,
     extract_json_path,
     render_messages,
     strip_ansi,
@@ -273,6 +274,8 @@ class TestCliProviderLoad:
         assert llm.strip_ansi_output is True
         assert llm.timeout_seconds == 1800.0
         assert llm.cwd is None
+        assert llm.max_retries == 2
+        assert llm.retry_backoff_seconds == 1.0
 
     def test_none_timeout_accepted(self):
         """CliProvider.load() accepts timeout_seconds=None to disable the timeout."""
@@ -290,6 +293,8 @@ class TestCliProviderLoad:
             strip_ansi=False,
             timeout_seconds=30.0,
             cwd="/opt/sandbox",
+            max_retries=5,
+            retry_backoff_seconds=2.5,
         )
         assert llm.command == ["my-cli", "--json"]
         assert llm.prompt_via == "arg"
@@ -299,11 +304,28 @@ class TestCliProviderLoad:
         assert llm.strip_ansi_output is False
         assert llm.timeout_seconds == 30.0
         assert llm.cwd == "/opt/sandbox"
+        assert llm.max_retries == 5
+        assert llm.retry_backoff_seconds == 2.5
 
     def test_custom_cwd_propagated(self):
         """CliProvider.load() forwards a caller-supplied cwd to the CliLLM."""
         llm = CliProvider().load(command=["my-cli"], cwd="/workspace/fixed")
         assert llm.cwd == "/workspace/fixed"
+
+    def test_negative_max_retries_raises(self):
+        """A negative max_retries raises ValueError."""
+        with pytest.raises(ValueError, match="max_retries"):
+            CliProvider().load(command=["echo"], max_retries=-1)
+
+    def test_negative_retry_backoff_raises(self):
+        """A negative retry_backoff_seconds raises ValueError."""
+        with pytest.raises(ValueError, match="retry_backoff_seconds"):
+            CliProvider().load(command=["echo"], retry_backoff_seconds=-1.0)
+
+    def test_zero_max_retries_accepted(self):
+        """max_retries=0 (disable retry) is accepted."""
+        llm = CliProvider().load(command=["echo"], max_retries=0)
+        assert llm.max_retries == 0
 
     def test_extra_kwargs_ignored(self):
         """Extra kwargs from an llm_config catalog entry do not raise."""
@@ -488,6 +510,139 @@ class TestRunSubprocess:
             with pytest.raises(CliLLMError) as exc_info:
                 llm._run_subprocess("p")
         assert len(str(exc_info.value)) < 600 + 100
+
+
+# ---------------------------------------------------------------------------
+# Transient-vs-permanent failure detection
+# ---------------------------------------------------------------------------
+
+
+class TestIsTransientFailure:
+    """Unit tests for the transient-failure text-pattern detector."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "CLI subprocess exited with code 1: claude\nstderr: rate limit exceeded",
+            "429 Too Many Requests",
+            "Error: Overloaded (Anthropic 529)",
+            "resource_exhausted: quota exceeded for this project",
+            "503 Service Unavailable",
+            "the upstream service is temporarily unavailable",
+            "request was throttled, please retry",
+        ],
+    )
+    def test_transient_signatures_detected(self, text):
+        """Known transient-failure text patterns are detected."""
+        assert _is_transient_failure(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "CLI subprocess exited with code 127: my-cli\nstderr: command not found",
+            "authentication failed: invalid API key",
+            "CLI output is not valid JSON (output_format='json'): ...",
+            "json_path='content' not found in CLI output: ...",
+            "CLI subprocess timed out after 30.0s: my-cli",
+            "usage: my-cli [OPTIONS]\nerror: unrecognized argument --bogus",
+        ],
+    )
+    def test_permanent_failures_not_detected(self, text):
+        """Permanent-failure text does not match any transient pattern."""
+        assert _is_transient_failure(text) is False
+
+
+# ---------------------------------------------------------------------------
+# CliLLM._run_subprocess -- in-process retry on transient failure
+# ---------------------------------------------------------------------------
+
+
+class TestRunSubprocessRetry:
+    """Tests for the retry-with-backoff wrapper around subprocess execution."""
+
+    def test_transient_failure_retries_then_succeeds(self):
+        """A transient failure is retried and the eventual success is returned."""
+        llm = _llm(max_retries=2, retry_backoff_seconds=0.01)
+        fail = _make_completed_proc("", returncode=1, stderr="429 Too Many Requests")
+        ok = _make_completed_proc("all good")
+        with patch("subprocess.run", side_effect=[fail, ok]) as mock_run:
+            with patch("bili.iris.providers.cli_provider.time.sleep") as mock_sleep:
+                result = llm._run_subprocess("prompt")
+        assert result == "all good"
+        assert mock_run.call_count == 2
+        mock_sleep.assert_called_once()
+
+    def test_transient_failure_exhausts_retries_and_raises(self):
+        """A persistently transient failure raises CliLLMError once max_retries
+        attempts are exhausted."""
+        llm = _llm(max_retries=2, retry_backoff_seconds=0.01)
+        fail = _make_completed_proc("", returncode=1, stderr="503 Service Unavailable")
+        with patch("subprocess.run", side_effect=[fail, fail, fail]) as mock_run:
+            with patch("bili.iris.providers.cli_provider.time.sleep"):
+                with pytest.raises(CliLLMError, match="exited with code 1"):
+                    llm._run_subprocess("prompt")
+        # max_retries=2 -> 3 total attempts (1 initial + 2 retries)
+        assert mock_run.call_count == 3
+
+    def test_permanent_failure_fails_fast_no_retry(self):
+        """A non-transient failure raises immediately with no retry attempts."""
+        llm = _llm(max_retries=2, retry_backoff_seconds=0.01)
+        fail = _make_completed_proc("", returncode=1, stderr="command not found")
+        with patch("subprocess.run", return_value=fail) as mock_run:
+            with patch("bili.iris.providers.cli_provider.time.sleep") as mock_sleep:
+                with pytest.raises(CliLLMError, match="exited with code 1"):
+                    llm._run_subprocess("prompt")
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
+
+    def test_max_retries_zero_disables_retry(self):
+        """max_retries=0 preserves the historical behaviour: a single attempt,
+        failing immediately even on a transient signature."""
+        llm = _llm(max_retries=0)
+        fail = _make_completed_proc("", returncode=1, stderr="rate limit exceeded")
+        with patch("subprocess.run", return_value=fail) as mock_run:
+            with patch("bili.iris.providers.cli_provider.time.sleep") as mock_sleep:
+                with pytest.raises(CliLLMError, match="exited with code 1"):
+                    llm._run_subprocess("prompt")
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
+
+    def test_backoff_delays_are_exponential(self):
+        """Successive retries back off exponentially from retry_backoff_seconds."""
+        llm = _llm(max_retries=3, retry_backoff_seconds=1.0)
+        fail = _make_completed_proc("", returncode=1, stderr="429 Too Many Requests")
+        ok = _make_completed_proc("done")
+        with patch("subprocess.run", side_effect=[fail, fail, fail, ok]):
+            with patch("bili.iris.providers.cli_provider.time.sleep") as mock_sleep:
+                result = llm._run_subprocess("prompt")
+        assert result == "done"
+        assert mock_sleep.call_args_list == [call(1.0), call(2.0), call(4.0)]
+
+    def test_default_max_retries_is_two(self):
+        """The default max_retries (2) permits two retries after the first
+        transient failure before raising."""
+        llm = _llm()
+        assert llm.max_retries == 2
+        fail = _make_completed_proc("", returncode=1, stderr="429 Too Many Requests")
+        with patch("subprocess.run", side_effect=[fail, fail, fail]) as mock_run:
+            with patch("bili.iris.providers.cli_provider.time.sleep"):
+                with pytest.raises(CliLLMError):
+                    llm._run_subprocess("prompt")
+        assert mock_run.call_count == 3
+
+    def test_timeout_is_not_retried(self):
+        """A subprocess timeout is treated as permanent (not retried): its
+        message never matches a transient signature."""
+        llm = _llm(max_retries=2, retry_backoff_seconds=0.01, timeout_seconds=5.0)
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["echo"], timeout=5),
+        ) as mock_run:
+            with patch("bili.iris.providers.cli_provider.time.sleep") as mock_sleep:
+                with pytest.raises(CliLLMError, match="timed out"):
+                    llm._run_subprocess("prompt")
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

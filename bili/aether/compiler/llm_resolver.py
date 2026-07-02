@@ -219,6 +219,14 @@ def create_llm(agent: AgentSpec) -> Any:
     if agent.cli_subprocess_cwd is not None and provider.startswith("cli"):
         kwargs["cwd"] = agent.cli_subprocess_cwd
 
+    # Forward cli_subprocess_max_retries / cli_subprocess_retry_backoff to
+    # CLI providers only, for the same reason as cli_subprocess_timeout above.
+    if agent.cli_subprocess_max_retries is not None and provider.startswith("cli"):
+        kwargs["max_retries"] = agent.cli_subprocess_max_retries
+
+    if agent.cli_subprocess_retry_backoff is not None and provider.startswith("cli"):
+        kwargs["retry_backoff_seconds"] = agent.cli_subprocess_retry_backoff
+
     LOGGER.info(
         "Creating LLM for agent '%s': provider=%s, model_id=%s",
         agent.agent_id,

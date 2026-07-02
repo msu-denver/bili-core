@@ -82,6 +82,8 @@ class TestCliPreset:
         assert preset.strip_ansi is True
         assert preset.timeout_seconds == 1800.0
         assert preset.cwd is None
+        assert preset.max_retries == 2
+        assert preset.retry_backoff_seconds == 1.0
 
     def test_none_timeout_accepted(self):
         """timeout_seconds=None disables the per-call timeout."""
@@ -99,6 +101,8 @@ class TestCliPreset:
             strip_ansi=False,
             timeout_seconds=60.0,
             cwd="/opt/sandbox",
+            max_retries=5,
+            retry_backoff_seconds=2.5,
         )
         assert preset.command == ["llm", "--fast"]
         assert preset.prompt_via == "stdin"
@@ -108,6 +112,8 @@ class TestCliPreset:
         assert preset.strip_ansi is False
         assert preset.timeout_seconds == 60.0
         assert preset.cwd == "/opt/sandbox"
+        assert preset.max_retries == 5
+        assert preset.retry_backoff_seconds == 2.5
 
     def test_dataclass_has_expected_fields(self):
         """CliPreset exposes exactly the fields that CliProvider.load accepts."""
@@ -121,6 +127,8 @@ class TestCliPreset:
             "strip_ansi",
             "timeout_seconds",
             "cwd",
+            "max_retries",
+            "retry_backoff_seconds",
         }
         assert expected == field_names
 
@@ -304,6 +312,27 @@ class TestCliPresetProvider:
         klass = CliPresetProvider.for_preset(preset)
         llm = klass().load(cwd=None)
         assert llm.cwd is None
+
+    def test_load_default_max_retries_matches_preset_default(self):
+        """load() with no override falls back to the preset's max_retries."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        assert llm.max_retries == 2
+
+    def test_load_overrides_max_retries(self):
+        """load() accepts a caller-supplied max_retries override."""
+        preset = CliPreset(command=["tool"], max_retries=2)
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(max_retries=5)
+        assert llm.max_retries == 5
+
+    def test_load_overrides_retry_backoff_seconds(self):
+        """load() accepts a caller-supplied retry_backoff_seconds override."""
+        preset = CliPreset(command=["tool"], retry_backoff_seconds=1.0)
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(retry_backoff_seconds=3.0)
+        assert llm.retry_backoff_seconds == 3.0
 
     def test_load_without_preset_raises(self):
         """load() raises RuntimeError if _preset is None (base class used directly)."""
