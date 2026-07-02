@@ -427,7 +427,12 @@ jobs:
               *:INCONCLUSIVE)   printf '⚠️ **Gate: INCONCLUSIVE** — %s Push a new commit to re-run the checks (they re-run on every push), or a maintainer can apply the `%s` label.\n' "$reason" "$ACK_LABEL" ;;
               *)                printf '🛑 **Gate: BLOCK** — %s\n' "$reason" ;;
             esac
-            printf '\n_Observe-only until `review-gate` is added to the branch'"'"'s required status checks._\n'
+            # NOTE: intentionally no "observe-only" footer. Whether this gate is a
+            # required (merge-blocking) check varies per repo/branch and changes
+            # over time; a hard-coded claim goes stale (it falsely read
+            # "observe-only" after the gate was made required across the lab).
+            # GitHub's checks UI already marks required checks; the verdict lines
+            # above tell the reader what to do regardless of enforcement.
           } > gate-comment.md
           gh api "repos/$REPO/issues/$PR/comments" \
             --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null \
