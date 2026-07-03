@@ -623,7 +623,7 @@ class TestParseOutput:
 class TestBuildMcpNode:
     """Tests for the build_mcp_node factory and the node callable it returns."""
 
-    def _make_cli_llm(self, command=None):
+    def _make_cli_llm(self, command=None, cwd=None):
         llm = MagicMock()
         llm.command = command or ["claude", "-p"]
         llm.message_format = "last"
@@ -631,6 +631,7 @@ class TestBuildMcpNode:
         llm.json_path = "content"
         llm.strip_ansi_output = False
         llm.timeout_seconds = 30.0
+        llm.cwd = cwd
         return llm
 
     def _make_injector(self, extra_env=None, cleanup=None, cwd=None):
@@ -652,7 +653,7 @@ class TestBuildMcpNode:
     def _make_state(self, text: str = "hello"):
         return {"messages": [HumanMessage(content=text)]}
 
-    def _run_node_with_mocks(
+    def _run_node_with_mocks(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         tool=None,
         injector=None,
@@ -660,10 +661,17 @@ class TestBuildMcpNode:
         returncode=0,
         extra_env=None,
         cwd=None,
+        llm_cwd=None,
     ):
-        """Patch EphemeralMcpServer and subprocess to run the node callable."""
+        """Patch EphemeralMcpServer and subprocess to run the node callable.
+
+        :param cwd: Injector-side cwd sentinel (e.g. the Gemini injector's
+            temp-dir cwd requirement), forwarded via the injector's extra env.
+        :param llm_cwd: The CliLLM's own configured ``cwd`` attribute --
+            simulates a caller-configured subprocess working directory.
+        """
         tool = tool or _make_plain_tool()
-        llm = self._make_cli_llm()
+        llm = self._make_cli_llm(cwd=llm_cwd)
         injector = injector or self._make_injector(extra_env=extra_env, cwd=cwd)
 
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
@@ -745,6 +753,43 @@ class TestBuildMcpNode:
         assert call_kwargs.get("cwd") == "/tmp/gemini_work"
         # Sentinel must NOT appear in the forwarded env.
         assert _GEMINI_CWD_KEY not in call_kwargs.get("env", {})
+
+    def test_configured_llm_cwd_forwarded_to_subprocess(self):
+        """A CliLLM.cwd configured on the model must reach the MCP subprocess.
+
+        Regression test: build_mcp_node previously ignored llm_model.cwd
+        entirely, so a configured working directory (e.g. for claude/codex,
+        which have no cwd-sentinel injector) was silently dropped and the
+        subprocess inherited the caller's cwd instead.
+        """
+        _, mock_run, _ = self._run_node_with_mocks(llm_cwd="/fixed/workspace")
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("cwd") == "/fixed/workspace"
+
+    def test_configured_llm_cwd_takes_precedence_over_gemini_sentinel(self):
+        """An explicit CliLLM.cwd wins over the injector's own cwd sentinel.
+
+        The Gemini injector requests a temp-dir cwd so it can pick up its
+        generated project-scoped settings file, but a caller-configured
+        CliLLM.cwd is an isolation boundary and must not be silently
+        overridden by injector plumbing.
+        """
+        _, mock_run, _ = self._run_node_with_mocks(
+            cwd="/tmp/gemini_work", llm_cwd="/fixed/workspace"
+        )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("cwd") == "/fixed/workspace"
+
+    def test_no_cwd_configured_leaves_subprocess_cwd_none(self):
+        """With no configured cwd and no injector sentinel, cwd stays None.
+
+        None means the subprocess inherits the calling process's cwd,
+        matching subprocess.run's own default and the direct CLI execution
+        path's default.
+        """
+        _, mock_run, _ = self._run_node_with_mocks()
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("cwd") is None
 
     def test_nonzero_exit_raises_cli_error(self):
         from bili.iris.providers.cli_provider import CliLLMError

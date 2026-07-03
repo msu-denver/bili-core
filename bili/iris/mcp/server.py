@@ -575,9 +575,26 @@ def build_mcp_node(
     7. Returns a state dict update with the response as an ``AIMessage``.
     8. Cleans up the ephemeral server and any injector-created temp resources.
 
+    Working-directory precedence
+    -----------------------------
+    The subprocess's working directory is resolved in this order:
+
+    1. ``llm_model.cwd``, if set. This is a caller-controlled isolation
+       boundary (e.g. pinning the CLI subprocess to a fixed sandbox
+       directory rather than letting it inherit the calling process's cwd)
+       and always takes precedence.
+    2. The injector-provided cwd sentinel, if the CLI injector requires a
+       specific working directory of its own (e.g. :class:`GeminiCliInjector`
+       points the subprocess at a temp directory containing its
+       project-scoped MCP settings file).
+    3. ``None`` -- the subprocess inherits the calling process's cwd,
+       matching ``subprocess.run``'s own default and the direct
+       (:meth:`CliLLM._run_subprocess`) CLI execution path's default.
+
     :param llm_model: A :class:`~bili.iris.providers.cli_provider.CliLLM`
         instance (provides ``command``, ``message_format``, ``output_format``,
-        ``json_path``, ``strip_ansi_output``, and ``timeout_seconds``).
+        ``json_path``, ``strip_ansi_output``, ``timeout_seconds``, and
+        ``cwd``).
     :param tools: LangChain tools to expose as MCP tools.
     :param injector: A CLI injector from :mod:`bili.iris.mcp.cli_injectors`
         (or any object implementing ``inject(handle) -> InjectionResult``).
@@ -591,6 +608,7 @@ def build_mcp_node(
     json_path: str = getattr(llm_model, "json_path", "content")
     strip_ansi_flag: bool = getattr(llm_model, "strip_ansi_output", True)
     timeout_seconds: float = getattr(llm_model, "timeout_seconds", 120.0)
+    configured_cwd: Optional[str] = getattr(llm_model, "cwd", None)
 
     # Import message rendering from cli_provider at construction time to fail fast
     # if the package is missing.
@@ -636,8 +654,20 @@ def build_mcp_node(
             )
 
             run_env = os.environ.copy()
-            subprocess_cwd: Optional[str] = extra_env.pop(_GEMINI_CWD_KEY, None)
+            sentinel_cwd: Optional[str] = extra_env.pop(_GEMINI_CWD_KEY, None)
             run_env.update(extra_env)
+
+            # Resolve the subprocess working directory. An explicitly configured
+            # CliLLM.cwd always wins -- it is a caller-controlled isolation
+            # boundary (e.g. pinning the CLI subprocess to a sandbox directory)
+            # and must not be silently overridden by an injector's own cwd
+            # requirements. When no explicit cwd is configured, fall back to the
+            # injector-provided sentinel (used by GeminiCliInjector to point the
+            # subprocess at its generated project-scoped settings directory).
+            # With neither set, cwd stays None and the subprocess inherits the
+            # calling process's cwd, matching subprocess.run's own default and
+            # the direct (_run_subprocess) CLI path's default.
+            subprocess_cwd: Optional[str] = configured_cwd or sentinel_cwd
 
             LOGGER.debug(
                 "EphemeralMcpServer: running CLI %s with MCP server %s",
