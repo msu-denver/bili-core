@@ -344,6 +344,22 @@ bili-core process
 
 **Install:** `pip install bili-core[mcp]` (includes both `mcp>=1.0` and `uvicorn>=0.30`)
 
+**Model / reasoning-effort control:** `CliLLM.model` and `CliLLM.reasoning_effort`
+(set via `AgentSpec.cli_subprocess_model` / `cli_subprocess_reasoning_effort` in
+AETHER, or directly on `CliProvider.load()`) pin a specific model and reasoning
+depth for the spawned CLI, instead of inheriting whatever the CLI's own global
+default or interactive session is set to. Applied identically on both the
+direct subprocess path and the ephemeral-MCP path above, via
+`bili.iris.providers.cli_model_flags.build_model_and_effort_args`:
+
+| Preset | `model` flag | `reasoning_effort` flag |
+|--------|-------------|--------------------------|
+| `cli_claude_code` | `--model <value>` | `--effort <value>` (e.g. `low`/`medium`/`high`/`xhigh`/`max`) |
+| `cli_codex` | `--model <value>` | `-c model_reasoning_effort="<value>"` (e.g. `low`/`medium`/`high`/`xhigh`) |
+| `cli_gemini_cli` | `--model <value>` | Not CLI-settable (Gemini exposes thinking-budget only via `.gemini/settings.json` or interactive slash commands); setting it is a documented no-op with a logged warning |
+
+Both settings default to `None` (no override -- unconfigured behaviour is unchanged).
+
 **Extension point:** Register injectors for additional CLIs at startup:
 
 ```python

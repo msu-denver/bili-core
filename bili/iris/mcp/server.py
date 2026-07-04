@@ -591,18 +591,44 @@ def build_mcp_node(
        matching ``subprocess.run``'s own default and the direct
        (:meth:`CliLLM._run_subprocess`) CLI execution path's default.
 
+    Model / reasoning-effort flags
+    -------------------------------
+    ``llm_model.model`` and ``llm_model.reasoning_effort``, if set, are
+    rendered into argv tokens (via ``llm_model.model_flag_template`` /
+    ``llm_model.reasoning_effort_flag_template`` -- see
+    :func:`~bili.iris.providers.cli_model_flags.build_model_and_effort_args`)
+    and appended to the *base* command **before** the injector adds its own
+    MCP-related flags.  This mirrors the direct
+    (:meth:`~bili.iris.providers.cli_provider.CliLLM._run_subprocess`) CLI
+    execution path exactly, so a configured model or reasoning effort
+    reaches the spawned CLI on both the tool-less and MCP tool-strategy
+    paths.  A value configured with no corresponding flag template for the
+    target CLI is a documented no-op (see
+    :func:`~bili.iris.providers.cli_model_flags.build_model_and_effort_args`).
+
     :param llm_model: A :class:`~bili.iris.providers.cli_provider.CliLLM`
         instance (provides ``command``, ``message_format``, ``output_format``,
-        ``json_path``, ``strip_ansi_output``, ``timeout_seconds``, and
-        ``cwd``).
+        ``json_path``, ``strip_ansi_output``, ``timeout_seconds``, ``cwd``,
+        ``model``, ``reasoning_effort``, ``model_flag_template``, and
+        ``reasoning_effort_flag_template``).
     :param tools: LangChain tools to expose as MCP tools.
     :param injector: A CLI injector from :mod:`bili.iris.mcp.cli_injectors`
         (or any object implementing ``inject(handle) -> InjectionResult``).
     :returns: A ``(state: dict) -> dict`` callable.
     :raises ImportError: If ``bili-core[mcp]`` is not installed.
     """
+    # Import message rendering from cli_provider at construction time to fail fast
+    # if the package is missing.
+    from bili.iris.providers.cli_model_flags import (  # pylint: disable=import-outside-toplevel
+        build_model_and_effort_args,
+    )
+    from bili.iris.providers.cli_provider import (  # pylint: disable=import-outside-toplevel
+        CliLLMError,
+        render_messages,
+    )
+
     # Capture the CliLLM configuration at construction time.
-    command: List[str] = list(llm_model.command)
+    base_command: List[str] = list(llm_model.command)
     message_format: str = getattr(llm_model, "message_format", "last")
     output_format: str = getattr(llm_model, "output_format", "text")
     json_path: str = getattr(llm_model, "json_path", "content")
@@ -610,11 +636,15 @@ def build_mcp_node(
     timeout_seconds: float = getattr(llm_model, "timeout_seconds", 120.0)
     configured_cwd: Optional[str] = getattr(llm_model, "cwd", None)
 
-    # Import message rendering from cli_provider at construction time to fail fast
-    # if the package is missing.
-    from bili.iris.providers.cli_provider import (  # pylint: disable=import-outside-toplevel
-        CliLLMError,
-        render_messages,
+    # Apply any configured model / reasoning-effort flags to the base command
+    # -- same helper, same precedence as the direct _run_subprocess path --
+    # before the injector appends its own MCP-related flags below.
+    command: List[str] = base_command + build_model_and_effort_args(
+        getattr(llm_model, "model", None),
+        getattr(llm_model, "model_flag_template", None),
+        getattr(llm_model, "reasoning_effort", None),
+        getattr(llm_model, "reasoning_effort_flag_template", None),
+        cli_name=base_command[0] if base_command else "",
     )
 
     def _node(state: Dict) -> Dict:  # pylint: disable=too-many-locals

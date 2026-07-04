@@ -623,7 +623,15 @@ class TestParseOutput:
 class TestBuildMcpNode:
     """Tests for the build_mcp_node factory and the node callable it returns."""
 
-    def _make_cli_llm(self, command=None, cwd=None):
+    def _make_cli_llm(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        command=None,
+        cwd=None,
+        model=None,
+        reasoning_effort=None,
+        model_flag_template=None,
+        reasoning_effort_flag_template=None,
+    ):
         llm = MagicMock()
         llm.command = command or ["claude", "-p"]
         llm.message_format = "last"
@@ -632,6 +640,10 @@ class TestBuildMcpNode:
         llm.strip_ansi_output = False
         llm.timeout_seconds = 30.0
         llm.cwd = cwd
+        llm.model = model
+        llm.reasoning_effort = reasoning_effort
+        llm.model_flag_template = model_flag_template
+        llm.reasoning_effort_flag_template = reasoning_effort_flag_template
         return llm
 
     def _make_injector(self, extra_env=None, cleanup=None, cwd=None):
@@ -662,6 +674,10 @@ class TestBuildMcpNode:
         extra_env=None,
         cwd=None,
         llm_cwd=None,
+        model=None,
+        reasoning_effort=None,
+        model_flag_template=None,
+        reasoning_effort_flag_template=None,
     ):
         """Patch EphemeralMcpServer and subprocess to run the node callable.
 
@@ -669,9 +685,22 @@ class TestBuildMcpNode:
             temp-dir cwd requirement), forwarded via the injector's extra env.
         :param llm_cwd: The CliLLM's own configured ``cwd`` attribute --
             simulates a caller-configured subprocess working directory.
+        :param model: The CliLLM's own configured ``model`` attribute.
+        :param reasoning_effort: The CliLLM's own configured
+            ``reasoning_effort`` attribute.
+        :param model_flag_template: The CliLLM's own configured
+            ``model_flag_template`` attribute.
+        :param reasoning_effort_flag_template: The CliLLM's own configured
+            ``reasoning_effort_flag_template`` attribute.
         """
         tool = tool or _make_plain_tool()
-        llm = self._make_cli_llm(cwd=llm_cwd)
+        llm = self._make_cli_llm(
+            cwd=llm_cwd,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            model_flag_template=model_flag_template,
+            reasoning_effort_flag_template=reasoning_effort_flag_template,
+        )
         injector = injector or self._make_injector(extra_env=extra_env, cwd=cwd)
 
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
@@ -790,6 +819,100 @@ class TestBuildMcpNode:
         _, mock_run, _ = self._run_node_with_mocks()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs.get("cwd") is None
+
+    def test_configured_model_reaches_injector_command(self):
+        """A CliLLM.model configured on the model must reach the base command
+        handed to the injector, before MCP flags are appended.
+
+        Regression coverage for the same dual-path gotcha the cwd fix (#236)
+        had: model/reasoning-effort flags must be applied on the MCP
+        tool-strategy path (build_mcp_node), not only on the direct
+        _run_subprocess path.
+        """
+        _, _, injector = self._run_node_with_mocks(
+            model="claude-sonnet-5",
+            model_flag_template=["--model", "{value}"],
+        )
+        call_kwargs = injector.inject.call_args.kwargs
+        assert call_kwargs["command"] == ["claude", "-p", "--model", "claude-sonnet-5"]
+
+    def test_configured_reasoning_effort_reaches_injector_command(self):
+        """A CliLLM.reasoning_effort configured on the model must reach the
+        base command handed to the injector, before MCP flags are appended."""
+        _, _, injector = self._run_node_with_mocks(
+            reasoning_effort="high",
+            reasoning_effort_flag_template=["--effort", "{value}"],
+        )
+        call_kwargs = injector.inject.call_args.kwargs
+        assert call_kwargs["command"] == ["claude", "-p", "--effort", "high"]
+
+    def test_configured_model_and_reasoning_effort_both_reach_injector_command(self):
+        """Both model and reasoning_effort flags reach the injector's base
+        command, model first, matching the direct-path ordering."""
+        _, _, injector = self._run_node_with_mocks(
+            model="claude-sonnet-5",
+            model_flag_template=["--model", "{value}"],
+            reasoning_effort="high",
+            reasoning_effort_flag_template=["--effort", "{value}"],
+        )
+        call_kwargs = injector.inject.call_args.kwargs
+        assert call_kwargs["command"] == [
+            "claude",
+            "-p",
+            "--model",
+            "claude-sonnet-5",
+            "--effort",
+            "high",
+        ]
+
+    def test_no_model_or_reasoning_effort_configured_leaves_command_unchanged(self):
+        """With neither model nor reasoning_effort set, the base command
+        handed to the injector is unchanged -- today's behaviour, unchanged."""
+        _, _, injector = self._run_node_with_mocks()
+        call_kwargs = injector.inject.call_args.kwargs
+        assert call_kwargs["command"] == ["claude", "-p"]
+
+    def test_model_set_with_no_template_omits_flag_on_mcp_path(self):
+        """model set with model_flag_template=None is a documented no-op on
+        the MCP path too: no extra flag is added to the injector's command."""
+        _, _, injector = self._run_node_with_mocks(
+            model="claude-sonnet-5", model_flag_template=None
+        )
+        call_kwargs = injector.inject.call_args.kwargs
+        assert call_kwargs["command"] == ["claude", "-p"]
+
+    def test_configured_model_flags_reach_final_subprocess_command_when_injector_passthrough(
+        self,
+    ):
+        """End-to-end: when the injector passes the base command through
+        unchanged (appending only its own flags), the final subprocess.run
+        call carries the configured model flags too."""
+        from bili.iris.mcp.cli_injectors import InjectionResult
+
+        def _passthrough_inject(command, handle):  # pylint: disable=unused-argument
+            return InjectionResult(
+                augmented_command=list(command) + ["--mcp-config", "/tmp/x.json"],
+                extra_env={},
+                cleanup=None,
+            )
+
+        injector = MagicMock()
+        injector.inject.side_effect = _passthrough_inject
+
+        _, mock_run, _ = self._run_node_with_mocks(
+            injector=injector,
+            model="claude-sonnet-5",
+            model_flag_template=["--model", "{value}"],
+        )
+        called_cmd = mock_run.call_args[0][0]
+        assert called_cmd == [
+            "claude",
+            "-p",
+            "--model",
+            "claude-sonnet-5",
+            "--mcp-config",
+            "/tmp/x.json",
+        ]
 
     def test_nonzero_exit_raises_cli_error(self):
         from bili.iris.providers.cli_provider import CliLLMError

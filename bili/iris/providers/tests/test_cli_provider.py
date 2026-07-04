@@ -33,10 +33,12 @@ from bili.aether.compiler.llm_resolver import resolve_provider
 from bili.iris.config.llm_config import LLM_MODELS
 from bili.iris.providers.base import KNOWN_PROVIDER_TYPES
 from bili.iris.providers.cli_provider import (
+    DEFAULT_MODEL_FLAG_TEMPLATE,
     CliLLM,
     CliLLMError,
     CliProvider,
     _is_transient_failure,
+    build_model_and_effort_args,
     extract_json_path,
     render_messages,
     strip_ansi,
@@ -233,6 +235,85 @@ class TestExtractJsonPath:
 
 
 # ---------------------------------------------------------------------------
+# build_model_and_effort_args
+# ---------------------------------------------------------------------------
+
+
+class TestBuildModelAndEffortArgs:
+    """Unit tests for the model/reasoning-effort argv-templating helper."""
+
+    def test_no_model_no_effort_returns_empty(self):
+        """Neither model nor reasoning_effort set -> no extra argv tokens."""
+        result = build_model_and_effort_args(None, ["--model", "{value}"], None, None)
+        assert result == []
+
+    def test_model_only_renders_template(self):
+        """A configured model renders its template into argv tokens."""
+        result = build_model_and_effort_args(
+            "gpt-5", ["--model", "{value}"], None, None
+        )
+        assert result == ["--model", "gpt-5"]
+
+    def test_reasoning_effort_only_renders_template(self):
+        """A configured reasoning_effort renders its template into argv tokens."""
+        result = build_model_and_effort_args(
+            None, None, "high", ["--effort", "{value}"]
+        )
+        assert result == ["--effort", "high"]
+
+    def test_both_model_and_effort_render_in_order(self):
+        """Both settings render, model tokens first then reasoning-effort tokens."""
+        result = build_model_and_effort_args(
+            "gpt-5",
+            ["--model", "{value}"],
+            "high",
+            ["--effort", "{value}"],
+        )
+        assert result == ["--model", "gpt-5", "--effort", "high"]
+
+    def test_combined_flag_template_renders_single_token(self):
+        """A template that embeds '{value}' inside a larger token (e.g. a
+        '-c key=value' style config override) renders correctly."""
+        result = build_model_and_effort_args(
+            None, None, "high", ["-c", 'model_reasoning_effort="{value}"']
+        )
+        assert result == ["-c", 'model_reasoning_effort="high"']
+
+    def test_model_set_but_no_template_is_no_op_with_warning(self, caplog):
+        """model set with model_flag_template=None is a documented no-op:
+        no argv tokens are added, and a warning is logged."""
+        with caplog.at_level("WARNING"):
+            result = build_model_and_effort_args(
+                "gpt-5", None, None, None, cli_name="my-cli"
+            )
+        assert result == []
+        assert "model" in caplog.text
+        assert "my-cli" in caplog.text
+
+    def test_reasoning_effort_set_but_no_template_is_no_op_with_warning(self, caplog):
+        """reasoning_effort set with reasoning_effort_flag_template=None is a
+        documented no-op: no argv tokens are added, and a warning is logged."""
+        with caplog.at_level("WARNING"):
+            result = build_model_and_effort_args(
+                None, None, "high", None, cli_name="gemini"
+            )
+        assert result == []
+        assert "reasoning-effort" in caplog.text or "reasoning_effort" in caplog.text
+        assert "gemini" in caplog.text
+
+    def test_no_template_no_op_uses_placeholder_cli_name_when_unset(self, caplog):
+        """When cli_name is not passed, the warning uses a '<cli>' placeholder
+        rather than crashing or logging an empty string."""
+        with caplog.at_level("WARNING"):
+            build_model_and_effort_args("gpt-5", None, None, None)
+        assert "<cli>" in caplog.text
+
+    def test_default_model_flag_template_constant(self):
+        """DEFAULT_MODEL_FLAG_TEMPLATE is the near-universal '--model' convention."""
+        assert DEFAULT_MODEL_FLAG_TEMPLATE == ("--model", "{value}")
+
+
+# ---------------------------------------------------------------------------
 # CliProvider.load validation
 # ---------------------------------------------------------------------------
 
@@ -276,6 +357,10 @@ class TestCliProviderLoad:
         assert llm.cwd is None
         assert llm.max_retries == 2
         assert llm.retry_backoff_seconds == 1.0
+        assert llm.model is None
+        assert llm.reasoning_effort is None
+        assert llm.model_flag_template == ["--model", "{value}"]
+        assert llm.reasoning_effort_flag_template is None
 
     def test_none_timeout_accepted(self):
         """CliProvider.load() accepts timeout_seconds=None to disable the timeout."""
@@ -295,6 +380,10 @@ class TestCliProviderLoad:
             cwd="/opt/sandbox",
             max_retries=5,
             retry_backoff_seconds=2.5,
+            model="fast-model",
+            reasoning_effort="low",
+            model_flag_template=["-m", "{value}"],
+            reasoning_effort_flag_template=["--reasoning", "{value}"],
         )
         assert llm.command == ["my-cli", "--json"]
         assert llm.prompt_via == "arg"
@@ -306,11 +395,28 @@ class TestCliProviderLoad:
         assert llm.cwd == "/opt/sandbox"
         assert llm.max_retries == 5
         assert llm.retry_backoff_seconds == 2.5
+        assert llm.model == "fast-model"
+        assert llm.reasoning_effort == "low"
+        assert llm.model_flag_template == ["-m", "{value}"]
+        assert llm.reasoning_effort_flag_template == ["--reasoning", "{value}"]
 
     def test_custom_cwd_propagated(self):
         """CliProvider.load() forwards a caller-supplied cwd to the CliLLM."""
         llm = CliProvider().load(command=["my-cli"], cwd="/workspace/fixed")
         assert llm.cwd == "/workspace/fixed"
+
+    def test_none_model_flag_template_disables_injection(self):
+        """Passing model_flag_template=None disables model-flag injection."""
+        llm = CliProvider().load(command=["my-cli"], model_flag_template=None)
+        assert llm.model_flag_template is None
+
+    def test_model_flag_template_is_copied_not_aliased(self):
+        """The returned CliLLM's model_flag_template is an independent list,
+        not the same object passed in by the caller."""
+        template = ["--model", "{value}"]
+        llm = CliProvider().load(command=["my-cli"], model_flag_template=template)
+        llm.model_flag_template.append("mutated")
+        assert template == ["--model", "{value}"]
 
     def test_negative_max_retries_raises(self):
         """A negative max_retries raises ValueError."""
@@ -376,6 +482,74 @@ class TestBuildRunArgs:
     def test_command_is_not_mutated(self):
         """_build_run_args does not mutate the CliLLM.command list."""
         llm = _llm(command=["my-llm", "--flag"], prompt_via="arg")
+        original = list(llm.command)
+        llm._build_run_args("prompt")
+        assert llm.command == original
+
+    def test_model_flag_applied_before_prompt(self):
+        """A configured model is inserted between the base command and the
+        prompt argument."""
+        llm = _llm(prompt_via="arg", model="gpt-5")
+        cmd, _, _ = llm._build_run_args("hello")
+        assert cmd == ["echo", "--model", "gpt-5", "hello"]
+
+    def test_reasoning_effort_flag_applied_before_prompt(self):
+        """A configured reasoning_effort is inserted between the base command
+        and the prompt argument, using the configured template."""
+        llm = _llm(
+            prompt_via="arg",
+            reasoning_effort="high",
+            reasoning_effort_flag_template=["--effort", "{value}"],
+        )
+        cmd, _, _ = llm._build_run_args("hello")
+        assert cmd == ["echo", "--effort", "high", "hello"]
+
+    def test_model_and_reasoning_effort_both_applied_in_order(self):
+        """Model flags precede reasoning-effort flags, both before the prompt."""
+        llm = _llm(
+            prompt_via="arg",
+            model="gpt-5",
+            reasoning_effort="high",
+            reasoning_effort_flag_template=["--effort", "{value}"],
+        )
+        cmd, _, _ = llm._build_run_args("hello")
+        assert cmd == ["echo", "--model", "gpt-5", "--effort", "high", "hello"]
+
+    def test_unset_model_and_reasoning_effort_add_no_flags(self):
+        """With neither set, the command is unchanged -- backward compatible."""
+        llm = _llm(prompt_via="arg")
+        cmd, _, _ = llm._build_run_args("hello")
+        assert cmd == ["echo", "hello"]
+
+    def test_model_flag_applied_in_stdin_mode(self):
+        """A configured model is applied to the base command even when the
+        prompt is delivered via stdin (not appended to the argv)."""
+        llm = _llm(prompt_via="stdin", model="gpt-5")
+        cmd, stdin_text, _ = llm._build_run_args("hello")
+        assert cmd == ["echo", "--model", "gpt-5"]
+        assert stdin_text == "hello"
+
+    def test_model_flag_applied_in_file_mode(self):
+        """A configured model is applied to the base command in file mode,
+        before the temp-file path argument."""
+        llm = _llm(prompt_via="file", model="gpt-5")
+        cmd, _, tmp = llm._build_run_args("hello")
+        os.unlink(tmp)
+        assert cmd == ["echo", "--model", "gpt-5", tmp]
+
+    def test_model_set_with_no_template_logs_warning_and_omits_flag(self, caplog):
+        """model set with model_flag_template=None is a documented no-op on
+        the direct path too."""
+        llm = _llm(prompt_via="arg", model="gpt-5", model_flag_template=None)
+        with caplog.at_level("WARNING"):
+            cmd, _, _ = llm._build_run_args("hello")
+        assert cmd == ["echo", "hello"]
+        assert "model" in caplog.text
+
+    def test_command_still_not_mutated_with_model_configured(self):
+        """_build_run_args does not mutate CliLLM.command even when model
+        flags are applied on top of it."""
+        llm = _llm(command=["my-llm", "--flag"], prompt_via="arg", model="gpt-5")
         original = list(llm.command)
         llm._build_run_args("prompt")
         assert llm.command == original
@@ -877,6 +1051,29 @@ class TestInvokeEndToEnd:
         positional_cmd = mock_run.call_args.args[0]
         assert positional_cmd[-1] == "question"
         assert mock_run.call_args.kwargs.get("input") is None
+
+    def test_invoke_applies_configured_model_and_reasoning_effort(self):
+        """A full invoke() call carries the configured model and
+        reasoning_effort flags through to the spawned subprocess command."""
+        llm = _llm(
+            prompt_via="arg",
+            model="gpt-5",
+            reasoning_effort="high",
+            reasoning_effort_flag_template=["--effort", "{value}"],
+        )
+        with patch(
+            "subprocess.run", return_value=_make_completed_proc("answer")
+        ) as mock_run:
+            llm.invoke([_human("question")])
+        positional_cmd = mock_run.call_args.args[0]
+        assert positional_cmd == [
+            "echo",
+            "--model",
+            "gpt-5",
+            "--effort",
+            "high",
+            "question",
+        ]
 
 
 # ---------------------------------------------------------------------------
