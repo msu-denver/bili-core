@@ -84,6 +84,10 @@ class TestCliPreset:
         assert preset.cwd is None
         assert preset.max_retries == 2
         assert preset.retry_backoff_seconds == 1.0
+        assert preset.model is None
+        assert preset.reasoning_effort is None
+        assert preset.model_flag_template == ["--model", "{value}"]
+        assert preset.reasoning_effort_flag_template is None
 
     def test_none_timeout_accepted(self):
         """timeout_seconds=None disables the per-call timeout."""
@@ -103,6 +107,10 @@ class TestCliPreset:
             cwd="/opt/sandbox",
             max_retries=5,
             retry_backoff_seconds=2.5,
+            model="fast-model",
+            reasoning_effort="low",
+            model_flag_template=["-m", "{value}"],
+            reasoning_effort_flag_template=["--reasoning", "{value}"],
         )
         assert preset.command == ["llm", "--fast"]
         assert preset.prompt_via == "stdin"
@@ -114,6 +122,15 @@ class TestCliPreset:
         assert preset.cwd == "/opt/sandbox"
         assert preset.max_retries == 5
         assert preset.retry_backoff_seconds == 2.5
+        assert preset.model == "fast-model"
+        assert preset.reasoning_effort == "low"
+        assert preset.model_flag_template == ["-m", "{value}"]
+        assert preset.reasoning_effort_flag_template == ["--reasoning", "{value}"]
+
+    def test_none_model_flag_template_accepted(self):
+        """model_flag_template=None disables model-flag injection for a preset."""
+        preset = CliPreset(command=["my-tool"], model_flag_template=None)
+        assert preset.model_flag_template is None
 
     def test_dataclass_has_expected_fields(self):
         """CliPreset exposes exactly the fields that CliProvider.load accepts."""
@@ -129,6 +146,10 @@ class TestCliPreset:
             "cwd",
             "max_retries",
             "retry_backoff_seconds",
+            "model",
+            "reasoning_effort",
+            "model_flag_template",
+            "reasoning_effort_flag_template",
         }
         assert expected == field_names
 
@@ -192,6 +213,70 @@ class TestBuiltinPresets:
     def test_gemini_cli_preset_output_format(self):
         """GEMINI_CLI_PRESET uses plain-text output."""
         assert GEMINI_CLI_PRESET.output_format == "text"
+
+
+# ---------------------------------------------------------------------------
+# Built-in preset model / reasoning-effort flag mapping
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinPresetModelAndReasoningEffort:
+    """Verify each built-in preset's model / reasoning-effort flag templates.
+
+    Per-CLI mapping (see cli_presets.py module docstring for the full
+    rationale):
+
+    - claude-code: ``--model <value>`` and ``--effort <value>``.
+    - codex: ``--model <value>`` and ``-c model_reasoning_effort="<value>"``.
+    - gemini-cli: ``--model <value>``; no CLI-settable reasoning-effort
+      control (``reasoning_effort_flag_template`` is ``None``).
+    """
+
+    def test_claude_code_model_flag_template(self):
+        """CLAUDE_CODE_PRESET applies model via '--model <value>'."""
+        assert CLAUDE_CODE_PRESET.model_flag_template == ["--model", "{value}"]
+
+    def test_claude_code_reasoning_effort_flag_template(self):
+        """CLAUDE_CODE_PRESET applies reasoning_effort via '--effort <value>'."""
+        assert CLAUDE_CODE_PRESET.reasoning_effort_flag_template == [
+            "--effort",
+            "{value}",
+        ]
+
+    def test_codex_model_flag_template(self):
+        """CODEX_PRESET applies model via '--model <value>'."""
+        assert CODEX_PRESET.model_flag_template == ["--model", "{value}"]
+
+    def test_codex_reasoning_effort_flag_template(self):
+        """CODEX_PRESET applies reasoning_effort via a '-c' config override."""
+        assert CODEX_PRESET.reasoning_effort_flag_template == [
+            "-c",
+            'model_reasoning_effort="{value}"',
+        ]
+
+    def test_gemini_cli_model_flag_template(self):
+        """GEMINI_CLI_PRESET applies model via '--model <value>'."""
+        assert GEMINI_CLI_PRESET.model_flag_template == ["--model", "{value}"]
+
+    def test_gemini_cli_reasoning_effort_not_cli_settable(self):
+        """GEMINI_CLI_PRESET has no reasoning-effort flag template.
+
+        The Gemini CLI exposes a thinking-budget control only via
+        .gemini/settings.json (or interactive slash commands), not a
+        headless-mode flag -- this preset documents that as an explicit
+        ``None`` template.
+        """
+        assert GEMINI_CLI_PRESET.reasoning_effort_flag_template is None
+
+    def test_all_builtin_presets_default_model_unset(self):
+        """None of the built-in presets pin a model by default."""
+        for preset in (CLAUDE_CODE_PRESET, CODEX_PRESET, GEMINI_CLI_PRESET):
+            assert preset.model is None
+
+    def test_all_builtin_presets_default_reasoning_effort_unset(self):
+        """None of the built-in presets pin a reasoning effort by default."""
+        for preset in (CLAUDE_CODE_PRESET, CODEX_PRESET, GEMINI_CLI_PRESET):
+            assert preset.reasoning_effort is None
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +431,87 @@ class TestCliPresetProvider:
         klass = CliPresetProvider.for_preset(preset)
         llm = klass().load()
         assert isinstance(llm, CliLLM)
+
+    def test_load_default_model_matches_preset_default(self):
+        """load() with no override falls back to the preset's model (None)."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        assert llm.model is None
+
+    def test_load_overrides_model(self):
+        """load() accepts a caller-supplied model override."""
+        preset = CliPreset(command=["tool"], model="preset-default-model")
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(model="caller-model")
+        assert llm.model == "caller-model"
+
+    def test_load_overrides_reasoning_effort(self):
+        """load() accepts a caller-supplied reasoning_effort override."""
+        preset = CliPreset(
+            command=["tool"], reasoning_effort_flag_template=["--effort", "{value}"]
+        )
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(reasoning_effort="high")
+        assert llm.reasoning_effort == "high"
+
+    def test_load_default_model_flag_template_matches_preset(self):
+        """load() with no override falls back to the preset's model_flag_template."""
+        preset = CliPreset(command=["tool"], model_flag_template=["-m", "{value}"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        assert llm.model_flag_template == ["-m", "{value}"]
+
+    def test_load_default_model_flag_template_is_copied_not_aliased(self):
+        """The preset's model_flag_template list is copied, not shared, so a
+        caller mutating the returned CliLLM's list cannot corrupt the preset."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        llm.model_flag_template.append("mutated")
+        assert preset.model_flag_template == ["--model", "{value}"]
+
+    def test_load_overrides_model_flag_template(self):
+        """load() accepts a caller-supplied model_flag_template override."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(model_flag_template=["--use-model", "{value}"])
+        assert llm.model_flag_template == ["--use-model", "{value}"]
+
+    def test_load_none_model_flag_template_disables_injection(self):
+        """Passing model_flag_template=None disables model-flag injection
+        even if the bound preset has one configured."""
+        preset = CliPreset(command=["tool"], model_flag_template=["--model", "{value}"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(model_flag_template=None)
+        assert llm.model_flag_template is None
+
+    def test_load_default_reasoning_effort_flag_template_matches_preset(self):
+        """load() with no override falls back to the preset's
+        reasoning_effort_flag_template."""
+        preset = CliPreset(
+            command=["tool"], reasoning_effort_flag_template=["--effort", "{value}"]
+        )
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        assert llm.reasoning_effort_flag_template == ["--effort", "{value}"]
+
+    def test_load_default_reasoning_effort_flag_template_is_none_by_default(self):
+        """A preset with no reasoning_effort_flag_template configured yields
+        None on the loaded CliLLM (documented no-op if reasoning_effort is
+        also set)."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load()
+        assert llm.reasoning_effort_flag_template is None
+
+    def test_load_overrides_reasoning_effort_flag_template(self):
+        """load() accepts a caller-supplied reasoning_effort_flag_template
+        override."""
+        preset = CliPreset(command=["tool"])
+        klass = CliPresetProvider.for_preset(preset)
+        llm = klass().load(reasoning_effort_flag_template=["--think", "{value}"])
+        assert llm.reasoning_effort_flag_template == ["--think", "{value}"]
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +716,90 @@ class TestLoadModelRoundtrip:
             llm = load_model("cli_claude_code")
             with pytest.raises(CliLLMError, match="timed out"):
                 llm.invoke([HumanMessage(content="hello")])
+
+    def test_claude_code_model_and_effort_reach_subprocess_command(self):
+        """model + reasoning_effort overrides reach the spawned claude command."""
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed_proc(stdout="ok"),
+        ) as mock_run:
+            llm = load_model(
+                "cli_claude_code", model="claude-sonnet-5", reasoning_effort="high"
+            )
+            llm.invoke([HumanMessage(content="hello")])
+        cmd: List[str] = mock_run.call_args[0][0]
+        assert cmd == [
+            "claude",
+            "-p",
+            "--model",
+            "claude-sonnet-5",
+            "--effort",
+            "high",
+            "hello",
+        ]
+
+    def test_codex_model_and_effort_reach_subprocess_command(self):
+        """model + reasoning_effort overrides reach the spawned codex command,
+        with reasoning_effort applied via the '-c model_reasoning_effort=' config
+        override."""
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed_proc(stdout="ok"),
+        ) as mock_run:
+            llm = load_model("cli_codex", model="gpt-5-codex", reasoning_effort="low")
+            llm.invoke([HumanMessage(content="hello")])
+        cmd: List[str] = mock_run.call_args[0][0]
+        assert cmd == [
+            "codex",
+            "exec",
+            "--model",
+            "gpt-5-codex",
+            "-c",
+            'model_reasoning_effort="low"',
+            "hello",
+        ]
+
+    def test_gemini_cli_model_reaches_subprocess_command(self):
+        """model override reaches the spawned gemini command."""
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed_proc(stdout="ok"),
+        ) as mock_run:
+            llm = load_model("cli_gemini_cli", model="gemini-3-pro")
+            llm.invoke([HumanMessage(content="hello")])
+        cmd: List[str] = mock_run.call_args[0][0]
+        assert cmd == ["gemini", "-p", "--model", "gemini-3-pro", "hello"]
+
+    def test_gemini_cli_reasoning_effort_is_no_op(self):
+        """reasoning_effort on the gemini preset is a documented no-op: no
+        extra flag is added, and the CLI's own default is used."""
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed_proc(stdout="ok"),
+        ) as mock_run:
+            llm = load_model("cli_gemini_cli", reasoning_effort="high")
+            llm.invoke([HumanMessage(content="hello")])
+        cmd: List[str] = mock_run.call_args[0][0]
+        assert cmd == ["gemini", "-p", "hello"]
+
+    def test_unset_model_and_reasoning_effort_add_no_flags(self):
+        """With neither model nor reasoning_effort set, no extra flags are
+        added -- today's behaviour, unchanged."""
+        for preset_type, expected_prefix in (
+            ("cli_claude_code", ["claude", "-p"]),
+            ("cli_codex", ["codex", "exec"]),
+            ("cli_gemini_cli", ["gemini", "-p"]),
+        ):
+            with patch(
+                "subprocess.run",
+                return_value=_make_completed_proc(stdout="ok"),
+            ) as mock_run:
+                llm = load_model(preset_type)
+                llm.invoke([HumanMessage(content="hello")])
+            cmd: List[str] = mock_run.call_args[0][0]
+            assert cmd == expected_prefix + [
+                "hello"
+            ], f"{preset_type}: expected no extra flags, got cmd={cmd}"
 
 
 # ---------------------------------------------------------------------------

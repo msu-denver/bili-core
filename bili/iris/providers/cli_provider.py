@@ -74,6 +74,17 @@ The subprocess inherits the calling process's environment (``os.environ``).
 Whatever credential the CLI tool requires (OAuth session, API key file, etc.)
 must already be present in the environment -- bili-core never touches it.
 
+Model and reasoning-effort selection
+-------------------------------------
+``CliLLM.model`` and ``CliLLM.reasoning_effort`` pin a specific model and
+reasoning depth for the spawned CLI, instead of inheriting whatever the CLI
+tool's own global default or interactive session is set to.  Both default to
+``None`` (no override -- unconfigured behaviour is unchanged).  See
+:mod:`bili.iris.providers.cli_model_flags` for the full rationale and the
+shared argv-templating mechanism used by both this module's direct
+subprocess path and the MCP tool-strategy path
+(:func:`bili.iris.mcp.server.build_mcp_node`).
+
 No new optional dependency is required; the module uses stdlib ``subprocess``
 and ``re`` only.
 """
@@ -85,7 +96,7 @@ import re
 import subprocess
 import tempfile
 import time
-from typing import Any, AsyncIterator, Iterator, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Iterator, List, Optional, Sequence, Tuple, Union
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -98,6 +109,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from .base import LLMProvider
+from .cli_model_flags import DEFAULT_MODEL_FLAG_TEMPLATE, build_model_and_effort_args
 
 LOGGER = logging.getLogger(__name__)
 
@@ -399,6 +411,31 @@ class CliLLM(BaseChatModel):
         Base delay, in seconds, before the first retry.  Each subsequent
         retry doubles the delay (``retry_backoff_seconds * 2 ** attempt``).
         Default ``1.0``.
+    model : str or None
+        Model name/ID to pass to the CLI, overriding whatever model the
+        CLI's own global default or interactive session would otherwise use.
+        Default ``None`` (no override -- the CLI's own default model is
+        used, matching historical behaviour).  Applied via
+        ``model_flag_template``; see :func:`build_model_and_effort_args`.
+    reasoning_effort : str or None
+        Reasoning-effort / thinking-budget value to pass to the CLI (the
+        accepted vocabulary is CLI-specific, e.g. ``"low"``/``"medium"``/
+        ``"high"``/``"max"``).  Default ``None`` (no override).  Applied via
+        ``reasoning_effort_flag_template``; a value set with no template
+        configured for the target CLI is a documented no-op (a warning is
+        logged).  See :func:`build_model_and_effort_args`.
+    model_flag_template : list[str] or None
+        Argv template used to render ``model`` into command-line tokens (the
+        literal substring ``"{value}"`` is replaced by ``model``).  Default
+        ``["--model", "{value}"]`` -- the near-universal convention across
+        CLI LLM tools.  Set to ``None`` to disable model-flag injection
+        entirely for this CLI.
+    reasoning_effort_flag_template : list[str] or None
+        Argv template used to render ``reasoning_effort`` into command-line
+        tokens, analogous to ``model_flag_template``.  Default ``None`` --
+        there is no cross-CLI convention for this control, so named presets
+        that know a specific CLI's syntax configure this explicitly (see
+        :mod:`bili.iris.providers.cli_presets`).
     """
 
     # ------------------------------------------------------------------
@@ -415,6 +452,10 @@ class CliLLM(BaseChatModel):
     cwd: Optional[str] = None
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+    model_flag_template: Optional[List[str]] = list(DEFAULT_MODEL_FLAG_TEMPLATE)
+    reasoning_effort_flag_template: Optional[List[str]] = None
 
     # ------------------------------------------------------------------
     # BaseChatModel required property
@@ -433,12 +474,24 @@ class CliLLM(BaseChatModel):
     ) -> Tuple[List[str], Optional[str], Optional[str]]:
         """Return ``(cmd, stdin_text, tmp_file_path)`` for the subprocess call.
 
+        The base command is ``self.command`` with any configured ``model`` /
+        ``reasoning_effort`` flags appended (see
+        :func:`build_model_and_effort_args`), before the prompt itself is
+        added according to ``prompt_via``.
+
         The caller is responsible for cleaning up ``tmp_file_path`` if set.
         """
+        base_command = list(self.command) + build_model_and_effort_args(
+            self.model,
+            self.model_flag_template,
+            self.reasoning_effort,
+            self.reasoning_effort_flag_template,
+            cli_name=self.command[0] if self.command else "",
+        )
         if self.prompt_via == "stdin":
-            return list(self.command), prompt, None
+            return base_command, prompt, None
         if self.prompt_via == "arg":
-            return list(self.command) + [prompt], None, None
+            return base_command + [prompt], None, None
         # "file"
         # Write to a temp file and pass the path as an extra arg
         with tempfile.NamedTemporaryFile(
@@ -449,7 +502,7 @@ class CliLLM(BaseChatModel):
         ) as tmp:
             tmp.write(prompt)
             tmp_path = tmp.name
-        return list(self.command) + [tmp_path], None, tmp_path
+        return base_command + [tmp_path], None, tmp_path
 
     def _run_subprocess(self, prompt: str) -> str:
         """Execute the CLI with *prompt*, retrying transient failures.
@@ -700,6 +753,34 @@ class CliProvider(LLMProvider):
     retry_backoff_seconds : float, optional
         Base delay, in seconds, before the first retry; doubles on each
         subsequent retry.  Default ``1.0``.
+
+    model : str or None, optional
+        Model name/ID to pass to the CLI, overriding whatever model the
+        CLI's own global default or interactive session would otherwise use.
+        Default ``None`` (no override -- today's behaviour, unchanged).
+        Applied via ``model_flag_template``.
+
+    reasoning_effort : str or None, optional
+        Reasoning-effort / thinking-budget value to pass to the CLI (the
+        accepted vocabulary -- e.g. ``"low"``/``"medium"``/``"high"``/
+        ``"max"`` -- is defined by the target CLI).  Default ``None`` (no
+        override).  Applied via ``reasoning_effort_flag_template``; a value
+        set with no template configured for this CLI is a documented no-op
+        (a warning is logged, no flag is added).
+
+    model_flag_template : sequence of str or None, optional
+        Argv template used to render ``model`` into command-line tokens (the
+        literal substring ``"{value}"`` is replaced by ``model``).  Default
+        ``("--model", "{value}")`` -- the near-universal convention across
+        CLI LLM tools.  Pass ``None`` to disable model-flag injection
+        entirely for this CLI.
+
+    reasoning_effort_flag_template : sequence of str or None, optional
+        Argv template used to render ``reasoning_effort`` into command-line
+        tokens, analogous to ``model_flag_template``.  Default ``None`` --
+        there is no cross-CLI convention for this control, so named presets
+        that know a specific CLI's syntax configure this explicitly (see
+        :mod:`bili.iris.providers.cli_presets`).
     """
 
     # The `strip_ansi` parameter intentionally shares its name with the
@@ -707,7 +788,7 @@ class CliProvider(LLMProvider):
     # documented in the class docstring; the module function is an
     # implementation detail.  Pylint sees the parameter as shadowing the
     # outer-scope name, which is benign here.
-    def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,redefined-outer-name
+    def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,too-many-locals,redefined-outer-name
         self,
         command: List[str],
         prompt_via: str = "stdin",
@@ -719,6 +800,10 @@ class CliProvider(LLMProvider):
         cwd: Optional[str] = None,
         max_retries: int = 2,
         retry_backoff_seconds: float = 1.0,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        model_flag_template: Optional[Sequence[str]] = DEFAULT_MODEL_FLAG_TEMPLATE,
+        reasoning_effort_flag_template: Optional[Sequence[str]] = None,
         **_extra: Any,
     ) -> CliLLM:
         """Create and return a :class:`CliLLM` instance.
@@ -742,6 +827,18 @@ class CliProvider(LLMProvider):
             failure, before raising.  ``0`` disables retry.
         :param retry_backoff_seconds: Base delay in seconds before the first
             retry; doubles on each subsequent retry.
+        :param model: Model name/ID to pass to the CLI.  ``None`` (default)
+            inherits the CLI's own default model.
+        :param reasoning_effort: Reasoning-effort / thinking-budget value to
+            pass to the CLI.  ``None`` (default) inherits the CLI's own
+            default reasoning depth.
+        :param model_flag_template: Argv template for *model*.  Default
+            ``("--model", "{value}")``.  Pass ``None`` to disable model-flag
+            injection for this CLI.
+        :param reasoning_effort_flag_template: Argv template for
+            *reasoning_effort*.  Default ``None`` (no known cross-CLI
+            convention); named presets configure this explicitly for CLIs
+            that support a reasoning-effort control.
         :returns: A configured :class:`CliLLM` instance.
         :raises ValueError: If ``command`` is empty, any config value is not
             among the supported options, or ``max_retries``/
@@ -784,6 +881,16 @@ class CliProvider(LLMProvider):
             cwd=cwd,
             max_retries=max_retries,
             retry_backoff_seconds=retry_backoff_seconds,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            model_flag_template=(
+                list(model_flag_template) if model_flag_template is not None else None
+            ),
+            reasoning_effort_flag_template=(
+                list(reasoning_effort_flag_template)
+                if reasoning_effort_flag_template is not None
+                else None
+            ),
         )
         LOGGER.debug(llm)
         return llm

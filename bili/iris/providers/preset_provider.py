@@ -80,12 +80,28 @@ class CliPresetProvider(LLMProvider):
             "cwd",
             "max_retries",
             "retry_backoff_seconds",
+            "model",
+            "reasoning_effort",
         ):
             val = overrides.get(field, _UNSET)
             resolved[field] = val if val is not _UNSET else getattr(preset, field)
+
+        # model_flag_template / reasoning_effort_flag_template are list-valued
+        # (like command): copy them when falling back to the preset default so
+        # a caller mutating the returned CliLLM's list in place does not
+        # corrupt the shared preset object.
+        for list_field in ("model_flag_template", "reasoning_effort_flag_template"):
+            val = overrides.get(list_field, _UNSET)
+            if val is not _UNSET:
+                resolved[list_field] = val
+            else:
+                preset_val = getattr(preset, list_field)
+                resolved[list_field] = (
+                    list(preset_val) if preset_val is not None else None
+                )
         return resolved
 
-    def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
+    def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         command: Optional[List[str]] = _UNSET,
         prompt_via: Optional[str] = _UNSET,
@@ -97,6 +113,10 @@ class CliPresetProvider(LLMProvider):
         cwd: Optional[str] = _UNSET,
         max_retries: Optional[int] = _UNSET,
         retry_backoff_seconds: Optional[float] = _UNSET,
+        model: Optional[str] = _UNSET,
+        reasoning_effort: Optional[str] = _UNSET,
+        model_flag_template: Optional[List[str]] = _UNSET,
+        reasoning_effort_flag_template: Optional[List[str]] = _UNSET,
         **extra: Any,
     ) -> CliLLM:
         """Create a :class:`~bili.iris.providers.cli_provider.CliLLM` using
@@ -117,6 +137,16 @@ class CliPresetProvider(LLMProvider):
             ``0`` to disable in-process retry entirely.
         :param retry_backoff_seconds: Override the preset's
             ``retry_backoff_seconds``.
+        :param model: Override the preset's ``model``.  Pins the CLI to a
+            specific model instead of inheriting the CLI's own default.
+        :param reasoning_effort: Override the preset's ``reasoning_effort``.
+            Pins the CLI's reasoning depth; a value set with no
+            corresponding flag template configured for this preset is a
+            documented no-op (a warning is logged).
+        :param model_flag_template: Override the preset's
+            ``model_flag_template``.
+        :param reasoning_effort_flag_template: Override the preset's
+            ``reasoning_effort_flag_template``.
         :returns: A configured :class:`~bili.iris.providers.cli_provider.CliLLM`.
         :raises RuntimeError: If the provider was not created via
             :meth:`for_preset` (i.e. ``_preset`` is ``None``).
@@ -138,6 +168,10 @@ class CliPresetProvider(LLMProvider):
                 "cwd": cwd,
                 "max_retries": max_retries,
                 "retry_backoff_seconds": retry_backoff_seconds,
+                "model": model,
+                "reasoning_effort": reasoning_effort,
+                "model_flag_template": model_flag_template,
+                "reasoning_effort_flag_template": reasoning_effort_flag_template,
             }
         )
         LOGGER.info(

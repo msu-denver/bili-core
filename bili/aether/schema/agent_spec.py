@@ -182,6 +182,48 @@ class AgentSpec(BaseModel):
         ),
     )
 
+    cli_subprocess_model: Optional[str] = Field(
+        None,
+        description=(
+            "Model name/ID to pass to a CLI-backed provider's subprocess "
+            "(provider types 'cli', 'cli_claude_code', 'cli_codex', "
+            "'cli_gemini_cli', and any custom CLI preset), pinning a "
+            "specific model instead of whatever the CLI tool's own global "
+            "default or interactive session would otherwise use.  Applied "
+            "via the preset's configured model-selection flag (e.g. "
+            "'--model <value>' for all three built-in presets).  Leave "
+            "unset (the default) to inherit the CLI's own default model -- "
+            "today's behaviour, unchanged.  Only applies to agents whose "
+            "resolved provider is a CLI subprocess type; ignored for API "
+            "providers."
+        ),
+    )
+
+    cli_subprocess_reasoning_effort: Optional[str] = Field(
+        None,
+        description=(
+            "Reasoning-effort / thinking-budget level to pass to a "
+            "CLI-backed provider's subprocess (provider types 'cli', "
+            "'cli_claude_code', 'cli_codex', 'cli_gemini_cli', and any "
+            "custom CLI preset), pinning a specific reasoning depth instead "
+            "of whatever the CLI tool's own default would otherwise use -- "
+            "useful for capping a heavy default reasoner on a mechanical "
+            "role, or forcing deeper reasoning for a hard one.  The "
+            "accepted values and the mechanism used to apply them are "
+            "CLI-specific: Claude Code accepts an effort level (e.g. "
+            "'low', 'medium', 'high', 'xhigh', 'max') via its '--effort' "
+            "flag; Codex accepts an effort level (e.g. 'low', 'medium', "
+            "'high', 'xhigh') via a '-c model_reasoning_effort=' config "
+            "override.  The Gemini CLI has no CLI-settable reasoning-"
+            "effort / thinking-budget control in headless mode, so this "
+            "setting is a documented no-op (a warning is logged) for the "
+            "'cli_gemini_cli' preset.  Leave unset (the default) to "
+            "inherit the CLI's own default reasoning depth -- today's "
+            "behaviour, unchanged.  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
     # =========================================================================
     # CAPABILITIES & TOOLS
     # =========================================================================

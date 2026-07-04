@@ -551,6 +551,146 @@ class TestCreateLlm:
         kwargs = fake_load_model.call_args[1]
         assert "retry_backoff_seconds" not in kwargs
 
+    def test_create_llm_cli_subprocess_model_forwarded(self):
+        """cli_subprocess_model is forwarded to load_model as 'model' for
+        CLI providers."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "cli_agent_model",
+            model_name="cli:my-tool",
+            cli_subprocess_model="claude-sonnet-5",
+        )
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert kwargs["model"] == "claude-sonnet-5"
+
+    def test_create_llm_cli_model_not_forwarded_to_api_provider(self):
+        """cli_subprocess_model is NOT forwarded when the provider is not a
+        CLI type."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        # gpt-4o resolves to "remote_openai", not a CLI provider
+        agent = _agent(
+            "api_agent_model", model_name="gpt-4o", cli_subprocess_model="gpt-5"
+        )
+
+        fake_load_model = MagicMock(return_value="API_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert "model" not in kwargs
+
+    def test_create_llm_cli_model_none_not_forwarded(self):
+        """When cli_subprocess_model is None (default), model is not added --
+        the CLI provider uses its preset default (the CLI's own default
+        model)."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent("cli_default_model", model_name="cli:my-tool")
+        # cli_subprocess_model defaults to None
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert "model" not in kwargs
+
+    def test_create_llm_cli_subprocess_reasoning_effort_forwarded(self):
+        """cli_subprocess_reasoning_effort is forwarded to load_model as
+        'reasoning_effort' for CLI providers."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent(
+            "cli_agent_effort",
+            model_name="cli:my-tool",
+            cli_subprocess_reasoning_effort="high",
+        )
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert kwargs["reasoning_effort"] == "high"
+
+    def test_create_llm_cli_reasoning_effort_not_forwarded_to_api_provider(self):
+        """cli_subprocess_reasoning_effort is NOT forwarded when the provider
+        is not a CLI type."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        # gpt-4o resolves to "remote_openai", not a CLI provider
+        agent = _agent(
+            "api_agent_effort",
+            model_name="gpt-4o",
+            cli_subprocess_reasoning_effort="high",
+        )
+
+        fake_load_model = MagicMock(return_value="API_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert "reasoning_effort" not in kwargs
+
+    def test_create_llm_cli_reasoning_effort_none_not_forwarded(self):
+        """When cli_subprocess_reasoning_effort is None (default),
+        reasoning_effort is not added -- the CLI provider uses its preset
+        default (the CLI's own default reasoning depth)."""
+        from bili.aether.compiler import (  # pylint: disable=import-outside-toplevel
+            llm_resolver,
+        )
+
+        agent = _agent("cli_default_effort", model_name="cli:my-tool")
+        # cli_subprocess_reasoning_effort defaults to None
+
+        fake_load_model = MagicMock(return_value="CLI_LLM")
+        fake_loader = types.ModuleType("bili.iris.loaders.llm_loader")
+        fake_loader.load_model = fake_load_model
+
+        with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
+            with patch.dict(sys.modules, {"bili.iris.loaders.llm_loader": fake_loader}):
+                llm_resolver.create_llm(agent)
+
+        kwargs = fake_load_model.call_args[1]
+        assert "reasoning_effort" not in kwargs
+
 
 class TestResolveProvider:
     """Tests for resolve_provider() and the LLM_MODELS ImportError path."""

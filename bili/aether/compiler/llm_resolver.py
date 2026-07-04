@@ -154,6 +154,46 @@ def resolve_provider(model_name: str) -> str:
     return provider
 
 
+def _forward_cli_subprocess_kwargs(
+    agent: AgentSpec, provider: str, kwargs: Dict[str, Any]
+) -> None:
+    """Forward ``AgentSpec.cli_subprocess_*`` fields into *kwargs* for CLI providers.
+
+    Mutates *kwargs* in place.  A no-op entirely when *provider* is not a CLI
+    subprocess type -- passing these kwargs to an API provider's loader would
+    raise an unexpected-keyword-argument error, since those loader functions
+    have explicit signatures without ``**kwargs``.
+
+    :param agent: The ``AgentSpec`` whose ``cli_subprocess_*`` fields may be set.
+    :param provider: The resolved provider type string (e.g. ``"cli_claude_code"``).
+    :param kwargs: The in-progress ``load_model`` kwargs dict; updated in place.
+    """
+    if not provider.startswith("cli"):
+        return
+
+    if agent.cli_subprocess_timeout is not None:
+        # 0 is the user's signal for "no timeout" (matches the ge=0 constraint
+        # on the field).  Translate it to None so subprocess.run receives
+        # timeout=None rather than timeout=0 (which would expire immediately).
+        raw = agent.cli_subprocess_timeout
+        kwargs["timeout_seconds"] = None if raw == 0.0 else raw
+
+    if agent.cli_subprocess_cwd is not None:
+        kwargs["cwd"] = agent.cli_subprocess_cwd
+
+    if agent.cli_subprocess_max_retries is not None:
+        kwargs["max_retries"] = agent.cli_subprocess_max_retries
+
+    if agent.cli_subprocess_retry_backoff is not None:
+        kwargs["retry_backoff_seconds"] = agent.cli_subprocess_retry_backoff
+
+    if agent.cli_subprocess_model is not None:
+        kwargs["model"] = agent.cli_subprocess_model
+
+    if agent.cli_subprocess_reasoning_effort is not None:
+        kwargs["reasoning_effort"] = agent.cli_subprocess_reasoning_effort
+
+
 def create_llm(agent: AgentSpec) -> Any:
     """Create a LangChain-compatible chat model from an ``AgentSpec``.
 
@@ -204,28 +244,10 @@ def create_llm(agent: AgentSpec) -> Any:
     if agent.max_tokens is not None:
         kwargs["max_tokens"] = agent.max_tokens
 
-    # Forward cli_subprocess_timeout to CLI providers only.  Passing it to API
-    # providers would raise an unexpected-keyword-argument error because those
-    # loader functions have explicit signatures without **kwargs.
-    if agent.cli_subprocess_timeout is not None and provider.startswith("cli"):
-        # 0 is the user's signal for "no timeout" (matches the ge=0 constraint
-        # on the field).  Translate it to None so subprocess.run receives
-        # timeout=None rather than timeout=0 (which would expire immediately).
-        raw = agent.cli_subprocess_timeout
-        kwargs["timeout_seconds"] = None if raw == 0.0 else raw
-
-    # Forward cli_subprocess_cwd to CLI providers only, for the same reason
-    # as cli_subprocess_timeout above.
-    if agent.cli_subprocess_cwd is not None and provider.startswith("cli"):
-        kwargs["cwd"] = agent.cli_subprocess_cwd
-
-    # Forward cli_subprocess_max_retries / cli_subprocess_retry_backoff to
-    # CLI providers only, for the same reason as cli_subprocess_timeout above.
-    if agent.cli_subprocess_max_retries is not None and provider.startswith("cli"):
-        kwargs["max_retries"] = agent.cli_subprocess_max_retries
-
-    if agent.cli_subprocess_retry_backoff is not None and provider.startswith("cli"):
-        kwargs["retry_backoff_seconds"] = agent.cli_subprocess_retry_backoff
+    # Forward cli_subprocess_* fields (timeout, cwd, retry policy, model,
+    # reasoning effort) to CLI providers only; see
+    # _forward_cli_subprocess_kwargs for the per-field detail.
+    _forward_cli_subprocess_kwargs(agent, provider, kwargs)
 
     LOGGER.info(
         "Creating LLM for agent '%s': provider=%s, model_id=%s",
