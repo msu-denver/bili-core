@@ -1187,6 +1187,67 @@ class TestPromptedToolCalling:
             assert resolve_tool_strategy("o1-mini") == "none"
 
     # ------------------------------------------------------------------
+    # resolve_prompt_length_limit
+    # ------------------------------------------------------------------
+
+    def test_resolve_prompt_length_limit_returns_declared_limit(self):
+        """resolve_prompt_length_limit reads max_input_tokens by model_id or display name."""
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        mock_models = {
+            "remote_anthropic": {
+                "models": [
+                    {
+                        "model_name": "Claude Opus 4.8",
+                        "model_id": "claude-opus-4-8",
+                        "max_input_tokens": 200000,
+                    },
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_prompt_length_limit("claude-opus-4-8") == 200000
+            assert resolve_prompt_length_limit("Claude Opus 4.8") == 200000
+
+    def test_resolve_prompt_length_limit_none_for_unknown_model(self):
+        """resolve_prompt_length_limit returns None for a model absent from the catalog.
+
+        None means "no known limit"; callers must treat this permissively,
+        never as an implicit zero-length cap.
+        """
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        mock_models = {"remote_openai": {"models": []}}
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_prompt_length_limit("unknown-model-xyz") is None
+
+    def test_resolve_prompt_length_limit_none_when_entry_declares_no_limit(self):
+        """resolve_prompt_length_limit returns None when the catalog entry has no limit.
+
+        Mirrors real CLI-subprocess and local-provider catalog entries, whose
+        actual limits depend on the underlying tool/hardware rather than
+        bili-core's catalog.
+        """
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        mock_models = {
+            "cli_claude_code": {
+                "models": [
+                    {"model_name": "Claude Code CLI", "model_id": "cli:claude_code"},
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_prompt_length_limit("cli:claude_code") is None
+
+    def test_resolve_prompt_length_limit_none_on_import_error(self):
+        """resolve_prompt_length_limit returns None when LLM_MODELS cannot be imported."""
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        with patch.dict(sys.modules, {"bili.iris.config.llm_config": None}):
+            assert resolve_prompt_length_limit("any-model") is None
+
+    # ------------------------------------------------------------------
     # mcp and none routing in _generate_tool_agent_node
     # ------------------------------------------------------------------
 

@@ -132,7 +132,7 @@ agents:
 | `model_name` | No | `None` | LLM model (e.g., `gpt-4`, `claude-sonnet-3-5-20241022`) |
 | `temperature` | No | `0.0` | LLM sampling temperature (0.0-2.0) |
 | `max_tokens` | No | `None` | Maximum tokens in LLM response |
-| `system_prompt` | No | `None` | Instructions for the LLM (up to 10,000 chars) |
+| `system_prompt` | No | `None` | Instructions for the LLM. No fixed length cap — checked against the bound model's own declared input-token limit when known (see below); unconstrained otherwise. |
 | `capabilities` | No | `[]` | Agent capabilities (free-form strings) |
 | `tools` | No | `[]` | Tool names from the tool registry |
 | `output_format` | No | `text` | Output format: `text`, `json`, or `structured` |
@@ -161,6 +161,12 @@ agents:
 `objective` is required. `system_prompt` is optional — when omitted, the agent inherits from bili-core (if `inherit_from_bili_core: true` and `inherit_system_prompt: true`) or uses the LLM's default behavior.
 
 Each agent can specify its own LLM via `model_name`. Different agents in the same MAS can use different models.
+
+### Per-Model Prompt Length Limits
+
+Every model has a different prompt/context budget, so `system_prompt` is not checked against a single hardcoded number. When `model_name` resolves to a catalog entry with a known `max_input_tokens`, the prompt is checked against an approximate character budget derived from that limit; when the model is unset, unrecognized, or has no declared limit (e.g. CLI-subprocess and local providers), the check is skipped rather than imposing an arbitrary cap.
+
+Call `agent.get_prompt_length_limit()` to query the bound model's declared input-token limit directly (`None` when unknown), or `bili.aether.compiler.llm_resolver.resolve_prompt_length_limit(model_name)` to look it up from a model name before an `AgentSpec` exists, so you can budget a composed prompt against the model it will actually run on.
 
 ### Preset System
 

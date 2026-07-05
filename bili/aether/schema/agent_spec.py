@@ -15,6 +15,14 @@ from .enums import OutputFormat
 
 LOGGER = logging.getLogger(__name__)
 
+# Rough, deliberately generous characters-per-token estimate used only to turn
+# a model's declared *token* limit into a *character* budget for the
+# ``system_prompt`` length check below. Real tokenizers vary (and a caller
+# doing exact accounting should count tokens directly rather than rely on
+# this), but ~4 characters/token is a widely used approximation for English
+# text and errs on the side of not rejecting legitimate prompts.
+_APPROX_CHARS_PER_TOKEN = 4
+
 
 class AgentSpec(BaseModel):
     """
@@ -82,8 +90,15 @@ class AgentSpec(BaseModel):
 
     system_prompt: Optional[str] = Field(
         None,
-        description="Custom system prompt (overrides bili-core prompt if inherit=True)",
-        max_length=10000,
+        description=(
+            "Custom system prompt (overrides bili-core prompt if inherit=True). "
+            "No fixed length cap is imposed here -- prompt budgets vary enormously "
+            "by bound model (a small local model and a long-context frontier model "
+            "tolerate very different prompt sizes). When 'model_name' is set and "
+            "the model's declared input-token limit is known, the length is "
+            "checked against that model's own budget instead; see "
+            "'get_prompt_length_limit()' and 'validate_system_prompt_length'."
+        ),
     )
 
     temperature: Optional[float] = Field(
@@ -444,6 +459,44 @@ class AgentSpec(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_system_prompt_length(self):
+        """Check ``system_prompt`` length against the bound model's own budget.
+
+        Unlike a single fixed character cap (which is wrong for every model
+        simultaneously -- too generous for small-context models, too strict
+        for long-context ones), this validates the prompt against whatever
+        limit the *bound* model actually declares in the model catalog.
+
+        - No ``model_name`` set: nothing to validate against; skipped.
+        - ``model_name`` set but the model is unrecognised, or recognised but
+          without a declared input-token limit (e.g. CLI-subprocess and local
+          providers, whose limits depend on the underlying tool/hardware, not
+          bili-core's catalog): permissive by design. An unknown limit must
+          never manifest as an arbitrary cap.
+        - ``model_name`` set and resolves to a catalog entry with a declared
+          ``max_input_tokens``: the prompt is checked against an approximate
+          character budget derived from that limit. Token accounting varies
+          by tokenizer, so the estimate intentionally errs on the generous
+          side -- callers that need exact accounting should call
+          ``get_prompt_length_limit()`` and do their own token counting.
+        """
+        limit_tokens = self.get_prompt_length_limit()
+        if limit_tokens is None or not self.system_prompt:
+            return self
+
+        char_budget = limit_tokens * _APPROX_CHARS_PER_TOKEN
+        prompt_length = len(self.system_prompt)
+        if prompt_length > char_budget:
+            raise ValueError(
+                f"system_prompt is {prompt_length} characters, which exceeds the "
+                f"approximate {char_budget}-character budget for model "
+                f"'{self.model_name}' (declared limit: {limit_tokens} input "
+                f"tokens, estimated at {_APPROX_CHARS_PER_TOKEN} characters/token). "
+                "Shorten the prompt or bind a model with a larger input-token limit."
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_pipeline_depth(self):
         """Validate that pipeline nesting doesn't exceed max depth.
 
@@ -478,6 +531,30 @@ class AgentSpec(BaseModel):
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
+
+    def get_prompt_length_limit(self) -> Optional[int]:
+        """Return this agent's bound model's declared input-token limit, if known.
+
+        Looks up ``self.model_name`` in bili-core's model catalog
+        (``bili.iris.config.llm_config.LLM_MODELS``) and returns its declared
+        ``max_input_tokens``, letting a caller budget a composed prompt
+        against the model it will actually run on instead of guessing at a
+        one-size-fits-all number.
+
+        Returns:
+            The model's declared maximum input tokens, or ``None`` when
+            ``model_name`` is unset, the model is not in the catalog, or the
+            catalog entry does not declare a limit (e.g. CLI-subprocess and
+            local providers). ``None`` means "no known limit" -- callers
+            should treat that as permissive, not as zero.
+        """
+        if not self.model_name:  # pylint: disable=no-member
+            return None
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_prompt_length_limit,
+        )
+
+        return resolve_prompt_length_limit(self.model_name)  # pylint: disable=no-member
 
     def get_display_name(self) -> str:
         """Get human-readable agent name."""

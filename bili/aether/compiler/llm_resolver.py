@@ -364,6 +364,60 @@ def resolve_tool_strategy(model_name: str) -> str:
     return "native"
 
 
+def resolve_prompt_length_limit(model_name: str) -> Optional[int]:
+    """Return the declared maximum input-token limit for *model_name*, if known.
+
+    Every model has a different prompt/context budget -- a small local model
+    and a long-context frontier model tolerate very different prompt sizes --
+    so a single hardcoded limit is wrong for the catalog as a whole regardless
+    of what number is chosen. This gives callers (e.g. ``AgentSpec`` prompt
+    validation, or any code composing a prompt before it knows which model
+    will consume it) a way to look up the *actual* per-model limit and budget
+    accordingly, rather than guessing.
+
+    Args:
+        model_name: The model identifier to look up. Can be a display name
+            (e.g. ``"Claude Opus 4.8"``) or a model ID (e.g.
+            ``"claude-opus-4-8"``), matched the same way as
+            :func:`resolve_model`.
+
+    Returns:
+        The model's declared ``max_input_tokens`` from
+        ``bili.iris.config.llm_config.LLM_MODELS``, or ``None`` when the
+        model is not found in the catalog, the catalog entry does not
+        declare a limit (e.g. CLI-subprocess and local providers, whose
+        real limits depend on the underlying tool/hardware rather than
+        bili-core's catalog), or the catalog module cannot be imported.
+        ``None`` means "no known limit" -- callers should treat that as
+        permissive (no cap), never as zero.
+    """
+    try:
+        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
+            LLM_MODELS,
+        )
+    except ImportError:
+        LOGGER.debug(
+            "bili.iris.config.llm_config not available; "
+            "no known prompt length limit for '%s'",
+            model_name,
+        )
+        return None
+
+    for provider_info in LLM_MODELS.values():
+        for entry in provider_info.get("models", []):
+            if (
+                entry.get("model_id") == model_name
+                or entry.get("model_name") == model_name
+            ):
+                return entry.get("max_input_tokens")
+
+    LOGGER.debug(
+        "'%s' not found in LLM_MODELS; no known prompt length limit",
+        model_name,
+    )
+    return None
+
+
 def resolve_supports_tools(model_name: str) -> bool:
     """Return whether *model_name* supports native ``bind_tools``.
 

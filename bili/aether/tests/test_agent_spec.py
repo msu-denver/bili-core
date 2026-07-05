@@ -1,9 +1,45 @@
 """Tests for AgentSpec schema (domain-agnostic design)."""
 
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
 from bili.aether.schema import AgentSpec, OutputFormat
+
+# Small, self-contained catalog used to isolate the per-model prompt-length
+# tests from the real (large, ever-growing) LLM_MODELS catalog.
+_MOCK_CATALOG = {
+    "remote_test_large_context": {
+        "models": [
+            {
+                "model_name": "Large Context Test Model",
+                "model_id": "large-context-test-model",
+                "max_input_tokens": 200000,
+            },
+        ]
+    },
+    "remote_test_small_context": {
+        "models": [
+            {
+                "model_name": "Small Context Test Model",
+                "model_id": "small-context-test-model",
+                "max_input_tokens": 1000,
+            },
+        ]
+    },
+    "cli_test": {
+        "models": [
+            {
+                # CLI-subprocess-style entry: no declared max_input_tokens,
+                # mirroring the real cli/cli_claude_code/cli_codex/
+                # cli_gemini_cli catalog entries.
+                "model_name": "CLI Test Model",
+                "model_id": "cli:test",
+            },
+        ]
+    },
+}
 
 
 def test_minimal_agent():
@@ -216,3 +252,153 @@ def test_consensus_vote_field_with_json():
         consensus_vote_field="decision",
     )
     assert agent.consensus_vote_field == "decision"
+
+
+# =========================================================================
+# SYSTEM PROMPT LENGTH TESTS (per-model, not a fixed hardcoded cap)
+# =========================================================================
+
+
+def test_system_prompt_no_hardcoded_cap_without_model():
+    """A long system_prompt validates fine when no model_name is bound.
+
+    There is no longer a fixed character ceiling (the old max_length=10000)
+    on this field -- a single number is wrong for the catalog as a whole
+    regardless of what it is. With no model_name to check against, there is
+    nothing to validate, so length is unconstrained.
+    """
+    agent = AgentSpec(
+        agent_id="test",
+        role="judge",
+        objective="Test objective for validation",
+        system_prompt="x" * 15000,
+    )
+    assert len(agent.system_prompt) == 15000
+
+
+def test_system_prompt_no_hardcoded_cap_with_unknown_model():
+    """A long system_prompt validates fine for a model absent from the catalog.
+
+    An unknown limit must never manifest as an arbitrary cap.
+    """
+    with patch("bili.iris.config.llm_config.LLM_MODELS", _MOCK_CATALOG):
+        agent = AgentSpec(
+            agent_id="test",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="totally-unrecognized-model-xyz",
+            system_prompt="x" * 15000,
+        )
+        assert len(agent.system_prompt) == 15000
+
+
+def test_system_prompt_no_hardcoded_cap_for_cli_provider():
+    """A long system_prompt validates for a CLI-provider model with no declared limit.
+
+    CLI-subprocess and local providers do not declare max_input_tokens in the
+    catalog (their real limit depends on the underlying tool/hardware), so
+    they must be treated permissively, exactly like an unknown model.
+    """
+    with patch("bili.iris.config.llm_config.LLM_MODELS", _MOCK_CATALOG):
+        agent = AgentSpec(
+            agent_id="test",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="cli:test",
+            system_prompt="x" * 15000,
+        )
+        assert len(agent.system_prompt) == 15000
+
+
+def test_get_prompt_length_limit_returns_none_without_model_name():
+    """get_prompt_length_limit() returns None when model_name is unset."""
+    agent = AgentSpec(
+        agent_id="test",
+        role="judge",
+        objective="Test objective for validation",
+    )
+    assert agent.get_prompt_length_limit() is None
+
+
+def test_get_prompt_length_limit_returns_none_for_unknown_model():
+    """get_prompt_length_limit() returns None for a model absent from the catalog."""
+    with patch("bili.iris.config.llm_config.LLM_MODELS", _MOCK_CATALOG):
+        agent = AgentSpec(
+            agent_id="test",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="totally-unrecognized-model-xyz",
+        )
+        assert agent.get_prompt_length_limit() is None
+
+
+def test_get_prompt_length_limit_is_queryable_per_model():
+    """get_prompt_length_limit() surfaces the bound model's declared limit.
+
+    This is the mechanism a consumer uses to budget a composed prompt
+    against the model it will actually run on, by display name or model_id.
+    """
+    with patch("bili.iris.config.llm_config.LLM_MODELS", _MOCK_CATALOG):
+        large = AgentSpec(
+            agent_id="large",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="large-context-test-model",
+        )
+        assert large.get_prompt_length_limit() == 200000
+
+        # Lookup by display name works too, matching resolve_model semantics.
+        large_by_name = AgentSpec(
+            agent_id="large2",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="Large Context Test Model",
+        )
+        assert large_by_name.get_prompt_length_limit() == 200000
+
+        small = AgentSpec(
+            agent_id="small",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="small-context-test-model",
+        )
+        assert small.get_prompt_length_limit() == 1000
+
+
+def test_system_prompt_over_10k_validates_for_large_context_model():
+    """A >10k-character prompt validates fine for a large-context model.
+
+    This is the concrete case the old hardcoded max_length=10000 got wrong:
+    a prompt well over 10k characters is entirely reasonable for a model
+    with a 200k-token input budget.
+    """
+    with patch("bili.iris.config.llm_config.LLM_MODELS", _MOCK_CATALOG):
+        agent = AgentSpec(
+            agent_id="test",
+            role="judge",
+            objective="Test objective for validation",
+            model_name="large-context-test-model",
+            system_prompt="x" * 15000,
+        )
+        assert len(agent.system_prompt) == 15000
+
+
+def test_system_prompt_rejected_for_small_context_model():
+    """An excessive prompt is rejected against a small-context model's own limit.
+
+    Confirms the per-model check has real teeth (not a permissive no-op that
+    always passes): a prompt that vastly exceeds the *bound* model's declared
+    budget is still caught, just against that model's real limit rather than
+    an arbitrary fixed number.
+    """
+    with patch("bili.iris.config.llm_config.LLM_MODELS", _MOCK_CATALOG):
+        with pytest.raises(ValidationError, match="system_prompt"):
+            AgentSpec(
+                agent_id="test",
+                role="judge",
+                objective="Test objective for validation",
+                model_name="small-context-test-model",
+                # small-context-test-model declares max_input_tokens=1000,
+                # i.e. an approximate 4000-character budget.
+                system_prompt="x" * 20000,
+            )
