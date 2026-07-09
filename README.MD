@@ -86,11 +86,11 @@ cp .env.example .env
 
 ```bash
 cd scripts/development
-./start-container.sh
-./attach-container.sh
+./start-container
+./attach-container
 ```
 
-This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases.
+This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases. The compute profile (`cpu` or `gpu`) is auto-detected from the presence of an NVIDIA GPU; pass `cpu` or `gpu` as an argument to force one.
 
 ### 3. Run the application
 
@@ -99,6 +99,30 @@ Inside the container:
 ```bash
 streamlit    # Start the Streamlit UI on port 8501
 flask        # Start the Flask API on port 5001
+```
+
+#### Detached mode (background bringup)
+
+To bring the same environment up in the background without holding a terminal (useful for automation, CI, or when you just want the services running), pass `-d`:
+
+```bash
+./scripts/development/start-container -d          # auto-detect cpu/gpu profile
+./scripts/development/start-container -d cpu       # force the cpu profile
+```
+
+Detached mode brings up compose, starts Flask (`:5001`) and Streamlit (`:8501`) inside the container, waits for the Flask API to respond, and prints the log-tail and stop commands. The foreground behavior above is unchanged.
+
+Tail the logs:
+
+```bash
+docker exec bili-core tail -f /tmp/flask.log
+docker exec bili-core tail -f /tmp/streamlit.log
+```
+
+Tear the environment down (works for foreground or detached, safe to run when nothing is up):
+
+```bash
+./scripts/development/stop-container
 ```
 
 ### 4. Access the application
