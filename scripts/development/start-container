@@ -71,16 +71,16 @@ docker compose --profile "$profile" up -d
 # attaches and runs those by hand. We invoke the identical aliases here so the
 # same processes start the same way. Both aliases already run the
 # `createpgdb && deps` provisioning preamble inline, so no extra setup step is
-# needed. The streamlit alias tees to /tmp/streamlit.log itself; the flask
-# alias does not, so only flask gets an exec-layer tee (tee-ing streamlit here
-# too would double-tee and garble its log).
+# needed. Both aliases tee their own output to /tmp (the lab-wide convention:
+# the alias owns its log), so no tee is added here; a second tee at this layer
+# would double-tee and garble the logs.
 #
 # `bash -ic` (interactive) is required: bash does NOT expand aliases in non-
 # interactive shells, so `flask` / `streamlit` (aliases, not functions) would
 # silently no-op under a plain `bash -c`. An interactive shell auto-sources
 # ~/.bashrc and expands aliases. The "no job control in this shell" warning
 # under `exec -d` is harmless.
-docker exec -d bili-core bash -ic 'flask 2>&1 | tee /tmp/flask.log'
+docker exec -d bili-core bash -ic 'flask'
 docker exec -d bili-core bash -ic 'streamlit'
 echo "Starting Flask (:5001) + Streamlit (:8501) in the container."
 
