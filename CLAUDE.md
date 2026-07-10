@@ -21,16 +21,31 @@ BiliCore is an open-source framework for benchmarking and building dynamic RAG (
 
 ### Container-Based Development (Recommended)
 ```bash
-# Start development environment
+# Start development environment (foreground; auto-detects cpu/gpu profile)
 cd scripts/development
-./start-container.sh
+./start-container
 
 # Attach to container
-./attach-container.sh
+./attach-container
 
 # Inside container
-streamlit  # Start Streamlit UI
-flask      # Start Flask API
+streamlit  # Start Streamlit UI (:8501)
+flask      # Start Flask API (:5001)
+```
+
+Detached mode brings the same environment up in the background (for automation, CI, or a hands-off bringup). It starts Flask and Streamlit inside the container, waits for the Flask API on `:5001`, and prints log-tail and stop commands. The foreground path is unchanged.
+
+```bash
+# Background bringup; optional cpu|gpu arg forces the profile
+./scripts/development/start-container -d
+./scripts/development/start-container -d cpu
+
+# Tail the in-container logs
+docker exec bili-core tail -f /tmp/flask.log
+docker exec bili-core tail -f /tmp/streamlit.log
+
+# Tear down (foreground or detached; idempotent)
+./scripts/development/stop-container
 ```
 
 ### Code Quality Commands

@@ -9,7 +9,7 @@ alias createpgdb='psql "${POSTGRES_CONNECTION_STRING%/*}/postgres" -c "CREATE DA
 alias deps='cd /app/bili-core/scripts/development && ./install-deps'
 alias seeds3='cd /app/bili-core/scripts/development && ./upload-to-localstack-s3'
 alias streamlit='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-streamlit-server 2>&1 | tee /tmp/streamlit.log'
-alias flask='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-flask-server'
+alias flask='createpgdb && deps && cd /app/bili-core/scripts/development && ./start-flask-server 2>&1 | tee /tmp/flask.log'
 export LOCALSTACK_ENDPOINT='http://bili-core-localstack:4566'
 [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
 [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] && gcloud config set project "$GOOGLE_PROJECT_ID"
