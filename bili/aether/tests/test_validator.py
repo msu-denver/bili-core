@@ -391,6 +391,163 @@ def test_human_in_loop_missing_condition_warning():
 
 
 # =========================================================================
+# W14: ask_user + CLI tool_strategy='mcp' short timeout
+# =========================================================================
+
+
+def _ask_user_cli_agent(agent_id: str = "a", **kwargs) -> AgentSpec:
+    """An agent with ask_user in tools on the Claude Code CLI preset (mcp)."""
+    defaults = {
+        "model_name": "Claude Code CLI",
+        "tools": ["ask_user"],
+    }
+    defaults.update(kwargs)
+    return _agent(agent_id, **defaults)
+
+
+def test_ask_user_cli_short_timeout_warns():
+    """W14: an explicit short cli_subprocess_timeout on an ask_user CLI agent warns."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent(cli_subprocess_timeout=30.0)],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
+    assert any(
+        "ask_user" in w and "cli_subprocess_timeout" in w for w in result.warnings
+    )
+
+
+def test_ask_user_cli_unset_timeout_no_warning():
+    """W14: an unset cli_subprocess_timeout (preset default) does not warn."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent()],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+def test_ask_user_cli_zero_timeout_no_warning():
+    """W14: cli_subprocess_timeout=0 (explicit no-timeout) does not warn."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent(cli_subprocess_timeout=0.0)],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+def test_ask_user_cli_generous_timeout_no_warning():
+    """W14: a timeout at or above the floor does not warn."""
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent(cli_subprocess_timeout=1800.0)],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+def test_ask_user_without_cli_model_no_warning():
+    """W14: ask_user on a non-CLI (native tool-calling) model does not warn.
+
+    The short-timeout footgun only exists on the CLI/MCP subprocess path;
+    a native tool-calling model has no subprocess timeout to discard the
+    turn.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[
+            _agent(
+                "a",
+                model_name="gpt-4o",
+                tools=["ask_user"],
+                cli_subprocess_timeout=10.0,
+            )
+        ],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+def test_cli_model_without_ask_user_no_warning():
+    """W14: a short timeout on a CLI model without ask_user does not warn.
+
+    cli_subprocess_timeout is a legitimate, unrelated knob for any CLI
+    agent; the warning is specific to ask_user's turn-discarding footgun,
+    not a general opinion on short CLI timeouts.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[
+            _agent(
+                "a",
+                model_name="Claude Code CLI",
+                tools=[],
+                cli_subprocess_timeout=10.0,
+            )
+        ],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+def test_ask_user_cli_timeout_skipped_when_llm_resolver_unavailable(monkeypatch):
+    """W14: the check is skipped (not raised) when llm_resolver can't be imported.
+
+    Config construction happens BEFORE the import block: AgentSpec's own
+    system_prompt length-limit validator also imports llm_resolver, so
+    blocking the import unconditionally would break AgentSpec construction
+    itself, not just the check under test.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent(cli_subprocess_timeout=30.0)],
+    )
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _blocked_import(name, *args, **kwargs):
+        if name == "bili.aether.compiler.llm_resolver":
+            raise ImportError("simulated: llm_resolver unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocked_import)
+
+    result = validate_mas(config)
+
+    assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+# =========================================================================
 # INTEGRATION TESTS
 # =========================================================================
 

@@ -71,6 +71,7 @@ Typical usage
     # node_callable is a (state: dict) -> dict callable suitable for LangGraph.
 """
 
+import contextvars
 import inspect
 import logging
 import os
@@ -85,6 +86,21 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 LOGGER = logging.getLogger(__name__)
+
+#: Set (via a token-scoped context, see ``_build_mcp_fn``) for the duration
+#: of every ``tool.invoke(...)`` call made on behalf of an MCP-served tool
+#: request.  A tool implementation that needs to tell "I am being called
+#: through the ephemeral MCP bridge" apart from "I am being called through
+#: LangGraph's own tool-execution node" cannot rely on
+#: ``langchain_core.runnables.RunnableConfig`` propagation for this: calling
+#: ``Runnable.invoke()`` at all (as this module and LangGraph's own
+#: ``ToolNode`` both do) sets that ambient config regardless of whether a
+#: LangGraph graph is actually driving the call, so it cannot distinguish
+#: the two contexts.  This contextvar is bili-core's own, narrower signal,
+#: true only for the duration of a call this module itself makes.
+IN_MCP_TOOL_CALL: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "bili_iris_mcp_in_tool_call", default=False
+)
 
 # ---------------------------------------------------------------------------
 # Optional heavy dependencies — deferred so importing this module does not
@@ -275,6 +291,12 @@ def _build_mcp_fn(tool: Any) -> Callable:
     In both cases the function's ``__name__`` is set to ``tool.name`` so
     FastMCP registers it under the correct tool name.
 
+    Sets :data:`IN_MCP_TOOL_CALL` to ``True`` for the duration of the
+    ``tool.invoke(...)`` call so a tool implementation that dispatches on
+    calling context (e.g. ``ask_user``, which has no LangGraph node to
+    ``interrupt()`` on this path) can tell it apart from a native
+    ``ToolNode`` invocation.
+
     :param tool: A LangChain :class:`~langchain_core.tools.BaseTool`.
     :returns: A callable suitable for ``FastMCP.add_tool(fn, ...)``.
     """
@@ -286,7 +308,11 @@ def _build_mcp_fn(tool: Any) -> Callable:
     if not model_fields:
         # Plain single-string-input tool.
         def _plain_fn(tool_input: str) -> str:
-            return str(tool.invoke(tool_input))
+            token = IN_MCP_TOOL_CALL.set(True)
+            try:
+                return str(tool.invoke(tool_input))
+            finally:
+                IN_MCP_TOOL_CALL.reset(token)
 
         _plain_fn.__name__ = tool.name
         _plain_fn.__doc__ = tool.description or ""
@@ -312,7 +338,11 @@ def _build_mcp_fn(tool: Any) -> Callable:
         )
 
     def _structured_fn(**kwargs: Any) -> str:
-        return str(tool.invoke(kwargs))
+        token = IN_MCP_TOOL_CALL.set(True)
+        try:
+            return str(tool.invoke(kwargs))
+        finally:
+            IN_MCP_TOOL_CALL.reset(token)
 
     _structured_fn.__signature__ = inspect.Signature(
         parameters=params, return_annotation=str

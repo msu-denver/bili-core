@@ -15,6 +15,7 @@ its own :meth:`HitlResponder.ask` (see :class:`ScriptedHitlResponder` for the
 shape of a minimal implementation).
 """
 
+import threading
 from typing import List, Optional, Protocol, runtime_checkable
 
 from bili.utils.logging_utils import get_logger
@@ -37,13 +38,22 @@ NO_RESPONSE_PREFIX = "[no response:"
 class HitlResponder(Protocol):
     """Host-implemented callback that blocks until a human answers a question.
 
-    A single instance is registered once per process (or per run) via
+    A single instance is registered once per process (or run) via
     :func:`bili.iris.tools.ask_user.register_ask_user_tool` and is shared by
-    every ``ask_user`` tool call that instance's registration produced. An
-    implementation backing more than one concurrent agent run (e.g. several
-    MAS runs fanned out in parallel by a host) must be safe to call from
-    multiple threads at once, since each in-flight ``ask_user`` call blocks
-    the thread that made it.
+    every ``ask_user`` call that registration produced, across BOTH pause
+    mechanisms (the native ``interrupt()`` path calls :meth:`ask` indirectly
+    via a graph resume, the CLI/MCP path calls it directly and blocks on it).
+
+    Thread safety is a host-side contract this protocol does not enforce but
+    every implementation must honor: more than one ``ask_user`` call can be
+    in flight AT THE SAME TIME against the same responder instance whenever
+    a host runs multiple agent RUNS concurrently (e.g. a fan-out batch of N
+    MAS runs, each potentially raising its own question). Each in-flight
+    call blocks the thread that made it, so :meth:`ask` -- and any shared
+    state it reads or writes -- must be safe to call from multiple threads
+    at once. A responder that renders questions into a single-consumer UI
+    (one prompt at a time) must serialize or queue internally rather than
+    silently interleaving or corrupting concurrent calls.
     """
 
     def ask(self, question: str, options: Optional[List[str]] = None) -> str:
@@ -97,12 +107,18 @@ class ScriptedHitlResponder:
     Not a production responder. Used by bili-core's own tests, and usable by
     a host's tests, to exercise the ``ask_user`` pause/resume seam without a
     real human or a real event loop.
+
+    Thread-safe: a lock guards the append-then-index sequence in :meth:`ask`
+    so concurrent calls (e.g. a test that fans out several agent runs against
+    one shared responder) get distinct, correctly-ordered answers rather than
+    racing on the shared call count.
     """
 
     def __init__(self, answers: List[str]) -> None:
         """:param answers: Answers returned in order, one per :meth:`ask` call."""
         self._answers = list(answers)
         self._calls: List[dict] = []
+        self._lock = threading.Lock()
 
     def ask(self, question: str, options: Optional[List[str]] = None) -> str:
         """Record the call and return the next scripted answer.
@@ -111,13 +127,15 @@ class ScriptedHitlResponder:
             answers -- a test bug (the script under-provisioned answers),
             not a runtime condition to degrade gracefully from.
         """
-        self._calls.append({"question": question, "options": options})
-        return self._answers[len(self._calls) - 1]
+        with self._lock:
+            self._calls.append({"question": question, "options": options})
+            return self._answers[len(self._calls) - 1]
 
     @property
     def calls(self) -> List[dict]:
         """The ``{"question", "options"}`` dicts recorded for each :meth:`ask` call."""
-        return list(self._calls)
+        with self._lock:
+            return list(self._calls)
 
 
 __all__ = [
