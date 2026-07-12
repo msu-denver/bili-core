@@ -48,6 +48,19 @@ Usage::
         elif event_type == "__node_complete__":
             print(f"\n[{event_data['node']} complete]")
 
+    # ask_user (or any tool calling langgraph.types.interrupt()) pauses the
+    # run_streaming() generator with a __ask_user_pending__ sentinel;
+    # resume_with_value() supplies the answer and continues execution:
+    for node_name, state_update in executor.run_streaming(
+        {"messages": [HumanMessage(content="Deploy the app.")]}, thread_id="my-thread"
+    ):
+        if node_name == "__ask_user_pending__":
+            question = state_update["interrupts"][0]["question"]
+            for node_name2, state_update2 in executor.resume_with_value(
+                "staging", thread_id="my-thread"
+            ):
+                print(f"{node_name2}: {state_update2}")
+
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
 """
@@ -499,6 +512,104 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                     )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 LOGGER.warning("Could not inspect graph state for HITL check: %s", exc)
+
+        # Separately, check for a langgraph.types.interrupt() pause (e.g. the
+        # ask_user tool) — distinct from the human_in_loop / is_human whole-
+        # agent-slot mechanism above, and not gated on human_in_loop, since a
+        # tool-level interrupt can occur in any MAS regardless of that flag.
+        # Additive: existing __human_interrupt__ callers are unaffected.
+        if invoke_config:
+            try:
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                pending_interrupts = [
+                    interrupt_obj
+                    for task in graph_state.tasks
+                    for interrupt_obj in task.interrupts
+                ]
+                if pending_interrupts:
+                    yield (
+                        "__ask_user_pending__",
+                        {
+                            # Raw interrupt payload(s) as passed to interrupt(...),
+                            # e.g. {"type": "ask_user", "question": ..., "options": ...}.
+                            "interrupts": [i.value for i in pending_interrupts],
+                            "thread_id": effective_thread_id,
+                        },
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.warning(
+                    "Could not inspect graph state for ask_user interrupt check: %s",
+                    exc,
+                )
+
+    def resume_with_value(
+        self,
+        value: Any,
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Resume a graph paused at a ``langgraph.types.interrupt()`` call.
+
+        Unlike :meth:`resume_streaming` (which injects a ``HumanMessage`` and
+        lets the graph continue routing normally — the ``human_in_loop`` /
+        ``is_human`` whole-agent-slot mechanism), this supplies *value*
+        directly as the return value of the ``interrupt(...)`` call that
+        paused execution, via ``Command(resume=value)``. Use this to resume
+        after a ``__ask_user_pending__`` sentinel from :meth:`run_streaming`.
+
+        The outer AETHER/IRIS node that called into the tool-calling agent
+        re-executes from its own start on resume (not just the single
+        interrupted tool call) — this is ``langgraph.types.interrupt()``'s
+        documented behavior, not a bili-core choice. Verified against
+        ``create_agent``'s tool-calling subgraph specifically: its own
+        internal LLM-call node is NOT re-invoked on resume (LangGraph tracks
+        that node's own already-completed task independently, even without
+        an explicit checkpointer passed to ``create_agent``, when the
+        subgraph is invoked from inside an already-checkpointed outer node —
+        which is how every bili-core tool-calling node uses it). Code in the
+        outer node before the tool-calling agent is invoked (e.g. system
+        prompt / comm-context assembly) does re-run; this is harmless as
+        long as it is pure computation with no external side effect, which
+        holds for AETHER's own pre-invoke bookkeeping today.
+
+        Args:
+            value: The value returned to the paused ``interrupt(...)`` call
+                (e.g. the human's answer to an ``ask_user`` question).
+            thread_id: Thread ID originally reported in the
+                ``__ask_user_pending__`` sentinel.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the interrupt, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before resume_with_value()."
+            )
+
+        from langgraph.types import Command  # pylint: disable=import-outside-toplevel
+
+        invoke_config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._config.max_iterations,
+        }
+
+        LOGGER.info("Resuming interrupt()-paused execution for thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                Command(resume=value),
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("resume_with_value failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("interrupt() resume complete for thread '%s'", thread_id)
 
     def run_streaming_tokens(
         self,

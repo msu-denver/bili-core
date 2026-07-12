@@ -156,4 +156,18 @@ TOOLS = {
             },
         },
     },
+    "ask_user": {
+        "description": "Pauses the agent's turn to ask the human operating it a "
+        "question, then resumes with the answer. Requires a host to have called "
+        "bili.iris.tools.ask_user.register_ask_user_tool() and, on the native "
+        "tool-calling path, to resume the paused run via Command(resume=...).",
+        "enabled": False,
+        # Unused by the tool's actual behavior -- ask_user's description is
+        # fixed on the StructuredTool built by register_ask_user_tool() and
+        # does not read this value. Present only so initialize_tools() (which
+        # requires every registered tool to resolve a prompt) does not force
+        # every caller to supply a placeholder prompt for a tool that has none.
+        "default_prompt": "Ask the human operating this agent a question when a "
+        "decision requires their input, then continue with their answer.",
+    },
 }
