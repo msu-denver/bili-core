@@ -31,6 +31,7 @@ AETHER is a domain-agnostic multi-agent system (MAS) framework built as an exten
 - [Executing a MAS](#executing-a-mas)
   - [Basic Execution](#basic-execution)
   - [MASExecutor Methods](#masexecutor-methods)
+  - [Human-in-the-Loop](#human-in-the-loop)
   - [MASExecutionResult](#masexecutionresult)
   - [Checkpoint Persistence Testing](#checkpoint-persistence-testing)
   - [Cross-Model Transfer Testing](#cross-model-transfer-testing)
@@ -221,6 +222,8 @@ agents:
 | `model_name` | No | `None` | LLM model (e.g., `gpt-4`, `claude-sonnet-3-5-20241022`) |
 | `temperature` | No | `0.0` | LLM sampling temperature (0.0-2.0) |
 | `max_tokens` | No | `None` | Maximum tokens in LLM response |
+| `fallback_models` | No | `[]` | Ordered fallback model names tried on a transient error from `model_name` |
+| `cli_subprocess_timeout` | No | `None` | Per-call subprocess timeout in seconds for CLI-backed providers; `None` uses the preset default (1800s), `0` disables the timeout entirely. See [Human-in-the-Loop](#human-in-the-loop) for the `ask_user` CLI-path caveat. |
 | `system_prompt` | No | `None` | Instructions for the LLM. No fixed length cap — checked against the bound model's own declared input-token limit when `model_name` resolves to a catalog entry with a known limit; unconstrained otherwise. See [`get_prompt_length_limit()`](#per-model-prompt-length-limits). |
 | `capabilities` | No | `[]` | Agent capabilities (free-form strings) |
 | `tools` | No | `[]` | Tool names from the tool registry |
@@ -237,6 +240,7 @@ agents:
 | `tier` | No | `None` | Tier in hierarchical workflows (1 = highest authority) |
 | `voting_weight` | No | `1.0` | Weight in voting/consensus workflows |
 | `is_supervisor` | No | `false` | Whether agent can dynamically route to specialists |
+| `is_human` | No | `false` | Whether this agent slot is filled by a human reviewer; when `true` and `human_in_loop: true` on the MAS, execution pauses before this node (see [Human-in-the-Loop](#human-in-the-loop)) |
 | `consensus_vote_field` | No | `None` | Field name in output containing vote |
 | `metadata` | No | `{}` | Arbitrary key-value pairs for custom use |
 
@@ -602,6 +606,11 @@ The validator checks for **errors** (fatal — block execution) and **warnings**
 | Warning | Hierarchical tier gap (e.g., tier 1 and 3 but no 2) |
 | Warning | Supervisor entry point not marked `is_supervisor` |
 | Warning | `human_in_loop` enabled without `human_escalation_condition` |
+| Warning | Pipeline node unreachable from entry point |
+| Warning | Pipeline has only stub agents (no `model_name` anywhere) |
+| Warning | Pipeline conditional edges with no unconditional fallback |
+| Warning | `ask_user` agent on a CLI `tool_strategy="mcp"` model with a `cli_subprocess_timeout` below 5 minutes (see [Human-in-the-Loop](#human-in-the-loop)) |
+| Warning | `ask_user` agent on a CLI `tool_strategy="mcp"` model -- reminder that a `HitlResponder` must be registered |
 
 Validation runs on top of Pydantic's field-level validation — it catches cross-field and structural issues that individual field constraints can't express.
 
@@ -980,6 +989,153 @@ result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
 | `run(input_data, thread_id, save_results)` | `MASExecutionResult` | Execute graph, collect results |
 | `run_with_checkpoint_persistence(input_data, thread_id)` | `(original, restored)` | Run twice with checkpoint save/restore |
 | `run_cross_model_test(input_data, source_model, target_model, thread_id)` | `(source, target)` | Run with two different model configurations |
+| `run_streaming(input_data, thread_id)` | generator of `(node_name, state_update)` | Stream node outputs; yields a `__human_interrupt__` / `__ask_user_pending__` sentinel if the run pauses (see [Human-in-the-Loop](#human-in-the-loop)) |
+| `resume_streaming(human_input, thread_id)` | generator | Resume after a `__human_interrupt__` sentinel |
+| `resume_with_value(value, thread_id)` | generator | Resume after a `__ask_user_pending__` sentinel |
+
+### Human-in-the-Loop
+
+AETHER has two distinct human-in-the-loop mechanisms. They pause execution
+for different reasons and at different granularities; pick the one that
+matches what you actually need a human for.
+
+| | `human_in_loop` | `ask_user` |
+|---|---|---|
+| **What pauses** | The whole workflow, before a designated human-reviewer agent's turn | One tool call, mid-turn, inside an agent's own reasoning |
+| **Granularity** | Whole-turn handoff | A single question |
+| **Who answers** | A human filling the role of an `AgentSpec` with `is_human: true` | Any `HitlResponder` implementation the host provides |
+| **Config** | `human_in_loop: true` + an agent with `is_human: true` | `tools: ["ask_user"]` on any tool-enabled agent |
+| **Resume with** | `MASExecutor.resume_streaming(human_input, thread_id)` | `MASExecutor.resume_with_value(value, thread_id)` (native path) |
+| **Use for** | "This decision needs a human reviewer in the loop as a workflow step" (approval gates, escalation) | "This agent needs one piece of information or judgment it cannot infer, then it keeps going" |
+
+They compose: a MAS can use both, independently, in the same config.
+
+#### `human_in_loop`: whole-turn escalation to a human reviewer
+
+Set `human_in_loop: true` on the `MASConfig` and mark one agent
+`is_human: true`. AETHER compiles the graph with `interrupt_before` set on
+that agent's node, so execution pauses immediately before it would run.
+`run_streaming()` detects the pause after the stream exhausts (via
+`graph_state.next`) and yields a `("__human_interrupt__", {"next": [...],
+"thread_id": ...})` sentinel; the caller collects the human's review and
+calls `resume_streaming(human_input, thread_id)`, which injects it as a
+`HumanMessage` and lets the graph continue routing normally.
+
+```yaml
+human_in_loop: true
+human_escalation_condition: >-           # documents *why* this MAS escalates
+  state.tie_breaker_needed or state.confidence < 0.5
+agents:
+  - agent_id: human_reviewer
+    role: reviewer
+    is_human: true
+    objective: "Review the escalated decision"
+```
+
+```python
+for node_name, state_update in executor.run_streaming(input_data, thread_id="t1"):
+    if node_name == "__human_interrupt__":
+        human_input = collect_review_from_a_ui()  # your own UI/CLI/queue
+        for node_name2, state_update2 in executor.resume_streaming(human_input, "t1"):
+            ...
+```
+
+The validator warns (`W10`) if `human_in_loop` is set without a
+`human_escalation_condition` -- the condition is documentation, not an
+enforced gate, but omitting it usually means the escalation trigger was
+never actually thought through.
+
+#### `ask_user`: an agent asks one question and keeps going
+
+`ask_user` is a generic tool (`bili.iris.tools.ask_user`), not a workflow-level
+config field. Any tool-enabled agent that lists `"ask_user"` in `tools` can
+call it mid-turn to ask the human operating the run a question it cannot
+answer from the conversation or its other tools, then continue its OWN turn
+with the answer folded back into context -- no handoff to a separate
+reviewer agent, no restart of the workflow's routing.
+
+```python
+from bili.iris.tools.ask_user import register_ask_user_tool
+from bili.iris.tools.hitl import HitlResponder
+
+class MyResponder:
+    """Implement HitlResponder however your host wants to surface questions --
+    a CLI prompt, an HTTP endpoint, a desktop modal, a message queue. bili-core
+    never renders the question itself."""
+    def ask(self, question: str, options: list[str] | None = None) -> str:
+        return my_own_ui.prompt(question, options)
+
+register_ask_user_tool(MyResponder())  # opt-in: no effect until called
+```
+
+Then declare it like any other tool:
+
+```yaml
+agents:
+  - agent_id: deployer
+    role: deployer
+    model_name: gpt-4o
+    tools: ["ask_user"]
+```
+
+**The `HitlResponder` seam.** `HitlResponder` (`bili.iris.tools.hitl`) is the
+one surface-agnostic contract a host implements: a single blocking
+`ask(question, options) -> str` method. bili-core does not render questions,
+pick a delivery surface, or impose a timeout policy -- that is entirely the
+host's responsibility. On timeout or an explicit skip, a `HitlResponder`
+should return a string starting with `NO_RESPONSE_PREFIX`
+(`"[no response:"`) instead of raising, so a headless run never hangs and the
+calling agent can branch on "no answer" like any other tool observation.
+`register_ask_user_tool()` defaults to `NullHitlResponder` when no responder
+is given, so a MAS config that lists `ask_user` still compiles and runs in an
+environment with no real responder wired up -- it just degrades to the
+no-response sentinel. `ScriptedHitlResponder` is a thread-safe test double
+for exercising the pause/resume seam without a real human.
+
+A single `HitlResponder` instance may see more than one `ask_user` call *at
+the same time* if a host runs multiple agent runs concurrently (e.g. a
+fan-out batch) -- implementations must be safe to call from multiple threads
+at once.
+
+**Two pause mechanisms, one tool.** Because
+`resolve_tools()` resolves an agent's tool list before its model's
+`tool_strategy` is known, `ask_user` cannot be two separately-registered
+tools for the native and CLI/MCP paths -- it is one `TOOL_REGISTRY` entry
+whose `func` dispatches at call time:
+
+- **Native tool-calling** (`tool_strategy="native"`, i.e.
+  `langchain.agents.create_agent` / `bind_tools`): calls
+  `langgraph.types.interrupt()` from inside the tool call itself -- a
+  different LangGraph primitive than `human_in_loop`'s compile-time
+  `interrupt_before` node list, and one that resumes the SAME agent's turn
+  rather than handing off to a different node. `run_streaming()` yields a
+  `("__ask_user_pending__", {"interrupts": [...], "thread_id": ...})`
+  sentinel with the raw question/options payload; resume with
+  `MASExecutor.resume_with_value(answer, thread_id)`.
+- **CLI/MCP** (`tool_strategy="mcp"`): the tool is served over the ephemeral
+  authenticated MCP server to a spawned CLI agent (Claude Code, Codex, Gemini
+  CLI) that self-orchestrates. There is no LangGraph node to interrupt there,
+  so the tool instead BLOCKS the MCP tool-call handler by calling
+  `HitlResponder.ask(...)` directly -- the block itself is what leaves the
+  CLI subprocess's own outstanding tool call pending until a human answers.
+  No `resume_*` call is needed on this path; the answer returns synchronously
+  as the tool's result.
+
+**CLI subprocess timeout caveat.** On the CLI/MCP path, the whole subprocess
+call is bounded by `AgentSpec.cli_subprocess_timeout` (default: the CLI
+preset's 1800s). If a human has not answered by the time that timeout
+expires, the ENTIRE turn is discarded, not just the pending question -- the
+timeout is a blunt instrument with no special accommodation for a pending
+`ask_user` call. Leave `cli_subprocess_timeout` unset (the generous preset
+default) or set it to `0` (no timeout) for agents that use `ask_user` on a
+CLI model, unless there is a specific reason to bound how long that agent
+waits for a human. The validator warns (`W14`) if an `ask_user` agent on a
+`tool_strategy="mcp"` model has an explicit timeout below 5 minutes, and
+separately reminds (`W15`) that the CLI/MCP path requires a real
+`HitlResponder` to be registered -- that reminder fires whenever an
+`ask_user` + CLI/MCP agent is declared, since whether a responder is
+actually registered is host runtime state a static config validator cannot
+see.
 
 ### MASExecutionResult
 
@@ -1114,7 +1270,7 @@ The table below shows which AETHER features each example demonstrates:
 - **Middleware**: Per-agent middleware (summarization, call limits)
 - **Checkpointer**: State persistence configuration
 - **Inheritance**: Inherit defaults from bili-core role registry
-- **Human-in-Loop**: Pause execution for human approval
+- **Human-in-Loop**: Whole-turn escalation to a human-reviewer agent (`human_in_loop`); see [Human-in-the-Loop](#human-in-the-loop) for this and the finer-grained `ask_user` tool
 - **Vote Fields**: Extract consensus votes from structured output
 
 ### Examples by Domain

@@ -1,5 +1,11 @@
 """Tests for the static MAS validation engine."""
 
+# pylint: disable=too-many-lines
+# One cohesive suite covering every MASValidator check (W1-W15); splitting
+# by warning number would fragment closely related positive/negative cases
+# for no real benefit, so this follows the same pattern as
+# bili/iris/config/llm_config.py and bili/aether/compiler/graph_builder.py.
+
 import os
 
 from bili.aether.config.loader import load_mas_from_yaml
@@ -545,6 +551,122 @@ def test_ask_user_cli_timeout_skipped_when_llm_resolver_unavailable(monkeypatch)
     result = validate_mas(config)
 
     assert not any("cli_subprocess_timeout" in w for w in result.warnings)
+
+
+# =========================================================================
+# W15: ask_user + CLI tool_strategy='mcp' registration reminder
+# =========================================================================
+
+
+def test_ask_user_cli_registration_reminder_warns():
+    """W15: an ask_user CLI/MCP agent always gets the registration reminder.
+
+    Fires unconditionally for any tool_strategy='mcp' agent declaring
+    ask_user -- the check cannot see whether register_ask_user_tool() was
+    actually called (that is runtime state, not part of MASConfig), so it
+    does not try to distinguish "wired" from "unwired" and reminds every
+    time instead.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent()],
+    )
+
+    result = validate_mas(config)
+
+    assert result.valid is True
+    assert any(
+        "ask_user" in w and "register_ask_user_tool" in w for w in result.warnings
+    )
+
+
+def test_ask_user_registration_reminder_without_cli_model_no_warning():
+    """W15: ask_user on a native tool-calling model does not warn.
+
+    The native path's interrupt()/Command(resume=...) pause does not
+    consult a HitlResponder at all, so an unwired native agent still
+    pauses correctly -- there is no registration footgun to remind about.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("a", model_name="gpt-4o", tools=["ask_user"])],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("register_ask_user_tool" in w for w in result.warnings)
+
+
+def test_cli_model_without_ask_user_no_registration_warning():
+    """W15: a CLI model without ask_user in tools does not warn.
+
+    The reminder is specific to ask_user's HitlResponder requirement, not
+    a general comment on CLI/MCP agents.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_agent("a", model_name="Claude Code CLI", tools=[])],
+    )
+
+    result = validate_mas(config)
+
+    assert not any("register_ask_user_tool" in w for w in result.warnings)
+
+
+def test_ask_user_registration_reminder_fires_regardless_of_timeout():
+    """W15 fires independently of W14 -- a generous or unset timeout still
+    gets the registration reminder, since the two checks name unrelated
+    risks (timeout discards the turn; missing registration fabricates an
+    answer with no pause at all).
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent(cli_subprocess_timeout=0.0)],
+    )
+
+    result = validate_mas(config)
+
+    assert any("register_ask_user_tool" in w for w in result.warnings)
+
+
+def test_ask_user_registration_reminder_skipped_when_llm_resolver_unavailable(
+    monkeypatch,
+):
+    """W15: the check is skipped (not raised) when llm_resolver can't be imported.
+
+    Config construction happens BEFORE the import block for the same reason
+    as the equivalent W14 test: AgentSpec's own system_prompt length-limit
+    validator also imports llm_resolver.
+    """
+    config = MASConfig(
+        mas_id="test",
+        name="Test",
+        workflow_type=WorkflowType.SEQUENTIAL,
+        agents=[_ask_user_cli_agent()],
+    )
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _blocked_import(name, *args, **kwargs):
+        if name == "bili.aether.compiler.llm_resolver":
+            raise ImportError("simulated: llm_resolver unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocked_import)
+
+    result = validate_mas(config)
+
+    assert not any("register_ask_user_tool" in w for w in result.warnings)
 
 
 # =========================================================================
