@@ -73,6 +73,7 @@ class MASValidator:
         self._check_orphaned_agents()
         self._check_supervisor_capabilities()
         self._check_ask_user_cli_timeout()
+        self._check_ask_user_cli_registration_visibility()
 
     def _check_orphaned_agents(self) -> None:
         """W1: Warn about agents with no channel connections.
@@ -158,6 +159,54 @@ class MASValidator:
                 f"(preset default 1800s) or set it to 0 (no timeout) unless "
                 f"you have a specific reason to bound how long this agent "
                 f"waits for a human."
+            )
+
+    def _check_ask_user_cli_registration_visibility(self) -> None:
+        """W15: Warn that an ask_user CLI/MCP agent needs a registered HitlResponder.
+
+        Whether a real HitlResponder is registered is HOST RUNTIME STATE
+        (register_ask_user_tool() populates a process-global TOOL_REGISTRY
+        entry), not something a MASConfig -- the only input this static
+        validator sees -- can express. validate_mas() has no access to
+        TOOL_REGISTRY and, by design, never reaches into live process state
+        (see the module docstring: this validator performs config-only,
+        structural checks). So this check cannot tell "wired" from
+        "unwired" and does not try to; it unconditionally reminds the
+        config author of the requirement whenever an agent could reach the
+        CLI/MCP pause path, which is the best available signal from static
+        config alone.
+
+        Scoped to tool_strategy='mcp' specifically, not tool_strategy='native':
+        the native path's pause/resume (interrupt() / Command(resume=...))
+        does not consult a HitlResponder at all, so an unwired native agent
+        still pauses correctly. Only the CLI/MCP path silently returns the
+        NullHitlResponder no-response sentinel -- no error, no visible pause,
+        just a fabricated "no answer" -- when nothing real is registered,
+        which is the actual footgun this check exists to name.
+        """
+        try:
+            from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+                resolve_tool_strategy,
+            )
+        except ImportError:
+            return
+
+        for agent in self._config.agents:
+            if "ask_user" not in agent.tools or not agent.model_name:
+                continue
+            if resolve_tool_strategy(agent.model_name) != "mcp":
+                continue
+            self._result.add_warning(
+                f"Agent '{agent.agent_id}' has 'ask_user' in tools on a CLI "
+                f"tool_strategy='mcp' model. This path requires a real "
+                f"HitlResponder registered via "
+                f"bili.iris.tools.ask_user.register_ask_user_tool(responder=...) "
+                f"before this agent runs. Without one, ask_user calls "
+                f"silently return the no-response sentinel instead of "
+                f"pausing for a human -- this static check cannot see "
+                f"whether a responder is registered (that is runtime "
+                f"state), so treat this as a reminder to verify the "
+                f"registration, not a diagnosis of a missing one."
             )
 
     # ==================================================================
