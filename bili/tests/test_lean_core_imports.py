@@ -289,6 +289,25 @@ class TestLeanCoreImports:
 
             assert QueryableMemorySaver is not None
 
+    def test_amazon_opensearch_not_imported_on_sibling_tool_access(self):
+        """Importing a sibling bili.iris.tools submodule does not pull in opensearch-py.
+
+        bili.iris.tools.__init__ lazily loads its submodules (PEP 562), so
+        importing bili.iris.tools.mock_tool must not trigger
+        bili.iris.tools.amazon_opensearch's own module-level opensearch-py
+        import as a side effect of the package __init__ running. Checking
+        for the absence of "bili.iris.tools.amazon_opensearch" in
+        sys.modules (rather than "opensearchpy" itself) sidesteps
+        _blocked_modules' own None-sentinel, which is always a key present
+        in sys.modules while active -- see
+        test_opensearch_utils_not_imported_on_utils_access for the same
+        pattern.
+        """
+        with _blocked_modules(["opensearchpy"]):
+            import bili.iris.tools.mock_tool  # pylint: disable=import-outside-toplevel,unused-import
+
+            assert "bili.iris.tools.amazon_opensearch" not in sys.modules
+
 
 # ---------------------------------------------------------------------------
 # PEP 562 lazy-loader __init__.py coverage
@@ -383,6 +402,44 @@ class TestLazyLoaderInits:
         assert "memory_checkpointer" in names
         assert "mongo_checkpointer" in names
         assert "pg_checkpointer" in names
+
+    # ------------------------------------------------------------------
+    # bili/iris/tools/__init__.py
+    # ------------------------------------------------------------------
+
+    def test_iris_tools_getattr_loads_known_submodule(self):
+        """Accessing a known submodule via bili.iris.tools.__getattr__ imports it."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        saved = sys.modules.pop("bili.iris.tools", None)
+        try:
+            pkg = importlib.import_module("bili.iris.tools")
+            mod = pkg.__getattr__("mock_tool")
+            assert mod is not None
+            assert hasattr(mod, "init_mock_tool")
+        finally:
+            if saved is not None:
+                sys.modules["bili.iris.tools"] = saved
+
+    def test_iris_tools_getattr_raises_for_unknown_name(self):
+        """Accessing an unknown attribute via bili.iris.tools.__getattr__ raises."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        import pytest as _pytest  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.iris.tools")
+        with _pytest.raises(AttributeError, match="has no attribute"):
+            pkg.__getattr__("_nonexistent_xyz")
+
+    def test_iris_tools_dir_returns_submodule_names(self):
+        """bili.iris.tools.__dir__() returns the declared lazy submodule names."""
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        pkg = importlib.import_module("bili.iris.tools")
+        names = pkg.__dir__()
+        assert "amazon_opensearch" in names
+        assert "faiss_memory_indexing" in names
+        assert "mock_tool" in names
 
     # ------------------------------------------------------------------
     # bili/iris/loaders/__init__.py
