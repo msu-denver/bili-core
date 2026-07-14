@@ -85,9 +85,15 @@ class OllamaProvider(LLMProvider):
         :returns: A ``ChatOllama`` instance.
         :raises ImportError: If ``langchain_ollama`` is not installed.
         """
-        from langchain_ollama import (  # pylint: disable=import-outside-toplevel,import-error
-            ChatOllama,
-        )
+        try:
+            from langchain_ollama import (  # pylint: disable=import-outside-toplevel,import-error
+                ChatOllama,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "The 'langchain-ollama' package is required for the Ollama "
+                "provider. Install it with: pip install bili-core[ollama]"
+            ) from exc
 
         resolved_base_url = base_url or DEFAULT_OLLAMA_BASE_URL
         LOGGER.info(

@@ -145,14 +145,23 @@ class TestOllamaProviderLoad:
         assert result is sentinel
 
     def test_missing_sdk_raises_import_error(self):
-        """Verify a helpful ImportError surfaces when langchain_ollama is absent."""
-        # Ensure no stand-in module is present so the real import is attempted.
+        """Verify a helpful ImportError surfaces when langchain_ollama is absent.
+
+        Setting sys.modules["langchain_ollama"] = None blocks the import
+        unconditionally (Python raises ImportError for a None entry),
+        regardless of whether the real package happens to be installed in
+        the venv running this test -- unlike popping the module, which only
+        exercises this path when the dependency is truly absent.
+        """
         saved = sys.modules.pop("langchain_ollama", None)
+        sys.modules["langchain_ollama"] = None  # type: ignore[assignment]
         try:
-            with pytest.raises(ImportError):
+            with pytest.raises(ImportError, match="langchain-ollama.*required"):
                 OllamaProvider().load(model_name="qwen3")
         finally:
-            if saved is not None:
+            if saved is None:
+                sys.modules.pop("langchain_ollama", None)
+            else:
                 sys.modules["langchain_ollama"] = saved
 
 
