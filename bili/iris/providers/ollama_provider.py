@@ -23,6 +23,21 @@ the ``model_name`` kwarg (from ``AgentSpec.model_name``) or a catalog entry's
 ``model_id``.  Point at a non-default daemon with the ``base_url`` kwarg (or a
 catalog entry's ``kwargs.base_url``); it defaults to ``http://localhost:11434``.
 
+Resolving arbitrary user-pulled tags
+-------------------------------------
+An AETHER ``AgentSpec`` carries only ``model_name``, resolved to a provider via
+catalog lookup and prefix heuristics (see
+``bili.aether.compiler.llm_resolver``).  A tag that is not in the catalog and
+matches no heuristic cannot resolve at all.  Since Ollama tags are arbitrary
+and user-pulled (``qwen3:14b``, ``llama3.1:70b-instruct-q4_0``, ...), prefix
+the ``model_name`` with the ``ollama:`` sentinel (e.g.
+``"ollama:qwen3:14b"``) to route to this provider without a catalog entry,
+mirroring the existing ``cli:`` sentinel for the subprocess CLI provider.
+:meth:`load` strips the ``ollama:`` prefix before constructing ``ChatOllama``
+so the daemon receives the real tag.  The prefix is optional: the single-turn
+path that passes a bare tag with an explicit ``provider_type`` continues to
+work unchanged.
+
 Heavy dependencies
 ------------------
 ``langchain_ollama`` is imported inside :meth:`OllamaProvider.load` so this
@@ -39,6 +54,11 @@ LOGGER = logging.getLogger(__name__)
 
 #: Ollama's default daemon endpoint.  Used when no ``base_url`` is supplied.
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+
+#: Sentinel prefix that routes an arbitrary, non-catalog ``model_name`` to
+#: this provider via the resolver's heuristic rules (mirrors the "cli:"
+#: sentinel for the subprocess CLI provider).  Stripped in :meth:`load`.
+OLLAMA_MODEL_PREFIX = "ollama:"
 
 
 # pylint: disable=too-few-public-methods
@@ -79,7 +99,12 @@ class OllamaProvider(LLMProvider):
     ) -> Any:
         """Create and return a ``ChatOllama`` instance.
 
-        :param model_name: Name of a model pulled into the local Ollama server.
+        :param model_name: Name of a model pulled into the local Ollama
+            server (e.g. ``"qwen3"``), optionally prefixed with the
+            ``"ollama:"`` sentinel (e.g. ``"ollama:qwen3:14b"``) so the
+            resolver can route an arbitrary, non-catalog tag here.  The
+            prefix, if present, is stripped before the tag reaches
+            ``ChatOllama``.
         :param base_url: Ollama daemon base URL; defaults to
             ``"http://localhost:11434"``.
         :returns: A ``ChatOllama`` instance.
@@ -95,12 +120,24 @@ class OllamaProvider(LLMProvider):
                 "provider. Install it with: pip install bili-core[ollama]"
             ) from exc
 
-        resolved_base_url = base_url or DEFAULT_OLLAMA_BASE_URL
-        LOGGER.info(
-            "Initializing Ollama model '%s' at %s", model_name, resolved_base_url
+        # Strip the "ollama:" sentinel used by the resolver's heuristic
+        # routing (bili.aether.compiler.llm_resolver) for non-catalog tags.
+        # The single-turn path passes the bare tag directly, so the prefix
+        # is optional here -- only stripped when present.
+        resolved_model_name = (
+            model_name[len(OLLAMA_MODEL_PREFIX) :]
+            if model_name.startswith(OLLAMA_MODEL_PREFIX)
+            else model_name
         )
 
-        config: dict = {"model": model_name, "base_url": resolved_base_url}
+        resolved_base_url = base_url or DEFAULT_OLLAMA_BASE_URL
+        LOGGER.info(
+            "Initializing Ollama model '%s' at %s",
+            resolved_model_name,
+            resolved_base_url,
+        )
+
+        config: dict = {"model": resolved_model_name, "base_url": resolved_base_url}
         # Ollama names the generation-length parameter num_predict, not
         # max_tokens; map bili-core's cross-provider max_tokens onto it.
         if max_tokens is not None:

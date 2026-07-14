@@ -1110,6 +1110,19 @@ class TestHeuristicResolution:
         assert resolve_provider("cli:custom") == "cli"
         assert resolve_provider("cli:my-local-tool") == "cli"
 
+    def test_cli_prefix_wins_over_embedded_vendor_substring(self):
+        """Verify 'cli:' outranks a vendor substring embedded in the tag.
+
+        Regression test: the "cli:" sentinel rule must precede every vendor
+        substring rule in _HEURISTIC_RULES, or a tag that happens to embed a
+        vendor pattern (e.g. "cli:deepseek-r1" contains "deepseek-") would
+        match the earlier vendor rule first and misroute away from the cli
+        provider.
+        """
+        # "cli:deepseek-r1" contains the "deepseek-" vendor pattern by
+        # construction; this asserts the sentinel wins the match anyway.
+        assert resolve_provider("cli:deepseek-r1") == "cli"
+
 
 # ---------------------------------------------------------------------------
 # LLM_MODELS catalog entry

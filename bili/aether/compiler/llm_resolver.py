@@ -26,9 +26,28 @@ LOGGER = logging.getLogger(__name__)
 
 _HEURISTIC_RULES = [
     # (substring_or_prefix, provider_type)
-    # Order matters -- more specific patterns must come before broader ones.
-    # The heuristic layer only fires when LLM_MODELS lookup returns nothing,
-    # so these rules apply to non-catalog model IDs only.
+    # Order matters -- more specific patterns must come before broader ones,
+    # since matching below is a plain substring test ("pattern in lower"),
+    # not an anchored prefix match.  The heuristic layer only fires when
+    # LLM_MODELS lookup returns nothing, so these rules apply to non-catalog
+    # model IDs only.
+    #
+    # Explicit sentinel prefixes MUST precede every vendor substring rule
+    # below.  A sentinel-prefixed tag can legitimately embed a vendor
+    # substring (e.g. "ollama:deepseek-r1:14b" contains "deepseek-";
+    # "ollama:llama-3.1-8b" contains "llama-3"), and since this loop takes
+    # the first match, an unrelated vendor rule appearing earlier would
+    # silently steal the match and misroute a local/CLI tag to a remote
+    # provider. Placing both sentinels first means an explicit routing
+    # prefix always wins over an incidental vendor substring.
+    ("cli:", "cli"),  # Subprocess CLI provider sentinel
+    # Local Ollama server sentinel.  The resolver keeps model_id unchanged
+    # on a heuristic match (same as "cli:" above); OllamaProvider.load()
+    # strips the "ollama:" prefix itself before passing the bare tag to
+    # ChatOllama, since (unlike the CLI provider) it forwards model_name
+    # straight to the client rather than taking its config from a separate
+    # command kwarg.
+    ("ollama:", "local_ollama"),
     ("gpt-", "remote_openai"),
     ("gpt4", "remote_openai"),
     ("o1-", "remote_openai"),
@@ -60,9 +79,6 @@ _HEURISTIC_RULES = [
     ("llama-3", "remote_groq"),  # Groq-hosted Llama
     ("compound-beta", "remote_groq"),  # Groq compound system
     ("gemma2-", "remote_groq"),  # Groq-hosted Gemma
-    # Subprocess CLI provider -- matches the "cli:" sentinel prefix used
-    # for CLI models in LLM_MODELS and any user-configured cli model_id.
-    ("cli:", "cli"),
     # Broad pre-existing fallbacks -- preserved for backward compatibility.
     # These fire for non-catalog model IDs that match only the bare vendor
     # name (e.g. bare "gemini", legacy Bedrock-style "mistral-..." that did
