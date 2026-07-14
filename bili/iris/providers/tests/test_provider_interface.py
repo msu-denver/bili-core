@@ -97,6 +97,7 @@ class TestLLMProviderAbstractBase:
         assert "remote_openai" in KNOWN_PROVIDER_TYPES
         assert "local_llamacpp" in KNOWN_PROVIDER_TYPES
         assert "local_huggingface" in KNOWN_PROVIDER_TYPES
+        assert "local_ollama" in KNOWN_PROVIDER_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -201,14 +202,15 @@ _EXPECTED_BUILTIN_TYPES = {
     "remote_openai",
     "local_llamacpp",
     "local_huggingface",
+    "local_ollama",
 }
 
 
 class TestBuiltinRegistration:
-    """Verify all six built-in providers are registered in PROVIDER_REGISTRY."""
+    """Verify the built-in providers are registered in PROVIDER_REGISTRY."""
 
     def test_all_builtins_registered(self):
-        """Verify all six built-in provider types are in PROVIDER_REGISTRY."""
+        """Verify the built-in provider types are in PROVIDER_REGISTRY."""
         for provider_type in _EXPECTED_BUILTIN_TYPES:
             assert (
                 provider_type in PROVIDER_REGISTRY
@@ -262,7 +264,7 @@ class TestRegistryPopulatedOnProductionPath:
         state is present and not just an artifact of how the test file loaded.
         """
         # PROVIDER_REGISTRY is the same object imported at module top level.
-        # If __init__ correctly imports builtin, all six types must be present.
+        # If __init__ correctly imports builtin, the built-in types must be present.
         for provider_type in _EXPECTED_BUILTIN_TYPES:
             assert provider_type in PROVIDER_REGISTRY, (
                 f"Production-path registry missing '{provider_type}'. "

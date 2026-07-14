@@ -430,7 +430,7 @@ def is_authenticated():
 The LLM configuration panel (`display_configuration_panels()` in `configuration_panels.py`) provides comprehensive model configuration:
 
 #### Model Selection
-- **LLM Type**: Dropdown for provider selection (all registered provider types: AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq, Claude Code CLI, Codex CLI, Gemini CLI, generic CLI, llama.cpp, HuggingFace)
+- **LLM Type**: Dropdown for provider selection (all registered provider types: AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq, Claude Code CLI, Codex CLI, Gemini CLI, generic CLI, llama.cpp, HuggingFace, Ollama)
 - **LLM Model**: Dropdown for specific model selection within provider
 
 #### Model Parameters (dynamically shown based on model capabilities)

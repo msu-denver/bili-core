@@ -2003,4 +2003,39 @@ LLM_MODELS = {
             },
         ],
     },
+    "local_ollama": {
+        "name": "Local Ollama Server Model",
+        "description": "Open-source model served by a local Ollama daemon over "
+        "HTTP. Pull the model first with 'ollama pull <model>'. The model name "
+        "is user-chosen; set it via the model_id below or the agent's "
+        "model_name. Point at a non-default daemon with kwargs.base_url "
+        "(defaults to http://localhost:11434).",
+        "model_help": "https://ollama.com/library",
+        "models": [
+            {
+                # The model_id is a placeholder: Ollama models are pulled
+                # locally with user-chosen names, so set the concrete model
+                # via model_id here or the agent's model_name. Tool-capable
+                # models (Qwen3, Llama 3.1+, Mistral) honour native tool calls.
+                "model_name": "Ollama Local (Server) Model",
+                "model_id": "qwen3",
+                "custom_model_path": False,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "local_only": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 100,
+                # base_url flows through to OllamaProvider.load() as the
+                # daemon endpoint; override per entry for a remote Ollama host.
+                "kwargs": {"base_url": "http://localhost:11434"},
+                # Unlike the in-process llamacpp/huggingface local providers,
+                # ChatOllama implements bind_tools, so tools bind natively for
+                # tool-capable models (the same path as the API providers).
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+        ],
+    },
 }

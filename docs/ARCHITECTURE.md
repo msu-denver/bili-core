@@ -4,7 +4,7 @@ This document describes the architecture and organization of the BiliCore framew
 
 ## Overview
 
-BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across 17 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 2 local providers (llama.cpp, HuggingFace).
+BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across 18 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 3 local providers (llama.cpp, HuggingFace, Ollama).
 
 The codebase is split into **three major subsystems** plus a set of shared modules:
 
@@ -29,7 +29,7 @@ bili-core/
 │   │   │   ├── pg_checkpointer.py
 │   │   │   └── memory_checkpointer.py
 │   │   ├── config/                #   Configuration management
-│   │   │   ├── llm_config.py      #     LLM model configurations (106 models, 17 provider types)
+│   │   │   ├── llm_config.py      #     LLM model configurations (107 models, 18 provider types)
 │   │   │   ├── tool_config.py     #     Tool configurations
 │   │   │   └── middleware_config.py
 │   │   ├── graph_builder/         #   LangGraph construction utilities
@@ -208,7 +208,7 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 
 The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
-106 model configurations across 17 provider types registered in `llm_config.py`:
+107 model configurations across 18 provider types registered in `llm_config.py`:
 
 | Provider type | Description |
 |---|---|
@@ -225,6 +225,7 @@ The configuration module holds declarative metadata for every supported LLM mode
 | `remote_groq` | Groq inference — Llama 3.3 70B, Llama 3.1 8B, Compound Beta |
 | `local_llamacpp` | llama.cpp in-memory (GGUF files) |
 | `local_huggingface` | HuggingFace local (GPTQ / transformers) |
+| `local_ollama` | Ollama local daemon over HTTP — open-source models (Qwen3, Llama 3.1+, Mistral); native tool calling for tool-capable models |
 | `cli` | Generic CLI subprocess (any text-in/text-out LLM tool) |
 | `cli_claude_code` | Claude Code CLI preset (`claude -p`) |
 | `cli_codex` | OpenAI Codex CLI preset (`codex exec`) |
