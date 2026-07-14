@@ -394,6 +394,36 @@ class TestOllamaSentinelHeuristic:
 
         assert resolve_provider(tag) == "local_ollama"
 
+    @pytest.mark.parametrize(
+        "tag,embedded_vendor_pattern",
+        [
+            # These tags embed a vendor substring rule that appears elsewhere
+            # in _HEURISTIC_RULES.  Regression coverage for a real bug: the
+            # sentinel rules were originally placed mid-list, after the
+            # vendor rules, so a substring match on an earlier vendor rule
+            # (e.g. "deepseek-", "llama-3") won the match before "ollama:"
+            # was ever checked, silently misrouting these to a remote
+            # provider instead of local_ollama.
+            ("ollama:deepseek-r1:14b", "deepseek-"),
+            ("ollama:llama-3.1-8b", "llama-3"),
+        ],
+    )
+    def test_sentinel_wins_over_embedded_vendor_substring(
+        self, tag, embedded_vendor_pattern
+    ):
+        """Verify the 'ollama:' sentinel outranks an embedded vendor substring.
+
+        Sanity-checks the test fixture itself: the tag must actually contain
+        the vendor pattern it is meant to collide with, or this test would
+        pass for the wrong reason (no collision to guard against).
+        """
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_provider,
+        )
+
+        assert embedded_vendor_pattern in tag.lower()
+        assert resolve_provider(tag) == "local_ollama"
+
     def test_sentinel_tool_strategy_is_native(self):
         """Verify a non-catalog 'ollama:' tag still resolves to native tool-calling.
 
