@@ -27,6 +27,7 @@ Provider type string               Implementation class
 ``remote_groq``                    :class:`~.groq_provider.GroqProvider`
 ``local_llamacpp``                 :class:`~.llamacpp_provider.LlamaCppProvider`
 ``local_huggingface``              :class:`~.huggingface_provider.HuggingFaceProvider`
+``local_ollama``                   :class:`~.ollama_provider.OllamaProvider`
 ``cli``                            :class:`~.cli_provider.CliProvider`
 ``cli_claude_code``                :class:`~.preset_provider.CliPresetProvider` (Claude Code preset)
 ``cli_codex``                      :class:`~.preset_provider.CliPresetProvider` (Codex CLI preset)
@@ -48,6 +49,7 @@ from .groq_provider import GroqProvider
 from .huggingface_provider import HuggingFaceProvider
 from .llamacpp_provider import LlamaCppProvider
 from .mistral_provider import MistralProvider
+from .ollama_provider import OllamaProvider
 from .openai_provider import OpenAIProvider
 from .preset_provider import CliPresetProvider
 from .registry import PROVIDER_REGISTRY
@@ -70,6 +72,7 @@ _BUILTIN_PROVIDERS = {
     "remote_groq": GroqProvider,
     "local_llamacpp": LlamaCppProvider,
     "local_huggingface": HuggingFaceProvider,
+    "local_ollama": OllamaProvider,
     "cli": CliProvider,
 }
 

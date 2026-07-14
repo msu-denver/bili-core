@@ -43,6 +43,8 @@ KNOWN_PROVIDER_TYPES = frozenset(
         # Local in-process providers
         "local_llamacpp",
         "local_huggingface",
+        # Local server provider (Ollama daemon over HTTP)
+        "local_ollama",
         # Subprocess / transport-level providers
         "cli",
         # Named CLI presets (each preset is a CliPresetProvider subclass)

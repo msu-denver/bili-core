@@ -202,6 +202,12 @@ _EXTRAS = {
     "llamacpp": [
         "llama-cpp-python==0.3.7",
     ],
+    # Ollama local server inference (bili/iris/providers/ollama_provider.py).
+    # Talks to a running Ollama daemon over HTTP; native tool calling for
+    # tool-capable models. Usage: pip install bili-core[ollama]
+    "ollama": [
+        "langchain-ollama>=0.2.0",
+    ],
     # Full ML stack: Keras, TensorFlow, scikit-learn (AEGIS attack strategies,
     # baseline runners, and advanced embedding backends).
     # Usage: pip install bili-core[ml]
