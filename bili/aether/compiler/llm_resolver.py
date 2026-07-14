@@ -63,6 +63,15 @@ _HEURISTIC_RULES = [
     # Subprocess CLI provider -- matches the "cli:" sentinel prefix used
     # for CLI models in LLM_MODELS and any user-configured cli model_id.
     ("cli:", "cli"),
+    # Local Ollama server -- matches the "ollama:" sentinel prefix so an
+    # arbitrary user-pulled tag (e.g. "ollama:qwen3:14b") routes to
+    # local_ollama without needing a catalog entry.  Unlike the "cli:"
+    # sentinel (whose provider takes its config from separate kwargs and
+    # never reads model_id), OllamaProvider.load() sends model_name
+    # straight to ChatOllama, so it strips this prefix itself before
+    # passing the bare tag to the daemon; the resolver keeps the model_id
+    # unchanged here, mirroring the "cli:" heuristic.
+    ("ollama:", "local_ollama"),
     # Broad pre-existing fallbacks -- preserved for backward compatibility.
     # These fire for non-catalog model IDs that match only the bare vendor
     # name (e.g. bare "gemini", legacy Bedrock-style "mistral-..." that did

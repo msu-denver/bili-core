@@ -3,13 +3,17 @@
 Covers:
 - ``OllamaProvider.load()`` with a mocked ``langchain_ollama.ChatOllama``:
   default base_url, explicit base_url, num_predict mapping, full config,
-  optional-param omission, extra-kwarg tolerance, and the missing-SDK path.
+  optional-param omission, extra-kwarg tolerance, the missing-SDK path, and
+  ``"ollama:"``-sentinel prefix stripping (with and without the prefix).
 - Built-in registration of ``local_ollama`` in ``PROVIDER_REGISTRY``.
 - The ``local_ollama`` catalog entry: native tool-calling capability wiring
   (``tool_strategy == "native"`` and ``supports_tools is True``) and the
   ``base_url`` default carried via the entry's ``kwargs`` block.
 - ``resolve_tool_strategy`` treating the entry as native.
 - ``load_model("local_ollama", ...)`` routing through the provider registry.
+- The resolver's ``"ollama:"`` heuristic routing an arbitrary, non-catalog
+  user-pulled tag to ``local_ollama``, including the full ``create_llm()``
+  path from an ``AgentSpec.model_name`` through to ``ChatOllama``.
 """
 
 # pylint: disable=too-few-public-methods,duplicate-code
@@ -23,7 +27,11 @@ import pytest
 
 import bili.iris.providers.builtin  # noqa: F401  pylint: disable=unused-import
 from bili.iris.providers.base import LLMProvider
-from bili.iris.providers.ollama_provider import DEFAULT_OLLAMA_BASE_URL, OllamaProvider
+from bili.iris.providers.ollama_provider import (
+    DEFAULT_OLLAMA_BASE_URL,
+    OLLAMA_MODEL_PREFIX,
+    OllamaProvider,
+)
 from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 # ---------------------------------------------------------------------------
@@ -143,6 +151,40 @@ class TestOllamaProviderLoad:
         with _mock_module("langchain_ollama", ChatOllama=mock_cls):
             result = OllamaProvider().load(model_name="qwen3")
         assert result is sentinel
+
+    def test_ollama_prefix_is_stripped_before_reaching_chatollama(self):
+        """Verify the 'ollama:' sentinel is stripped so ChatOllama gets the bare tag.
+
+        Reproduces the exact failing case from AETHER/MAS resolution: a
+        user-pulled tag with a colon-separated size suffix (qwen3:14b).
+        """
+        mock_cls = MagicMock()
+        with _mock_module("langchain_ollama", ChatOllama=mock_cls):
+            OllamaProvider().load(model_name="ollama:qwen3:14b")
+        kwargs = mock_cls.call_args[1]
+        assert kwargs["model"] == "qwen3:14b"
+
+    def test_bare_tag_without_prefix_still_works(self):
+        """Verify a bare tag with no sentinel prefix is passed through unchanged.
+
+        This is the single-turn path: an explicit provider_type is given, so
+        the caller passes the bare Ollama tag directly (no "ollama:" prefix
+        needed, since routing is not the resolver's job here).
+        """
+        mock_cls = MagicMock()
+        with _mock_module("langchain_ollama", ChatOllama=mock_cls):
+            OllamaProvider().load(model_name="qwen3:14b")
+        kwargs = mock_cls.call_args[1]
+        assert kwargs["model"] == "qwen3:14b"
+
+    def test_prefix_constant_matches_stripped_value(self):
+        """Verify OLLAMA_MODEL_PREFIX is exactly what load() strips."""
+        mock_cls = MagicMock()
+        tag = "llama3.1:70b-instruct-q4_0"
+        with _mock_module("langchain_ollama", ChatOllama=mock_cls):
+            OllamaProvider().load(model_name=f"{OLLAMA_MODEL_PREFIX}{tag}")
+        kwargs = mock_cls.call_args[1]
+        assert kwargs["model"] == tag
 
     def test_missing_sdk_raises_import_error(self):
         """Verify a helpful ImportError surfaces when langchain_ollama is absent.
@@ -287,3 +329,111 @@ class TestLoadModelRoutesOllama:
         assert kwargs["model"] == "qwen3"
         assert kwargs["base_url"] == "http://localhost:11434"
         assert kwargs["temperature"] == 0.1
+
+
+# ---------------------------------------------------------------------------
+# Resolver heuristic — "ollama:" sentinel for arbitrary, non-catalog tags
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaSentinelHeuristic:
+    """Verify the resolver routes an "ollama:"-prefixed tag to local_ollama.
+
+    Reproduces the AETHER/MAS resolution gap: an AgentSpec carries only
+    model_name, resolved via catalog lookup + prefix heuristics. An arbitrary
+    user-pulled tag (not in the catalog, matching no other heuristic) could
+    not resolve at all before the "ollama:" sentinel rule was added.
+    """
+
+    def test_before_fix_repro_raises_without_sentinel(self):
+        """Verify a bare non-catalog tag with no sentinel still cannot resolve.
+
+        This is the exact shape of the original failure: passing the raw
+        user-pulled tag with no routing hint raises ValueError, because it
+        matches neither a catalog entry nor any heuristic pattern. The
+        "ollama:" sentinel (tested below) is the fix; a bare tag legitimately
+        has no way to route without either a catalog entry or the sentinel.
+        """
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_model,
+        )
+
+        with pytest.raises(ValueError, match="Cannot resolve model"):
+            resolve_model("qwen3:14b")
+
+    def test_sentinel_resolves_the_exact_failing_tag(self):
+        """Verify 'ollama:qwen3:14b' now resolves to local_ollama.
+
+        This is the exact previously-failing case from AETHER/MAS
+        resolution: a colon-separated user-pulled tag with a size suffix.
+        """
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_model,
+        )
+
+        provider, model_id = resolve_model("ollama:qwen3:14b")
+        assert provider == "local_ollama"
+        # The resolver keeps the model_id unchanged (mirrors the "cli:"
+        # sentinel); OllamaProvider.load() strips the prefix, not the resolver.
+        assert model_id == "ollama:qwen3:14b"
+
+    @pytest.mark.parametrize(
+        "tag",
+        [
+            "ollama:qwen3",
+            "ollama:qwen3:14b",
+            "ollama:llama3.1:70b-instruct-q4_0",
+            "ollama:custom-finetune-v2",
+        ],
+    )
+    def test_sentinel_resolves_arbitrary_tags(self, tag):
+        """Verify any 'ollama:'-prefixed tag routes to local_ollama."""
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_provider,
+        )
+
+        assert resolve_provider(tag) == "local_ollama"
+
+    def test_sentinel_tool_strategy_is_native(self):
+        """Verify a non-catalog 'ollama:' tag still resolves to native tool-calling.
+
+        The tag is not in LLM_MODELS, so resolve_tool_strategy falls through
+        to its "not found" default, which is "native". This documents that
+        fallback explicitly for the sentinel-routed (non-catalog) path.
+        """
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_tool_strategy,
+        )
+
+        assert resolve_tool_strategy("ollama:qwen3:14b") == "native"
+
+    def test_create_llm_end_to_end_with_sentinel_tag(self):
+        """Verify create_llm() resolves an AgentSpec's sentinel-prefixed tag
+        all the way to a ChatOllama instance with the bare tag.
+
+        End-to-end reproduction of the fixed AETHER/MAS path: an AgentSpec
+        with model_name="ollama:qwen3:14b" now compiles to a working LLM
+        instead of raising ValueError at resolution time.
+        """
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            create_llm,
+        )
+        from bili.aether.schema import (  # pylint: disable=import-outside-toplevel
+            AgentSpec,
+        )
+
+        spec = AgentSpec(
+            agent_id="local-model-agent",
+            role="tester",
+            objective="Integration test for the ollama: sentinel resolution path.",
+            model_name="ollama:qwen3:14b",
+        )
+
+        sentinel = MagicMock(name="chat_ollama_instance")
+        mock_cls = MagicMock(return_value=sentinel)
+        with _mock_module("langchain_ollama", ChatOllama=mock_cls):
+            result = create_llm(spec)
+
+        assert result is sentinel
+        kwargs = mock_cls.call_args[1]
+        assert kwargs["model"] == "qwen3:14b"
