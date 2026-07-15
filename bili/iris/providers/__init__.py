@@ -19,6 +19,12 @@ Public API
 - :class:`ProviderChain` — ordered ``(provider_type, kwargs)`` sequence
 - :func:`build_fallback_llm` — wrap an existing LLM with a fallback chain
 - :data:`DEFAULT_POLICY` — default name-based exception classification policy
+- :func:`supports_structured_output` — whether a provider type enforces a
+  JSON schema at decode time (``structured_output_schema`` kwarg)
+- :func:`register_structured_output_provider` — declare schema enforcement
+  for an externally-registered provider
+- :func:`parse_structured_content` — parse + validate a structured response
+- :exc:`StructuredOutputError` (+ parse/validation subclasses)
 
 Design contract
 ---------------
@@ -59,6 +65,15 @@ from .registry import (
     get_provider,
     register_provider,
 )
+from .structured_output import (
+    StructuredOutputError,
+    StructuredOutputParseError,
+    StructuredOutputValidationError,
+    parse_structured_content,
+    register_structured_output_provider,
+    structured_output_providers,
+    supports_structured_output,
+)
 
 __all__ = [
     "LLMProvider",
@@ -71,4 +86,11 @@ __all__ = [
     "ProviderChain",
     "build_fallback_llm",
     "DEFAULT_POLICY",
+    "StructuredOutputError",
+    "StructuredOutputParseError",
+    "StructuredOutputValidationError",
+    "parse_structured_content",
+    "register_structured_output_provider",
+    "structured_output_providers",
+    "supports_structured_output",
 ]

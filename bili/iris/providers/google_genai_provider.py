@@ -18,6 +18,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
+from .structured_output import normalize_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ class GoogleGenAIProvider(LLMProvider):
         Top-k sampling limit.
     max_retries : int, optional
         Maximum number of automatic retries on transient errors.
+    structured_output_schema : dict or type, optional
+        JSON schema (or Pydantic model class) to constrain generation to.
+        Sets ``response_schema`` and ``response_mime_type=
+        "application/json"`` (Gemini controlled generation).
     """
 
     def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
@@ -51,6 +56,7 @@ class GoogleGenAIProvider(LLMProvider):
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
         max_retries: Optional[int] = None,
+        structured_output_schema: Optional[Any] = None,
         **_extra: Any,
     ) -> Any:
         """Create and return a ``ChatGoogleGenerativeAI`` instance.
@@ -76,6 +82,9 @@ class GoogleGenAIProvider(LLMProvider):
             config["top_k"] = top_k
         if max_retries is not None:
             config["max_retries"] = max_retries
+        if structured_output_schema is not None:
+            config["response_schema"] = normalize_schema(structured_output_schema)
+            config["response_mime_type"] = "application/json"
 
         llm = ChatGoogleGenerativeAI(**config)
         LOGGER.debug(llm)

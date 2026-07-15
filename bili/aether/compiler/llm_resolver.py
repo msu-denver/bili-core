@@ -16,7 +16,7 @@ module to load without those dependencies installed.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from bili.aether.schema import AgentSpec
+from bili.aether.schema import AgentSpec, OutputFormat
 
 LOGGER = logging.getLogger(__name__)
 
@@ -210,6 +210,56 @@ def _forward_cli_subprocess_kwargs(
         kwargs["reasoning_effort"] = agent.cli_subprocess_reasoning_effort
 
 
+def _resolve_structured_schema(agent: AgentSpec, provider: str) -> Optional[dict]:
+    """Return the JSON schema to bind for decode-time enforcement, or ``None``.
+
+    An agent declaring ``output_format="structured"`` with an
+    ``output_schema`` gets the schema bound at model-load time
+    (``structured_output_schema``) so generation is constrained to
+    schema-valid output, when both of these hold:
+
+    - The agent has no tools.  Constrained generation applies to every
+      assistant turn, which would also constrain the intermediate turns of a
+      tool-calling loop; the two are mutually exclusive on this seam.
+    - The resolved provider has decode-time enforcement wired
+      (:func:`bili.iris.providers.structured_output.supports_structured_output`).
+
+    When either condition fails the schema is not bound and a warning is
+    logged; the agent still runs, and ``_build_output`` in the agent
+    generator validates the output post-hoc against the same schema.  This
+    graceful degradation mirrors how tool/middleware resolution failures are
+    handled: a MAS config never becomes un-runnable because one model lacks
+    a capability.
+    """
+    if agent.output_format != OutputFormat.STRUCTURED or not agent.output_schema:
+        return None
+
+    if agent.tools:
+        LOGGER.warning(
+            "Agent '%s': output_format='structured' is not decode-time "
+            "enforced for tool-calling agents; the schema will be validated "
+            "post-hoc only. Produce large structured documents with a "
+            "dedicated tool-less agent to get constrained generation.",
+            agent.agent_id,
+        )
+        return None
+
+    from bili.iris.providers.structured_output import (  # noqa: E402  pylint: disable=import-outside-toplevel
+        supports_structured_output,
+    )
+
+    if not supports_structured_output(provider):
+        LOGGER.warning(
+            "Agent '%s': provider '%s' has no decode-time structured-output "
+            "enforcement; the schema will be validated post-hoc only.",
+            agent.agent_id,
+            provider,
+        )
+        return None
+
+    return agent.output_schema
+
+
 def create_llm(agent: AgentSpec) -> Any:
     """Create a LangChain-compatible chat model from an ``AgentSpec``.
 
@@ -260,6 +310,12 @@ def create_llm(agent: AgentSpec) -> Any:
     if agent.max_tokens is not None:
         kwargs["max_tokens"] = agent.max_tokens
 
+    # Bind the agent's output_schema for decode-time enforcement when the
+    # provider supports it (see _resolve_structured_schema for conditions).
+    structured_schema = _resolve_structured_schema(agent, provider)
+    if structured_schema is not None:
+        kwargs["structured_output_schema"] = structured_schema
+
     # Forward cli_subprocess_* fields (timeout, cwd, retry policy, model,
     # reasoning effort) to CLI providers only; see
     # _forward_cli_subprocess_kwargs for the per-field detail.
@@ -294,6 +350,12 @@ def create_llm(agent: AgentSpec) -> Any:
             fb_kwargs["temperature"] = agent.temperature
         if agent.max_tokens is not None:
             fb_kwargs["max_tokens"] = agent.max_tokens
+        # Structured-output support is evaluated per fallback provider: a
+        # chain may mix constrained and unconstrained backends, and an
+        # unsupported fallback must not fail load_model's fail-fast gate.
+        fb_schema = _resolve_structured_schema(agent, fb_provider)
+        if fb_schema is not None:
+            fb_kwargs["structured_output_schema"] = fb_schema
         fallback_chain.append((fb_provider, fb_kwargs))
         LOGGER.debug(
             "Agent '%s': registered fallback provider=%s, model_id=%s",

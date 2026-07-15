@@ -19,6 +19,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
+from .structured_output import normalize_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,13 +46,19 @@ class VertexAIProvider(LLMProvider):
         MIME type for structured output (e.g. ``"application/json"``).
     response_schema : dict, optional
         JSON schema for structured output.
+    structured_output_schema : dict or type, optional
+        Cross-provider spelling of ``response_schema``: a JSON schema (or
+        Pydantic model class) to constrain generation to.  Sets
+        ``response_schema`` and ``response_mime_type="application/json"``
+        (Gemini controlled generation).  Mutually exclusive with passing
+        ``response_schema`` / ``response_mime_type`` directly.
     additional_headers : dict, optional
         Extra HTTP headers (Priority PayGo, Provisioned Throughput, etc.).
     location : str, optional
         GCP region override (e.g. ``"us-central1"``, ``"global"``).
     """
 
-    def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
+    def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,too-many-branches
         self,
         model_name: str,
         max_tokens: Optional[int] = None,
@@ -61,6 +68,7 @@ class VertexAIProvider(LLMProvider):
         seed: Optional[int] = None,
         response_schema: Optional[dict] = None,
         response_mime_type: Optional[str] = None,
+        structured_output_schema: Optional[Any] = None,
         additional_headers: Optional[dict] = None,
         location: Optional[str] = None,
         **_extra: Any,
@@ -68,8 +76,20 @@ class VertexAIProvider(LLMProvider):
         """Create and return a ``ChatVertexAI`` instance.
 
         :returns: A ``ChatVertexAI`` instance.
+        :raises ValueError: If both ``structured_output_schema`` and
+            ``response_schema``/``response_mime_type`` are given.
         :raises ImportError: If ``langchain_google_vertexai`` is not installed.
         """
+        if structured_output_schema is not None and (
+            response_schema is not None or response_mime_type is not None
+        ):
+            raise ValueError(
+                "Pass either structured_output_schema (cross-provider) or "
+                "response_schema/response_mime_type (Vertex-native), not both."
+            )
+        if structured_output_schema is not None:
+            response_schema = normalize_schema(structured_output_schema)
+            response_mime_type = "application/json"
         from langchain_google_vertexai import (  # pylint: disable=import-outside-toplevel
             ChatVertexAI,
         )

@@ -718,7 +718,17 @@ def _resolve_middleware(agent: AgentSpec) -> list:
 
 
 def _build_output(agent: AgentSpec, content: str) -> dict:
-    """Build the agent output dict, parsing JSON if configured."""
+    """Build the agent output dict, parsing JSON/structured output if configured.
+
+    For ``output_format="json"`` the content is best-effort parsed (legacy
+    behaviour, no schema).  For ``output_format="structured"`` the content is
+    parsed *and validated* against the agent's ``output_schema``; on success
+    ``output["parsed"]`` is set (which is also what consensus vote extraction
+    reads), on failure ``output["raw"]`` and ``output["schema_error"]`` are
+    set.  Validation runs regardless of whether the model was decode-time
+    constrained, so post-hoc validation covers providers without constrained
+    decoding.
+    """
     output = {
         "agent_id": agent.agent_id,
         "role": agent.role,
@@ -731,6 +741,24 @@ def _build_output(agent: AgentSpec, content: str) -> dict:
             output["parsed"] = json.loads(content)
         except (json.JSONDecodeError, TypeError):
             output["raw"] = content
+    elif agent.output_format == OutputFormat.STRUCTURED:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            StructuredOutputError,
+            parse_structured_content,
+        )
+
+        try:
+            output["parsed"] = parse_structured_content(
+                content, schema=agent.output_schema
+            )
+        except StructuredOutputError as exc:
+            output["raw"] = content
+            output["schema_error"] = str(exc)
+            LOGGER.warning(
+                "Agent '%s': structured output failed schema validation: %s",
+                agent.agent_id,
+                exc,
+            )
     else:
         output["raw"] = content
 
