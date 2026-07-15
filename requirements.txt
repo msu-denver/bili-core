@@ -47,6 +47,9 @@ langchain-openai~=1.0.1
 # -----------------------------------------------------------------------------
 # Core Utilities
 # -----------------------------------------------------------------------------
+# jsonschema powers post-hoc validation in
+# bili.iris.providers.structured_output.parse_structured_content.
+jsonschema~=4.21
 pyyaml~=6.0
 requests~=2.32.3
 

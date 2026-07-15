@@ -17,6 +17,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
+from .structured_output import normalize_schema, openai_response_format
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +42,13 @@ class OpenAIProvider(LLMProvider):
         Random seed for reproducibility.
     max_retries : int, optional
         Maximum number of automatic retries on transient errors.
+    structured_output_schema : dict or type, optional
+        JSON schema (or Pydantic model class) to constrain generation to,
+        bound as OpenAI's ``response_format`` with ``strict: true``
+        (server-side constrained decoding).  When set, the returned object
+        is a ``RunnableBinding`` (still ``.invoke()``/``.stream()``, content
+        stays a JSON string) that does not expose ``bind_tools``; structured
+        output and native tool binding are mutually exclusive on this seam.
     """
 
     def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
@@ -52,12 +60,14 @@ class OpenAIProvider(LLMProvider):
         top_k: Optional[int] = None,
         seed: Optional[int] = None,
         max_retries: Optional[int] = None,
+        structured_output_schema: Optional[Any] = None,
         **_extra: Any,
     ) -> Any:
         """Create and return a ``ChatOpenAI`` instance.
 
         :param model_name: OpenAI model identifier.
-        :returns: A ``ChatOpenAI`` instance.
+        :returns: A ``ChatOpenAI`` instance, or a ``RunnableBinding`` over it
+            when ``structured_output_schema`` is set.
         :raises ImportError: If ``langchain_openai`` is not installed.
         """
         from langchain_openai import (  # pylint: disable=import-outside-toplevel
@@ -81,5 +91,11 @@ class OpenAIProvider(LLMProvider):
             config["max_retries"] = max_retries
 
         llm = ChatOpenAI(**config)
+        if structured_output_schema is not None:
+            llm = llm.bind(
+                response_format=openai_response_format(
+                    normalize_schema(structured_output_schema)
+                )
+            )
         LOGGER.debug(llm)
         return llm

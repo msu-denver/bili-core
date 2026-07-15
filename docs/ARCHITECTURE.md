@@ -240,6 +240,24 @@ is still accepted as a backward-compatible fallback.
 
 Factory pattern initialization via `llm_loader.py`.
 
+**Schema-constrained structured output
+(`bili/iris/providers/structured_output.py`):** pass
+`structured_output_schema` (a JSON schema dict or a Pydantic model class) to
+`load_model()` to constrain generation to schema-valid JSON at decode time.
+Wired providers and mechanisms: `local_ollama` (`ChatOllama format=` →
+llama.cpp GBNF grammar), `remote_openai` / `remote_azure_openai`
+(`response_format` `json_schema` with `strict: true`),
+`remote_google_vertex` / `remote_google_genai` (`response_schema` +
+`response_mime_type="application/json"`). The model's `.invoke()` contract is
+unchanged — `.content` stays a string, guaranteed schema-valid —
+and `parse_structured_content(content, schema=...)` turns it into a validated
+Python object. Requests against providers without decode-time enforcement
+raise `ValueError` at load time; external providers declare support via
+`register_structured_output_provider()`. AETHER binds an agent's
+`output_schema` through this seam automatically when
+`output_format: structured` (tool-less agents, supported providers) and
+validates post-hoc otherwise.
+
 ### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`) -- IRIS
 
 The heart of single-agent RAG execution. The loaders module (`bili/iris/loaders/`) provides factory functions that wire together LLMs, tools, and checkpointers into a compiled LangGraph `StateGraph`. The nodes module (`bili/iris/nodes/`) contains the individual processing steps that make up the default pipeline. See [LANGGRAPH.md](./LANGGRAPH.md) for details.

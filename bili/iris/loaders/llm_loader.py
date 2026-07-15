@@ -124,8 +124,20 @@ def load_model(
         model type, but always exposes an ``.invoke(messages)`` method.
     :rtype: object
     :raises ValueError: If the specified model_type is not one of the built-in
-        types and is not registered in the provider registry.
+        types and is not registered in the provider registry, or if
+        ``structured_output_schema`` is requested for a provider type without
+        decode-time schema enforcement.
     """
+    # Fail fast on structured-output requests the provider cannot honour.
+    # Silently returning an unconstrained model would let the caller believe
+    # generation is schema-constrained when it is not -- the exact failure
+    # the capability exists to prevent.
+    if kwargs.get("structured_output_schema") is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            require_structured_output_support,
+        )
+
+        require_structured_output_support(model_type)
     # Built-in provider dispatch — handles the six types shipped with bili-core.
     # This if/elif block is intentionally preserved for backward compatibility;
     # the individual loader functions are part of the public API and may be
@@ -525,6 +537,7 @@ def load_remote_gcp_vertex_model(
     seed=None,
     response_schema=None,
     response_mime_type=None,
+    structured_output_schema=None,
     additional_headers=None,
     location=None,
 ):
@@ -549,6 +562,12 @@ def load_remote_gcp_vertex_model(
     :type top_k: int, optional
     :param seed: Optional. Seed for reproducibility in model output.
     :type seed: int, optional
+    :param structured_output_schema: Optional. Cross-provider spelling of
+        ``response_schema``: a JSON schema dict (or Pydantic model class) to
+        constrain generation to. Sets ``response_schema`` and
+        ``response_mime_type="application/json"``. Mutually exclusive with
+        passing ``response_schema``/``response_mime_type`` directly.
+    :type structured_output_schema: dict or type, optional
     :param additional_headers: Optional. HTTP headers to include in API requests.
         Use for Priority PayGo: {"X-Vertex-AI-LLM-Shared-Request-Type": "priority"}
         Use for Provisioned Throughput: {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
@@ -567,6 +586,21 @@ def load_remote_gcp_vertex_model(
     from langchain_google_vertexai import (  # pylint: disable=import-outside-toplevel
         ChatVertexAI,
     )
+
+    if structured_output_schema is not None and (
+        response_schema is not None or response_mime_type is not None
+    ):
+        raise ValueError(
+            "Pass either structured_output_schema (cross-provider) or "
+            "response_schema/response_mime_type (Vertex-native), not both."
+        )
+    if structured_output_schema is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            normalize_schema,
+        )
+
+        response_schema = normalize_schema(structured_output_schema)
+        response_mime_type = "application/json"
 
     llm_config = {
         "model_name": model_name,
@@ -660,6 +694,7 @@ def load_remote_azure_openai(
     top_p=None,
     top_k=None,
     seed=None,
+    structured_output_schema=None,
 ):
     """
     Loads and initializes a remote Azure OpenAI model with the specified
@@ -683,6 +718,10 @@ def load_remote_azure_openai(
     :param top_k: Optional. Top-k sampling that limits the next token
         selection to k most likely options, if specified.
     :param seed: Optional. Random seed for deterministic outputs in sampling.
+    :param structured_output_schema: Optional. JSON schema dict (or Pydantic
+        model class) to constrain generation to, bound as ``response_format``
+        with ``strict: true``. When set, the returned object is a
+        ``RunnableBinding`` (no ``bind_tools``).
     :return: An initialized Azure OpenAI language model instance.
     """
     # Lazy import: langchain_openai is only needed when the Azure OpenAI backend
@@ -712,6 +751,17 @@ def load_remote_azure_openai(
         azure_config["seed"] = seed
 
     llm = AzureChatOpenAI(**azure_config)
+    if structured_output_schema is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            normalize_schema,
+            openai_response_format,
+        )
+
+        llm = llm.bind(
+            response_format=openai_response_format(
+                normalize_schema(structured_output_schema)
+            )
+        )
     LOGGER.debug(llm)
     return llm
 
@@ -725,6 +775,7 @@ def load_remote_openai(
     top_k=None,
     seed=None,
     max_retries=None,
+    structured_output_schema=None,
 ):
     """
     Loads and initializes a remote OpenAI model with the specified
@@ -747,6 +798,10 @@ def load_remote_openai(
     :param top_k: Optional. Top-k sampling that limits the next token
         selection to k most likely options, if specified.
     :param seed: Optional. Random seed for deterministic outputs in sampling.
+    :param structured_output_schema: Optional. JSON schema dict (or Pydantic
+        model class) to constrain generation to, bound as ``response_format``
+        with ``strict: true`` (OpenAI structured outputs). When set, the
+        returned object is a ``RunnableBinding`` (no ``bind_tools``).
     :return: An initialized OpenAI language model instance.
     """
     # Lazy import: langchain_openai is only needed when the OpenAI backend is used.
@@ -772,5 +827,16 @@ def load_remote_openai(
         openai_config["max_retries"] = max_retries
 
     llm = ChatOpenAI(**openai_config)
+    if structured_output_schema is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            normalize_schema,
+            openai_response_format,
+        )
+
+        llm = llm.bind(
+            response_format=openai_response_format(
+                normalize_schema(structured_output_schema)
+            )
+        )
     LOGGER.debug(llm)
     return llm

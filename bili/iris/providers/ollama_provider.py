@@ -23,6 +23,20 @@ the ``model_name`` kwarg (from ``AgentSpec.model_name``) or a catalog entry's
 ``model_id``.  Point at a non-default daemon with the ``base_url`` kwarg (or a
 catalog entry's ``kwargs.base_url``); it defaults to ``http://localhost:11434``.
 
+Schema-constrained structured output
+------------------------------------
+Pass ``structured_output_schema`` (a JSON schema ``dict`` or a Pydantic
+``BaseModel`` subclass) to constrain generation to schema-valid JSON.  The
+schema is forwarded as ``ChatOllama``'s ``format`` parameter; Ollama compiles
+it to a llama.cpp GBNF grammar, so decoding is token-level constrained -- the
+model cannot emit output that violates the schema.  ``.invoke()`` still
+returns a message whose ``.content`` is a string (guaranteed schema-valid
+JSON); parse it with
+:func:`bili.iris.providers.structured_output.parse_structured_content`.
+The ``format`` grammar applies to assistant *content* only; Ollama does not
+constrain tool-call arguments, so combine the schema with a tool-less agent
+and apply side effects deterministically from the validated object.
+
 Resolving arbitrary user-pulled tags
 -------------------------------------
 An AETHER ``AgentSpec`` carries only ``model_name``, resolved to a provider via
@@ -49,6 +63,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
+from .structured_output import normalize_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -84,6 +99,10 @@ class OllamaProvider(LLMProvider):
         Top-k sampling limit.
     seed : int, optional
         Random seed for reproducibility.
+    structured_output_schema : dict or type, optional
+        JSON schema (or Pydantic model class) to constrain generation to.
+        Forwarded as ``ChatOllama``'s ``format`` parameter for
+        grammar-constrained decoding.
     """
 
     def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
@@ -95,6 +114,7 @@ class OllamaProvider(LLMProvider):
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
         seed: Optional[int] = None,
+        structured_output_schema: Optional[Any] = None,
         **_extra: Any,
     ) -> Any:
         """Create and return a ``ChatOllama`` instance.
@@ -150,6 +170,10 @@ class OllamaProvider(LLMProvider):
             config["top_k"] = top_k
         if seed is not None:
             config["seed"] = seed
+        if structured_output_schema is not None:
+            # ChatOllama's format parameter accepts a JSON schema dict; the
+            # daemon compiles it to a GBNF grammar for constrained decoding.
+            config["format"] = normalize_schema(structured_output_schema)
 
         llm = ChatOllama(**config)
         LOGGER.debug(llm)

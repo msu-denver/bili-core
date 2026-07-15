@@ -227,8 +227,8 @@ agents:
 | `system_prompt` | No | `None` | Instructions for the LLM. No fixed length cap — checked against the bound model's own declared input-token limit when `model_name` resolves to a catalog entry with a known limit; unconstrained otherwise. See [`get_prompt_length_limit()`](#per-model-prompt-length-limits). |
 | `capabilities` | No | `[]` | Agent capabilities (free-form strings) |
 | `tools` | No | `[]` | Tool names from the tool registry |
-| `output_format` | No | `text` | Output format: `text`, `json`, or `structured` |
-| `output_schema` | No | `None` | JSON schema (required when `output_format: structured`) |
+| `output_format` | No | `text` | Output format: `text`, `json`, or `structured` (see [Structured Output Enforcement](#structured-output-enforcement)) |
+| `output_schema` | No | `None` | JSON schema (required when `output_format: structured`); bound for decode-time constrained generation on supported providers and validated post-hoc otherwise |
 | `middleware` | No | `[]` | Middleware names for agent execution (see Per-Agent Middleware) |
 | `middleware_params` | No | `{}` | Parameters for middleware, keyed by name |
 | `inherit_from_bili_core` | No | `false` | Master toggle: inherit config from bili-core |
@@ -274,6 +274,15 @@ agent.get_prompt_length_limit()  # -> 200000 (max_input_tokens from the catalog)
 ```
 
 The same lookup is available directly from a model name via `bili.aether.compiler.llm_resolver.resolve_prompt_length_limit(model_name)`, useful for budgeting a prompt before an `AgentSpec` exists at all.
+
+### Structured Output Enforcement
+
+`output_format: structured` + `output_schema` is enforced end to end, not just declared:
+
+1. **Decode-time constraint (when possible).** At LLM-creation time the agent's `output_schema` is bound into the model via the provider-level `structured_output_schema` capability, so generation is *constrained* to schema-valid JSON — the model cannot emit output that violates the schema. This applies when the resolved provider supports decode-time enforcement (Ollama via llama.cpp grammar; OpenAI/Azure OpenAI via strict `response_format`; Vertex/Google GenAI via controlled generation) **and** the agent has no tools. Tool-bearing agents skip the binding (a constrained generation cannot also drive a tool-calling loop) with a logged warning; produce large structured documents with a dedicated tool-less agent.
+2. **Post-hoc validation (always).** The agent's output is parsed and validated against `output_schema` when the output dict is built. On success `output["parsed"]` holds the validated object — this is also what consensus vote extraction reads. On failure `output["raw"]` holds the content and `output["schema_error"]` describes the violation.
+
+Fallback chains evaluate decode-time support per fallback provider, so a chain can mix constrained and unconstrained backends; the post-hoc validation covers whichever backend answered.
 
 ### Use Presets for Common Patterns
 

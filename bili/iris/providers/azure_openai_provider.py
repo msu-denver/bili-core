@@ -18,6 +18,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
+from .structured_output import normalize_schema, openai_response_format
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +46,11 @@ class AzureOpenAIProvider(LLMProvider):
         Top-k sampling limit (forwarded; provider may ignore).
     seed : int, optional
         Random seed for reproducibility.
+    structured_output_schema : dict or type, optional
+        JSON schema (or Pydantic model class) to constrain generation to,
+        bound as ``response_format`` with ``strict: true`` (same mechanism
+        as the direct OpenAI provider).  When set, the returned object is a
+        ``RunnableBinding`` that does not expose ``bind_tools``.
     """
 
     def load(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
@@ -56,6 +62,7 @@ class AzureOpenAIProvider(LLMProvider):
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
         seed: Optional[int] = None,
+        structured_output_schema: Optional[Any] = None,
         **_extra: Any,
     ) -> Any:
         """Create and return an ``AzureChatOpenAI`` instance.
@@ -63,7 +70,8 @@ class AzureOpenAIProvider(LLMProvider):
         :param model_name: Azure deployment name.
         :param api_version: REST API version string. Required; no default is
             provided so the caller cannot silently use a stale version.
-        :returns: An ``AzureChatOpenAI`` instance.
+        :returns: An ``AzureChatOpenAI`` instance, or a ``RunnableBinding``
+            over it when ``structured_output_schema`` is set.
         :raises ImportError: If ``langchain_openai`` is not installed.
         """
         from langchain_openai import (  # pylint: disable=import-outside-toplevel
@@ -92,5 +100,11 @@ class AzureOpenAIProvider(LLMProvider):
             config["seed"] = seed
 
         llm = AzureChatOpenAI(**config)
+        if structured_output_schema is not None:
+            llm = llm.bind(
+                response_format=openai_response_format(
+                    normalize_schema(structured_output_schema)
+                )
+            )
         LOGGER.debug(llm)
         return llm
