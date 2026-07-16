@@ -1590,19 +1590,57 @@ LLM_MODELS = {
         "name": "Google Generative AI (Gemini API)",
         "description": "Remote Gemini models accessed via the Google AI Developer "
         "API (GOOGLE_API_KEY). Complements the 'remote_google_vertex' provider "
-        "which routes through Google Cloud Vertex AI. "
+        "which routes through Google Cloud Vertex AI. Any Developer API model "
+        "can be used without a catalog entry by prefixing the model name with "
+        "'genai:' (e.g. 'genai:gemini-3.1-flash-lite'). "
         "See https://ai.google.dev/gemini-api/docs/models for the model list.",
         "model_help": "https://ai.google.dev/gemini-api/docs/models",
+        # Every display name below carries a "(Direct API)" suffix to
+        # disambiguate from the identically-model_id'd Vertex AI entries; the
+        # model_id sent to the API remains the standard Gemini identifier.
+        # The suffix is load-bearing for selection: a bare model_id that Vertex
+        # also lists resolves to Vertex (catalog lookup precedes the resolver
+        # heuristics and Vertex is declared first), so reaching the Developer
+        # API for such an id requires this display name, the "genai:" sentinel
+        # prefix, or an explicit provider_type="remote_google_genai".
         "models": [
             {
-                # Display name includes "(Direct API)" to disambiguate from the
-                # identically-named Vertex AI entries.  Users who want the Google
-                # AI Developer API (GOOGLE_API_KEY, not GCP/Vertex credentials)
-                # must select by this display name or invoke load_model() with
-                # provider_type="remote_google_genai" directly.  The model_id
-                # sent to the API remains the standard Gemini identifier.
+                "model_name": "Gemini 3.1 Flash Lite (Direct API)",
+                "model_id": "gemini-3.1-flash-lite",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 65536,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
                 "model_name": "Gemini 2.5 Flash (Direct API)",
                 "model_id": "gemini-2.5-flash",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 65536,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.5 Flash Lite (Direct API)",
+                "model_id": "gemini-2.5-flash-lite",
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
