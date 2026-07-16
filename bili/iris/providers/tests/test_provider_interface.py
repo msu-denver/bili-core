@@ -11,6 +11,8 @@ Covers:
 
 # pylint: disable=too-few-public-methods,duplicate-code
 
+import sys
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -538,8 +540,6 @@ class TestHuggingFaceProvider:
     @patch("bili.iris.loaders.tokenizer_loader.load_huggingface_tokenizer")
     @patch("torch.cuda.is_available", return_value=True)
     @patch("torch.cuda.empty_cache")
-    @patch("transformers.AutoModelForCausalLM")
-    @patch("transformers.pipeline")
     @patch(
         "langchain_huggingface.chat_models.huggingface.HuggingFacePipeline",
         create=True,
@@ -552,8 +552,6 @@ class TestHuggingFaceProvider:
         self,
         mock_chat,
         mock_hf_pipe,  # pylint: disable=unused-argument
-        mock_pipe,
-        mock_auto,
         mock_empty_cache,  # pylint: disable=unused-argument
         mock_cuda_avail,  # pylint: disable=unused-argument
         mock_tok,
@@ -563,24 +561,39 @@ class TestHuggingFaceProvider:
         tokenizer.pad_token = None
         tokenizer.eos_token = "</s>"
         mock_tok.return_value = tokenizer
-        mock_auto.from_pretrained.return_value = MagicMock()
         mock_chat.return_value = "chat_model"
 
-        result = HuggingFaceProvider().load(
-            model_name="gpt2",
-            max_tokens=128,
-            temperature=0.6,
-            top_p=0.9,
-            top_k=40,
-            seed=7,
-        )
+        # ``transformers`` is a lazy module (transformers._LazyModule), so
+        # patching transformers.pipeline / .AutoModelForCausalLM does not reach
+        # the ``from transformers import ...`` executed inside load() until that
+        # lazy attribute has been resolved once -- which makes the patch's
+        # effect depend on suite execution order (green only when an earlier
+        # test warms the attribute, red when this test runs cold/isolated).
+        # Injecting a fake module the lazy-import machinery never sees past is
+        # order-independent.  Mirrors the torch injection in test_llm_loader.py.
+        fake_transformers = ModuleType("transformers")
+        fake_transformers.AutoModelForCausalLM = MagicMock()
+        fake_transformers.pipeline = MagicMock()
+
+        with patch.dict(sys.modules, {"transformers": fake_transformers}):
+            result = HuggingFaceProvider().load(
+                model_name="gpt2",
+                max_tokens=128,
+                temperature=0.6,
+                top_p=0.9,
+                top_k=40,
+                seed=7,
+            )
 
         assert result == "chat_model"
         assert tokenizer.pad_token == "</s>"
-        pipe_kwargs = mock_pipe.call_args[1]
+        pipe_kwargs = fake_transformers.pipeline.call_args[1]
         assert pipe_kwargs["task"] == "text-generation"
         assert pipe_kwargs["max_new_tokens"] == 128
         assert pipe_kwargs["temperature"] == 0.6
+        assert pipe_kwargs["top_p"] == 0.9
+        assert pipe_kwargs["top_k"] == 40
+        assert pipe_kwargs["seed"] == 7
 
 
 # ---------------------------------------------------------------------------
