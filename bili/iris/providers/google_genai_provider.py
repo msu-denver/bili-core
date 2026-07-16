@@ -7,6 +7,21 @@ Google AI Developer API, as a complement to the existing
 
 Authentication reads ``GOOGLE_API_KEY`` from the environment.
 
+Selecting the Developer API for an arbitrary model
+--------------------------------------------------
+An AETHER ``AgentSpec`` carries only ``model_name``, resolved to a provider via
+catalog lookup and prefix heuristics (see
+``bili.aether.compiler.llm_resolver``).  Catalog lookup runs first and reaches
+``remote_google_vertex`` before this provider, so a bare Gemini ``model_id``
+that both providers list (e.g. ``"gemini-2.5-flash"``) resolves to Vertex and a
+caller has no way to ask for the Developer API by model id alone.  Prefix the
+``model_name`` with the ``genai:`` sentinel (e.g. ``"genai:gemini-2.5-flash"``)
+to force this provider for any Developer API model, catalogued or not,
+mirroring the ``ollama:`` and ``cli:`` sentinels.  :meth:`load` strips the
+``genai:`` prefix before constructing ``ChatGoogleGenerativeAI`` so the API
+receives the real model id.  The prefix is optional: passing a bare model id
+with an explicit ``provider_type`` continues to work unchanged.
+
 Heavy dependencies
 ------------------
 ``langchain_google_genai`` is imported inside :meth:`GoogleGenAIProvider.load`
@@ -22,6 +37,12 @@ from .structured_output import normalize_schema
 
 LOGGER = logging.getLogger(__name__)
 
+#: Sentinel prefix that routes an arbitrary ``model_name`` to this provider via
+#: the resolver's heuristic rules, overriding the catalog lookup that would
+#: otherwise send a Vertex-catalogued Gemini id to ``remote_google_vertex``
+#: (mirrors the "ollama:" and "cli:" sentinels).  Stripped in :meth:`load`.
+GOOGLE_GENAI_MODEL_PREFIX = "genai:"
+
 
 # pylint: disable=too-few-public-methods
 class GoogleGenAIProvider(LLMProvider):
@@ -30,8 +51,10 @@ class GoogleGenAIProvider(LLMProvider):
     Accepted kwargs
     ---------------
     model_name : str
-        Gemini model identifier (e.g. ``"gemini-2.5-flash"``,
-        ``"gemini-2.0-flash"``).
+        Gemini model identifier (e.g. ``"gemini-3.1-flash-lite"``,
+        ``"gemini-2.5-flash"``), optionally prefixed with the ``"genai:"``
+        sentinel to force the Developer API for a model id the catalog also
+        lists under Vertex.
     max_tokens : int, optional
         Maximum completion tokens (mapped to ``max_output_tokens``).
     temperature : float, optional
@@ -61,7 +84,10 @@ class GoogleGenAIProvider(LLMProvider):
     ) -> Any:
         """Create and return a ``ChatGoogleGenerativeAI`` instance.
 
-        :param model_name: Gemini model identifier.
+        :param model_name: Gemini model identifier, optionally prefixed with
+            the ``"genai:"`` sentinel (e.g. ``"genai:gemini-2.5-flash"``) so
+            the resolver routes a Vertex-catalogued id here.  The prefix, if
+            present, is stripped before the id reaches the API.
         :returns: A ``ChatGoogleGenerativeAI`` instance.
         :raises ImportError: If ``langchain_google_genai`` is not installed.
         """
@@ -69,9 +95,20 @@ class GoogleGenAIProvider(LLMProvider):
             ChatGoogleGenerativeAI,
         )
 
-        LOGGER.info("Initializing Google GenAI model: %s", model_name)
+        # Strip the "genai:" sentinel used by the resolver's heuristic routing
+        # (bili.aether.compiler.llm_resolver) to force the Developer API for an
+        # id the catalog also lists under Vertex.  Callers passing an explicit
+        # provider_type send a bare id, so the prefix is only stripped when
+        # present.
+        resolved_model_name = (
+            model_name[len(GOOGLE_GENAI_MODEL_PREFIX) :]
+            if model_name.startswith(GOOGLE_GENAI_MODEL_PREFIX)
+            else model_name
+        )
 
-        config: dict = {"model": model_name}
+        LOGGER.info("Initializing Google GenAI model: %s", resolved_model_name)
+
+        config: dict = {"model": resolved_model_name}
         if max_tokens is not None:
             config["max_output_tokens"] = max_tokens
         if temperature is not None:

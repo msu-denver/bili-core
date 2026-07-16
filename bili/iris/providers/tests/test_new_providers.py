@@ -269,6 +269,31 @@ class TestHeuristicResolution:
         provider, _, _ = self._resolve("gemini-2.5-flash")
         assert provider == "remote_google_genai"
 
+    def test_genai_sentinel_routes_to_google_genai(self):
+        """Verify the 'genai:' sentinel routes to remote_google_genai."""
+        provider, model_id, _ = self._resolve("genai:gemini-2.5-flash")
+        assert provider == "remote_google_genai"
+        # The prefix stays on model_id; GoogleGenAIProvider.load() strips it.
+        assert model_id == "genai:gemini-2.5-flash"
+
+    def test_genai_sentinel_routes_non_gemini_names(self):
+        """Verify the sentinel routes a name carrying no 'gemini' substring.
+
+        The sentinel must not depend on the vendor rules to fire, or a future
+        Developer API model named off-pattern would fail to resolve.
+        """
+        provider, _, _ = self._resolve("genai:some-future-model")
+        assert provider == "remote_google_genai"
+
+    def test_genai_sentinel_precedes_vendor_rules(self):
+        """Verify the sentinel wins over an incidental vendor substring.
+
+        Rule matching is a substring test taking the first hit, so a sentinel
+        placed after a vendor rule would let that rule steal the match.
+        """
+        provider, _, _ = self._resolve("genai:gpt-4o-lookalike")
+        assert provider == "remote_google_genai"
+
     def test_deepseek_routes_to_deepseek(self):
         """Verify 'deepseek-' prefix routes to remote_deepseek."""
         provider, _, _ = self._resolve("deepseek-chat")
