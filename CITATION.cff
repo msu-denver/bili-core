@@ -6,7 +6,7 @@ abstract: >
   BiliCore is an open-source, MIT-licensed framework for building and testing
   LLM-powered applications. It comprises three components: IRIS (Interactive
   Reasoning and Integration Services) for single-agent orchestration across
-  60+ models from 6 providers; AETHER (Agent Ecosystems for Testing,
+  100+ models from 18 provider types; AETHER (Agent Ecosystems for Testing,
   Hardening, Evaluation, and Research) for declarative multi-agent system
   creation via YAML; and AEGIS (Adversarial Evaluation and Guarding of
   Intelligent Systems) for security testing of multi-agent systems. Originally
@@ -39,8 +39,8 @@ authors:
     family-names: Williams
     email: awill157@msudenver.edu
     affiliation: "Metropolitan State University of Denver, Community-Centered Computing (C3) Lab"
-version: 5.3.2
-date-released: 2026-06-12
+version: 5.4.0
+date-released: 2026-07-17
 license: MIT
 repository-code: "https://github.com/msu-denver/bili-core"
 url: "https://github.com/msu-denver/bili-core"
@@ -87,5 +87,5 @@ preferred-citation:
     - given-names: Alyssa
       family-names: Williams
   year: 2026
-  version: 5.3.2
+  version: 5.4.0
   url: "https://github.com/msu-denver/bili-core"
