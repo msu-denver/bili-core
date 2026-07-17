@@ -51,13 +51,17 @@ def _mock_module(module_name: str, **attrs):
     mod = ModuleType(module_name)
     for attr, value in attrs.items():
         setattr(mod, attr, value)
-    already_present = module_name in sys.modules
+    # Capture the real module object, not a bool: a present-flag would restore
+    # the literal True into sys.modules in the finally, corrupting the module
+    # for later tests when the SDK actually is installed.  Matches the helper
+    # in test_ollama_provider.py.
+    already_present = sys.modules.get(module_name)
     sys.modules[module_name] = mod
     try:
         yield mod
     finally:
-        if already_present:
-            sys.modules[module_name] = already_present  # type: ignore[assignment]
+        if already_present is not None:
+            sys.modules[module_name] = already_present
         else:
             sys.modules.pop(module_name, None)
 
