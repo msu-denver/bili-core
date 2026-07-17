@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Automated Review Policy
+
+The PR review workflow enforces two rules the automated reviewer applies on every pull request:
+
+- **Tests ship with code.** If a PR changes application or library source code in a way that warrants tests (new or changed behavior, bug fixes, new branches or edge cases) and does not add or update corresponding tests, the reviewer flags it as a HIGH-severity finding. Docs-only, README, comments, formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only, version bumps) are exempt.
+- **Semgrep findings inform the review.** A free Semgrep (OSS) scan runs before the Claude review and posts its findings as a PR comment, which the reviewer folds into its analysis. It scans with the `p/python`, `p/secrets`, `p/ci`, and `p/dockerfile` rule packs. This replaces the metered Claude security-review job.
+
 ## Project Overview
 
 BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments. The framework is organized into three core components:
@@ -14,16 +21,31 @@ BiliCore is an open-source framework for benchmarking and building dynamic RAG (
 
 ### Container-Based Development (Recommended)
 ```bash
-# Start development environment
+# Start development environment (foreground; auto-detects cpu/gpu profile)
 cd scripts/development
-./start-container.sh
+./start-container
 
 # Attach to container
-./attach-container.sh
+./attach-container
 
 # Inside container
-streamlit  # Start Streamlit UI
-flask      # Start Flask API
+streamlit  # Start Streamlit UI (:8501)
+flask      # Start Flask API (:5001)
+```
+
+Detached mode brings the same environment up in the background (for automation, CI, or a hands-off bringup). It starts Flask and Streamlit inside the container, waits for the Flask API on `:5001`, and prints log-tail and stop commands. The foreground path is unchanged.
+
+```bash
+# Background bringup; optional cpu|gpu arg forces the profile
+./scripts/development/start-container -d
+./scripts/development/start-container -d cpu
+
+# Tail the in-container logs
+docker exec bili-core tail -f /tmp/flask.log
+docker exec bili-core tail -f /tmp/streamlit.log
+
+# Tear down (foreground or detached; idempotent)
+./scripts/development/stop-container
 ```
 
 ### Code Quality Commands
@@ -64,9 +86,9 @@ BiliCore is structured around three major components:
 
 The core single-agent pipeline for retrieval-augmented generation:
 
-1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
+1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, local-file JSONL, and in-memory storage (4 backends). All checkpointers implement a queryable interface for conversation management with both sync and async APIs. Set `JSONL_CHECKPOINT_PATH` to activate the JSONL backend without a database server.
 
-2. **LLM Configuration** (`bili/iris/config/`): Model configurations for 60+ LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models. Uses factory pattern for model initialization.
+2. **LLM Configuration** (`bili/iris/config/`): 109 model configurations across 18 provider types (11 remote API: AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq; 3 CLI presets: Claude Code, Codex, Gemini CLI; generic CLI subprocess; local: llama.cpp, HuggingFace, Ollama). Uses factory pattern for model initialization. Each entry declares a `tool_strategy` (one of `"native"`, `"facilitated"`, `"mcp"`, `"none"`) that selects the tool-calling path: `native` binds tools directly (API providers and tool-capable Ollama models), `facilitated` drives a prompted ReAct loop (text-only and in-process local models), `mcp` exposes tools through an ephemeral authenticated MCP server for self-orchestrating CLI agents, and `none` runs the plain path with no tools. A derived `supports_tools` boolean (`True` only when `tool_strategy == "native"`) is retained for backward compatibility. Schema-constrained structured output (`bili/iris/providers/structured_output.py`): pass `structured_output_schema` (JSON schema dict or Pydantic class) to `load_model()` and generation is constrained to schema-valid JSON at decode time — Ollama (llama.cpp GBNF grammar), OpenAI/Azure OpenAI (strict `response_format`), Vertex/Google GenAI (controlled generation); unsupported providers fail fast; `parse_structured_content()` parses + validates the response; AETHER binds an agent's `output_schema` through this seam when `output_format: structured`.
 
 3. **Tools Framework** (`bili/iris/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
 

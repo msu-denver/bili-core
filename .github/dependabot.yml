@@ -3,6 +3,7 @@
 # Tracks updates for:
 #   - Python packages declared in requirements.txt
 #   - GitHub Actions referenced in .github/workflows/
+#   - Docker base image declared in the Dockerfile
 #
 # Dependabot opens one PR per outdated dependency, grouped where it makes sense
 # to keep review burden manageable. Security updates run independently of this
@@ -70,3 +71,27 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Docker base image (Dockerfile)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      docker:
+        patterns:
+          - "*"

@@ -48,6 +48,19 @@ Usage::
         elif event_type == "__node_complete__":
             print(f"\n[{event_data['node']} complete]")
 
+    # ask_user (or any tool calling langgraph.types.interrupt()) pauses the
+    # run_streaming() generator with a __ask_user_pending__ sentinel;
+    # resume_with_value() supplies the answer and continues execution:
+    for node_name, state_update in executor.run_streaming(
+        {"messages": [HumanMessage(content="Deploy the app.")]}, thread_id="my-thread"
+    ):
+        if node_name == "__ask_user_pending__":
+            question = state_update["interrupts"][0]["question"]
+            for node_name2, state_update2 in executor.resume_with_value(
+                "staging", thread_id="my-thread"
+            ):
+                print(f"{node_name2}: {state_update2}")
+
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
 """
@@ -120,6 +133,9 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         self._runtime_context = runtime_context
         self._compiled_mas = None
         self._compiled_graph = None
+        # Populated by initialize(); used by run/stream methods to decide
+        # whether to inject a thread_id into invoke_config.
+        self._checkpointer = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -145,8 +161,18 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         Calls ``compile_mas()`` (which validates the config) and then
         ``compile_graph()`` to produce the executable graph.
 
-        If ``user_id`` was provided to ``__init__()``, creates a checkpointer
-        with multi-tenant security enabled.
+        Checkpointer attachment (mirrors IRIS always-on behaviour):
+        - ``checkpoint_enabled=True`` (the default) always attaches a
+          checkpointer, even without ``user_id``:
+            - With ``user_id``: ownership-validating saver keyed to that user.
+            - Without ``user_id``: configured backend (default: memory).
+        - ``checkpoint_enabled=False``: explicit opt-out; no saver attached
+          (HITL override still applies).
+        - HITL: a ``MemorySaver`` is always attached when human-interrupt
+          nodes are present, even when ``checkpoint_enabled=False``.
+
+        After initialization, ``self._checkpointer`` reflects whether a
+        checkpointer is actually attached (``None`` = no persistence).
 
         Raises:
             ValueError: If config validation fails.
@@ -168,31 +194,49 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 a.agent_id for a in self._config.agents if getattr(a, "is_human", False)
             ]
 
-        # Create checkpointer — required for HITL resumption even when
-        # checkpoint_enabled is False in the config.
+        # Always-on checkpointing: attach a checkpointer whenever
+        # checkpoint_enabled=True, regardless of whether user_id is set.
+        # checkpoint_enabled=False is the explicit opt-out.
         checkpointer = None
-        if self._user_id and self._config.checkpoint_enabled:
-            checkpointer = self._create_checkpointer_with_user_id()
-        elif human_nodes and not self._config.checkpoint_enabled:
-            # HITL requires a checkpointer so state can be resumed after the
-            # interrupt.  Fall back to an in-process MemorySaver.
+        if self._config.checkpoint_enabled:
+            if self._user_id:
+                # Multi-tenant: ownership-validating saver keyed to this user
+                checkpointer = self._create_checkpointer_with_user_id()
+            else:
+                # Local / single-instance: configured backend, no ownership
+                # validation
+                checkpointer = self._create_checkpointer_local()
+
+        # HITL override: state resumption requires a checkpointer even when
+        # checkpoint_enabled=False.  Fall back to an in-process MemorySaver.
+        if human_nodes and checkpointer is None:
             from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
                 MemorySaver,
             )
 
             checkpointer = MemorySaver()
+            LOGGER.info(
+                "HITL mode: attaching MemorySaver for state resumption "
+                "(checkpoint_enabled=False)"
+            )
 
+        self._checkpointer = checkpointer
         self._compiled_graph = self._compiled_mas.compile_graph(
             checkpointer=checkpointer,
             interrupt_before=human_nodes,
         )
 
         LOGGER.info(
-            "MASExecutor initialized for '%s' (%d agents, %s workflow%s)",
+            "MASExecutor initialized for '%s' (%d agents, %s workflow%s%s)",
             self._config.mas_id,
             len(self._config.agents),
             self._config.workflow_type.value,
             f", user_id={self._user_id}" if self._user_id else "",
+            (
+                ", checkpointer={}".format(type(checkpointer).__name__)
+                if checkpointer
+                else ", checkpointer=None"
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -239,7 +283,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         # Build invoke config
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
-        if self._config.checkpoint_enabled:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -269,8 +313,8 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             final_state
         )
 
-        checkpoint_saved = self._config.checkpoint_enabled
-        # JSONL logging deprecated - communication now persists in checkpointer state
+        checkpoint_saved = self._checkpointer is not None
+        # Communication now persists in checkpointer state
         comm_log_path = None
 
         result = MASExecutionResult(
@@ -342,7 +386,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
-        if self._config.checkpoint_enabled:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -434,8 +478,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         effective_thread_id: Optional[str] = None
-        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
-        if needs_checkpoint:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -469,6 +512,104 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                     )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 LOGGER.warning("Could not inspect graph state for HITL check: %s", exc)
+
+        # Separately, check for a langgraph.types.interrupt() pause (e.g. the
+        # ask_user tool) — distinct from the human_in_loop / is_human whole-
+        # agent-slot mechanism above, and not gated on human_in_loop, since a
+        # tool-level interrupt can occur in any MAS regardless of that flag.
+        # Additive: existing __human_interrupt__ callers are unaffected.
+        if invoke_config:
+            try:
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                pending_interrupts = [
+                    interrupt_obj
+                    for task in graph_state.tasks
+                    for interrupt_obj in task.interrupts
+                ]
+                if pending_interrupts:
+                    yield (
+                        "__ask_user_pending__",
+                        {
+                            # Raw interrupt payload(s) as passed to interrupt(...),
+                            # e.g. {"type": "ask_user", "question": ..., "options": ...}.
+                            "interrupts": [i.value for i in pending_interrupts],
+                            "thread_id": effective_thread_id,
+                        },
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.warning(
+                    "Could not inspect graph state for ask_user interrupt check: %s",
+                    exc,
+                )
+
+    def resume_with_value(
+        self,
+        value: Any,
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Resume a graph paused at a ``langgraph.types.interrupt()`` call.
+
+        Unlike :meth:`resume_streaming` (which injects a ``HumanMessage`` and
+        lets the graph continue routing normally — the ``human_in_loop`` /
+        ``is_human`` whole-agent-slot mechanism), this supplies *value*
+        directly as the return value of the ``interrupt(...)`` call that
+        paused execution, via ``Command(resume=value)``. Use this to resume
+        after a ``__ask_user_pending__`` sentinel from :meth:`run_streaming`.
+
+        The outer AETHER/IRIS node that called into the tool-calling agent
+        re-executes from its own start on resume (not just the single
+        interrupted tool call) — this is ``langgraph.types.interrupt()``'s
+        documented behavior, not a bili-core choice. Verified against
+        ``create_agent``'s tool-calling subgraph specifically: its own
+        internal LLM-call node is NOT re-invoked on resume (LangGraph tracks
+        that node's own already-completed task independently, even without
+        an explicit checkpointer passed to ``create_agent``, when the
+        subgraph is invoked from inside an already-checkpointed outer node —
+        which is how every bili-core tool-calling node uses it). Code in the
+        outer node before the tool-calling agent is invoked (e.g. system
+        prompt / comm-context assembly) does re-run; this is harmless as
+        long as it is pure computation with no external side effect, which
+        holds for AETHER's own pre-invoke bookkeeping today.
+
+        Args:
+            value: The value returned to the paused ``interrupt(...)`` call
+                (e.g. the human's answer to an ``ask_user`` question).
+            thread_id: Thread ID originally reported in the
+                ``__ask_user_pending__`` sentinel.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the interrupt, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before resume_with_value()."
+            )
+
+        from langgraph.types import Command  # pylint: disable=import-outside-toplevel
+
+        invoke_config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._config.max_iterations,
+        }
+
+        LOGGER.info("Resuming interrupt()-paused execution for thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                Command(resume=value),
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("resume_with_value failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("interrupt() resume complete for thread '%s'", thread_id)
 
     def run_streaming_tokens(
         self,
@@ -523,8 +664,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         effective_thread_id: Optional[str] = None
-        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
-        if needs_checkpoint:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -669,7 +809,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
-        if self._config.checkpoint_enabled:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -916,6 +1056,42 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
     # Internal helpers
     # ==================================================================
 
+    def _create_checkpointer_local(self) -> Any:
+        """Create a checkpointer for local/single-instance runs (no user_id).
+
+        Uses the MASConfig's ``checkpoint_config`` to select the backend but
+        does NOT set ``user_id``, so thread ownership validation is disabled.
+        Falls back to ``MemorySaver`` if the factory is unavailable.
+
+        Returns:
+            A checkpointer instance without ownership validation.
+        """
+        try:
+            from bili.aether.integration.checkpointer_factory import (  # pylint: disable=import-outside-toplevel
+                create_checkpointer_from_config,
+            )
+
+            checkpointer = create_checkpointer_from_config(
+                self._config.checkpoint_config, user_id=None
+            )
+            LOGGER.info(
+                "Created local checkpointer (type=%s) for always-on persistence",
+                type(checkpointer).__name__,
+            )
+            return checkpointer
+
+        except ImportError:
+            LOGGER.warning(
+                "Checkpointer factory not available; "
+                "falling back to MemorySaver for local checkpointing"
+            )
+
+        from langgraph.checkpoint.memory import (  # pylint: disable=import-error,import-outside-toplevel
+            MemorySaver,
+        )
+
+        return MemorySaver()
+
     def _create_checkpointer_with_user_id(self) -> Any:
         """Create a checkpointer with multi-tenant security enabled.
 
@@ -1049,11 +1225,16 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         if wtype == WorkflowType.CUSTOM and self._config.human_in_loop:
             state["needs_human_review"] = False
 
-        # Communication fields (only when channels are configured)
+        # communication_log is always initialised so per-agent provenance is
+        # captured for every run, regardless of whether explicit channels are
+        # configured.
+        state["communication_log"] = []
+
+        # channel_messages and pending_messages are only needed for MAS
+        # configurations that declare explicit inter-agent channels.
         if self._config.channels:
             state["channel_messages"] = {}
             state["pending_messages"] = {}
-            state["communication_log"] = []
 
         # Merge user-provided data (overrides defaults)
         if input_data:

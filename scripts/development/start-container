@@ -3,27 +3,122 @@
 # Exit on error
 set -e
 
+# Detached mode brings up the same environment as the interactive flow but
+# without holding a foreground terminal. Use it for agents, automation, CI, or
+# any background bringup. Default (no flag) is unchanged: foreground compose.
+#
+# The optional positional arg forces the compute profile (cpu or gpu),
+# overriding the nvidia-smi auto-detect. Agents and CI use this to force cpu on
+# a machine that happens to have a GPU. With no arg the profile is auto-detected
+# exactly as before.
+detach=false
+profile=""
+usage="Usage: $0 [-d|--detach] [cpu|gpu]"
+# A bare cpu|gpu first arg forces the profile for the FOREGROUND path too
+# (matches the README); -d may be followed by an optional profile.
+case "$1" in
+    -d|--detach) detach=true ;;
+    cpu|gpu) profile="$1"; if [ -n "$2" ]; then echo "$usage"; exit 1; fi ;;
+    "") ;;
+    *) echo "$usage"; exit 1 ;;
+esac
+case "$2" in
+    cpu|gpu) profile="$2" ;;
+    "") ;;
+    *) echo "$usage"; exit 1 ;;
+esac
+
 # Change to the directory of the script
 cd "$(dirname "$0")"
 
-# Check for NVIDIA GPU
-if command -v nvidia-smi &> /dev/null; then
-    echo "NVIDIA GPU detected. Using GPU profile."
-    profile="gpu"
+# Pick the compute profile: explicit arg wins, otherwise auto-detect an NVIDIA
+# GPU. The compose file exposes the same container_name (bili-core) under two
+# profiles: "gpu" reserves the GPU device, "cpu" does not.
+if [ -z "$profile" ]; then
+    if command -v nvidia-smi &> /dev/null; then
+        echo "NVIDIA GPU detected. Using GPU profile."
+        profile="gpu"
+    else
+        echo "No NVIDIA GPU detected. Using CPU profile."
+        profile="cpu"
+    fi
 else
-    echo "No NVIDIA GPU detected. Using CPU profile."
-    profile="cpu"
+    echo "Using $profile profile (explicit override)."
 fi
 
 docker build ../../ -t bili-core
 docker compose build
 docker network create bili-core || true
 
-docker compose --profile $profile up
+if [ "$detach" = false ]; then
+    docker compose --profile "$profile" up
 
-docker stop bili-core
-docker stop bili-core-postgis
-docker stop bili-core-mongodb
-docker stop bili-core-localstack
+    docker stop bili-core
+    docker stop bili-core-postgis
+    docker stop bili-core-mongodb
+    docker stop bili-core-localstack
 
-docker compose down
+    docker compose down
+    exit 0
+fi
+
+# --- Detached mode -----------------------------------------------------------
+
+docker compose --profile "$profile" up -d
+
+# The container entrypoint (wait.sh) writes ~/.bashrc with the `flask` and
+# `streamlit` aliases, then idles on `tail -f /dev/null`. The interactive flow
+# attaches and runs those by hand. We invoke the identical aliases here so the
+# same processes start the same way. Both aliases already run the
+# `createpgdb && deps` provisioning preamble inline, so no extra setup step is
+# needed. Both aliases tee their own output to /tmp (the lab-wide convention:
+# the alias owns its log), so no tee is added here; a second tee at this layer
+# would double-tee and garble the logs.
+#
+# `bash -ic` (interactive) is required: bash does NOT expand aliases in non-
+# interactive shells, so `flask` / `streamlit` (aliases, not functions) would
+# silently no-op under a plain `bash -c`. An interactive shell auto-sources
+# ~/.bashrc and expands aliases. The "no job control in this shell" warning
+# under `exec -d` is harmless.
+docker exec -d bili-core bash -ic 'flask'
+docker exec -d bili-core bash -ic 'streamlit'
+echo "Starting Flask (:5001) + Streamlit (:8501) in the container."
+
+# Poll until the Flask API answers on :5001 (bounded ~90s). First boot installs
+# deps and creates the database, so the first response can lag well behind
+# `up -d`. The trailing `|| true` is required because this script runs under
+# `set -e`: curl exits non-zero while the API is still starting (connection
+# refused), and an unguarded command substitution in an assignment would abort
+# the whole script on the first poll. With the guard, curl still writes "000"
+# on failure, so the loop condition below is unchanged.
+echo "Waiting for Flask API on :5001 ..."
+api_status=""
+for _ in $(seq 1 45); do
+    api_status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/ 2>/dev/null || true)
+    # Any HTTP response (even 404) means the server process is accepting requests.
+    if [ "$api_status" != "000" ] && [ -n "$api_status" ]; then
+        break
+    fi
+    sleep 2
+done
+
+echo ""
+echo "=== bili-core (detached) ==="
+docker compose --profile "$profile" ps
+echo ""
+if [ "$api_status" != "000" ] && [ -n "$api_status" ]; then
+    echo "Flask API on :5001 responding (HTTP $api_status)."
+else
+    echo "Flask API on :5001 not responding yet (still building?). Tail the logs to watch startup."
+fi
+echo ""
+echo "URLs:"
+echo "  Streamlit UI: http://localhost:8501"
+echo "  Flask API:    http://localhost:5001"
+echo ""
+echo "Tail logs:"
+echo "  docker exec bili-core tail -f /tmp/flask.log"
+echo "  docker exec bili-core tail -f /tmp/streamlit.log"
+echo ""
+echo "Stop:"
+echo "  ./scripts/development/stop-container"

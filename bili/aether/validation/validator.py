@@ -72,6 +72,8 @@ class MASValidator:
     def _check_agents(self) -> None:
         self._check_orphaned_agents()
         self._check_supervisor_capabilities()
+        self._check_ask_user_cli_timeout()
+        self._check_ask_user_cli_registration_visibility()
 
     def _check_orphaned_agents(self) -> None:
         """W1: Warn about agents with no channel connections.
@@ -103,6 +105,109 @@ class MASValidator:
                         f"Supervisor agent '{agent.agent_id}' should have "
                         f"'inter_agent_communication' capability"
                     )
+
+    #: Floor below which an explicit cli_subprocess_timeout on an ask_user
+    #: agent is flagged.  A human needs time to notice a pending question and
+    #: respond; the CLI subprocess timeout kills the WHOLE turn (not just the
+    #: pending question) if it expires first, so a short explicit override is
+    #: very likely a footgun rather than an intentional choice.  5 minutes is
+    #: a floor, not a recommendation -- most ask_user-enabled agents should
+    #: leave cli_subprocess_timeout unset (the 1800s preset default) or set
+    #: it to 0 (no timeout) rather than tune it down.
+    _ASK_USER_CLI_TIMEOUT_FLOOR_SECONDS = 300.0
+
+    def _check_ask_user_cli_timeout(self) -> None:
+        """W14: Warn if an ask_user agent on a CLI/MCP model has a too-short timeout.
+
+        The CLI subprocess path (tool_strategy='mcp') has no LangGraph node to
+        interrupt; ask_user blocks the subprocess call itself on a
+        HitlResponder. The subprocess's own cli_subprocess_timeout is a blunt
+        instrument: if it expires before the human answers, the ENTIRE turn is
+        discarded (CliLLMError), not just the pending question. An explicit
+        override below _ASK_USER_CLI_TIMEOUT_FLOOR_SECONDS is flagged; leaving
+        cli_subprocess_timeout unset (preset default 1800s) or 0 (no timeout)
+        is not.
+
+        Skipped entirely when resolve_tool_strategy is unavailable (mirrors
+        that function's own ImportError tolerance) or when an agent has no
+        model_name (nothing to resolve).
+        """
+        try:
+            from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+                resolve_tool_strategy,
+            )
+        except ImportError:
+            return
+
+        for agent in self._config.agents:
+            if "ask_user" not in agent.tools or not agent.model_name:
+                continue
+            if agent.cli_subprocess_timeout is None:
+                continue  # preset default (1800s) -- generous, not flagged
+            if agent.cli_subprocess_timeout == 0.0:
+                continue  # explicit "no timeout" -- the safe extreme
+            if agent.cli_subprocess_timeout >= self._ASK_USER_CLI_TIMEOUT_FLOOR_SECONDS:
+                continue
+            if resolve_tool_strategy(agent.model_name) != "mcp":
+                continue
+            self._result.add_warning(
+                f"Agent '{agent.agent_id}' has 'ask_user' in tools and a CLI "
+                f"tool_strategy='mcp' model with cli_subprocess_timeout="
+                f"{agent.cli_subprocess_timeout}s. If the human has not "
+                f"answered by then, the ENTIRE turn is discarded, not just "
+                f"the pending question. Leave cli_subprocess_timeout unset "
+                f"(preset default 1800s) or set it to 0 (no timeout) unless "
+                f"you have a specific reason to bound how long this agent "
+                f"waits for a human."
+            )
+
+    def _check_ask_user_cli_registration_visibility(self) -> None:
+        """W15: Warn that an ask_user CLI/MCP agent needs a registered HitlResponder.
+
+        Whether a real HitlResponder is registered is HOST RUNTIME STATE
+        (register_ask_user_tool() populates a process-global TOOL_REGISTRY
+        entry), not something a MASConfig -- the only input this static
+        validator sees -- can express. validate_mas() has no access to
+        TOOL_REGISTRY and, by design, never reaches into live process state
+        (see the module docstring: this validator performs config-only,
+        structural checks). So this check cannot tell "wired" from
+        "unwired" and does not try to; it unconditionally reminds the
+        config author of the requirement whenever an agent could reach the
+        CLI/MCP pause path, which is the best available signal from static
+        config alone.
+
+        Scoped to tool_strategy='mcp' specifically, not tool_strategy='native':
+        the native path's pause/resume (interrupt() / Command(resume=...))
+        does not consult a HitlResponder at all, so an unwired native agent
+        still pauses correctly. Only the CLI/MCP path silently returns the
+        NullHitlResponder no-response sentinel -- no error, no visible pause,
+        just a fabricated "no answer" -- when nothing real is registered,
+        which is the actual footgun this check exists to name.
+        """
+        try:
+            from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+                resolve_tool_strategy,
+            )
+        except ImportError:
+            return
+
+        for agent in self._config.agents:
+            if "ask_user" not in agent.tools or not agent.model_name:
+                continue
+            if resolve_tool_strategy(agent.model_name) != "mcp":
+                continue
+            self._result.add_warning(
+                f"Agent '{agent.agent_id}' has 'ask_user' in tools on a CLI "
+                f"tool_strategy='mcp' model. This path requires a real "
+                f"HitlResponder registered via "
+                f"bili.iris.tools.ask_user.register_ask_user_tool(responder=...) "
+                f"before this agent runs. Without one, ask_user calls "
+                f"silently return the no-response sentinel instead of "
+                f"pausing for a human -- this static check cannot see "
+                f"whether a responder is registered (that is runtime "
+                f"state), so treat this as a reminder to verify the "
+                f"registration, not a diagnosis of a missing one."
+            )
 
     # ==================================================================
     # Channel checks

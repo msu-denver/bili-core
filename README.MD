@@ -22,14 +22,21 @@ Originally developed for the [**Colorado Sustainability Hub**](https://sustainab
 BiliCore is organized into three named components, each solving a distinct problem:
 
 ### IRIS — Interactive Reasoning and Integration Services
-**Single-agent orchestration.** 60+ models across 6 providers.
+**Single-agent orchestration.** 109 model configurations across 18 provider types.
 
 IRIS bridges users to LLMs, tools, and data sources. It provides a node-based workflow pipeline where each step (persona injection, tool execution, memory management, response normalization) is a composable node. Switch models mid-conversation, configure tools on the fly, and persist state across sessions.
 
-- **Providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local models
+- **API providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic (direct), Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI (Grok), Groq
+- **CLI providers:** Claude Code CLI, OpenAI Codex CLI, Google Gemini CLI (subprocess, `tool_strategy="mcp"`), plus a generic CLI subprocess provider for any text-in/text-out LLM tool
+- **Local providers:** llama.cpp (GGUF models), HuggingFace (GPTQ/transformers), Ollama (local daemon over HTTP, native tool calling for tool-capable models)
+- **Fallback engine:** `FallbackLLM` chains multiple providers so a transient error on the primary silently retries the next in the list
+- **Structured output:** pass `structured_output_schema` (JSON schema dict or Pydantic class) to `load_model()` and generation is constrained to schema-valid JSON at decode time — Ollama (llama.cpp GBNF grammar), OpenAI + Azure OpenAI (`response_format` with `strict: true`), Vertex AI + Google GenAI (controlled generation); `parse_structured_content()` parses and validates the response, and unsupported providers fail fast instead of silently returning an unconstrained model
+- **Tool-calling modes:** `native` (bind_tools; API providers and tool-capable local models via Ollama), `facilitated` (prompted ReAct hand-rolled loop for text-only/in-process local models), `mcp` (agent tools exposed as an ephemeral authenticated MCP server; CLI self-orchestrates), `none` (no tool support, plain path)
+- **Ephemeral MCP server:** `tool_strategy="mcp"` starts a per-call in-process MCP server (FastMCP + uvicorn, SSE transport) on a random loopback port; per-call Bearer-token auth; per-CLI injectors for Claude Code, Codex, and Gemini CLI; falls back to tool-less if no injector registered (never starts unauthenticated)
 - **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
 - **Middleware:** Summarization, model call limiting, custom middleware
 - **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management
+- **MCP subsystem:** `bili/iris/mcp/` covers two directions: (1) MCP client — agents consume tools from external MCP servers (stdio or HTTP/SSE) as LangChain tools; (2) MCP server — expose an agent's tools to a spawned CLI LLM via the ephemeral server. Install: `pip install bili-core[mcp]`
 - **Streaming:** Token-by-token responses via sync and async APIs
 - **Location:** `bili/iris/`
 
@@ -80,11 +87,11 @@ cp .env.example .env
 
 ```bash
 cd scripts/development
-./start-container.sh
-./attach-container.sh
+./start-container
+./attach-container
 ```
 
-This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases.
+This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases. The compute profile (`cpu` or `gpu`) is auto-detected from the presence of an NVIDIA GPU; pass `cpu` or `gpu` as an argument to force one.
 
 ### 3. Run the application
 
@@ -93,6 +100,30 @@ Inside the container:
 ```bash
 streamlit    # Start the Streamlit UI on port 8501
 flask        # Start the Flask API on port 5001
+```
+
+#### Detached mode (background bringup)
+
+To bring the same environment up in the background without holding a terminal (useful for automation, CI, or when you just want the services running), pass `-d`:
+
+```bash
+./scripts/development/start-container -d          # auto-detect cpu/gpu profile
+./scripts/development/start-container -d cpu       # force the cpu profile
+```
+
+Detached mode brings up compose, starts Flask (`:5001`) and Streamlit (`:8501`) inside the container, waits for the Flask API to respond, and prints the log-tail and stop commands. The foreground behavior above is unchanged.
+
+Tail the logs:
+
+```bash
+docker exec bili-core tail -f /tmp/flask.log
+docker exec bili-core tail -f /tmp/streamlit.log
+```
+
+Tear the environment down (works for foreground or detached, safe to run when nothing is up):
+
+```bash
+./scripts/development/stop-container
 ```
 
 ### 4. Access the application

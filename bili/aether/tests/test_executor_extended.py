@@ -662,6 +662,100 @@ class TestResumeStreaming:  # pylint: disable=too-few-public-methods
 
 
 # =========================================================================
+# resume_with_value (the ask_user Command(resume=...) resume path)
+# =========================================================================
+
+
+class TestResumeWithValue:
+    """Tests for MASExecutor.resume_with_value()."""
+
+    def test_resume_with_value_requires_initialize(self):
+        config = _seq_config()
+        executor = MASExecutor(config)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            list(executor.resume_with_value("staging", "thread-1"))
+
+    def test_resume_with_value_propagates_graph_errors(self):
+        """A stream() failure during resume is logged and re-raised, not
+        swallowed -- mirrors resume_streaming's own error-propagation
+        contract so callers of either resume path get the same guarantee.
+        """
+        config = _seq_config()
+        executor = MASExecutor(config)
+        executor.initialize()
+        executor._compiled_graph = (  # pylint: disable=protected-access
+            _BrokenStreamingGraph()
+        )
+        with pytest.raises(RuntimeError, match="Simulated streaming failure"):
+            list(executor.resume_with_value("staging", "thread-1"))
+
+
+# =========================================================================
+# __ask_user_pending__ sentinel detection in run_streaming
+# =========================================================================
+
+
+class TestAskUserPendingSentinel:
+    """Tests for the __ask_user_pending__ sentinel run_streaming() yields."""
+
+    def test_get_state_failure_is_logged_not_raised(self, caplog):
+        """A get_state() failure during the ask_user interrupt check must not
+        break run_streaming() for callers who never use ask_user -- mirrors
+        the existing __human_interrupt__ check's own tolerance of a get_state
+        failure (executor.py already logs-and-continues there; this is the
+        same contract for the additive check).
+        """
+        config = _seq_config(checkpoint_enabled=True)
+        executor = MASExecutor(config)
+        executor.initialize()
+
+        class _FailingGetState:
+            """Wraps the real compiled graph but breaks get_state()."""
+
+            def __init__(self, inner):
+                self._inner = inner
+
+            def stream(self, *args, **kwargs):
+                return self._inner.stream(*args, **kwargs)
+
+            def get_state(self, *args, **kwargs):
+                raise RuntimeError("Simulated get_state failure")
+
+        executor._compiled_graph = _FailingGetState(  # pylint: disable=protected-access
+            executor._compiled_graph
+        )  # pylint: disable=protected-access
+
+        with caplog.at_level("WARNING"):
+            events = list(
+                executor.run_streaming(
+                    {"messages": [HumanMessage(content="hi")]}, thread_id="t-fail"
+                )
+            )
+
+        assert not [e for e in events if e[0] == "__ask_user_pending__"]
+        assert any(
+            "ask_user interrupt check" in record.message for record in caplog.records
+        )
+
+    def test_no_pending_interrupt_yields_no_sentinel(self):
+        """A normal run (no interrupt() call anywhere) yields no
+        __ask_user_pending__ sentinel -- the additive check is a no-op for
+        every MAS that does not use ask_user.
+        """
+        config = _seq_config(checkpoint_enabled=True, n_agents=1)
+        executor = MASExecutor(config)
+        executor.initialize()
+
+        events = list(
+            executor.run_streaming(
+                {"messages": [HumanMessage(content="hi")]}, thread_id="t-normal"
+            )
+        )
+
+        assert not [e for e in events if e[0] == "__ask_user_pending__"]
+
+
+# =========================================================================
 # Helper-method coverage
 # =========================================================================
 

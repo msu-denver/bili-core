@@ -79,8 +79,8 @@ def display_login_signup():
     )
     st.markdown(
         "**IRIS** (Interactive Reasoning and Integration Services) — "
-        "Single-agent orchestration across 60+ models and 6 providers "
-        "(AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local). "
+        "Single-agent orchestration across 97 model configurations and 17 "
+        "provider types (API, CLI, and local). "
         "Extensible tools, middleware, and state persistence."
     )
     st.markdown(

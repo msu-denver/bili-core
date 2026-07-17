@@ -95,7 +95,11 @@ services:
                     - bili-core-mongodb
 
     bili-core-localstack:
-        image: localstack/localstack
+        # Pinned to 4.14.0 (released 2026-02-26), the last LocalStack release
+        # before they switched to calendar versioning (2026.03.0+) and made
+        # every image (including community/free tier) require a
+        # LOCALSTACK_AUTH_TOKEN. Pinning here keeps dev setup token-free.
+        image: localstack/localstack:4.14.0
         container_name: "bili-core-localstack"
         hostname: "bili-core-localstack"
         ports:
@@ -116,9 +120,16 @@ services:
                 aliases:
                     - bili-core-localstack
         healthcheck:
-            test: [ "CMD-SHELL", "curl -s http://localhost:4566/_localstack/health | grep '\"s3\": \"running\"'" ]
+            # Modern LocalStack serves health at /_localstack/health. The old
+            # /health path is now treated as an S3 bucket request (returns
+            # NoSuchBucket XML), so the old check never matched and the container
+            # was permanently "unhealthy" even though S3 worked. Match s3 in
+            # either ready state ("running" or lazy "available").
+            test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -E '\"s3\": \"(available|running)\"'"]
             interval: 10s
+            timeout: 5s
             retries: 5
+            start_period: 30s
 
 networks:
     bili-core:

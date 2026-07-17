@@ -163,14 +163,17 @@ class TestSequentialExecution:
 class TestCommunicationLogs:
     """Tests for communication statistics collection."""
 
-    def test_no_channels_zero_messages(self):
+    def test_no_channels_records_agent_output_events(self):
+        # Even without explicit channels, each agent appends one provenance entry
+        # to communication_log via the __agent_output__ broadcast channel.
         config = _seq_config(n_agents=2)
         executor = MASExecutor(config)
         executor.initialize()
         result = executor.run(save_results=False)
 
-        assert result.total_messages == 0
-        assert result.messages_by_channel == {}
+        # 2 agents → 2 broadcast events on __agent_output__
+        assert result.total_messages == 2
+        assert result.messages_by_channel == {"__agent_output__": 2}
 
     def test_channels_collect_communication_log(self):
         config = MASConfig(

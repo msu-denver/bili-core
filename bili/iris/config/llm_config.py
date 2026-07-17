@@ -58,8 +58,12 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
+                # NOTE: Amazon Nova Premier EOL announced 2026-09-14. Migrate to Nova 2.
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-premier.html
                 "model_name": "Amazon Nova Premier",
                 "model_id": "us.amazon.nova-premier-v1:0",
                 "custom_model_path": False,
@@ -71,6 +75,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Amazon Nova Lite",
@@ -84,6 +90,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Amazon Nova Micro",
@@ -97,6 +105,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # Amazon Titan Models (3)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-text.html
@@ -113,6 +123,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "none",
                 "supports_tools": False,
             },
             {
@@ -127,6 +138,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "none",
                 "supports_tools": False,
             },
             {
@@ -141,6 +153,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "none",
                 "supports_tools": False,
             },
             # AI21 Labs Models (2)
@@ -158,6 +171,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "AI21 Jamba 1.5 Mini",
@@ -172,8 +187,10 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
-            # Anthropic Models (10)
+            # Anthropic Models (11)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-claude.html
             # https://docs.anthropic.com/en/docs/about-claude/models
             {
@@ -188,6 +205,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.5 Haiku",
@@ -201,6 +220,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3 Opus",
@@ -214,6 +235,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude Opus 4",
@@ -227,6 +250,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude Opus 4.1",
@@ -240,6 +265,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3 Sonnet",
@@ -253,6 +280,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet",
@@ -266,6 +295,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet v2",
@@ -279,6 +310,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude 3.7 Sonnet",
@@ -292,6 +325,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Anthropic Claude Sonnet 4.6",
@@ -305,6 +340,25 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-4-7.html
+                # Launched 2026-04-16. 1M-token context, 128K output.
+                "model_name": "Anthropic Claude Opus 4.7",
+                "model_id": "us.anthropic.claude-opus-4-7",
+                "custom_model_path": False,
+                "max_input_tokens": 1000000,
+                "max_output_tokens": 128000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             # Cohere Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-cohere-command.html
@@ -322,6 +376,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 500,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Cohere Command R+",
@@ -335,12 +391,14 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 500,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
-            # DeepSeek Models (1)
+            # DeepSeek Models (2)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-deepseek.html
             {
                 "model_name": "DeepSeek-R1",
-                "model_id": "deepseek.r1-v1:0",
+                "model_id": "us.deepseek.r1-v1:0",
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32000,
@@ -349,8 +407,31 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
-            # Meta LLama Models (11)
+            {
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-deepseek-deepseek-v3-1.html
+                # NOTE: DeepSeek V3.x does NOT support tool use via the Bedrock Converse API
+                # as of 2026-06. See https://repost.aws/questions/QU83cNU6P_Q0iJnkD9Tl4JIw
+                # model_id: bedrock-runtime Converse API ID per AWS docs. DeepSeek-R1 uses the
+                # cross-region inference profile us.deepseek.r1-v1:0; if V3.1 similarly requires
+                # the us. prefix, update to us.deepseek.v3-v1:0 once AWS inference-profiles-support
+                # docs confirm that cross-region profile ID for V3.1.
+                "model_name": "DeepSeek-V3.1",
+                "model_id": "deepseek.v3-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 32768,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "facilitated",
+                "supports_tools": False,
+            },
+            # Meta LLama Models (12)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-meta.html
             # https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
             {
@@ -364,6 +445,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -377,6 +459,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -391,6 +474,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -405,6 +489,25 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
+                "supports_tools": False,
+            },
+            {
+                # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-meta-llama-3-1-405b.html
+                # NOTE: AWS classifies this model as "Legacy". Same Llama bind_tools limitation
+                # as all Llama models via ChatBedrockConverse (langchain-aws #175).
+                "model_name": "Meta Llama 3.1 405B Instruct",
+                "model_id": "us.meta.llama3-1-405b-instruct-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -419,6 +522,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -433,6 +537,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -447,6 +552,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -461,6 +567,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -475,6 +582,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -489,6 +597,11 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                # Llama 4 supports tool calling in principle, but langchain-aws #175 confirms
+                # that bind_tools/create_react_agent produces malformed chains for all Llama
+                # models via ChatBedrockConverse. Keep "facilitated" until the upstream bug
+                # is fixed. Track: https://github.com/langchain-ai/langchain-aws/issues/175
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -503,13 +616,16 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 50,
+                # Same langchain-aws #175 bind_tools limitation as Scout above.
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
-            # Minstral AI Models (5)
+            # Mistral AI Models (11)
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-large-2407.html
             # https://docs.mistral.ai/getting-started/models/models_overview/
             # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-mistral-text-completion.html
             {
+                # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Large",
                 "model_id": "mistral.mistral-large-2402-v1:0",
                 "custom_model_path": False,
@@ -520,9 +636,11 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
+                # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Small",
                 "model_id": "mistral.mistral-small-2402-v1:0",
                 "custom_model_path": False,
@@ -533,6 +651,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -547,6 +666,7 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 200,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
             {
@@ -561,6 +681,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 200,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Mistral Pixtral Large",
@@ -573,6 +695,99 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-mistral-large-24-07-model/
+                "model_name": "Mistral Large 24.07",
+                "model_id": "mistral.mistral-large-2407-v1:0",
+                "custom_model_path": False,
+                "max_input_tokens": 131000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                # Mistral Large 3 — 675B MoE, 256K context, function calling via Converse API.
+                "model_name": "Mistral Large 3",
+                "model_id": "mistral.mistral-large-3-675b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 256000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                "model_name": "Mistral Ministral 3 3B",
+                "model_id": "mistral.ministral-3-3b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                "model_name": "Mistral Ministral 3 8B",
+                "model_id": "mistral.ministral-3-8b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                "model_name": "Mistral Ministral 3 14B",
+                "model_id": "mistral.ministral-3-14b-instruct",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4096,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+            },
+            {
+                # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-18-fully-managed-open-weight-models/
+                # Devstral 2 — 123B code-specialist MoE, optimized for agentic coding tasks.
+                "model_name": "Mistral Devstral 2 123B",
+                "model_id": "mistral.devstral-2-123b",
+                "custom_model_path": False,
+                "max_input_tokens": 131000,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
                 "supports_tools": True,
             },
             # TwelveLabs Models (1)
@@ -588,6 +803,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
         ],
     },
@@ -618,6 +835,8 @@ LLM_MODELS = {
                 "supports_thinking_budget": True,
                 "thinking_budget_max": 24576,
                 "thinking_budget_default": 0,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.5 Flash",
@@ -637,6 +856,8 @@ LLM_MODELS = {
                 "supports_thinking_budget": True,
                 "thinking_budget_max": 24576,
                 "thinking_budget_default": 0,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.5 Flash Lite",
@@ -656,6 +877,8 @@ LLM_MODELS = {
                 "supports_thinking_budget": True,
                 "thinking_budget_max": 24576,
                 "thinking_budget_default": 0,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.0 Flash",
@@ -669,6 +892,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 2.0 Flash Lite",
@@ -682,6 +907,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Pro 002",
@@ -695,6 +922,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Pro",
@@ -708,6 +937,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Flash",
@@ -721,6 +952,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.5 Flash 002",
@@ -734,6 +967,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
             {
                 "model_name": "Gemini 1.0 Pro",
@@ -747,6 +982,8 @@ LLM_MODELS = {
                 "supports_top_p": True,
                 "supports_top_k": True,
                 "top_k_max": 40,
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
         ],
     },
@@ -774,6 +1011,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -789,6 +1028,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -804,6 +1045,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -819,6 +1062,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -834,6 +1079,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -849,6 +1096,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
                 },
@@ -864,6 +1113,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -879,10 +1130,11 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "none",
+                "supports_tools": False,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
-                "supports_tools": False,
             },
             {
                 "model_name": "Azure OpenAI o3",
@@ -895,6 +1147,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -910,6 +1164,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -925,6 +1181,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -940,6 +1198,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "kwargs": {
                     "api_version": "2025-01-01-preview",
                 },
@@ -955,6 +1215,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
@@ -971,6 +1232,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
                 "kwargs": {
                     "api_version": "2024-08-01-preview",
@@ -996,6 +1258,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1011,6 +1275,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1026,6 +1292,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1041,6 +1309,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1056,6 +1326,7 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "none",
                 "supports_tools": False,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
@@ -1072,6 +1343,8 @@ LLM_MODELS = {
                 "supports_max_output_tokens": False,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
@@ -1087,10 +1360,630 @@ LLM_MODELS = {
                 "supports_max_output_tokens": True,
                 "supports_top_p": True,
                 "supports_top_k": False,
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
                 "supports_max_retries": True,
                 "max_retries_default": 3,
                 "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Anthropic direct API
+    # https://docs.anthropic.com/en/docs/about-claude/models
+    # https://pypi.org/project/langchain-anthropic/
+    # -------------------------------------------------------------------------
+    "remote_anthropic": {
+        "name": "Anthropic",
+        "description": "Remote models accessed via the Anthropic API directly. "
+        "Supports Claude Opus, Sonnet, and Haiku model families. "
+        "See https://docs.anthropic.com/en/docs/about-claude/models for the "
+        "full model list.",
+        "model_help": "https://docs.anthropic.com/en/docs/about-claude/models",
+        "models": [
+            {
+                "model_name": "Claude Opus 4.8",
+                "model_id": "claude-opus-4-8",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 32000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Claude Sonnet 4.6",
+                "model_id": "claude-sonnet-4-6",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 16000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Claude Haiku 4.5",
+                "model_id": "claude-haiku-4-5",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 8096,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Claude Fable 5",
+                "model_id": "claude-fable-5",
+                "custom_model_path": False,
+                "max_input_tokens": 200000,
+                "max_output_tokens": 16000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Mistral AI
+    # https://docs.mistral.ai/models/overview
+    # https://pypi.org/project/langchain-mistralai/
+    # -------------------------------------------------------------------------
+    "remote_mistral": {
+        "name": "Mistral AI",
+        "description": "Remote models accessed via the Mistral AI API. "
+        "Supports Mistral Large, Small, and Codestral model families. "
+        "See https://docs.mistral.ai/models/overview for the full model list.",
+        "model_help": "https://docs.mistral.ai/models/overview",
+        "models": [
+            {
+                "model_name": "Mistral Large Latest",
+                "model_id": "mistral-large-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Mistral Small Latest",
+                "model_id": "mistral-small-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Codestral Latest",
+                "model_id": "codestral-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 262144,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Cohere
+    # https://docs.cohere.com/docs/models
+    # https://pypi.org/project/langchain-cohere/
+    # -------------------------------------------------------------------------
+    "remote_cohere": {
+        "name": "Cohere",
+        "description": "Remote models accessed via the Cohere API. "
+        "Supports Command A+, Command A, Command R+, and Command R model "
+        "families. See https://docs.cohere.com/docs/models for the full list.",
+        "model_help": "https://docs.cohere.com/docs/models",
+        "models": [
+            {
+                "model_name": "Command A+",
+                "model_id": "command-a-plus-05-2026",
+                "custom_model_path": False,
+                "max_input_tokens": 256000,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Command R+",
+                "model_id": "command-r-plus",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Command R",
+                "model_id": "command-r",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 4000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Google Generative AI (Gemini developer API -- not Vertex AI)
+    # https://ai.google.dev/gemini-api/docs/models
+    # https://pypi.org/project/langchain-google-genai/
+    # -------------------------------------------------------------------------
+    "remote_google_genai": {
+        "name": "Google Generative AI (Gemini API)",
+        "description": "Remote Gemini models accessed via the Google AI Developer "
+        "API (GOOGLE_API_KEY). Complements the 'remote_google_vertex' provider "
+        "which routes through Google Cloud Vertex AI. Any Developer API model "
+        "can be used without a catalog entry by prefixing the model name with "
+        "'genai:' (e.g. 'genai:gemini-3.1-flash-lite'). "
+        "See https://ai.google.dev/gemini-api/docs/models for the model list.",
+        "model_help": "https://ai.google.dev/gemini-api/docs/models",
+        # Every display name below carries a "(Direct API)" suffix to
+        # disambiguate from the identically-model_id'd Vertex AI entries; the
+        # model_id sent to the API remains the standard Gemini identifier.
+        # The suffix is load-bearing for selection: a bare model_id that Vertex
+        # also lists resolves to Vertex (catalog lookup precedes the resolver
+        # heuristics and Vertex is declared first), so reaching the Developer
+        # API for such an id requires this display name, the "genai:" sentinel
+        # prefix, or an explicit provider_type="remote_google_genai".
+        "models": [
+            {
+                "model_name": "Gemini 3.1 Flash Lite (Direct API)",
+                "model_id": "gemini-3.1-flash-lite",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 65536,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.5 Flash (Direct API)",
+                "model_id": "gemini-2.5-flash",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 65536,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.5 Flash Lite (Direct API)",
+                "model_id": "gemini-2.5-flash-lite",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 65536,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.0 Flash (Direct API)",
+                "model_id": "gemini-2.0-flash",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Gemini 2.0 Flash Lite (Direct API)",
+                "model_id": "gemini-2.0-flash-lite",
+                "custom_model_path": False,
+                "max_input_tokens": 1048576,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # DeepSeek
+    # https://api-docs.deepseek.com/
+    # https://pypi.org/project/langchain-deepseek/
+    # -------------------------------------------------------------------------
+    "remote_deepseek": {
+        "name": "DeepSeek",
+        "description": "Remote models accessed via the DeepSeek API. "
+        "Supports the DeepSeek-V3/V4 chat family and the DeepSeek-R1 "
+        "reasoning family. "
+        "See https://api-docs.deepseek.com/ for the full model list.",
+        "model_help": "https://api-docs.deepseek.com/",
+        "models": [
+            {
+                "model_name": "DeepSeek Chat",
+                "model_id": "deepseek-chat",
+                "custom_model_path": False,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 8192,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "DeepSeek Reasoner",
+                "model_id": "deepseek-reasoner",
+                "custom_model_path": False,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 32768,
+                "supports_temperature": False,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "tool_strategy": "none",
+                "supports_tools": False,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # xAI (Grok)
+    # https://docs.x.ai/
+    # https://pypi.org/project/langchain-xai/
+    # -------------------------------------------------------------------------
+    "remote_xai": {
+        "name": "xAI (Grok)",
+        "description": "Remote Grok models accessed via the xAI API. "
+        "Supports the Grok model family including reasoning variants. "
+        "See https://docs.x.ai/ for the full model list.",
+        "model_help": "https://docs.x.ai/",
+        "models": [
+            {
+                "model_name": "Grok 3 Latest",
+                "model_id": "grok-3-latest",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 131072,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Grok Beta",
+                "model_id": "grok-beta",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 131072,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # -------------------------------------------------------------------------
+    # Groq
+    # https://console.groq.com/docs/models
+    # https://pypi.org/project/langchain-groq/
+    # -------------------------------------------------------------------------
+    "remote_groq": {
+        "name": "Groq",
+        "description": "Remote models served on Groq's low-latency inference "
+        "hardware. Supports Llama, Gemma, and compound-beta model families. "
+        "See https://console.groq.com/docs/models for the full model list.",
+        "model_help": "https://console.groq.com/docs/models",
+        "models": [
+            {
+                "model_name": "Llama 3.3 70B Versatile",
+                "model_id": "llama-3.3-70b-versatile",
+                "custom_model_path": False,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 32768,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Llama 3.1 8B Instant",
+                "model_id": "llama-3.1-8b-instant",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Compound Beta",
+                "model_id": "compound-beta",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+            {
+                "model_name": "Compound Beta Mini",
+                "model_id": "compound-beta-mini",
+                "custom_model_path": False,
+                "max_input_tokens": 131072,
+                "max_output_tokens": 8000,
+                "supports_temperature": True,
+                "supports_seed": False,
+                "supports_max_output_tokens": True,
+                "supports_top_p": True,
+                "supports_top_k": False,
+                "tool_strategy": "native",
+                "supports_tools": True,
+                "supports_max_retries": True,
+                "max_retries_default": 2,
+                "max_retries_max": 10,
+            },
+        ],
+    },
+    # ------------------------------------------------------------------ #
+    # CLI (subprocess) provider                                          #
+    # ------------------------------------------------------------------ #
+    # The "cli" provider type drives any command-line LLM tool as a     #
+    # stateless text-in / text-out model.  The model_id is the display  #
+    # name only; the actual executable is configured via the "command"  #
+    # kwarg at runtime (e.g. command=["my-llm", "--no-color"]).         #
+    # The entry below serves as a UI placeholder / example; users may   #
+    # register additional entries for specific CLI tools in their own   #
+    # application config.                                               #
+    # ------------------------------------------------------------------ #
+    "cli": {
+        "name": "CLI Subprocess Provider",
+        "description": (
+            "Drives any command-line LLM tool as a stateless text model via "
+            "subprocess.  Configure the executable and arguments at runtime "
+            "using the 'command' kwarg."
+        ),
+        "model_help": "https://github.com/msu-denver/bili-core",
+        "models": [
+            {
+                "model_name": "CLI LLM (Custom Command)",
+                # The model_id is a sentinel; the real executable is set via
+                # the "command" kwarg when calling CliProvider.load().
+                "model_id": "cli:custom",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                # CLI tools run as a subprocess -- tool-calling via the
+                # LangChain bind_tools() API is not available.  These models
+                # are agentic CLIs best driven as MCP servers (#311).
+                "tool_strategy": "mcp",
+                "supports_tools": False,
+            },
+        ],
+    },
+    # ------------------------------------------------------------------ #
+    # CLI preset providers                                                #
+    # ------------------------------------------------------------------ #
+    # Each entry below is a named preset for a specific CLI LLM tool.   #
+    # The preset supplies the known one-shot invocation, prompt-delivery #
+    # strategy, and output config so callers need no per-tool knowledge. #
+    # The subprocess inherits os.environ; whatever credential the tool   #
+    # holds (OAuth session, API key env var, etc.) is reused.            #
+    # ------------------------------------------------------------------ #
+    "cli_claude_code": {
+        "name": "Claude Code CLI (Preset)",
+        "description": (
+            "Drives 'claude -p <prompt>' (Anthropic Claude Code CLI) in "
+            "one-shot print mode.  No API key configuration is required "
+            "beyond having the Claude CLI installed and authenticated.  "
+            "The subprocess reuses the calling process's OAuth session or "
+            "ANTHROPIC_API_KEY environment variable."
+        ),
+        "model_help": "https://docs.anthropic.com/en/docs/claude-code/cli-usage",
+        "models": [
+            {
+                "model_name": "Claude Code CLI",
+                "model_id": "cli:claude_code",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "tool_strategy": "mcp",
+                "supports_tools": False,
+            },
+        ],
+    },
+    "cli_codex": {
+        "name": "OpenAI Codex CLI (Preset)",
+        "description": (
+            "Drives 'codex exec <prompt>' (OpenAI Codex CLI) in "
+            "non-interactive mode.  Requires the Codex CLI to be installed "
+            "and authenticated via OPENAI_API_KEY or its interactive login "
+            "flow.  The subprocess reuses the calling process's environment."
+        ),
+        "model_help": "https://developers.openai.com/codex/noninteractive",
+        "models": [
+            {
+                "model_name": "Codex CLI",
+                "model_id": "cli:codex",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "tool_strategy": "mcp",
+                "supports_tools": False,
+            },
+        ],
+    },
+    "cli_gemini_cli": {
+        "name": "Google Gemini CLI (Preset)",
+        "description": (
+            "Drives 'gemini -p <prompt>' (Google Gemini CLI) in "
+            "non-interactive headless mode.  Requires the Gemini CLI to be "
+            "installed and authenticated via Google OAuth or GEMINI_API_KEY.  "
+            "The subprocess reuses the calling process's environment."
+        ),
+        "model_help": "https://github.com/google-gemini/gemini-cli",
+        "models": [
+            {
+                "model_name": "Gemini CLI",
+                "model_id": "cli:gemini_cli",
+                "supports_temperature": False,
+                "supports_seed": False,
+                "supports_max_output_tokens": False,
+                "supports_top_p": False,
+                "supports_top_k": False,
+                "tool_strategy": "mcp",
+                "supports_tools": False,
             },
         ],
     },
@@ -1117,6 +2010,7 @@ LLM_MODELS = {
                 # If you wanted to manually use tools, you can create the LLM and bind
                 # tool calls differently than create_react_agent does in the default
                 # implementation in bili.loaders.langchain_loader.load_langgraph_agent
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
             },
         ],
@@ -1142,7 +2036,43 @@ LLM_MODELS = {
                 # If you wanted to manually use tools, you can create the LLM and bind
                 # tool calls differently than create_react_agent does in the default
                 # implementation in bili.loaders.langchain_loader.load_langgraph_agent
+                "tool_strategy": "facilitated",
                 "supports_tools": False,
+            },
+        ],
+    },
+    "local_ollama": {
+        "name": "Local Ollama Server Model",
+        "description": "Open-source model served by a local Ollama daemon over "
+        "HTTP. Pull the model first with 'ollama pull <model>'. The model name "
+        "is user-chosen; set it via the model_id below or the agent's "
+        "model_name. Point at a non-default daemon with kwargs.base_url "
+        "(defaults to http://localhost:11434).",
+        "model_help": "https://ollama.com/library",
+        "models": [
+            {
+                # The model_id is a placeholder: Ollama models are pulled
+                # locally with user-chosen names, so set the concrete model
+                # via model_id here or the agent's model_name. Tool-capable
+                # models (Qwen3, Llama 3.1+, Mistral) honour native tool calls.
+                "model_name": "Ollama Local (Server) Model",
+                "model_id": "qwen3",
+                "custom_model_path": False,
+                "supports_temperature": True,
+                "supports_seed": True,
+                "supports_max_output_tokens": True,
+                "local_only": True,
+                "supports_top_p": True,
+                "supports_top_k": True,
+                "top_k_max": 100,
+                # base_url flows through to OllamaProvider.load() as the
+                # daemon endpoint; override per entry for a remote Ollama host.
+                "kwargs": {"base_url": "http://localhost:11434"},
+                # Unlike the in-process llamacpp/huggingface local providers,
+                # ChatOllama implements bind_tools, so tools bind natively for
+                # tool-capable models (the same path as the API providers).
+                "tool_strategy": "native",
+                "supports_tools": True,
             },
         ],
     },

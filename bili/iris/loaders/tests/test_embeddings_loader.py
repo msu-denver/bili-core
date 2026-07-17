@@ -2,6 +2,11 @@
 
 Covers load_embedding_function routing and each provider-specific
 embedding function creator with mocked external dependencies.
+
+Because each creator function now lazy-imports its embedding class inside
+the function body, the patch target is the class in its source module
+(e.g. ``langchain_community.embeddings.SentenceTransformerEmbeddings``)
+rather than an alias re-exported from embeddings_loader.
 """
 
 from unittest.mock import MagicMock, patch
@@ -105,7 +110,7 @@ class TestLoadEmbeddingFunction:
 class TestCreateSentenceTransformerEmbeddingFunction:
     """Verify SentenceTransformer embedding function creation."""
 
-    @patch("bili.iris.loaders.embeddings_loader.SentenceTransformerEmbeddings")
+    @patch("langchain_community.embeddings.SentenceTransformerEmbeddings")
     def test_default_model(self, mock_cls):
         """Verify default model name is used."""
         mock_cls.return_value = MagicMock()
@@ -113,7 +118,7 @@ class TestCreateSentenceTransformerEmbeddingFunction:
         mock_cls.assert_called_once_with(model_name="bert-large-nli-mean-tokens")
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.embeddings_loader.SentenceTransformerEmbeddings")
+    @patch("langchain_community.embeddings.SentenceTransformerEmbeddings")
     def test_custom_model(self, mock_cls):
         """Verify custom model name is passed through."""
         mock_cls.return_value = MagicMock()
@@ -124,7 +129,7 @@ class TestCreateSentenceTransformerEmbeddingFunction:
 class TestCreateAzureOpenaiEmbeddingFunction:
     """Verify Azure OpenAI embedding function creation."""
 
-    @patch("bili.iris.loaders.embeddings_loader.AzureOpenAIEmbeddings")
+    @patch("langchain_openai.AzureOpenAIEmbeddings")
     def test_default_model(self, mock_cls):
         """Verify default model name for Azure embeddings."""
         mock_cls.return_value = MagicMock()
@@ -132,7 +137,7 @@ class TestCreateAzureOpenaiEmbeddingFunction:
         mock_cls.assert_called_once_with(model="azure_text-embedding-3-large")
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.embeddings_loader.AzureOpenAIEmbeddings")
+    @patch("langchain_openai.AzureOpenAIEmbeddings")
     def test_custom_model(self, mock_cls):
         """Verify custom model name for Azure embeddings."""
         mock_cls.return_value = MagicMock()
@@ -143,7 +148,7 @@ class TestCreateAzureOpenaiEmbeddingFunction:
 class TestCreateOpenaiEmbeddingFunction:
     """Verify OpenAI embedding function creation."""
 
-    @patch("bili.iris.loaders.embeddings_loader.OpenAIEmbeddings")
+    @patch("langchain_openai.OpenAIEmbeddings")
     def test_default_model(self, mock_cls):
         """Verify default model name for OpenAI embeddings."""
         mock_cls.return_value = MagicMock()
@@ -155,7 +160,7 @@ class TestCreateOpenaiEmbeddingFunction:
 class TestCreateAmazonBedrockEmbeddingFunction:
     """Verify Amazon Bedrock embedding function creation."""
 
-    @patch("bili.iris.loaders.embeddings_loader.BedrockEmbeddings")
+    @patch("langchain_aws.BedrockEmbeddings")
     def test_default_model(self, mock_cls):
         """Verify default model name for Bedrock embeddings."""
         mock_cls.return_value = MagicMock()
@@ -167,7 +172,7 @@ class TestCreateAmazonBedrockEmbeddingFunction:
 class TestCreateGoogleVertexaiEmbeddingFunction:
     """Verify Google Vertex AI embedding function creation."""
 
-    @patch("bili.iris.loaders.embeddings_loader.VertexAIEmbeddings")
+    @patch("langchain_google_vertexai.VertexAIEmbeddings")
     def test_default_model(self, mock_cls):
         """Verify default model name for Vertex embeddings."""
         mock_cls.return_value = MagicMock()
@@ -175,7 +180,7 @@ class TestCreateGoogleVertexaiEmbeddingFunction:
         mock_cls.assert_called_once_with(model="azure_text-embedding-3-large")
         assert result is mock_cls.return_value
 
-    @patch("bili.iris.loaders.embeddings_loader.VertexAIEmbeddings")
+    @patch("langchain_google_vertexai.VertexAIEmbeddings")
     def test_custom_model(self, mock_cls):
         """Verify custom model name for Vertex embeddings."""
         mock_cls.return_value = MagicMock()

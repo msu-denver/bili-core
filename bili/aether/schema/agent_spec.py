@@ -15,6 +15,14 @@ from .enums import OutputFormat
 
 LOGGER = logging.getLogger(__name__)
 
+# Rough, deliberately generous characters-per-token estimate used only to turn
+# a model's declared *token* limit into a *character* budget for the
+# ``system_prompt`` length check below. Real tokenizers vary (and a caller
+# doing exact accounting should count tokens directly rather than rely on
+# this), but ~4 characters/token is a widely used approximation for English
+# text and errs on the side of not rejecting legitimate prompts.
+_APPROX_CHARS_PER_TOKEN = 4
+
 
 class AgentSpec(BaseModel):
     """
@@ -82,8 +90,15 @@ class AgentSpec(BaseModel):
 
     system_prompt: Optional[str] = Field(
         None,
-        description="Custom system prompt (overrides bili-core prompt if inherit=True)",
-        max_length=10000,
+        description=(
+            "Custom system prompt (overrides bili-core prompt if inherit=True). "
+            "No fixed length cap is imposed here -- prompt budgets vary enormously "
+            "by bound model (a small local model and a long-context frontier model "
+            "tolerate very different prompt sizes). When 'model_name' is set and "
+            "the model's declared input-token limit is known, the length is "
+            "checked against that model's own budget instead; see "
+            "'get_prompt_length_limit()' and 'validate_system_prompt_length'."
+        ),
     )
 
     temperature: Optional[float] = Field(
@@ -104,6 +119,124 @@ class AgentSpec(BaseModel):
 
     max_tokens: Optional[int] = Field(
         None, ge=1, description="Maximum tokens in LLM response"
+    )
+
+    fallback_models: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Ordered list of fallback model names to try when the primary "
+            "model fails with a transient error (rate limit, provider "
+            "unavailable, API timeout).  Each entry is resolved exactly like "
+            "``model_name`` — display name or model_id, looked up in "
+            "``LLM_MODELS`` then by heuristic.  The same ``temperature`` and "
+            "``max_tokens`` values from this AgentSpec are applied to each "
+            "fallback.  Leave empty (the default) to disable fallback "
+            "behaviour entirely."
+        ),
+    )
+
+    cli_subprocess_timeout: Optional[float] = Field(
+        None,
+        ge=0.0,
+        description=(
+            "Per-call subprocess timeout in seconds for CLI-backed providers "
+            "(provider types 'cli', 'cli_claude_code', 'cli_codex', "
+            "'cli_gemini_cli', and any custom CLI preset).  When set, "
+            "overrides the preset default (1800 s).  Set to 0 to disable the "
+            "timeout entirely (equivalent to None — the subprocess runs until "
+            "it exits naturally).  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
+    cli_subprocess_cwd: Optional[str] = Field(
+        None,
+        description=(
+            "Working directory for CLI-backed providers' subprocess (provider "
+            "types 'cli', 'cli_claude_code', 'cli_codex', 'cli_gemini_cli', "
+            "and any custom CLI preset).  When set, overrides the preset "
+            "default and pins the subprocess to this fixed directory instead "
+            "of inheriting the calling process's current working directory. "
+            "Useful for CLI tools that gate filesystem access per directory "
+            "(a one-time trust decision for a known directory rather than one "
+            "triggered by every caller cwd) or to scope the tool's filesystem "
+            "reach to a dedicated directory.  Leave unset (the default) to "
+            "preserve historical behaviour.  Only applies to agents whose "
+            "resolved provider is a CLI subprocess type; ignored for API "
+            "providers."
+        ),
+    )
+
+    cli_subprocess_max_retries: Optional[int] = Field(
+        None,
+        ge=0,
+        description=(
+            "Number of additional in-process attempts for CLI-backed "
+            "providers (provider types 'cli', 'cli_claude_code', "
+            "'cli_codex', 'cli_gemini_cli', and any custom CLI preset) after "
+            "an initial TRANSIENT subprocess failure (rate limit, overload, "
+            "transient 5xx), before giving up.  When set, overrides the "
+            "preset default (2).  Set to 0 to disable in-process retry "
+            "entirely.  Non-transient failures (bad command, auth error, "
+            "malformed output) always fail on the first attempt regardless "
+            "of this setting.  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
+    cli_subprocess_retry_backoff: Optional[float] = Field(
+        None,
+        ge=0.0,
+        description=(
+            "Base delay in seconds before the first in-process retry for "
+            "CLI-backed providers (provider types 'cli', 'cli_claude_code', "
+            "'cli_codex', 'cli_gemini_cli', and any custom CLI preset); each "
+            "subsequent retry doubles the delay.  When set, overrides the "
+            "preset default (1.0 s).  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
+    )
+
+    cli_subprocess_model: Optional[str] = Field(
+        None,
+        description=(
+            "Model name/ID to pass to a CLI-backed provider's subprocess "
+            "(provider types 'cli', 'cli_claude_code', 'cli_codex', "
+            "'cli_gemini_cli', and any custom CLI preset), pinning a "
+            "specific model instead of whatever the CLI tool's own global "
+            "default or interactive session would otherwise use.  Applied "
+            "via the preset's configured model-selection flag (e.g. "
+            "'--model <value>' for all three built-in presets).  Leave "
+            "unset (the default) to inherit the CLI's own default model -- "
+            "today's behaviour, unchanged.  Only applies to agents whose "
+            "resolved provider is a CLI subprocess type; ignored for API "
+            "providers."
+        ),
+    )
+
+    cli_subprocess_reasoning_effort: Optional[str] = Field(
+        None,
+        description=(
+            "Reasoning-effort / thinking-budget level to pass to a "
+            "CLI-backed provider's subprocess (provider types 'cli', "
+            "'cli_claude_code', 'cli_codex', 'cli_gemini_cli', and any "
+            "custom CLI preset), pinning a specific reasoning depth instead "
+            "of whatever the CLI tool's own default would otherwise use -- "
+            "useful for capping a heavy default reasoner on a mechanical "
+            "role, or forcing deeper reasoning for a hard one.  The "
+            "accepted values and the mechanism used to apply them are "
+            "CLI-specific: Claude Code accepts an effort level (e.g. "
+            "'low', 'medium', 'high', 'xhigh', 'max') via its '--effort' "
+            "flag; Codex accepts an effort level (e.g. 'low', 'medium', "
+            "'high', 'xhigh') via a '-c model_reasoning_effort=' config "
+            "override.  The Gemini CLI has no CLI-settable reasoning-"
+            "effort / thinking-budget control in headless mode, so this "
+            "setting is a documented no-op (a warning is logged) for the "
+            "'cli_gemini_cli' preset.  Leave unset (the default) to "
+            "inherit the CLI's own default reasoning depth -- today's "
+            "behaviour, unchanged.  Only applies to agents whose resolved "
+            "provider is a CLI subprocess type; ignored for API providers."
+        ),
     )
 
     # =========================================================================
@@ -326,6 +459,44 @@ class AgentSpec(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_system_prompt_length(self):
+        """Check ``system_prompt`` length against the bound model's own budget.
+
+        Unlike a single fixed character cap (which is wrong for every model
+        simultaneously -- too generous for small-context models, too strict
+        for long-context ones), this validates the prompt against whatever
+        limit the *bound* model actually declares in the model catalog.
+
+        - No ``model_name`` set: nothing to validate against; skipped.
+        - ``model_name`` set but the model is unrecognised, or recognised but
+          without a declared input-token limit (e.g. CLI-subprocess and local
+          providers, whose limits depend on the underlying tool/hardware, not
+          bili-core's catalog): permissive by design. An unknown limit must
+          never manifest as an arbitrary cap.
+        - ``model_name`` set and resolves to a catalog entry with a declared
+          ``max_input_tokens``: the prompt is checked against an approximate
+          character budget derived from that limit. Token accounting varies
+          by tokenizer, so the estimate intentionally errs on the generous
+          side -- callers that need exact accounting should call
+          ``get_prompt_length_limit()`` and do their own token counting.
+        """
+        limit_tokens = self.get_prompt_length_limit()
+        if limit_tokens is None or not self.system_prompt:
+            return self
+
+        char_budget = limit_tokens * _APPROX_CHARS_PER_TOKEN
+        prompt_length = len(self.system_prompt)
+        if prompt_length > char_budget:
+            raise ValueError(
+                f"system_prompt is {prompt_length} characters, which exceeds the "
+                f"approximate {char_budget}-character budget for model "
+                f"'{self.model_name}' (declared limit: {limit_tokens} input "
+                f"tokens, estimated at {_APPROX_CHARS_PER_TOKEN} characters/token). "
+                "Shorten the prompt or bind a model with a larger input-token limit."
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_pipeline_depth(self):
         """Validate that pipeline nesting doesn't exceed max depth.
 
@@ -360,6 +531,30 @@ class AgentSpec(BaseModel):
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
+
+    def get_prompt_length_limit(self) -> Optional[int]:
+        """Return this agent's bound model's declared input-token limit, if known.
+
+        Looks up ``self.model_name`` in bili-core's model catalog
+        (``bili.iris.config.llm_config.LLM_MODELS``) and returns its declared
+        ``max_input_tokens``, letting a caller budget a composed prompt
+        against the model it will actually run on instead of guessing at a
+        one-size-fits-all number.
+
+        Returns:
+            The model's declared maximum input tokens, or ``None`` when
+            ``model_name`` is unset, the model is not in the catalog, or the
+            catalog entry does not declare a limit (e.g. CLI-subprocess and
+            local providers). ``None`` means "no known limit" -- callers
+            should treat that as permissive, not as zero.
+        """
+        if not self.model_name:  # pylint: disable=no-member
+            return None
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            resolve_prompt_length_limit,
+        )
+
+        return resolve_prompt_length_limit(self.model_name)  # pylint: disable=no-member
 
     def get_display_name(self) -> str:
         """Get human-readable agent name."""

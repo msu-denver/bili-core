@@ -2,8 +2,41 @@
 
 When an ``AgentSpec`` has ``model_name`` set, the generated node makes
 real LLM calls using bili-core's ``llm_loader``.  If the agent also has
-``tools`` configured, the node is built with ``langchain.agents.create_agent``
-— the same pattern used by ``bili/iris/nodes/react_agent_node.py``.
+``tools`` configured, the node execution path is selected based on the
+model's ``tool_strategy`` (sourced from ``LLM_MODELS`` via
+:func:`~bili.aether.compiler.llm_resolver.resolve_tool_strategy`),
+mirroring the routing in ``bili/iris/nodes/react_agent_node.py``:
+
+1. **Native tool-calling** (``tool_strategy="native"``, the default for API
+   providers): uses ``langchain.agents.create_agent`` + ``bind_tools``.
+
+2. **Prompted tool-calling** (``tool_strategy="facilitated"``): uses the
+   shared :func:`~bili.iris.nodes.react_agent_node._build_prompted_react_loop`
+   factory imported from IRIS.  Tools are described in a system-message
+   preamble; the model's text output is parsed for ``Action:`` /
+   ``Final Answer:`` markers.  Works with any model that can follow text
+   instructions.
+
+3. **MCP / agentic CLI** (``tool_strategy="mcp"``): the agent's tools are
+   exposed as an ephemeral, per-call authenticated MCP server
+   (:class:`~bili.iris.mcp.server.EphemeralMcpServer`) on a dynamic
+   localhost port.  The CLI model connects to this server and calls tools
+   via its own native tool-calling interface.  This path routes through the
+   shared ``_agent_node`` closure so system_prompt injection, comm_context,
+   human-message ordering, timing, and provenance are all inherited.  For
+   CLIs that use ``message_format="last"`` (the default), the executor
+   embeds the per-agent system instruction into the last HumanMessage
+   before the MCP node renders it, because ``render_messages("last")``
+   discards SystemMessage objects.  If no injector is registered for the
+   CLI, the agent falls back to the direct-LLM path.
+
+4. **No-tool model** (``tool_strategy="none"``): the model has no tool
+   support; tools are dropped and the model runs tool-less.
+
+5. **No tools configured**: calls ``llm.invoke()`` directly (unchanged).
+
+The prompted-loop implementation is shared with IRIS via a direct import
+from ``bili.iris.nodes.react_agent_node`` — no code is duplicated.
 """
 
 import json
@@ -110,14 +143,23 @@ def _generate_llm_agent_node(agent: AgentSpec) -> Callable[[dict], dict]:
     resolved and passed to ``create_agent`` for tool-enabled agents.
     """
     # pylint: disable=import-outside-toplevel
-    from bili.aether.compiler.llm_resolver import create_llm, resolve_tools
+    from bili.aether.compiler.llm_resolver import (
+        create_llm,
+        resolve_tool_strategy,
+        resolve_tools,
+    )
 
     llm = create_llm(agent)
     tools = resolve_tools(agent)
     middleware = _resolve_middleware(agent)
+    tool_strategy = (
+        resolve_tool_strategy(agent.model_name) if agent.model_name else "native"
+    )
 
     if tools:
-        return _generate_tool_agent_node(agent, llm, tools, middleware)
+        return _generate_tool_agent_node(
+            agent, llm, tools, middleware, tool_strategy=tool_strategy
+        )
 
     if middleware:
         LOGGER.warning(
@@ -134,17 +176,147 @@ def _generate_tool_agent_node(
     llm: object,
     tools: List,
     middleware: Optional[List] = None,
+    tool_strategy: str = "native",
 ) -> Callable[[dict], dict]:
-    """Create a node using ``create_agent()`` for tool-enabled agents.
+    """Create a node for tool-enabled agents, selecting the execution path by strategy.
 
-    Mirrors the tool-enabled path in ``bili/iris/nodes/react_agent_node.py``.
-    Middleware (if provided) is forwarded to ``create_agent()``.
+    ``tool_strategy`` is the authoritative routing key:
+
+    - ``"native"`` (default for API-backed models): delegates to
+      ``langchain.agents.create_agent`` + ``bind_tools``.  Middleware is
+      forwarded to ``create_agent()``.
+    - ``"facilitated"``: uses the shared prompted ReAct loop imported from
+      ``bili/iris/nodes/react_agent_node.py``.  Middleware is not applicable
+      on this path and is silently ignored.
+    - ``"mcp"``: the agent's tools are exposed as an ephemeral, per-call
+      authenticated MCP server on a dynamic localhost port.  The CLI model
+      (Claude Code, Codex, Gemini CLI) connects to the server and calls
+      tools via its own native tool-calling interface.  If no injector is
+      registered for the CLI, falls back to the direct-LLM path with a
+      warning.
+    - ``"none"``: the model has no tool support (e.g. some reasoning models
+      reject tool kwargs entirely); tools are dropped and the agent runs on
+      the direct-LLM path.
+
+    ``max_react_iterations`` for the ``"facilitated"`` path can be tuned via
+    ``agent.metadata["max_react_iterations"]``; the default is 10.
     """
-    from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
-        create_agent,
-    )
+    # ── Build the executor at node-construction time ──────────────────────────
+    if tool_strategy == "native":
+        from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
+            create_agent,
+        )
 
-    react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
+        react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
+        executor_mode = "tool-agent (native)"
+
+        def _invoke_executor(messages: list) -> list:
+            result = react_agent.invoke({"messages": messages})
+            return result.get("messages", [])
+
+    elif tool_strategy == "facilitated":
+        # Prompted path: model cannot bind_tools; run the hand-rolled ReAct loop.
+        # Imported from IRIS so the implementation is shared, not duplicated.
+        from bili.iris.nodes.react_agent_node import (  # pylint: disable=import-outside-toplevel
+            _DEFAULT_MAX_REACT_ITERATIONS,
+            _build_prompted_react_loop,
+        )
+
+        if middleware:
+            LOGGER.warning(
+                "Agent '%s' has middleware configured but tool_strategy='facilitated'; "
+                "middleware is only applicable on the native create_agent path "
+                "and will be ignored for the prompted ReAct path.",
+                agent.agent_id,
+            )
+
+        max_react_iterations = int(
+            agent.metadata.get("max_react_iterations", _DEFAULT_MAX_REACT_ITERATIONS)
+        )
+        prompted_loop = _build_prompted_react_loop(
+            llm_model=llm,
+            tools=tools,
+            max_react_iterations=max_react_iterations,
+        )
+        executor_mode = "tool-agent (prompted)"
+
+        def _invoke_executor(messages: list) -> list:
+            result = prompted_loop({"messages": messages})
+            return result.get("messages", [])
+
+    elif tool_strategy == "mcp":
+        # MCP path: expose tools as an ephemeral authenticated MCP server.
+        # The CLI self-orchestrates; bili-core takes its final stdout as the
+        # agent response.  This branch routes through the shared _agent_node
+        # so every cross-cutting concern (system_prompt injection, comm_context,
+        # human-message ordering, timing, provenance) is inherited in one place.
+        from bili.iris.mcp.server import (  # pylint: disable=import-outside-toplevel
+            build_mcp_node,
+            resolve_mcp_injector,
+        )
+
+        injector = resolve_mcp_injector(llm)
+        if injector is None:
+            LOGGER.warning(
+                "Agent '%s': tool_strategy='mcp' but no injector found for CLI '%s'; "
+                "falling back to direct-LLM node.  Register an injector via "
+                "bili.iris.mcp.cli_injectors.register_cli_mcp_injector() to enable "
+                "MCP tool-calling for this CLI.",
+                agent.agent_id,
+                getattr(llm, "command", ["?"])[0],
+            )
+            return _generate_direct_llm_node(agent, llm)
+
+        LOGGER.debug(
+            "Agent '%s': tool_strategy='mcp' -- serving %d tool(s) via "
+            "ephemeral MCP server for CLI '%s'.",
+            agent.agent_id,
+            len(tools),
+            getattr(llm, "command", ["?"])[0],
+        )
+        mcp_raw_node = build_mcp_node(llm_model=llm, tools=tools, injector=injector)
+        # Capture the CLI's message_format at construction time so the
+        # executor can handle it without referencing the outer llm object.
+        cli_message_format: str = str(getattr(llm, "message_format", "last"))
+        executor_mode = "tool-agent (mcp)"
+
+        def _invoke_executor(messages: list) -> list:
+            # _agent_node injects the per-agent system_prompt as a
+            # SystemMessage.  For "last"-format CLIs, render_messages()
+            # ignores SystemMessage and returns only the last HumanMessage
+            # content.  Embed the system instruction into the last
+            # HumanMessage before passing to the MCP node so the CLI
+            # receives its per-role instructions.
+            if cli_message_format == "last":
+                from langchain_core.messages import (
+                    HumanMessage as _HM,  # pylint: disable=import-error,import-outside-toplevel
+                )
+                from langchain_core.messages import SystemMessage as _SM
+
+                sys_parts = [m.content for m in messages if isinstance(m, _SM)]
+                if sys_parts:
+                    sys_instruction = str(sys_parts[0])
+                    stripped = [m for m in messages if not isinstance(m, _SM)]
+                    for i in range(len(stripped) - 1, -1, -1):
+                        if isinstance(stripped[i], _HM):
+                            orig = str(stripped[i].content)
+                            stripped[i] = _HM(content=f"{sys_instruction}\n\n{orig}")
+                            break
+                    messages = stripped
+
+            result = mcp_raw_node({"messages": messages})
+            return result.get("messages", [])
+
+    else:
+        # "none": model has no tool support (e.g. reasoning models that reject
+        # tool kwargs entirely).  Drop tools; delegate to the direct-LLM node.
+        LOGGER.debug(
+            "Agent '%s': tool_strategy='none' -- dropping tools; routing to direct-LLM node.",
+            agent.agent_id,
+        )
+        return _generate_direct_llm_node(agent, llm)
+
+    # ── Shared node callable ──────────────────────────────────────────────────
 
     def _agent_node(state: dict) -> dict:  # pylint: disable=too-many-locals
         start_time = time.time()
@@ -196,18 +368,18 @@ def _generate_tool_agent_node(
 
         _ensure_human_last(messages, agent)
 
-        # Invoke the react agent — it handles tool calls internally
-        result = react_agent.invoke({"messages": messages})
+        # Invoke via the pre-selected executor (native react_agent or prompted loop)
+        response_messages = _invoke_executor(messages)
 
         execution_ms = (time.time() - start_time) * 1000
         LOGGER.info(
-            "Agent node '%s' executed in %.2f ms (tool-agent)",
+            "Agent node '%s' executed in %.2f ms (%s)",
             agent.agent_id,
             execution_ms,
+            executor_mode,
         )
 
         # Extract the final response content
-        response_messages = result.get("messages", [])
         content = ""
         if response_messages:
             content = _normalise_content_value(response_messages[-1].content)
@@ -232,6 +404,72 @@ def _generate_tool_agent_node(
     _agent_node.agent_spec = agent  # type: ignore[attr-defined]
     _agent_node.__name__ = f"agent_{agent.agent_id}"
     _agent_node.__qualname__ = f"agent_{agent.agent_id}"
+
+    return _agent_node
+
+
+def _wrap_mcp_node_with_provenance(
+    inner_node: Callable[[dict], dict], agent: AgentSpec
+) -> Callable[[dict], dict]:
+    """Wrap an IRIS MCP node so it synthesises AETHER per-agent provenance.
+
+    .. note::
+        The main ``tool_strategy="mcp"`` code path in
+        :func:`_generate_tool_agent_node` now routes through the shared
+        ``_agent_node`` closure, which handles provenance (and system_prompt
+        injection, comm_context, human-message ordering) in one place.  This
+        function is retained as a standalone utility for direct use or testing.
+
+    The MCP node returned by :func:`~bili.iris.mcp.server.build_mcp_node` is
+    intentionally generic: it returns only
+    ``{"messages": [AIMessage(content=...)]}`` with no ``name``, no
+    ``current_agent``, no ``agent_outputs``, and no ``communication_log``.
+    This wrapper synthesises the full AETHER provenance payload from the agent
+    closure, matching what the shared ``_agent_node`` and
+    :func:`~bili.aether.compiler.graph_builder.GraphBuilder._wrap_pipeline_as_agent_node`
+    emit: an ``AIMessage`` tagged ``name=agent_id``, ``current_agent``,
+    ``agent_outputs[agent_id]``, and a ``communication_log`` broadcast entry.
+
+    .. warning::
+        This wrapper does **not** inject the agent's ``system_prompt`` or
+        comm_context into the prompt the CLI receives.  The shared ``_agent_node``
+        path is preferred because it applies all cross-cutting per-turn setup.
+    """
+    from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
+        AIMessage,
+    )
+
+    agent_id = agent.agent_id
+
+    def _agent_node(state: dict) -> dict:
+        result = inner_node(state)
+        inner_messages = result.get("messages", []) if isinstance(result, dict) else []
+
+        content = ""
+        for msg in reversed(inner_messages):
+            if getattr(msg, "content", None):
+                content = _normalise_content_value(msg.content)
+                break
+
+        output = _build_output(agent, content)
+        agent_outputs = dict(state.get("agent_outputs") or {})
+        agent_outputs[agent_id] = output
+
+        state_update: Dict[str, Any] = {
+            "messages": [AIMessage(content=content, name=agent_id)],
+            "current_agent": agent_id,
+            "agent_outputs": agent_outputs,
+        }
+
+        if agent.is_supervisor:
+            state_update["next_agent"] = _extract_next_agent(content, agent)
+
+        state_update.update(_build_communication_update(state, agent_id, content))
+        return state_update
+
+    _agent_node.agent_spec = agent  # type: ignore[attr-defined]
+    _agent_node.__name__ = f"agent_{agent_id}"
+    _agent_node.__qualname__ = f"agent_{agent_id}"
 
     return _agent_node
 
@@ -480,7 +718,17 @@ def _resolve_middleware(agent: AgentSpec) -> list:
 
 
 def _build_output(agent: AgentSpec, content: str) -> dict:
-    """Build the agent output dict, parsing JSON if configured."""
+    """Build the agent output dict, parsing JSON/structured output if configured.
+
+    For ``output_format="json"`` the content is best-effort parsed (legacy
+    behaviour, no schema).  For ``output_format="structured"`` the content is
+    parsed *and validated* against the agent's ``output_schema``; on success
+    ``output["parsed"]`` is set (which is also what consensus vote extraction
+    reads), on failure ``output["raw"]`` and ``output["schema_error"]`` are
+    set.  Validation runs regardless of whether the model was decode-time
+    constrained, so post-hoc validation covers providers without constrained
+    decoding.
+    """
     output = {
         "agent_id": agent.agent_id,
         "role": agent.role,
@@ -493,6 +741,24 @@ def _build_output(agent: AgentSpec, content: str) -> dict:
             output["parsed"] = json.loads(content)
         except (json.JSONDecodeError, TypeError):
             output["raw"] = content
+    elif agent.output_format == OutputFormat.STRUCTURED:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            StructuredOutputError,
+            parse_structured_content,
+        )
+
+        try:
+            output["parsed"] = parse_structured_content(
+                content, schema=agent.output_schema
+            )
+        except StructuredOutputError as exc:
+            output["raw"] = content
+            output["schema_error"] = str(exc)
+            LOGGER.warning(
+                "Agent '%s': structured output failed schema validation: %s",
+                agent.agent_id,
+                exc,
+            )
     else:
         output["raw"] = content
 
@@ -564,31 +830,40 @@ def _get_communication_context(state: dict, agent_id: str) -> str:
 def _build_communication_update(
     state: dict, agent_id: str, content: str
 ) -> Dict[str, Any]:
-    """Record agent output in communication state if communication is active.
+    """Record agent output in the communication log for provenance.
 
-    Uses state-based communication API (send_message_in_state) to properly
-    create messages with full Message structure, timestamps, and IDs.
+    ``communication_log`` is always present in the state schema so this
+    function always records the agent's output as a broadcast event on the
+    ``__agent_output__`` channel.  This produces one entry per agent per
+    superstep, giving a durable per-agent provenance trail regardless of
+    whether the MAS declares explicit inter-agent channels.
 
-    Returns a dict of state fields to merge (empty if communication is
-    not configured). The state schema uses ``operator.add`` / ``_merge_dicts``
-    reducers to combine updates from concurrent agent execution.
+    The returned dict is merged into the LangGraph state update by the
+    caller.  It contains:
+
+    - ``communication_log``: a single-element list with the new entry
+      (the ``operator.add`` reducer appends it to the accumulated log).
+    - ``channel_messages`` / ``pending_messages``: routing auxiliaries;
+      present in the update but ignored by LangGraph when those channels
+      are not in the state schema (MAS without explicit channels).
+
+    Args:
+        state: Current LangGraph state dict.
+        agent_id: ID of the agent that just completed.
+        content: Agent output content to record.
+
+    Returns:
+        State-update dict to merge into the node's return value.
     """
-    if "communication_log" not in state:
-        return {}
-
-    # Use state-based communication API for proper message structure
     # pylint: disable=import-outside-toplevel
     from bili.aether.runtime.communication_state import send_message_in_state
     from bili.aether.runtime.messages import MessageType
 
-    # Send agent output as broadcast message on __agent_output__ channel
-    state_update = send_message_in_state(
+    return send_message_in_state(
         state=state,
         channel_id="__agent_output__",
         sender=agent_id,
         content=content,
-        receiver="__all__",  # Broadcast to all agents
+        receiver="__all__",
         message_type=MessageType.BROADCAST,
     )
-
-    return state_update
