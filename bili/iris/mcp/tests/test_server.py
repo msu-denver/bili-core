@@ -184,6 +184,35 @@ class TestBuildMcpFn:
 # _TokenAuthMiddleware
 # ---------------------------------------------------------------------------
 
+#: Arbitrary ports for the middleware's peer lookup. The tests in
+#: TestTokenAuthMiddleware drive the TOKEN check, so their authorization is
+#: stubbed and these are never resolved against a real connection. The real
+#: lookup is exercised in TestConnectionIsBoundToTheSpawnedProcessTree.
+_SERVER_PORT = 51000
+_PEER_PORT = 51001
+
+#: Stand-in PID for the spawned subprocess in the build_mcp_node tests, where
+#: both the server and Popen are mocked and nothing is really spawned.
+_SPAWNED_PID = 424242
+
+
+class _PermissiveAuth:  # pylint: disable=too-few-public-methods
+    """Authorization stub that permits, isolating the token check under test."""
+
+    def permits(self, peer_port: int, server_port: int) -> bool:
+        """Permit every caller."""
+        del peer_port, server_port
+        return True
+
+
+class _DenyingAuth:  # pylint: disable=too-few-public-methods
+    """Authorization stub that refuses, isolating the identity check."""
+
+    def permits(self, peer_port: int, server_port: int) -> bool:
+        """Refuse every caller."""
+        del peer_port, server_port
+        return False
+
 
 class TestTokenAuthMiddleware:
     """Tests for _TokenAuthMiddleware ASGI middleware."""
@@ -192,7 +221,12 @@ class TestTokenAuthMiddleware:
 
     def _make_scope(self, scope_type: str = "http", auth_header: bytes = b"") -> dict:
         headers = [(b"authorization", auth_header)] if auth_header else []
-        return {"type": scope_type, "path": "/mcp", "headers": headers}
+        return {
+            "type": scope_type,
+            "path": "/mcp",
+            "headers": headers,
+            "client": ("127.0.0.1", _PEER_PORT),
+        }
 
     async def _collect_response(self, scope, middleware) -> dict:
         """Run the middleware and collect the ASGI response events."""
@@ -209,14 +243,14 @@ class TestTokenAuthMiddleware:
 
     def test_valid_token_passes_to_inner_app(self):
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = self._make_scope(auth_header=f"Bearer {self.TOKEN}".encode())
         asyncio.run(mw(scope, AsyncMock(), AsyncMock()))
         inner.assert_called_once()
 
     def test_missing_auth_header_returns_401(self):
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = self._make_scope()
         events = asyncio.run(self._collect_response(scope, mw))
         inner.assert_not_called()
@@ -224,7 +258,7 @@ class TestTokenAuthMiddleware:
 
     def test_wrong_token_returns_401(self):
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = self._make_scope(auth_header=b"Bearer wrong-token")
         events = asyncio.run(self._collect_response(scope, mw))
         inner.assert_not_called()
@@ -232,21 +266,21 @@ class TestTokenAuthMiddleware:
 
     def test_lifespan_scope_passes_through(self):
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = {"type": "lifespan"}
         asyncio.run(mw(scope, AsyncMock(), AsyncMock()))
         inner.assert_called_once()
 
     def test_websocket_scope_passes_through(self):
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = {"type": "websocket", "path": "/ws", "headers": []}
         asyncio.run(mw(scope, AsyncMock(), AsyncMock()))
         inner.assert_called_once()
 
     def test_401_response_body_is_valid_json(self):
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = self._make_scope()
         events = asyncio.run(self._collect_response(scope, mw))
         body = events[1]["body"]
@@ -255,7 +289,7 @@ class TestTokenAuthMiddleware:
     def test_401_content_length_matches_body(self):
         """Declared Content-Length must equal actual body length (prevents uvicorn error)."""
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         scope = self._make_scope()
         events = asyncio.run(self._collect_response(scope, mw))
         headers = dict(events[0]["headers"])
@@ -268,21 +302,67 @@ class TestTokenAuthMiddleware:
     def test_header_case_insensitive_lookup(self):
         """Auth header lookup must be case-insensitive (ASGI headers are bytes)."""
         inner = AsyncMock()
-        mw = _TokenAuthMiddleware(inner, self.TOKEN)
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
         # ASGI normalizes header names to lowercase bytes, but test explicitly.
         scope = {
             "type": "http",
             "path": "/mcp",
             "headers": [(b"Authorization", f"Bearer {self.TOKEN}".encode())],
+            "client": ("127.0.0.1", _PEER_PORT),
         }
         # With the standard lowercase key used by our middleware:
         scope2 = {
             "type": "http",
             "path": "/mcp",
             "headers": [(b"authorization", f"Bearer {self.TOKEN}".encode())],
+            "client": ("127.0.0.1", _PEER_PORT),
         }
         asyncio.run(mw(scope2, AsyncMock(), AsyncMock()))
         inner.assert_called_once()
+
+    def test_valid_token_from_an_unauthorized_caller_returns_403(self):
+        """A correct token is necessary and not sufficient.
+
+        The two refusals carry different statuses so an operator can tell a
+        wrong token apart from the right token used by the wrong process; they
+        are different problems with different fixes.
+        """
+        inner = AsyncMock()
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _DenyingAuth(), _SERVER_PORT)
+        scope = self._make_scope(auth_header=f"Bearer {self.TOKEN}".encode())
+        events = asyncio.run(self._collect_response(scope, mw))
+        inner.assert_not_called()
+        assert events[0]["status"] == 403
+
+    def test_a_request_with_no_client_address_is_refused(self):
+        """An unattributable caller is refused rather than waved through.
+
+        A request whose peer cannot be identified is precisely the case the
+        identity check exists for, so the absent-client branch must fail
+        closed; treating it as "cannot check, therefore allow" would reopen
+        the whole gap to anyone who can suppress the field.
+        """
+        inner = AsyncMock()
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _PermissiveAuth(), _SERVER_PORT)
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "headers": [(b"authorization", f"Bearer {self.TOKEN}".encode())],
+            "client": None,
+        }
+        events = asyncio.run(self._collect_response(scope, mw))
+        inner.assert_not_called()
+        assert events[0]["status"] == 403
+
+    def test_403_content_length_matches_body(self):
+        """The 403 shares the 401's response builder, so it shares its contract."""
+        inner = AsyncMock()
+        mw = _TokenAuthMiddleware(inner, self.TOKEN, _DenyingAuth(), _SERVER_PORT)
+        scope = self._make_scope(auth_header=f"Bearer {self.TOKEN}".encode())
+        events = asyncio.run(self._collect_response(scope, mw))
+        headers = dict(events[0]["headers"])
+        assert int(headers[b"content-length"]) == len(events[1]["body"])
+        assert json.loads(events[1]["body"])
 
 
 # ---------------------------------------------------------------------------
@@ -712,14 +792,14 @@ class TestBuildMcpNode:
         )
         mock_proc = MagicMock()
         mock_proc.returncode = returncode
-        mock_proc.stdout = stdout
-        mock_proc.stderr = ""
+        mock_proc.pid = _SPAWNED_PID
+        mock_proc.communicate = MagicMock(return_value=(stdout, ""))
 
         with (
             patch("bili.iris.mcp.server.EphemeralMcpServer") as mock_server_cls,
             patch(
-                "bili.iris.mcp.server.subprocess.run", return_value=mock_proc
-            ) as mock_run,
+                "bili.iris.mcp.server.subprocess.Popen", return_value=mock_proc
+            ) as mock_popen,
         ):
             mock_ctx = MagicMock()
             mock_ctx.__enter__ = MagicMock(return_value=mock_handle)
@@ -727,7 +807,11 @@ class TestBuildMcpNode:
             mock_server_cls.return_value = mock_ctx
 
             result = node(self._make_state())
-            return result, mock_run, injector
+            # The server object is what authorizes, so hand it back for the
+            # test that pins the grant.
+            mock_popen.server = mock_ctx
+            mock_popen.proc = mock_proc
+            return result, mock_popen, injector
 
     def test_node_returns_dict_with_messages(self):
         result, _, _ = self._run_node_with_mocks()
@@ -742,9 +826,62 @@ class TestBuildMcpNode:
         assert result["messages"][0].content == "hello"
 
     def test_subprocess_called_with_augmented_command(self):
-        _, mock_run, _ = self._run_node_with_mocks()
-        called_cmd = mock_run.call_args[0][0]
+        _, mock_popen, _ = self._run_node_with_mocks()
+        called_cmd = mock_popen.call_args[0][0]
         assert called_cmd == ["claude", "-p", "--mcp-config", "/tmp/x.json"]
+
+    def test_the_spawned_process_is_authorized(self):
+        """The node must grant the server the PID it just spawned.
+
+        Nothing else in this class can see this: the server is mocked here, so
+        a node that spawns the CLI and never authorizes it produces identical
+        output and every other assertion still holds.  Without this the whole
+        path ships denying every tool call the CLI makes.
+        """
+        _, mock_popen, _ = self._run_node_with_mocks()
+        mock_popen.server.authorize_subprocess.assert_called_once_with(_SPAWNED_PID)
+
+    def test_authorization_precedes_writing_the_prompt(self):
+        """The grant must be in place before the CLI can act on the prompt.
+
+        The CLI may connect as soon as it starts, so a grant that lands after
+        communicate() returns arrives after every tool call the run makes.
+        The ordering is observed from inside communicate() rather than read
+        off either mock's call list: the two calls are on different objects,
+        so neither list records the relationship, and an assertion over one of
+        them stays green with the grant moved after the call.
+        """
+        tool = _make_plain_tool()
+        llm = self._make_cli_llm()
+        injector = self._make_injector()
+        node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
+
+        mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_handle)
+        mock_ctx.__exit__ = MagicMock(return_value=False)
+
+        seen = {}
+
+        def _communicate(**_kwargs):
+            seen["authorized_first"] = mock_ctx.authorize_subprocess.called
+            return ("out", "")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.pid = _SPAWNED_PID
+        mock_proc.communicate = MagicMock(side_effect=_communicate)
+
+        with (
+            patch("bili.iris.mcp.server.EphemeralMcpServer", return_value=mock_ctx),
+            patch("bili.iris.mcp.server.subprocess.Popen", return_value=mock_proc),
+        ):
+            node(self._make_state())
+
+        assert seen.get("authorized_first") is True, (
+            "the prompt was written to the CLI before the server was told which "
+            "process to serve"
+        )
 
     def test_injector_inject_called_with_handle(self):
         _, _, injector = self._run_node_with_mocks()
@@ -769,16 +906,16 @@ class TestBuildMcpNode:
         cleanup.assert_called_once()
 
     def test_subprocess_passed_extra_env(self):
-        _, mock_run, _ = self._run_node_with_mocks(extra_env={"MY_KEY": "MY_VAL"})
-        call_kwargs = mock_run.call_args[1]
+        _, mock_popen, _ = self._run_node_with_mocks(extra_env={"MY_KEY": "MY_VAL"})
+        call_kwargs = mock_popen.call_args[1]
         assert call_kwargs["env"]["MY_KEY"] == "MY_VAL"
 
     def test_gemini_cwd_extracted_from_env(self):
         """Gemini injector's CWD sentinel must be extracted and used as cwd kwarg."""
         from bili.iris.mcp.cli_injectors import _GEMINI_CWD_KEY
 
-        _, mock_run, _ = self._run_node_with_mocks(cwd="/tmp/gemini_work")
-        call_kwargs = mock_run.call_args[1]
+        _, mock_popen, _ = self._run_node_with_mocks(cwd="/tmp/gemini_work")
+        call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("cwd") == "/tmp/gemini_work"
         # Sentinel must NOT appear in the forwarded env.
         assert _GEMINI_CWD_KEY not in call_kwargs.get("env", {})
@@ -791,8 +928,8 @@ class TestBuildMcpNode:
         which have no cwd-sentinel injector) was silently dropped and the
         subprocess inherited the caller's cwd instead.
         """
-        _, mock_run, _ = self._run_node_with_mocks(llm_cwd="/fixed/workspace")
-        call_kwargs = mock_run.call_args[1]
+        _, mock_popen, _ = self._run_node_with_mocks(llm_cwd="/fixed/workspace")
+        call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("cwd") == "/fixed/workspace"
 
     def test_configured_llm_cwd_takes_precedence_over_gemini_sentinel(self):
@@ -803,10 +940,10 @@ class TestBuildMcpNode:
         CliLLM.cwd is an isolation boundary and must not be silently
         overridden by injector plumbing.
         """
-        _, mock_run, _ = self._run_node_with_mocks(
+        _, mock_popen, _ = self._run_node_with_mocks(
             cwd="/tmp/gemini_work", llm_cwd="/fixed/workspace"
         )
-        call_kwargs = mock_run.call_args[1]
+        call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("cwd") == "/fixed/workspace"
 
     def test_no_cwd_configured_leaves_subprocess_cwd_none(self):
@@ -816,8 +953,8 @@ class TestBuildMcpNode:
         matching subprocess.run's own default and the direct CLI execution
         path's default.
         """
-        _, mock_run, _ = self._run_node_with_mocks()
-        call_kwargs = mock_run.call_args[1]
+        _, mock_popen, _ = self._run_node_with_mocks()
+        call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("cwd") is None
 
     def test_configured_model_reaches_injector_command(self):
@@ -899,12 +1036,12 @@ class TestBuildMcpNode:
         injector = MagicMock()
         injector.inject.side_effect = _passthrough_inject
 
-        _, mock_run, _ = self._run_node_with_mocks(
+        _, mock_popen, _ = self._run_node_with_mocks(
             injector=injector,
             model="claude-sonnet-5",
             model_flag_template=["--model", "{value}"],
         )
-        called_cmd = mock_run.call_args[0][0]
+        called_cmd = mock_popen.call_args[0][0]
         assert called_cmd == [
             "claude",
             "-p",
@@ -922,8 +1059,8 @@ class TestBuildMcpNode:
 
     def test_tool_preamble_prepended_to_prompt(self):
         """The stdin passed to subprocess must include the tool preamble."""
-        _, mock_run, _ = self._run_node_with_mocks()
-        stdin_sent = mock_run.call_args[1].get("input", "")
+        _, mock_popen, _ = self._run_node_with_mocks()
+        stdin_sent = mock_popen.proc.communicate.call_args[1].get("input", "")
         assert "bili_tools_abc" in stdin_sent  # preamble contains server name
 
     def test_subprocess_timeout_raises_cli_error(self):
@@ -938,12 +1075,18 @@ class TestBuildMcpNode:
         node = build_mcp_node(llm_model=llm, tools=[tool], injector=injector)
 
         mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
+        # The timeout surfaces from communicate(), not from the spawn.
+        mock_proc = MagicMock()
+        mock_proc.pid = _SPAWNED_PID
+        mock_proc.communicate = MagicMock(
+            side_effect=[
+                _subprocess.TimeoutExpired(cmd="claude", timeout=30),
+                ("", ""),  # the post-kill reap
+            ]
+        )
         with (
             patch("bili.iris.mcp.server.EphemeralMcpServer") as mock_srv,
-            patch(
-                "bili.iris.mcp.server.subprocess.run",
-                side_effect=_subprocess.TimeoutExpired(cmd="claude", timeout=30),
-            ),
+            patch("bili.iris.mcp.server.subprocess.Popen", return_value=mock_proc),
         ):
             mock_ctx = MagicMock()
             mock_ctx.__enter__ = MagicMock(return_value=mock_handle)
@@ -952,6 +1095,10 @@ class TestBuildMcpNode:
 
             with pytest.raises(CliLLMError, match="timed out"):
                 node(self._make_state())
+
+        # subprocess.run kills the child on timeout; Popen.communicate does
+        # not, so a timed-out CLI would outlive the server serving it.
+        mock_proc.kill.assert_called_once()
 
     def test_ansi_stripping_applied_when_enabled(self):
         """With strip_ansi_output=True the ANSI escape codes are removed."""
@@ -965,12 +1112,12 @@ class TestBuildMcpNode:
         mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
         mock_proc = MagicMock()
         mock_proc.returncode = 0
-        mock_proc.stdout = ansi_output
-        mock_proc.stderr = ""
+        mock_proc.pid = _SPAWNED_PID
+        mock_proc.communicate = MagicMock(return_value=(ansi_output, ""))
 
         with (
             patch("bili.iris.mcp.server.EphemeralMcpServer") as mock_srv,
-            patch("bili.iris.mcp.server.subprocess.run", return_value=mock_proc),
+            patch("bili.iris.mcp.server.subprocess.Popen", return_value=mock_proc),
         ):
             mock_ctx = MagicMock()
             mock_ctx.__enter__ = MagicMock(return_value=mock_handle)
@@ -993,7 +1140,7 @@ class TestBuildMcpNode:
         mock_handle = EphemeralMcpHandle("http://127.0.0.1:9001/mcp", "tok", "srv")
         with (
             patch("bili.iris.mcp.server.EphemeralMcpServer") as mock_srv,
-            patch("bili.iris.mcp.server.subprocess.run"),
+            patch("bili.iris.mcp.server.subprocess.Popen"),
         ):
             mock_ctx = MagicMock()
             mock_ctx.__enter__ = MagicMock(return_value=mock_handle)

@@ -340,8 +340,9 @@ bili-core process
 │    tools: [tool_a, tool_b]  ──────────────────────────┐ │
 │                                                        │ │
 │  EphemeralMcpServer (FastMCP + auth middleware)       │ │
-│    ─ SSE transport on 127.0.0.1:<random-port>    ◄────┘ │
+│    ─ Streamable HTTP on 127.0.0.1:<random-port>  ◄────┘ │
 │    ─ per-call Bearer-token auth (256-bit random)        │
+│    ─ caller must be in the spawned process tree         │
 │    ─ uvicorn in background daemon thread                │
 │                                                        │ │
 │  CLI subprocess (claude / codex / gemini)              │ │
@@ -351,17 +352,26 @@ bili-core process
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Security model:** Every call generates a fresh `secrets.token_urlsafe(32)` token and a unique server name. The token is embedded in the CLI's MCP configuration by a per-CLI injector before the subprocess is spawned. No request can succeed without the correct token (ASGI middleware returns HTTP 401). If no injector is registered for the CLI binary, bili-core falls back to the tool-less path rather than starting an unauthenticated server.
+**Security model — two independent checks.** Every call generates a fresh `secrets.token_urlsafe(32)` token and a unique server name, and a per-CLI injector embeds the token in the CLI's MCP configuration before the subprocess is spawned. A request must then satisfy both of:
 
-**Per-CLI injection mechanisms:**
+1. **It carries the token.** Without it the ASGI middleware returns `401 Unauthorized`.
+2. **Its connection belongs to the spawned subprocess or one of that subprocess's descendants** (`bili/iris/mcp/peer_identity.py`). Otherwise `403 Forbidden`.
+
+The second check exists because the first cannot stand alone. The token reaches the subprocess through a file or an environment variable, so every process running as the same user can read it: a valid token is evidence of file access, not of being the intended caller. Descendants are covered rather than just the spawned PID, because CLI agents dispatch tool calls from workers they spawn themselves, and the grant is keyed on `(pid, create_time)` so a recycled PID cannot inherit it. The server denies everything until `EphemeralMcpServer.authorize_subprocess()` records the spawned process, which closes the window between the server binding its port and the subprocess existing.
+
+**What this does not cover.** A same-user attacker who attaches to or injects into the spawned process is indistinguishable from it by construction, and same-user isolation is inherently weak on a workstation. The check raises the bar from "holds the secret" to "is inside the spawned process tree"; it does not make that tree a security boundary between programs run by one user. Do not expose tools on this path whose blast radius exceeds what the invoking user may already do for themselves.
+
+If no injector is registered for the CLI binary, bili-core falls back to the tool-less path rather than starting an unauthenticated server.
+
+**Per-CLI injection mechanisms.** Files carrying the token are created `0600`, and no injector puts the token in `argv`, because a process command line is world-readable.
 
 | CLI | Token delivery |
 |-----|---------------|
-| `claude` (Claude Code) | Temp JSON written to `--mcp-config <path> --strict-mcp-config`; `Authorization: Bearer <token>` header |
-| `codex` (OpenAI Codex) | `-c mcp_servers.<name>.bearer_token_env_var=...` pointing at a unique per-call env var |
-| `gemini` (Gemini CLI) | Temp `.gemini/settings.json` written in a temp dir; subprocess `cwd` set to that dir |
+| `claude` (Claude Code) | Temp JSON (`0600`) written to `--mcp-config <path> --strict-mcp-config`; `Authorization: Bearer <token>` header |
+| `codex` (OpenAI Codex) | `-c mcp_servers.<name>.bearer_token_env_var=...` pointing at a unique per-call env var; the value never appears in `argv` |
+| `gemini` (Gemini CLI) | Temp `.gemini/settings.json` (`0600`) written in a temp dir; subprocess `cwd` set to that dir |
 
-**Install:** `pip install bili-core[mcp]` (includes both `mcp>=1.0` and `uvicorn>=0.30`)
+**Install:** `pip install bili-core[mcp]` (includes `mcp>=1.0`, `uvicorn>=0.30`, and `psutil>=5.9`)
 
 **Model / reasoning-effort control:** `CliLLM.model` and `CliLLM.reasoning_effort`
 (set via `AgentSpec.cli_subprocess_model` / `cli_subprocess_reasoning_effort` in
