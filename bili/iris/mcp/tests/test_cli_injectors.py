@@ -19,6 +19,8 @@ All tests verify:
 import json
 import os
 import re
+import stat
+import tempfile
 from pathlib import Path
 
 from bili.iris.mcp.cli_injectors import (
@@ -339,6 +341,95 @@ class TestGeminiCliInjector:
         result = injector.inject(command=["gemini", "-p"], handle=handle)
         assert result.augmented_command == ["gemini", "-p"]
         result.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# Token-delivery confidentiality, derived over the whole registry
+# ---------------------------------------------------------------------------
+
+_PROBE_TOKEN = "probe-token-Nn3rQ1s7ZkVt-do-not-reuse"
+
+
+def _token_bearing_files(root: Path) -> "list[Path]":
+    """Return every regular file under *root* whose bytes contain the token.
+
+    Derived rather than enumerated: whatever an injector wrote is found by
+    reading what is on disk, so an injector added later is covered without
+    anyone extending a list of filenames.
+    """
+    found = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:  # pragma: no cover — unreadable temp artefact
+            continue
+        if _PROBE_TOKEN.encode() in data:
+            found.append(path)
+    return found
+
+
+def _run_every_injector(tmp_root: Path, monkeypatch) -> "list[Path]":
+    """Run every registered injector with tempdir redirected under *tmp_root*.
+
+    :returns: every file any injector wrote that carries the token.
+    """
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_root))
+    handle = _make_handle(token=_PROBE_TOKEN)
+    for cli_name, injector in INJECTORS.items():
+        injector.inject(command=[cli_name, "-p"], handle=handle)
+    return _token_bearing_files(tmp_root)
+
+
+class TestTokenDeliveryConfidentiality:
+    """Every channel carrying the token must be same-user-confidential.
+
+    The token is the only thing standing between a local caller and the
+    agent's tools, so the channels that deliver it to the subprocess set the
+    boundary.  Both properties below are asserted over the whole registry,
+    not per injector, so a newly registered injector inherits them.
+    """
+
+    def test_every_token_bearing_file_is_owner_only(self, tmp_path, monkeypatch):
+        """A file carrying the token must be 0600, never the process umask.
+
+        A default umask yields 0644, which would publish the token to every
+        user on the host.
+        """
+        written = _run_every_injector(tmp_path, monkeypatch)
+        modes = {p: stat.S_IMODE(p.stat().st_mode) for p in written}
+        assert modes, "no injector wrote a token-bearing file; the walk found nothing"
+        assert all(m == 0o600 for m in modes.values()), {
+            str(p): oct(m) for p, m in modes.items() if m != 0o600
+        }
+
+    def test_the_walk_detects_a_widened_file(self, tmp_path):
+        """Control: the collector must flag a 0644 token file.
+
+        Without this, a walk that silently found nothing would satisfy the
+        test above forever.
+        """
+        decoy = tmp_path / "decoy.json"
+        decoy.write_text(json.dumps({"Authorization": f"Bearer {_PROBE_TOKEN}"}))
+        os.chmod(decoy, 0o644)
+        found = _token_bearing_files(tmp_path)
+        assert decoy in found
+        assert stat.S_IMODE(decoy.stat().st_mode) != 0o600
+
+    def test_no_injector_puts_the_token_in_argv(self, tmp_path, monkeypatch):
+        """A process command line is world-readable, so the token must not be in it.
+
+        The Codex injector passes the *name* of an environment variable; the
+        value must reach the subprocess through the environment only.
+        """
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+        handle = _make_handle(token=_PROBE_TOKEN)
+        for cli_name, injector in INJECTORS.items():
+            result = injector.inject(command=[cli_name, "-p"], handle=handle)
+            assert not any(
+                _PROBE_TOKEN in arg for arg in result.augmented_command
+            ), f"{cli_name} injector leaked the token into argv"
 
 
 # ---------------------------------------------------------------------------

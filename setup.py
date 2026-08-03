@@ -249,10 +249,18 @@ _EXTRAS = {
     # Server: expose an agent's tools as an ephemeral MCP server for     #
     #   MCP-capable CLI models (#311).                                   #
     # Both require the mcp SDK; the server side additionally needs       #
-    # uvicorn to run the ephemeral SSE server.                           #
+    # uvicorn to run the ephemeral HTTP server.                          #
     # Usage: pip install bili-core[mcp]                                  #
+    #                                                                    #
+    # The mcp ceiling is a capability pin, not caution: 2.0 removed      #
+    # mcp.server.fastmcp, which bili/iris/mcp/server.py builds the       #
+    # ephemeral server from. Raising it means porting to the replacement #
+    # API, not relaxing the bound. The failure is silent without the     #
+    # ceiling -- the import guard reports the extra as uninstalled and   #
+    # the whole subsystem turns itself off -- so the bound is what makes #
+    # an incompatible SDK a resolver error instead.                      #
     # ------------------------------------------------------------------ #
-    "mcp": ["mcp>=1.0", "uvicorn>=0.30"],
+    "mcp": ["mcp>=1.0,<2", "uvicorn>=0.30"],
     # ------------------------------------------------------------------ #
     # Development tooling.                                                 #
     # Usage: pip install bili-core[dev]                                   #
