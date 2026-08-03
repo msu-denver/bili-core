@@ -38,16 +38,34 @@ before being forwarded to the FastMCP application.  Requests without the
 correct ``Authorization: Bearer <token>`` header receive a ``401 Unauthorized``
 response and the connection is dropped.
 
-The token is handed to the :mod:`~bili.iris.mcp.cli_injectors` module, which
-embeds it in the MCP configuration written for the CLI subprocess.  The
-subprocess is therefore the **only** process that can authenticate to the
-ephemeral server — no other local process knows the token.
-
 The server binds to ``127.0.0.1`` (IPv4 loopback) only.  FastMCP
 automatically enables DNS-rebinding protection for localhost hosts, blocking
 requests with non-localhost ``Host:`` headers.  Together, these controls mean
 the server is not reachable from any external host or via a DNS-rebinding
 attack.
+
+What the token does and does not protect
+----------------------------------------
+The token is handed to the :mod:`~bili.iris.mcp.cli_injectors` module, which
+delivers it to the spawned subprocess through a configuration file or an
+environment variable.  Both channels are readable by the *user the process
+runs as*, so the protection the token provides is exactly the protection
+those channels provide:
+
+* **Other users on the same host** cannot read the token.  The injectors
+  create their configuration files ``0600``, and a subprocess environment is
+  readable only by its owner.  The loopback socket itself is reachable by any
+  local user, so the token is what stops them, and it does.
+
+* **Other processes running as the same user** can read the token, and the
+  server accepts any request presenting it.  There is no check that the
+  caller is the subprocess that was spawned: a bearer token cannot express
+  that, because a TCP connection carries no peer identity.  On a single-user
+  workstation this includes editor plugins, shell helpers, and any other
+  agent that user is running.
+
+Do not expose tools on this path whose blast radius exceeds what the invoking
+user may already do for themselves.
 
 Lazy imports
 ------------

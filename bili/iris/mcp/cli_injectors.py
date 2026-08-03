@@ -5,8 +5,19 @@ an ephemeral MCP server described by an
 :class:`~bili.iris.mcp.server.EphemeralMcpHandle`.  Injectors are keyed by
 the CLI executable's basename (e.g. ``"claude"``, ``"codex"``, ``"gemini"``).
 
-All injectors embed the per-call Bearer token in the MCP configuration so
-that only the spawned subprocess can authenticate to the ephemeral server.
+All injectors embed the per-call Bearer token in the MCP configuration so the
+spawned subprocess can authenticate to the ephemeral server.
+
+Token delivery is same-user-confidential, not per-process
+---------------------------------------------------------
+The token reaches the subprocess through a file or an environment variable,
+so any process running as the **same user** can read it and authenticate;
+other users cannot.  Files carrying the token are therefore created ``0600``
+rather than at the process umask, and no injector puts the token in ``argv``
+(the Codex injector passes the *name* of an environment variable, never its
+value), because a process command line is world-readable.  Keep both
+properties when adding an injector.  See the security-model section of
+:mod:`bili.iris.mcp.server` for what this does and does not defend against.
 
 Auth mechanisms by CLI
 ----------------------
@@ -282,10 +293,11 @@ class GeminiCliInjector(McpCliInjector):  # pylint: disable=too-few-public-metho
     This injector:
 
     1. Creates a temporary directory.
-    2. Writes ``<tmpdir>/.gemini/settings.json`` using the ``httpUrl`` key,
-       which maps to Gemini's Streamable HTTP transport (``httpUrl`` = MCP
-       Streamable HTTP; ``url`` = deprecated SSE transport in the Gemini config
-       schema).  The Bearer token is embedded in the ``headers`` map.
+    2. Writes ``<tmpdir>/.gemini/settings.json`` (mode ``0600``) using the
+       ``httpUrl`` key, which maps to Gemini's Streamable HTTP transport
+       (``httpUrl`` = MCP Streamable HTTP; ``url`` = deprecated SSE transport
+       in the Gemini config schema).  The Bearer token is embedded in the
+       ``headers`` map.
     3. Sets the subprocess ``cwd`` to *tmpdir* so Gemini picks up the
        project-scoped settings file automatically.
 
@@ -314,7 +326,19 @@ class GeminiCliInjector(McpCliInjector):  # pylint: disable=too-few-public-metho
         gemini_dir = Path(tmp_dir) / ".gemini"
         gemini_dir.mkdir()
         settings_path = gemini_dir / "settings.json"
-        settings_path.write_text(json.dumps(settings_payload), encoding="utf-8")
+        # The file carries the Bearer token, so it is created 0600 rather than
+        # at the process umask (which yields 0644 on a default configuration).
+        # mkdtemp's own 0700 also keeps other users out, but that protection is
+        # a property of the enclosing directory: a caller that relocates or
+        # copies this file must not be able to widen the token's exposure by
+        # doing so.  Opened O_CREAT|O_EXCL so the mode is applied at creation
+        # and never exists briefly at the umask.
+        with os.fdopen(
+            os.open(settings_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+            "w",
+            encoding="utf-8",
+        ) as fh:
+            fh.write(json.dumps(settings_payload))
 
         LOGGER.debug(
             "GeminiCliInjector: wrote settings to %s (server=%s, cwd=%s)",
