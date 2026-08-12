@@ -9,6 +9,54 @@ The PR review workflow enforces two rules the automated reviewer applies on ever
 - **Tests ship with code.** If a PR changes application or library source code in a way that warrants tests (new or changed behavior, bug fixes, new branches or edge cases) and does not add or update corresponding tests, the reviewer flags it as a HIGH-severity finding. Docs-only, README, comments, formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only, version bumps) are exempt.
 - **Semgrep findings inform the review.** A free Semgrep (OSS) scan runs before the Claude review and posts its findings as a PR comment, which the reviewer folds into its analysis. It scans with the `p/python`, `p/secrets`, `p/ci`, and `p/dockerfile` rule packs. This replaces the metered Claude security-review job.
 
+
+## Running Alongside Other Projects and In Worktrees
+
+By default this project binds its historical host ports (Flask 5001, Streamlit 8501,
+PostGIS 5432, MongoDB 27017, LocalStack 4566/4571), so the normal workflow is
+unchanged. Other lab projects use overlapping ports, so only one stack can hold a
+given port at a time.
+
+```bash
+# run beside another project
+PORT_OFFSET=100 ./scripts/development/start-container -d
+
+# run a second copy of THIS project beside a running one
+CONTAINER_SUFFIX=-test PORT_OFFSET=110 ./scripts/development/start-container -d
+CONTAINER_SUFFIX=-test ./scripts/development/attach-container
+CONTAINER_SUFFIX=-test ./scripts/development/stop-container
+```
+
+`PORT_OFFSET` shifts every host binding; container-internal ports never move, so
+traffic inside the compose network is unaffected. `CONTAINER_SUFFIX` suffixes the
+container and network names and drives the Compose project name, so a second
+instance gets its own containers, network, and volumes.
+
+Pass the same `CONTAINER_SUFFIX` to **every** script in `scripts/development/`
+(including `start-opensearch-dashboard`), or you will attach to, tear down, or point
+a dashboard at the wrong stack. A suffixed instance starts with **empty databases**:
+two MongoDB processes cannot share a data directory, so isolation is required.
+
+`start-container` refuses to start when a resolved host port is held by another
+process, naming the port. Ports published by your own instance are excluded, so
+re-running against your own running stack stays idempotent.
+
+### Working in a git worktree inside the container
+
+The container mounts `../bili-core-worktrees` as a sibling of the repo, so several
+people or agents can build and test in parallel against one container:
+
+```bash
+git worktree add ../bili-core-worktrees/my-task -b feature/my-task
+./scripts/development/start-container -d
+docker exec -w /app/bili-core-worktrees/my-task bili-core pytest
+```
+
+Bring the stack up from the **main checkout**, not from inside a worktree: a
+worktree's `.git` is a file rather than a directory, so a stack started from one
+cannot resolve nested worktrees. The pointer rewrite needs **host git 2.48 or
+newer**; on older git the script warns and only the worktree feature degrades.
+
 ## Project Overview
 
 BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments. The framework is organized into three core components:

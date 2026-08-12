@@ -67,6 +67,54 @@ AEGIS provides a systematic framework for testing how adversarial payloads propa
 
 ---
 
+
+## Running Alongside Other Projects and In Worktrees
+
+By default this project binds its historical host ports (Flask 5001, Streamlit 8501,
+PostGIS 5432, MongoDB 27017, LocalStack 4566/4571), so the normal workflow is
+unchanged. Other lab projects use overlapping ports, so only one stack can hold a
+given port at a time.
+
+```bash
+# run beside another project
+PORT_OFFSET=100 ./scripts/development/start-container -d
+
+# run a second copy of THIS project beside a running one
+CONTAINER_SUFFIX=-test PORT_OFFSET=110 ./scripts/development/start-container -d
+CONTAINER_SUFFIX=-test ./scripts/development/attach-container
+CONTAINER_SUFFIX=-test ./scripts/development/stop-container
+```
+
+`PORT_OFFSET` shifts every host binding; container-internal ports never move, so
+traffic inside the compose network is unaffected. `CONTAINER_SUFFIX` suffixes the
+container and network names and drives the Compose project name, so a second
+instance gets its own containers, network, and volumes.
+
+Pass the same `CONTAINER_SUFFIX` to **every** script in `scripts/development/`
+(including `start-opensearch-dashboard`), or you will attach to, tear down, or point
+a dashboard at the wrong stack. A suffixed instance starts with **empty databases**:
+two MongoDB processes cannot share a data directory, so isolation is required.
+
+`start-container` refuses to start when a resolved host port is held by another
+process, naming the port. Ports published by your own instance are excluded, so
+re-running against your own running stack stays idempotent.
+
+### Working in a git worktree inside the container
+
+The container mounts `../bili-core-worktrees` as a sibling of the repo, so several
+people or agents can build and test in parallel against one container:
+
+```bash
+git worktree add ../bili-core-worktrees/my-task -b feature/my-task
+./scripts/development/start-container -d
+docker exec -w /app/bili-core-worktrees/my-task bili-core pytest
+```
+
+Bring the stack up from the **main checkout**, not from inside a worktree: a
+worktree's `.git` is a file rather than a directory, so a stack started from one
+cannot resolve nested worktrees. The pointer rewrite needs **host git 2.48 or
+newer**; on older git the script warns and only the worktree feature degrades.
+
 ## Quick Start
 
 ### Prerequisites

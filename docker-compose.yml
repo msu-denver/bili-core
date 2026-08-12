@@ -6,7 +6,7 @@ services:
     bili-core:
         build: .
         image: "bili-core"
-        container_name: "bili-core"
+        container_name: "bili-core${CONTAINER_SUFFIX:-}"
         deploy:
             resources:
                 reservations:
@@ -22,10 +22,15 @@ services:
             - ".:/app/bili-core/:rw"
             - "./env/bili_root/:/root/:rw"
             - "bili-core-virtualenv:/app/bili-core/venv/"
+            # Sibling of the repo mount, mirroring the host layout, so a worktree's
+            # relative gitdir pointer resolves the same in-container as on the host.
+            - "${WORKTREES_PATH:-../bili-core-worktrees}:/app/bili-core-worktrees/:rw"
         ports:
-            - 8501:8501
+            # Defaults are the historical ports, so a bare `docker compose up` is
+            # unchanged. start-container derives these from a single PORT_OFFSET.
+            - ${STREAMLIT_PORT:-8501}:8501
             # Port 8502 removed — AETHER UI now integrated into main app on 8501
-            - 5001:5001
+            - ${FLASK_PORT:-5001}:5001
         networks:
             bili-core:
                 aliases:
@@ -38,7 +43,7 @@ services:
     bili-core-cpu:
         build: .
         image: "bili-core"
-        container_name: "bili-core"
+        container_name: "bili-core${CONTAINER_SUFFIX:-}"
         env_file: .env
         environment:
             - PYTHON_ENV=development
@@ -48,10 +53,15 @@ services:
             - ".:/app/bili-core/:rw"
             - "./env/bili_root/:/root/:rw"
             - "bili-core-virtualenv:/app/bili-core/venv/"
+            # Sibling of the repo mount, mirroring the host layout, so a worktree's
+            # relative gitdir pointer resolves the same in-container as on the host.
+            - "${WORKTREES_PATH:-../bili-core-worktrees}:/app/bili-core-worktrees/:rw"
         ports:
-            - 8501:8501
+            # Defaults are the historical ports, so a bare `docker compose up` is
+            # unchanged. start-container derives these from a single PORT_OFFSET.
+            - ${STREAMLIT_PORT:-8501}:8501
             # Port 8502 removed — AETHER UI now integrated into main app on 8501
-            - 5001:5001
+            - ${FLASK_PORT:-5001}:5001
         networks:
             bili-core:
                 aliases:
@@ -64,7 +74,7 @@ services:
     bili-core-postgis:
         image: postgis/postgis:17-3.4
         platform: linux/amd64
-        container_name: "bili-core-postgis"
+        container_name: "bili-core-postgis${CONTAINER_SUFFIX:-}"
         environment:
             - PGDATA=/data/db
             - POSTGRES_USER=bilicore
@@ -72,7 +82,7 @@ services:
         volumes:
             - "bili-core-postgis-data:/data/db/"
         ports:
-            - 5432:5432
+            - ${POSTGIS_PORT:-5432}:5432
         networks:
             bili-core:
                 aliases:
@@ -80,7 +90,7 @@ services:
 
     bili-core-mongodb:
         image: mongo:8
-        container_name: "bili-core-mongodb"
+        container_name: "bili-core-mongodb${CONTAINER_SUFFIX:-}"
         hostname: "bili-core-mongodb"
         environment:
             MONGO_INITDB_ROOT_USERNAME: bilicore
@@ -88,7 +98,7 @@ services:
         volumes:
             - "bili-core-mongodb-data:/data/db/"
         ports:
-            - 27017:27017
+            - ${MONGO_PORT:-27017}:27017
         networks:
             bili-core:
                 aliases:
@@ -100,11 +110,11 @@ services:
         # every image (including community/free tier) require a
         # LOCALSTACK_AUTH_TOKEN. Pinning here keeps dev setup token-free.
         image: localstack/localstack:4.14.0
-        container_name: "bili-core-localstack"
+        container_name: "bili-core-localstack${CONTAINER_SUFFIX:-}"
         hostname: "bili-core-localstack"
         ports:
-            - "4566:4566"
-            - "4571:4571"
+            - "${LOCALSTACK_PORT:-4566}:4566"
+            - "${LOCALSTACK_ALT_PORT:-4571}:4571"
         environment:
             - DEBUG=1
             - DOCKER_SOCK=/var/run/docker.sock
@@ -133,5 +143,6 @@ services:
 
 networks:
     bili-core:
-        name: bili-core
+        # Suffixed with the containers so a second instance gets its own network.
+        name: "bili-core${CONTAINER_SUFFIX:-}"
         external: true
