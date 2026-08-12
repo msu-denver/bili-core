@@ -1,2 +1,4 @@
 #!/bin/bash
-docker exec -u 0 -it bili-core /bin/bash
+# CONTAINER_SUFFIX must match the one used to start the instance, or this
+# attaches to the default stack instead of the one you are working in.
+docker exec -u 0 -it "bili-core${CONTAINER_SUFFIX:-}" /bin/bash
