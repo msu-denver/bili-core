@@ -31,6 +31,128 @@ esac
 # Change to the directory of the script
 cd "$(dirname "$0")"
 
+# This script runs from scripts/development, not the repository root, so paths below
+# resolve from an explicit repo root. The cd above already moved us here, so the root
+# is two levels up; re-resolving $0 now would yield a bogus path.
+repo_root="$(cd ../.. && pwd)"
+projects_dir="$(cd "$repo_root/.." && pwd)"
+
+# CONTAINER_SUFFIX lets a second copy of this project run beside the first: it is
+# appended to the container names and the network name, and drives
+# COMPOSE_PROJECT_NAME so Compose gives the instance its OWN volumes. Empty by
+# default, so the normal single-instance workflow is unchanged. A suffixed instance
+# starts with EMPTY databases: two mongod processes cannot share a data directory, so
+# isolation is the only safe option.
+CONTAINER_SUFFIX="${CONTAINER_SUFFIX:-}"
+export CONTAINER_SUFFIX
+export COMPOSE_PROJECT_NAME="bili-core${CONTAINER_SUFFIX}"
+network_name="bili-core${CONTAINER_SUFFIX}"
+container_name="bili-core${CONTAINER_SUFFIX}"
+
+# --- Host port offset --------------------------------------------------------
+# Every host binding in docker-compose.yml is ${VAR:-<historical port>}, so with no
+# offset this environment is identical to what it has always been. Set PORT_OFFSET to
+# shift every host binding and free the defaults for another project.
+# Container-internal ports never move.
+if [ -z "${PORT_OFFSET:-}" ] && [ -f "$repo_root/.env" ]; then
+    PORT_OFFSET=$(grep -E '^[[:space:]]*PORT_OFFSET=' "$repo_root/.env" | tail -1 | cut -d= -f2- | tr -d " \"'")
+fi
+PORT_OFFSET=${PORT_OFFSET:-0}
+case "$PORT_OFFSET" in
+    ''|*[!0-9]*) echo "PORT_OFFSET must be a non-negative integer (got '$PORT_OFFSET')"; exit 1 ;;
+esac
+# Force base 10. Arithmetic expansion reads a leading zero as octal.
+PORT_OFFSET=$((10#$PORT_OFFSET))
+
+export STREAMLIT_PORT=$((8501 + PORT_OFFSET))
+export FLASK_PORT=$((5001 + PORT_OFFSET))
+export POSTGIS_PORT=$((5432 + PORT_OFFSET))
+export MONGO_PORT=$((27017 + PORT_OFFSET))
+export LOCALSTACK_PORT=$((4566 + PORT_OFFSET))
+export LOCALSTACK_ALT_PORT=$((4571 + PORT_OFFSET))
+
+# MONGO_PORT is the highest binding, so it overflows first.
+if [ "$MONGO_PORT" -gt 65535 ]; then
+    echo "PORT_OFFSET=$PORT_OFFSET puts mongo on $MONGO_PORT, past the maximum port 65535"
+    exit 1
+fi
+
+# Fail fast when a host port is already taken by something OTHER than this instance.
+# Compose otherwise leaves the container in "Created" state while a stray listener can
+# still answer the health poll, making a failed bring-up look successful. Ports
+# published by THIS compose project are excluded so re-running stays idempotent.
+own_ports=$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
+                      --format '{{.Ports}}' 2>/dev/null \
+            | grep -oE '(0\.0\.0\.0|\[::\]):[0-9]+' | cut -d: -f2 | sort -u)
+port_in_use() {
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+    elif command -v ss >/dev/null 2>&1; then
+        ss -ltnH "sport = :$1" 2>/dev/null | grep -q .
+    else
+        return 1
+    fi
+}
+if ! command -v lsof >/dev/null 2>&1 && ! command -v ss >/dev/null 2>&1; then
+    echo "NOTE: neither lsof nor ss is available, so the host-port preflight was skipped."
+fi
+port_conflicts=""
+for _p in "$STREAMLIT_PORT" "$FLASK_PORT" "$POSTGIS_PORT" "$MONGO_PORT" \
+          "$LOCALSTACK_PORT" "$LOCALSTACK_ALT_PORT"; do
+    if printf '%s\n' "$own_ports" | grep -qx "$_p"; then
+        continue
+    fi
+    if port_in_use "$_p"; then
+        port_conflicts="$port_conflicts $_p"
+    fi
+done
+if [ -n "$port_conflicts" ]; then
+    echo "Host port(s) already in use:$port_conflicts"
+    echo "Set PORT_OFFSET to shift this instance's ports, or CONTAINER_SUFFIX to run a second copy."
+    exit 1
+fi
+
+if [ "$PORT_OFFSET" -ne 0 ] || [ -n "$CONTAINER_SUFFIX" ]; then
+    echo "instance '${CONTAINER_SUFFIX:-default}' resolves to:"
+    echo "  flask :$FLASK_PORT   streamlit :$STREAMLIT_PORT   postgis :$POSTGIS_PORT"
+    echo "  mongo :$MONGO_PORT   localstack :$LOCALSTACK_PORT / :$LOCALSTACK_ALT_PORT"
+fi
+
+# --- Worktree mount ----------------------------------------------------------
+# Agents work in git worktrees and exec into this same container to build and test in
+# parallel. Compose mounts ${WORKTREES_PATH:-...}; resolve the same value here, as an
+# absolute path, so a custom WORKTREES_PATH is the directory actually created.
+export WORKTREES_PATH="${WORKTREES_PATH:-$projects_dir/bili-core-worktrees}"
+mkdir -p "$WORKTREES_PATH"
+
+# The rewrite below runs on the HOST and needs git 2.48+. On older git the setting is
+# ignored and repair writes ABSOLUTE paths, which cannot resolve in the container.
+host_git=$(git --version 2>/dev/null | awk '{print $3}')
+host_git_major=${host_git%%.*}
+host_git_minor=${host_git#*.}; host_git_minor=${host_git_minor%%.*}
+case "$host_git_major.$host_git_minor" in
+    [0-9]*.[0-9]*)
+        if [ "$host_git_major" -lt 2 ] || { [ "$host_git_major" -eq 2 ] && [ "$host_git_minor" -lt 48 ]; }; then
+            echo "WARNING: host git $host_git is older than 2.48, so worktree pointers stay"
+            echo "         absolute and git inside the container will fail in a worktree."
+        fi ;;
+    *) ;;  # unrecognized version string: skip the check rather than misreport
+esac
+
+# worktree.useRelativePaths rewrites the pointers but must NOT be left set: it records
+# extensions.relativeWorktrees, and git older than 2.48 refuses any repo declaring it.
+# Dev images in this lab ship git 2.30-2.39. The trap is load-bearing because
+# .git/config is shared with the container.
+clear_worktree_extension() {
+    git -C "$repo_root" config --unset worktree.useRelativePaths >/dev/null 2>&1 || true
+    git -C "$repo_root" config --unset extensions.relativeWorktrees >/dev/null 2>&1 || true
+}
+trap clear_worktree_extension EXIT INT TERM
+git -C "$repo_root" config worktree.useRelativePaths true
+git -C "$repo_root" worktree repair >/dev/null 2>&1 || true
+clear_worktree_extension
+trap - EXIT INT TERM
+
 # Pick the compute profile: explicit arg wins, otherwise auto-detect an NVIDIA
 # GPU. The compose file exposes the same container_name (bili-core) under two
 # profiles: "gpu" reserves the GPU device, "cpu" does not.
@@ -48,15 +170,17 @@ fi
 
 docker build ../../ -t bili-core
 docker compose build
-docker network create bili-core || true
+docker network create "$network_name" || true
 
 if [ "$detach" = false ]; then
     docker compose --profile "$profile" up
 
-    docker stop bili-core
-    docker stop bili-core-postgis
-    docker stop bili-core-mongodb
-    docker stop bili-core-localstack
+    # Suffixed, so Ctrl+C on a second instance tears down THAT instance rather than
+    # stopping the default stack out from under someone else.
+    docker stop "$container_name"
+    docker stop "bili-core-postgis${CONTAINER_SUFFIX}"
+    docker stop "bili-core-mongodb${CONTAINER_SUFFIX}"
+    docker stop "bili-core-localstack${CONTAINER_SUFFIX}"
 
     docker compose down
     exit 0
@@ -82,19 +206,19 @@ docker compose --profile "$profile" up -d
 # under `exec -d` is harmless.
 docker exec -d bili-core bash -ic 'flask'
 docker exec -d bili-core bash -ic 'streamlit'
-echo "Starting Flask (:5001) + Streamlit (:8501) in the container."
+echo "Starting Flask (:$FLASK_PORT) + Streamlit (:$STREAMLIT_PORT) in the container."
 
-# Poll until the Flask API answers on :5001 (bounded ~90s). First boot installs
+# Poll until the Flask API answers on its resolved port (bounded ~90s). First boot installs
 # deps and creates the database, so the first response can lag well behind
 # `up -d`. The trailing `|| true` is required because this script runs under
 # `set -e`: curl exits non-zero while the API is still starting (connection
 # refused), and an unguarded command substitution in an assignment would abort
 # the whole script on the first poll. With the guard, curl still writes "000"
 # on failure, so the loop condition below is unchanged.
-echo "Waiting for Flask API on :5001 ..."
+echo "Waiting for Flask API on :$FLASK_PORT ..."
 api_status=""
 for _ in $(seq 1 45); do
-    api_status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/ 2>/dev/null || true)
+    api_status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$FLASK_PORT/ 2>/dev/null || true)
     # Any HTTP response (even 404) means the server process is accepting requests.
     if [ "$api_status" != "000" ] && [ -n "$api_status" ]; then
         break
@@ -107,18 +231,18 @@ echo "=== bili-core (detached) ==="
 docker compose --profile "$profile" ps
 echo ""
 if [ "$api_status" != "000" ] && [ -n "$api_status" ]; then
-    echo "Flask API on :5001 responding (HTTP $api_status)."
+    echo "Flask API on :$FLASK_PORT responding (HTTP $api_status)."
 else
-    echo "Flask API on :5001 not responding yet (still building?). Tail the logs to watch startup."
+    echo "Flask API on :$FLASK_PORT not responding yet (still building?). Tail the logs to watch startup."
 fi
 echo ""
 echo "URLs:"
-echo "  Streamlit UI: http://localhost:8501"
-echo "  Flask API:    http://localhost:5001"
+echo "  Streamlit UI: http://localhost:$STREAMLIT_PORT"
+echo "  Flask API:    http://localhost:$FLASK_PORT"
 echo ""
 echo "Tail logs:"
-echo "  docker exec bili-core tail -f /tmp/flask.log"
-echo "  docker exec bili-core tail -f /tmp/streamlit.log"
+echo "  docker exec $container_name tail -f /tmp/flask.log"
+echo "  docker exec $container_name tail -f /tmp/streamlit.log"
 echo ""
 echo "Stop:"
 echo "  ./scripts/development/stop-container"

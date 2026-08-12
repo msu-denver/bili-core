@@ -39,9 +39,15 @@ class TestFindRepoRoot:
     """Tests for find_repo_root()."""
 
     def test_locates_real_repo_root(self):
-        """Returns a directory that contains a .git directory."""
+        """Returns a directory that carries a ``.git`` entry.
+
+        Existence, not a directory: this suite runs from a git worktree as
+        well as from a clone, and a worktree's ``.git`` is a file holding a
+        ``gitdir:`` pointer.  Asserting a directory here fails in exactly the
+        environment the code under test was changed to support.
+        """
         root = find_repo_root()
-        assert (root / ".git").is_dir()
+        assert (root / ".git").exists()
         # The repo root must contain the bili package this module lives in.
         assert (root / "bili" / "aegis" / "suites" / "_helpers.py").is_file()
 

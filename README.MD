@@ -32,7 +32,7 @@ IRIS bridges users to LLMs, tools, and data sources. It provides a node-based wo
 - **Fallback engine:** `FallbackLLM` chains multiple providers so a transient error on the primary silently retries the next in the list
 - **Structured output:** pass `structured_output_schema` (JSON schema dict or Pydantic class) to `load_model()` and generation is constrained to schema-valid JSON at decode time — Ollama (llama.cpp GBNF grammar), OpenAI + Azure OpenAI (`response_format` with `strict: true`), Vertex AI + Google GenAI (controlled generation); `parse_structured_content()` parses and validates the response, and unsupported providers fail fast instead of silently returning an unconstrained model
 - **Tool-calling modes:** `native` (bind_tools; API providers and tool-capable local models via Ollama), `facilitated` (prompted ReAct hand-rolled loop for text-only/in-process local models), `mcp` (agent tools exposed as an ephemeral authenticated MCP server; CLI self-orchestrates), `none` (no tool support, plain path)
-- **Ephemeral MCP server:** `tool_strategy="mcp"` starts a per-call in-process MCP server (FastMCP + uvicorn, SSE transport) on a random loopback port; per-call Bearer-token auth; per-CLI injectors for Claude Code, Codex, and Gemini CLI; falls back to tool-less if no injector registered (never starts unauthenticated)
+- **Ephemeral MCP server:** `tool_strategy="mcp"` starts a per-call in-process MCP server (FastMCP + uvicorn, Streamable HTTP transport) on a random loopback port. Two independent checks guard it: a per-call Bearer token (`401` without it), and the requirement that the caller's connection belong to the spawned subprocess or one of its descendants (`403` otherwise), because the token has to be delivered through a file or an environment variable that every process of the same user can read. Per-CLI injectors for Claude Code, Codex, and Gemini CLI; falls back to tool-less if no injector is registered (never starts unauthenticated). See `docs/ARCHITECTURE.md` §7 for the boundary this does and does not establish
 - **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
 - **Middleware:** Summarization, model call limiting, custom middleware
 - **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management
@@ -66,6 +66,54 @@ AEGIS provides a systematic framework for testing how adversarial payloads propa
 - **Location:** `bili/aegis/`
 
 ---
+
+
+## Running Alongside Other Projects and In Worktrees
+
+By default this project binds its historical host ports (Flask 5001, Streamlit 8501,
+PostGIS 5432, MongoDB 27017, LocalStack 4566/4571), so the normal workflow is
+unchanged. Other lab projects use overlapping ports, so only one stack can hold a
+given port at a time.
+
+```bash
+# run beside another project
+PORT_OFFSET=100 ./scripts/development/start-container -d
+
+# run a second copy of THIS project beside a running one
+CONTAINER_SUFFIX=-test PORT_OFFSET=110 ./scripts/development/start-container -d
+CONTAINER_SUFFIX=-test ./scripts/development/attach-container
+CONTAINER_SUFFIX=-test ./scripts/development/stop-container
+```
+
+`PORT_OFFSET` shifts every host binding; container-internal ports never move, so
+traffic inside the compose network is unaffected. `CONTAINER_SUFFIX` suffixes the
+container and network names and drives the Compose project name, so a second
+instance gets its own containers, network, and volumes.
+
+Pass the same `CONTAINER_SUFFIX` to **every** script in `scripts/development/`
+(including `start-opensearch-dashboard`), or you will attach to, tear down, or point
+a dashboard at the wrong stack. A suffixed instance starts with **empty databases**:
+two MongoDB processes cannot share a data directory, so isolation is required.
+
+`start-container` refuses to start when a resolved host port is held by another
+process, naming the port. Ports published by your own instance are excluded, so
+re-running against your own running stack stays idempotent.
+
+### Working in a git worktree inside the container
+
+The container mounts `../bili-core-worktrees` as a sibling of the repo, so several
+people or agents can build and test in parallel against one container:
+
+```bash
+git worktree add ../bili-core-worktrees/my-task -b feature/my-task
+./scripts/development/start-container -d
+docker exec -w /app/bili-core-worktrees/my-task bili-core pytest
+```
+
+Bring the stack up from the **main checkout**, not from inside a worktree: a
+worktree's `.git` is a file rather than a directory, so a stack started from one
+cannot resolve nested worktrees. The pointer rewrite needs **host git 2.48 or
+newer**; on older git the script warns and only the worktree feature degrades.
 
 ## Quick Start
 

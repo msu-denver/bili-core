@@ -41,22 +41,26 @@ DEFAULT_BASELINE_RESULTS_DIR: str = "bili/aegis/suites/baseline/results"
 
 
 def find_repo_root() -> Path:
-    """Walk up from this file until a ``.git`` directory is found.
+    """Walk up from this file until a ``.git`` entry is found.
+
+    Tests for existence rather than for a directory: in a git worktree
+    ``.git`` is a FILE holding a ``gitdir:`` pointer, so a directory test
+    is false there and the walk runs off the top of the filesystem.
 
     Returns:
         Absolute path to the repository root.
 
     Raises:
-        RuntimeError: If no ``.git`` directory is found before the filesystem
-            root (e.g. the project is not inside a git repository).
+        RuntimeError: If no ``.git`` entry is found before the filesystem
+            root (e.g. an installed copy, which carries no git metadata).
     """
     p = Path(__file__).resolve().parent
     while p != p.parent:
-        if (p / ".git").is_dir():
+        if (p / ".git").exists():
             return p
         p = p.parent
     raise RuntimeError(
-        "Could not locate repo root: no .git directory found above "
+        "Could not locate repo root: no .git entry found above "
         f"{Path(__file__).resolve()}"
     )
 

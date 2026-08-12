@@ -28,6 +28,7 @@ handling rather than making this a hard requirement for the base install.
 # defeating the pytestmark skip above).
 
 import asyncio
+import os
 import threading
 import time
 
@@ -74,7 +75,12 @@ class TestAskUserMcpIntegration:
             from mcp import ClientSession
             from mcp.client.streamable_http import streamablehttp_client
 
-            with EphemeralMcpServer([tool]) as handle:
+            _server = EphemeralMcpServer([tool])
+            with _server as handle:
+                # This test process is the caller, so it is what the
+                # server must be bound to; build_mcp_node does the same
+                # for the CLI it spawns.
+                _server.authorize_subprocess(os.getpid())
                 headers = {"Authorization": f"Bearer {handle.token}"}
                 async with streamablehttp_client(
                     handle.server_url, headers=headers
@@ -124,7 +130,12 @@ class TestAskUserMcpIntegration:
             from mcp import ClientSession
             from mcp.client.streamable_http import streamablehttp_client
 
-            with EphemeralMcpServer([tool]) as handle:
+            _server = EphemeralMcpServer([tool])
+            with _server as handle:
+                # This test process is the caller, so it is what the
+                # server must be bound to; build_mcp_node does the same
+                # for the CLI it spawns.
+                _server.authorize_subprocess(os.getpid())
                 headers = {"Authorization": f"Bearer {handle.token}"}
                 async with streamablehttp_client(
                     handle.server_url, headers=headers
@@ -166,7 +177,12 @@ class TestAskUserMcpIntegration:
             from mcp import ClientSession
             from mcp.client.streamable_http import streamablehttp_client
 
-            with EphemeralMcpServer([tool]) as handle:
+            _server = EphemeralMcpServer([tool])
+            with _server as handle:
+                # This test process is the caller, so it is what the
+                # server must be bound to; build_mcp_node does the same
+                # for the CLI it spawns.
+                _server.authorize_subprocess(os.getpid())
                 headers = {"Authorization": f"Bearer {handle.token}"}
                 async with streamablehttp_client(
                     handle.server_url, headers=headers
@@ -226,7 +242,12 @@ class TestAskUserMcpIntegration:
             from mcp import ClientSession
             from mcp.client.streamable_http import streamablehttp_client
 
-            with EphemeralMcpServer([tool]) as handle:
+            _server = EphemeralMcpServer([tool])
+            with _server as handle:
+                # This test process is the caller, so it is what the
+                # server must be bound to; build_mcp_node does the same
+                # for the CLI it spawns.
+                _server.authorize_subprocess(os.getpid())
                 headers = {"Authorization": f"Bearer {handle.token}"}
                 async with streamablehttp_client(
                     handle.server_url, headers=headers
@@ -281,7 +302,12 @@ class TestAskUserMcpIntegration:
                     from mcp import ClientSession
                     from mcp.client.streamable_http import streamablehttp_client
 
-                    with EphemeralMcpServer([tool]) as handle:
+                    _server = EphemeralMcpServer([tool])
+                    with _server as handle:
+                        # This test process is the caller, so it is what the
+                        # server must be bound to; build_mcp_node does the
+                        # same for the CLI it spawns.
+                        _server.authorize_subprocess(os.getpid())
                         headers = {"Authorization": f"Bearer {handle.token}"}
                         async with streamablehttp_client(
                             handle.server_url, headers=headers

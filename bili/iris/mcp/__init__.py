@@ -45,9 +45,13 @@ Public API — server side
 :func:`~bili.iris.mcp.cli_injectors.register_cli_mcp_injector`
     Register a custom injector for an additional CLI tool.
 
+:class:`~bili.iris.mcp.peer_identity.PeerAuthorization`
+    Decides whether an inbound connection belongs to the spawned subprocess
+    tree, which is what the Bearer token cannot establish on its own.
+
 Optional dependency
 -------------------
-The ``mcp`` Python SDK **and** ``uvicorn`` are required at runtime
+The ``mcp`` Python SDK, ``uvicorn``, and ``psutil`` are required at runtime
 (lazy-imported so the base bili-core install stays lean).  Install with::
 
     pip install bili-core[mcp]
@@ -79,9 +83,22 @@ Quick start — server (ephemeral, for MCP-capable CLI models)
     from bili.iris.mcp.cli_injectors import get_injector
 
     injector = get_injector("claude")  # or "codex", "gemini"
-    with EphemeralMcpServer(tools) as handle:
+    server = EphemeralMcpServer(tools)
+    with server as handle:
         result = injector.inject(command=["claude", "-p"], handle=handle)
-        subprocess.run(result.augmented_command + [prompt], env={**os.environ, **result.extra_env})
+        proc = subprocess.Popen(
+            result.augmented_command + [prompt],
+            env={**os.environ, **result.extra_env},
+        )
+        # Required. The server refuses every request, valid token included,
+        # until it knows which process it is serving; a bearer token cannot
+        # tell the spawned subprocess apart from any other process of the
+        # same user, all of which can read it.
+        server.authorize_subprocess(proc.pid)
+        proc.wait()
+
+:func:`~bili.iris.mcp.server.build_mcp_node` does this for callers on the
+``mcp`` tool-strategy path.
 """
 
 from .cli_injectors import (
@@ -100,6 +117,7 @@ from .loader import (
     initialize_mcp_servers_sync,
     register_mcp_tools,
 )
+from .peer_identity import PeerAuthorization, ProcessIdentity
 from .server import (
     EphemeralMcpHandle,
     EphemeralMcpServer,
@@ -117,6 +135,8 @@ __all__ = [
     # Server side
     "EphemeralMcpHandle",
     "EphemeralMcpServer",
+    "PeerAuthorization",
+    "ProcessIdentity",
     "build_mcp_node",
     "resolve_mcp_injector",
     # Injectors
