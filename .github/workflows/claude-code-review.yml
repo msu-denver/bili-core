@@ -264,6 +264,38 @@ jobs:
             exit 1
           fi
 
+          # THE REVIEW JOB CAN REPORT SUCCESS HAVING POSTED ONLY A PROGRESS
+          # PLACEHOLDER. When the review agent cannot run — an API rate limit is
+          # the usual cause, and the lab's repos share one account so concurrent
+          # CI across repos trips it — the action still writes "I'll analyze this
+          # and get back to you" and exits 0. The gate's REVIEW_RESULT check
+          # (which treats a non-success review as a transient throttle) never
+          # fires, the extractor finds no HIGH/CRITICAL in a comment that
+          # contains nothing, and the gate reports PASS on a pull request nobody
+          # reviewed. A gate that cannot tell "reviewed and clean" from "never
+          # reviewed" is worse than a red one, because it looks like evidence.
+          #
+          # The REMEDY DIFFERS from every other failure here, which is why it is
+          # named rather than left to the generic message: `gh run rerun --failed`
+          # re-runs only the extractor, which re-reads the same placeholder and
+          # fails identically. The whole workflow has to run again so the REVIEW
+          # job runs again.
+          #
+          # Detected by size, NOT by matching the placeholder text. Matching the
+          # text rejects any real review that quotes it — which is exactly what
+          # happened to the review of the PR that introduced this guard. The
+          # review writes its own heading so there is no fixed marker to require;
+          # what placeholders have in common is carrying no findings at all.
+          # Measured corpus: shortest real review 836 bytes, placeholders 190 and
+          # under.
+          bytes=$(wc -c < REVIEW.md | tr -d ' ')
+          if [ "$bytes" -lt 400 ]; then
+            echo "::error::The review bot's latest comment is ${bytes} bytes, which is a progress placeholder rather than a review. RE-RUN THE WHOLE WORKFLOW (gh run rerun <id>), not just the failed jobs: --failed re-runs this extractor against the same placeholder and fails again. Comment follows:" >&2
+            cat REVIEW.md >&2
+            exit 1
+          fi
+
+
       # SHA-pinned anthropics/claude-code-action v1.0.152. Cheap model (Haiku) —
       # this is a one-shot classification, not a review. The verdict comes back as
       # schema-validated STRUCTURED OUTPUT (the `--json-schema` claude_arg), exposed
