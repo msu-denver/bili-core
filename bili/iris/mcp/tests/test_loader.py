@@ -34,8 +34,8 @@ def _make_mcp_tool(name: str, description: str = "A test tool") -> Any:
     tool = MagicMock()
     tool.name = name
     tool.description = description
-    tool.inputSchema = MagicMock()
-    tool.inputSchema.model_dump = MagicMock(
+    tool.input_schema = MagicMock()
+    tool.input_schema.model_dump = MagicMock(
         return_value={"type": "object", "properties": {}}
     )
     return tool
@@ -55,7 +55,7 @@ def _make_mock_session(tool_names: List[str]) -> Any:
         content_block.type = "text"
         content_block.text = f"result_from_{name}"
         result.content = [content_block]
-        result.isError = False
+        result.is_error = False
         return result
 
     session.call_tool = _call_tool

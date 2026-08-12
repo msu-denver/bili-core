@@ -449,13 +449,13 @@ class _FakeUvicornServer:
 
 
 class TestEphemeralMcpServer:
-    """Tests for EphemeralMcpServer lifecycle (mocked uvicorn + FastMCP)."""
+    """Tests for EphemeralMcpServer lifecycle (mocked uvicorn + MCPServer)."""
 
     def _patch_deps(self, fake_port: int = 9876):
         """Return a context-manager-compatible patch dict."""
 
-        fake_fmcp = MagicMock()
-        fake_fmcp.streamable_http_app.return_value = MagicMock()
+        fake_mcp_server = MagicMock()
+        fake_mcp_server.streamable_http_app.return_value = MagicMock()
 
         class FakeUvicornConfig:
             def __init__(self, app, host, port, **kwargs):
@@ -468,7 +468,7 @@ class TestEphemeralMcpServer:
         )
 
         return {
-            "FastMCP": fake_fmcp,
+            "MCPServer": fake_mcp_server,
             "UvicornServer": fake_server,
             "UvicornConfig": FakeUvicornConfig,
         }
@@ -481,8 +481,8 @@ class TestEphemeralMcpServer:
         with (
             patch("bili.iris.mcp.server._find_free_port", return_value=port),
             patch(
-                "bili.iris.mcp.server.FastMCP", return_value=patches["FastMCP"]
-            ) as mock_fastmcp_cls,
+                "bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]
+            ) as mock_mcp_server_cls,
             patch("bili.iris.mcp.server.uvicorn") as mock_uv,
         ):
             mock_uv.Config = patches["UvicornConfig"]
@@ -495,22 +495,22 @@ class TestEphemeralMcpServer:
                 assert len(handle.token) > 20
                 assert "bili_tools_" in handle.server_name
 
-    def test_tool_registered_on_fastmcp(self):
+    def test_tool_registered_on_mcp_server(self):
         tool = _make_plain_tool(name="search")
         port = _find_free_port()
         patches = self._patch_deps(port)
 
         with (
             patch("bili.iris.mcp.server._find_free_port", return_value=port),
-            patch("bili.iris.mcp.server.FastMCP", return_value=patches["FastMCP"]),
+            patch("bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]),
             patch("bili.iris.mcp.server.uvicorn") as mock_uv,
         ):
             mock_uv.Config = patches["UvicornConfig"]
             mock_uv.Server = lambda cfg: patches["UvicornServer"]
 
             with EphemeralMcpServer([tool]) as _:
-                patches["FastMCP"].add_tool.assert_called_once()
-                call_args = patches["FastMCP"].add_tool.call_args
+                patches["MCPServer"].add_tool.assert_called_once()
+                call_args = patches["MCPServer"].add_tool.call_args
                 assert call_args.kwargs.get("name") == "search" or (
                     len(call_args.args) > 0 and call_args.kwargs.get("name") == "search"
                 )
@@ -522,7 +522,7 @@ class TestEphemeralMcpServer:
 
         with (
             patch("bili.iris.mcp.server._find_free_port", return_value=port),
-            patch("bili.iris.mcp.server.FastMCP", return_value=patches["FastMCP"]),
+            patch("bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]),
             patch("bili.iris.mcp.server.uvicorn") as mock_uv,
         ):
             mock_uv.Config = patches["UvicornConfig"]
@@ -542,7 +542,7 @@ class TestEphemeralMcpServer:
 
         with (
             patch("bili.iris.mcp.server._find_free_port", return_value=port),
-            patch("bili.iris.mcp.server.FastMCP", return_value=patches["FastMCP"]),
+            patch("bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]),
             patch("bili.iris.mcp.server.uvicorn") as mock_uv,
         ):
             mock_uv.Config = patches["UvicornConfig"]
@@ -555,20 +555,24 @@ class TestEphemeralMcpServer:
 
             assert fake_server.should_exit is True
 
-    def test_fastmcp_bound_to_localhost(self):
-        """FastMCP must be initialised with host='127.0.0.1'."""
+    def test_streamable_app_bound_to_localhost_with_dns_rebinding_protection(self):
+        """The streamable-HTTP app must be built for loopback with DNS-rebinding
+        protection explicitly enabled.
+
+        The mcp SDK leaves that protection OFF unless a
+        ``TransportSecuritySettings`` is supplied to ``streamable_http_app``, so
+        binding to loopback is not on its own enough to reject a request whose
+        ``Host`` header names another origin.  This pins the explicit settings:
+        drop them and the server silently loses the layer that blocks a
+        DNS-rebinding attack.
+        """
         tool = _make_plain_tool()
         port = _find_free_port()
         patches = self._patch_deps(port)
-        captured_kwargs = {}
-
-        def _capture_fastmcp(*args, **kwargs):
-            captured_kwargs.update(kwargs)
-            return patches["FastMCP"]
 
         with (
             patch("bili.iris.mcp.server._find_free_port", return_value=port),
-            patch("bili.iris.mcp.server.FastMCP", side_effect=_capture_fastmcp),
+            patch("bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]),
             patch("bili.iris.mcp.server.uvicorn") as mock_uv,
         ):
             mock_uv.Config = patches["UvicornConfig"]
@@ -577,7 +581,15 @@ class TestEphemeralMcpServer:
             with EphemeralMcpServer([tool]):
                 pass
 
-        assert captured_kwargs.get("host") == "127.0.0.1"
+        app_call = patches["MCPServer"].streamable_http_app.call_args
+        assert app_call.kwargs.get("host") == "127.0.0.1"
+        security = app_call.kwargs.get("transport_security")
+        assert security is not None, (
+            "streamable_http_app was called without transport_security; "
+            "DNS-rebinding protection is off by default in the SDK"
+        )
+        assert security.enable_dns_rebinding_protection is True
+        assert security.allowed_hosts == ["127.0.0.1:*", "localhost:*", "[::1]:*"]
 
     def test_import_error_when_mcp_missing(self):
         # _MCP_AVAILABLE is set at module load; simulate unavailability by patching the flag.
@@ -594,7 +606,7 @@ class TestEphemeralMcpServer:
 
         with (
             patch("bili.iris.mcp.server._find_free_port", return_value=port),
-            patch("bili.iris.mcp.server.FastMCP", return_value=patches["FastMCP"]),
+            patch("bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]),
             patch("bili.iris.mcp.server.uvicorn") as mock_uv,
             patch(
                 "bili.iris.mcp.server._wait_for_server_ready",
@@ -623,7 +635,9 @@ class TestEphemeralMcpServer:
         for port, patches in [(port1, patches1), (port2, patches2)]:
             with (
                 patch("bili.iris.mcp.server._find_free_port", return_value=port),
-                patch("bili.iris.mcp.server.FastMCP", return_value=patches["FastMCP"]),
+                patch(
+                    "bili.iris.mcp.server.MCPServer", return_value=patches["MCPServer"]
+                ),
                 patch("bili.iris.mcp.server.uvicorn") as mock_uv,
             ):
                 mock_uv.Config = patches["UvicornConfig"]
