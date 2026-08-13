@@ -308,7 +308,7 @@ _EXTRAS["all"] = sorted(
 
 setup(
     name="bili-core",
-    version="5.6.0",
+    version="5.7.0",
     # Detect runtime packages while excluding every test subpackage. Without
     # the exclude, find_packages() bundles 200+ .py test modules (under
     # bili/<component>/tests/ and bili/<component>/<subcomponent>/tests/)

@@ -1001,6 +1001,9 @@ result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
 | `run_streaming(input_data, thread_id)` | generator of `(node_name, state_update)` | Stream node outputs; yields a `__human_interrupt__` / `__ask_user_pending__` sentinel if the run pauses (see [Human-in-the-Loop](#human-in-the-loop)) |
 | `resume_streaming(human_input, thread_id)` | generator | Resume after a `__human_interrupt__` sentinel |
 | `resume_with_value(value, thread_id)` | generator | Resume after a `__ask_user_pending__` sentinel |
+| `run_streaming_steerable(input_data, thread_id)` | generator of `(node_name, state_update)` | Stream node outputs, draining operator directives at each superstep boundary (requires `enable_steering=True`; see [Operator Steering](#operator-steering)) |
+| `submit_steer(message)` | `None` | Enqueue an operator directive for a steerable run to pick up (thread-safe; call from a supervising thread) |
+| `steer(message, thread_id)` | generator | Inject one operator directive into a paused run and resume |
 
 ### Human-in-the-Loop
 
@@ -1145,6 +1148,55 @@ separately reminds (`W15`) that the CLI/MCP path requires a real
 `ask_user` + CLI/MCP agent is declared, since whether a responder is
 actually registered is host runtime state a static config validator cannot
 see.
+
+### Operator Steering
+
+Human-in-the-loop and `ask_user` are the **agent -> user** direction: an agent
+pauses to ask, and a human answers. **Operator steering is the opposite
+direction, user -> run**: a human supervising a long-running workflow injects a
+mid-run redirect ("emphasize X", "stop pursuing that branch", "redirect toward
+Y") *while it runs*, and the next agent picks it up at the next natural boundary
+without the run being killed and restarted.
+
+Steering is opt-in per executor and additive: with `enable_steering=False` (the
+default) compilation and every existing run/stream path are unchanged. Enabling
+it makes the graph pause after every agent node (`interrupt_after`) and
+guarantees a checkpointer is attached, so a directive can be written into state
+via `update_state` and observed on resume. A directive is delivered as a
+`HumanMessage`; every agent rebuilds its prompt from state at the start of its
+step (reading `messages` and its pending-message context), so a directive is
+picked up with no agent, compiler, or schema change.
+
+```python
+executor = MASExecutor(config, enable_steering=True)
+executor.initialize()
+
+# A supervising thread injects a directive while the run is in flight.
+# It is drained at the next superstep boundary and observed by the next agent.
+for node_name, state_update in executor.run_streaming_steerable(
+    {"messages": [HumanMessage(content="Draft the report.")]}, thread_id="run-1"
+):
+    if some_condition(node_name, state_update):
+        executor.submit_steer("Shift the emphasis toward the risk analysis.")
+```
+
+`submit_steer(message)` is thread-safe and intended to be called from a
+different thread than the one driving `run_streaming_steerable`. The directive
+lands at the pause after the currently executing agent completes, so it takes
+effect at the next natural boundary, not mid-step.
+
+For a caller that drives the run itself and wants to inject a single directive
+and continue, `steer(message, thread_id)` is the explicit counterpart: it
+applies one directive and resumes a paused run, generalising `resume_streaming`
+(which answers an agent's question) to the operator -> run direction.
+
+| | HITL / `ask_user` | Operator steering |
+|---|---|---|
+| **Direction** | agent -> user (agent asks, human answers) | user -> run (human redirects) |
+| **Who initiates** | The agent, mid-turn | The operator, at any time |
+| **When observed** | Immediately on resume | At the next superstep boundary |
+| **Config** | `human_in_loop` / `tools: ["ask_user"]` | `enable_steering=True` |
+| **Inject with** | `resume_streaming` / `resume_with_value` | `submit_steer` / `steer` |
 
 ### MASExecutionResult
 
