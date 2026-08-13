@@ -132,7 +132,7 @@ def _ask_user_mcp_impl(
 ) -> str:
     """CLI/MCP pause: block by calling *responder* directly.
 
-    There is no LangGraph node to interrupt here -- the FastMCP tool handler
+    There is no LangGraph node to interrupt here -- the MCP tool handler
     runs as a plain function on the ephemeral server's own event loop
     (:mod:`bili.iris.mcp.server`), invoked by a spawned CLI subprocess that
     self-orchestrates outside any graph bili-core drives. The block IS the

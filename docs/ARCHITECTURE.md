@@ -339,7 +339,7 @@ bili-core process
 │  IRIS agent node                                         │
 │    tools: [tool_a, tool_b]  ──────────────────────────┐ │
 │                                                        │ │
-│  EphemeralMcpServer (FastMCP + auth middleware)       │ │
+│  EphemeralMcpServer (MCPServer + auth middleware)     │ │
 │    ─ Streamable HTTP on 127.0.0.1:<random-port>  ◄────┘ │
 │    ─ per-call Bearer-token auth (256-bit random)        │
 │    ─ caller must be in the spawned process tree         │
@@ -371,7 +371,7 @@ If no injector is registered for the CLI binary, bili-core falls back to the too
 | `codex` (OpenAI Codex) | `-c mcp_servers.<name>.bearer_token_env_var=...` pointing at a unique per-call env var; the value never appears in `argv` |
 | `gemini` (Gemini CLI) | Temp `.gemini/settings.json` (`0600`) written in a temp dir; subprocess `cwd` set to that dir |
 
-**Install:** `pip install bili-core[mcp]` (includes `mcp>=1.0`, `uvicorn>=0.30`, and `psutil>=5.9`)
+**Install:** `pip install bili-core[mcp]` (includes `mcp>=2.0,<3`, `uvicorn>=0.31.1`, and `psutil>=5.9`)
 
 **Model / reasoning-effort control:** `CliLLM.model` and `CliLLM.reasoning_effort`
 (set via `AgentSpec.cli_subprocess_model` / `cli_subprocess_reasoning_effort` in

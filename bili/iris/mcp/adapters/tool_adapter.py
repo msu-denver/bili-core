@@ -232,7 +232,7 @@ def mcp_tool_to_langchain(
 
     :param server_name: The MCP server's name (used for namespacing).
     :param mcp_tool: An ``mcp.types.Tool`` instance (name, description,
-        inputSchema).
+        input_schema).
     :param call_tool_fn: An async callable ``(name, arguments) -> str`` that
         invokes the tool on the server.  Typically a closure over the live
         :class:`~mcp.ClientSession`.
@@ -256,9 +256,9 @@ def mcp_tool_to_langchain(
         mcp_tool.description or f"MCP tool '{tool_name}' from server '{server_name}'"
     )
     input_schema: Dict[str, Any] = (
-        mcp_tool.inputSchema.model_dump()
-        if hasattr(mcp_tool.inputSchema, "model_dump")
-        else dict(mcp_tool.inputSchema)
+        mcp_tool.input_schema.model_dump()
+        if hasattr(mcp_tool.input_schema, "model_dump")
+        else dict(mcp_tool.input_schema)
     )
 
     args_schema = _build_args_schema(namespaced_name, input_schema)
@@ -373,8 +373,9 @@ def extract_text_from_result(result: Any) -> str:
     if result is None:
         return ""
 
-    # Handle isError flag
-    if getattr(result, "isError", False):
+    # Handle the error flag (``is_error`` on the SDK result object; the wire
+    # field is ``isError``).
+    if getattr(result, "is_error", False):
         # Still extract text — the error message is usually in the text content
         LOGGER.warning("MCP tool returned an error result")
 

@@ -17,7 +17,7 @@ Architecture overview
     │  IRIS agent node                                     │
     │    tools: [tool_a, tool_b, ...]  ───────────────┐   │
     │                                                  │   │
-    │  EphemeralMcpServer (FastMCP + auth middleware)  │   │
+    │  EphemeralMcpServer (MCPServer + auth middleware)│   │
     │    ─ registers each LangChain tool as MCP tool ◄─┘   │
     │    ─ listens on 127.0.0.1:<port> (Streamable HTTP)    │
     │    ─ enforces per-call Bearer-token auth              │
@@ -34,15 +34,16 @@ Security model
 Each :class:`EphemeralMcpServer` instance generates a cryptographically-random
 per-call Bearer token (via :func:`secrets.token_urlsafe`).  Every HTTP request
 to the server is validated against this token by :class:`_TokenAuthMiddleware`
-before being forwarded to the FastMCP application.  Requests without the
+before being forwarded to the MCP server application.  Requests without the
 correct ``Authorization: Bearer <token>`` header receive a ``401 Unauthorized``
 response and the connection is dropped.
 
-The server binds to ``127.0.0.1`` (IPv4 loopback) only.  FastMCP
-automatically enables DNS-rebinding protection for localhost hosts, blocking
-requests with non-localhost ``Host:`` headers.  Together, these controls mean
-the server is not reachable from any external host or via a DNS-rebinding
-attack.
+The server binds to ``127.0.0.1`` (IPv4 loopback) only.  The
+:class:`~mcp.server.MCPServer` streamable-HTTP app is built with an explicit
+:class:`~mcp.server.transport_security.TransportSecuritySettings` that enables
+DNS-rebinding protection (off by default unless supplied), blocking requests
+with non-localhost ``Host:`` headers.  Together, these controls mean the
+server is not reachable from any external host or via a DNS-rebinding attack.
 
 Two checks, because the token alone cannot say who is calling
 -------------------------------------------------------------
@@ -135,18 +136,22 @@ IN_MCP_TOOL_CALL: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
 # Optional heavy dependencies — deferred so importing this module does not
 # crash when the [mcp] extra is not installed.  The names are assigned at
 # module level so that unit tests can patch them via
-# ``patch("bili.iris.mcp.server.FastMCP", ...)`` and
+# ``patch("bili.iris.mcp.server.MCPServer", ...)`` and
 # ``patch("bili.iris.mcp.server.uvicorn", ...)``.
 # ---------------------------------------------------------------------------
 
 try:
     import uvicorn  # type: ignore[import-untyped]
-    from mcp.server.fastmcp import FastMCP  # type: ignore[import-untyped]
+    from mcp.server import MCPServer  # type: ignore[import-untyped]
+    from mcp.server.transport_security import (  # type: ignore[import-untyped]
+        TransportSecuritySettings,
+    )
 
     _MCP_AVAILABLE = True
 except ImportError:  # pragma: no cover — mcp/uvicorn not installed; gate is [mcp] extra
     uvicorn = None  # type: ignore[assignment]
-    FastMCP = None  # type: ignore[assignment,misc]
+    MCPServer = None  # type: ignore[assignment,misc]
+    TransportSecuritySettings = None  # type: ignore[assignment,misc]
     _MCP_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
@@ -198,7 +203,7 @@ class _TokenAuthMiddleware:  # pylint: disable=too-few-public-methods
     through unchanged so uvicorn's startup/shutdown lifecycle works correctly.
     They carry no ``client`` and are not tool calls.
 
-    :param app: The inner ASGI application (the FastMCP Starlette app).
+    :param app: The inner ASGI application (the MCPServer Starlette app).
     :param token: The per-call secret Bearer token.
     :param authorization: The shared
         :class:`~bili.iris.mcp.peer_identity.PeerAuthorization`, which denies
@@ -349,17 +354,17 @@ def _wait_for_server_ready(
 
 
 # ---------------------------------------------------------------------------
-# LangChain tool → FastMCP function bridge
+# LangChain tool → MCPServer function bridge
 # ---------------------------------------------------------------------------
 
 
 def _build_mcp_fn(tool: Any) -> Callable:
-    """Build a FastMCP-compatible function from a LangChain :class:`BaseTool`.
+    """Build an :class:`~mcp.server.MCPServer`-compatible function from a tool.
 
-    FastMCP infers the MCP tool's JSON schema from the function's type
-    annotations via :func:`inspect.signature`.  This function dynamically
-    constructs a wrapper with the right signature so that FastMCP generates
-    an accurate input schema for the tool.
+    :class:`~mcp.server.MCPServer` infers the MCP tool's JSON schema from the
+    function's type annotations via :func:`inspect.signature`.  This function
+    dynamically constructs a wrapper with the right signature so that the
+    server generates an accurate input schema for the tool.
 
     Two cases:
 
@@ -372,7 +377,7 @@ def _build_mcp_fn(tool: Any) -> Callable:
        ``tool.invoke(tool_input)``.
 
     In both cases the function's ``__name__`` is set to ``tool.name`` so
-    FastMCP registers it under the correct tool name.
+    the server registers it under the correct tool name.
 
     Sets :data:`IN_MCP_TOOL_CALL` to ``True`` for the duration of the
     ``tool.invoke(...)`` call so a tool implementation that dispatches on
@@ -381,7 +386,7 @@ def _build_mcp_fn(tool: Any) -> Callable:
     ``ToolNode`` invocation.
 
     :param tool: A LangChain :class:`~langchain_core.tools.BaseTool`.
-    :returns: A callable suitable for ``FastMCP.add_tool(fn, ...)``.
+    :returns: A callable suitable for ``MCPServer.add_tool(fn, ...)``.
     """
     args_schema = getattr(tool, "args_schema", None)
     model_fields: Optional[Dict] = (
@@ -452,7 +457,7 @@ class EphemeralMcpHandle:
         (``http://127.0.0.1:<port>/mcp`` for Streamable HTTP transport).
         Clients must include ``Authorization: Bearer <token>`` on every request.
     :param token: The cryptographically-random per-call Bearer token.
-    :param server_name: The FastMCP server name used for this call.
+    :param server_name: The MCP server name used for this call.
     """
 
     server_url: str
@@ -473,10 +478,10 @@ class EphemeralMcpServer:  # pylint: disable=too-many-instance-attributes
     1. Generates a cryptographically-random per-call Bearer token
        (:func:`secrets.token_urlsafe`).
     2. Allocates a free localhost port (:func:`_find_free_port`).
-    3. Builds a FastMCP Streamable HTTP application and registers each tool via
-       :func:`_build_mcp_fn`.  (Streamable HTTP — ``POST /mcp`` — is the
-       current MCP transport standard; SSE is deprecated as of MCP spec
-       2025-03-26.)
+    3. Builds an :class:`~mcp.server.MCPServer` Streamable HTTP application and
+       registers each tool via :func:`_build_mcp_fn`.  (Streamable HTTP —
+       ``POST /mcp`` — is the current MCP transport standard; SSE is deprecated
+       as of MCP spec 2025-03-26.)
     4. Wraps the app in :class:`_TokenAuthMiddleware` to enforce per-call auth.
     5. Starts uvicorn in a background daemon thread (``asyncio.run`` in the
        thread creates a dedicated event loop — no interference with the caller's
@@ -511,7 +516,7 @@ class EphemeralMcpServer:  # pylint: disable=too-many-instance-attributes
     write, so the subprocess does not exist yet at that point.
 
     :param tools: LangChain tools to expose as MCP tools.
-    :param server_name: Base name for the FastMCP server.  A short random
+    :param server_name: Base name for the MCP server.  A short random
         suffix is appended per call to avoid collisions (e.g.
         ``bili_tools_3f7a``).  Defaults to ``"bili_tools"``.
     :param ready_timeout: Seconds to wait for the server to accept connections.
@@ -576,22 +581,36 @@ class EphemeralMcpServer:  # pylint: disable=too-many-instance-attributes
             self._port,
         )
 
-        # Build the FastMCP app and register tools.
-        fmcp = FastMCP(
-            self._call_name,
-            host=self._host,
-            port=self._port,
-        )
+        # Build the MCP server app and register tools.
+        mcp_server = MCPServer(self._call_name)
         for tool in self._tools:
             mcp_fn = _build_mcp_fn(tool)
-            fmcp.add_tool(mcp_fn, name=tool.name, description=tool.description or "")
+            mcp_server.add_tool(
+                mcp_fn, name=tool.name, description=tool.description or ""
+            )
             LOGGER.debug("EphemeralMcpServer: registered tool '%s'", tool.name)
 
         # Wrap the Streamable HTTP Starlette app with auth middleware.
         # Streamable HTTP (POST /mcp) is the current MCP transport standard;
         # it is supported by Claude Code ("type":"http"), Gemini CLI ("httpUrl"),
         # and Codex ("url").  SSE (/sse) is deprecated in the MCP 2025 spec.
-        mcp_app = fmcp.streamable_http_app()
+        #
+        # transport_security is passed explicitly because the app leaves
+        # DNS-rebinding protection OFF unless it is supplied, so binding to
+        # loopback alone would not reject a request whose Host header names
+        # another origin.  host is what the app validates those headers against.
+        mcp_app = mcp_server.streamable_http_app(
+            host=self._host,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+                allowed_origins=[
+                    "http://127.0.0.1:*",
+                    "http://localhost:*",
+                    "http://[::1]:*",
+                ],
+            ),
+        )
         auth_app = _TokenAuthMiddleware(
             mcp_app,
             self._token,
