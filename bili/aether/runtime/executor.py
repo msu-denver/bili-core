@@ -68,6 +68,7 @@ Usage::
 import json
 import logging
 import os
+import queue
 import time
 import uuid
 from datetime import datetime, timezone
@@ -101,6 +102,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         conversation_id: Optional[str] = None,
         custom_node_registry: Optional[Dict[str, Any]] = None,
         runtime_context: Optional[RuntimeContext] = None,
+        enable_steering: bool = False,
     ) -> None:
         """Initialize the executor.
 
@@ -123,6 +125,16 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 Checked before the global ``GRAPH_NODE_REGISTRY``.
             runtime_context: Optional :class:`RuntimeContext` holding
                 named services injected into pipeline node builders.
+            enable_steering: When ``True``, an operator may inject a
+                directive into a running graph that the next node observes
+                at the next superstep boundary (see :meth:`submit_steer`,
+                :meth:`steer`, :meth:`run_streaming_steerable`). This makes
+                :meth:`initialize` pause after every agent node
+                (``interrupt_after``) and guarantees a checkpointer is
+                attached, so directives can be applied via ``update_state``
+                and picked up on resume. Defaults to ``False``: when unset,
+                compilation and every existing run/stream path are
+                unchanged (no interrupt points, no directive queue).
         """
         self._config = config
         self._log_dir = log_dir or os.getcwd()
@@ -131,6 +143,14 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         self._conversation_id = conversation_id
         self._custom_node_registry = custom_node_registry
         self._runtime_context = runtime_context
+        self._enable_steering = enable_steering
+        # Thread-safe queue of operator directives drained at each superstep
+        # boundary by run_streaming_steerable(). Only allocated when steering
+        # is enabled, so the feature is inert (and allocates nothing) by
+        # default.
+        self._steer_queue: Optional["queue.Queue[str]"] = (
+            queue.Queue() if enable_steering else None
+        )
         self._compiled_mas = None
         self._compiled_graph = None
         # Populated by initialize(); used by run/stream methods to decide
@@ -220,10 +240,34 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 "(checkpoint_enabled=False)"
             )
 
+        # Steering override: injecting a directive mid-run uses the same
+        # update_state + resume seam as HITL, so it likewise requires a
+        # checkpointer even when checkpoint_enabled=False.
+        if self._enable_steering and checkpointer is None:
+            from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+                MemorySaver,
+            )
+
+            checkpointer = MemorySaver()
+            LOGGER.info(
+                "Steering enabled: attaching MemorySaver for directive "
+                "injection and resume (checkpoint_enabled=False)"
+            )
+
+        # When steering is enabled, pause after every agent node so a
+        # steerable run has a guaranteed boundary at which to drain the
+        # directive queue and apply pending directives before resuming.
+        # Empty (the default) means no interrupt points are added, so
+        # compilation is byte-for-byte identical to the non-steering path.
+        interrupt_after_nodes: List[str] = []
+        if self._enable_steering:
+            interrupt_after_nodes = list(self._compiled_mas.agent_nodes)
+
         self._checkpointer = checkpointer
         self._compiled_graph = self._compiled_mas.compile_graph(
             checkpointer=checkpointer,
             interrupt_before=human_nodes,
+            interrupt_after=interrupt_after_nodes or None,
         )
 
         LOGGER.info(
@@ -775,6 +819,223 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             raise
         finally:
             LOGGER.info("HITL resume complete for thread '%s'", thread_id)
+
+    # ------------------------------------------------------------------
+    # Operator steering (user-initiated mid-run redirect)
+    # ------------------------------------------------------------------
+    #
+    # HITL and ``ask_user`` are the agent->user direction: an agent pauses to
+    # ask, a human answers.  Steering is the opposite direction: a human
+    # supervising a long-running run injects a mid-run redirect ("emphasize
+    # X", "stop pursuing that branch") that the next agent observes at the
+    # next natural boundary, without killing the run and starting over.
+    #
+    # It reuses the existing update_state + resume seam (the same one HITL's
+    # resume_streaming uses): a directive is written into ``messages`` via
+    # ``update_state``, and the run resumes with ``.stream(None)``.  Every
+    # agent node rebuilds its prompt from state at the start of its step
+    # (reading ``messages`` and its pending-message context), so an injected
+    # directive is picked up with no agent, compiler, or schema change.
+
+    def submit_steer(self, message: str) -> None:
+        """Enqueue an operator directive for a steerable run to pick up.
+
+        Thread-safe: intended to be called from a different thread than the
+        one driving :meth:`run_streaming_steerable`, so a supervising
+        operator can inject a directive while the run is in flight. The
+        directive is drained and applied at the next superstep boundary (the
+        pause after the currently executing agent node completes), then
+        observed by the next node to start.
+
+        Args:
+            message: The operator's steering directive (free text).
+
+        Raises:
+            RuntimeError: If the executor was not constructed with
+                ``enable_steering=True``.
+        """
+        if self._steer_queue is None:
+            raise RuntimeError(
+                "Steering is not enabled. Construct "
+                "MASExecutor(..., enable_steering=True) to submit directives."
+            )
+        self._steer_queue.put(message)
+
+    def _drain_steer_queue(self) -> List[str]:
+        """Remove and return every currently-queued operator directive.
+
+        Non-blocking: returns only what is already queued at call time (an
+        empty list when nothing is pending), so a steerable run never waits
+        on the queue.
+        """
+        directives: List[str] = []
+        if self._steer_queue is None:
+            return directives
+        while True:
+            try:
+                directives.append(self._steer_queue.get_nowait())
+            except queue.Empty:
+                break
+        return directives
+
+    def _apply_steer_directives(
+        self, invoke_config: Dict[str, Any], messages: List[str]
+    ) -> None:
+        """Write operator directives into graph state as ``HumanMessage`` s.
+
+        This is the single point at which a steer directive lands in state,
+        shared by :meth:`steer` and :meth:`run_streaming_steerable` so the
+        two cannot drift on how a directive is applied. The next agent node
+        reads ``messages`` at the start of its step and observes them.
+        """
+        from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
+            HumanMessage,
+        )
+
+        self._compiled_graph.update_state(
+            invoke_config,
+            {"messages": [HumanMessage(content=m) for m in messages]},
+        )
+
+    def steer(
+        self,
+        message: str,
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Inject one operator directive into a paused run and resume it.
+
+        The explicit counterpart to :meth:`run_streaming_steerable`'s queue:
+        use this when the caller is itself driving the run (e.g. it broke out
+        of a streaming loop at a boundary) and wants to inject a single
+        directive and continue. Generalises :meth:`resume_streaming` (which
+        answers an agent's question) to the operator->run direction: the
+        directive is applied via ``update_state`` and execution resumes from
+        the checkpoint, so the next node observes it.
+
+        Requires the run to be paused at a boundary (steering attaches an
+        ``interrupt_after`` on every agent node, so a steerable run pauses
+        after each one) and a checkpointer to be attached (guaranteed when
+        ``enable_steering=True``).
+
+        Args:
+            message: The operator's steering directive (free text).
+            thread_id: Thread ID of the run to steer.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the directive is applied, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before steer()."
+            )
+
+        invoke_config: Dict[str, Any] = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._config.max_iterations,
+        }
+        self._apply_steer_directives(invoke_config, [message])
+
+        LOGGER.info("Applying operator steer directive to thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                None,
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("steer failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("Steer resume complete for thread '%s'", thread_id)
+
+    def run_streaming_steerable(
+        self,
+        input_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Stream node outputs, draining operator directives at each boundary.
+
+        A steer-aware variant of :meth:`run_streaming`. Because steering
+        compiles the graph to pause after every agent node
+        (``interrupt_after``), this drives the graph one superstep at a time:
+        it yields each node's ``(node_name, state_update)`` as it completes,
+        and at each pause it drains the directive queue (see
+        :meth:`submit_steer`) and applies any pending directives via
+        ``update_state`` before resuming. A directive submitted while an
+        agent is executing is therefore observed by the next agent to start.
+
+        Directives are drained non-blocking, so an empty queue makes this a
+        plain streamed run: it yields the same nodes in the same order and
+        produces the same final state, just paused and resumed at each
+        boundary. That equivalence is what makes steering safe to leave
+        enabled: an unused steer channel changes nothing.
+
+        Args:
+            input_data: Initial state overrides (may include a ``"messages"``
+                key with a list of LangChain messages).
+            thread_id: Thread ID for checkpointed execution.
+
+        Yields:
+            ``(node_name, state_update)`` tuples in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called, or the
+                executor was not constructed with ``enable_steering=True``.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. "
+                "Call initialize() before run_streaming_steerable()."
+            )
+        if not self._enable_steering:
+            raise RuntimeError(
+                "Steering is not enabled. Construct "
+                "MASExecutor(..., enable_steering=True) for a steerable run."
+            )
+
+        execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        LOGGER.info("Starting steerable MAS streaming execution: %s", execution_id)
+        initial_state = self._build_initial_state(input_data)
+
+        # Steering guarantees a checkpointer (see initialize()), so a
+        # thread_id is always constructed for the run.
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
+        effective_thread_id = self._construct_thread_id(thread_id, execution_id)
+        invoke_config["configurable"] = {"thread_id": effective_thread_id}
+
+        stream_input: Any = initial_state
+        try:
+            while True:
+                for chunk in self._compiled_graph.stream(
+                    stream_input,
+                    config=invoke_config,
+                    stream_mode="updates",
+                ):
+                    for node_name, state_update in chunk.items():
+                        yield (node_name, state_update)
+
+                # The stream exhausted: the graph either completed or paused
+                # at an interrupt_after boundary. If nothing is left to run,
+                # the run is done; otherwise drain any pending directives,
+                # apply them, and resume.
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                if not graph_state.next:
+                    break
+                directives = self._drain_steer_queue()
+                if directives:
+                    self._apply_steer_directives(invoke_config, directives)
+                stream_input = None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("run_streaming_steerable failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("Steerable MAS streaming complete: %s", execution_id)
 
     async def astream(
         self,
