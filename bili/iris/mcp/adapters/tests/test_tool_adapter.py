@@ -38,8 +38,8 @@ def _make_mcp_tool(
     tool = MagicMock()
     tool.name = name
     tool.description = description
-    tool.inputSchema = MagicMock()
-    tool.inputSchema.model_dump = MagicMock(
+    tool.input_schema = MagicMock()
+    tool.input_schema.model_dump = MagicMock(
         return_value=schema or {"type": "object", "properties": {}}
     )
     return tool
@@ -57,7 +57,7 @@ def _make_call_result(text_contents: list, is_error: bool = False) -> Any:
     """Create a mock mcp.types.CallToolResult."""
     result = MagicMock()
     result.content = [_make_text_content(t) for t in text_contents]
-    result.isError = is_error
+    result.is_error = is_error
     return result
 
 
@@ -246,7 +246,7 @@ class TestExtractTextFromResult:
     def test_non_text_block_ignored(self):
         """Non-text content blocks (images etc.) are skipped."""
         result = MagicMock()
-        result.isError = False
+        result.is_error = False
         image_block = MagicMock()
         image_block.type = "image"
         text_block = _make_text_content("kept text")
@@ -254,7 +254,7 @@ class TestExtractTextFromResult:
         assert extract_text_from_result(result) == "kept text"
 
     def test_error_result_still_extracts_text(self):
-        """isError=True results still extract their text content."""
+        """is_error=True results still extract their text content."""
         result = _make_call_result(["error: something went wrong"], is_error=True)
         assert "error: something went wrong" in extract_text_from_result(result)
 
@@ -504,8 +504,8 @@ class TestMcpToolsToLangchain:
         bad_tool = MagicMock()
         bad_tool.name = "bad"
         bad_tool.description = "oops"
-        bad_tool.inputSchema = MagicMock()
-        bad_tool.inputSchema.model_dump = MagicMock(
+        bad_tool.input_schema = MagicMock()
+        bad_tool.input_schema.model_dump = MagicMock(
             side_effect=RuntimeError("schema error")
         )
 

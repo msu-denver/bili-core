@@ -9,9 +9,14 @@ bili-core[mcp]" at people who did, and every test that skips on
 ``_MCP_AVAILABLE`` skips, so a whole subsystem stops being exercised with
 nothing in the run going red.
 
-That is not hypothetical.  ``mcp`` 2.0 removed ``mcp.server.fastmcp``, the
-module the ephemeral server is built from, and the extra's floor-only pin
-(``mcp>=1.0``) resolved straight to it.
+That is not hypothetical.  The ephemeral server is built from
+``mcp.server.MCPServer``, which exists only in ``mcp`` 2.x; the 1.x
+``mcp.server.fastmcp`` it was built from before was removed in the same 2.0
+release, so the two APIs never coexist.  The extra pins ``mcp>=2.0,<3`` for
+exactly this reason: a 1.x SDK fails the import guard, and the pin turns that
+into a resolver error the operator sees instead of a subsystem that quietly
+switches itself off.  The next major could move the API again, and this test
+is what would then catch ``_MCP_AVAILABLE`` disagreeing with the environment.
 
 The assertion below is two-sided and has no skip: whichever way the
 environment is set up, something real is being claimed.

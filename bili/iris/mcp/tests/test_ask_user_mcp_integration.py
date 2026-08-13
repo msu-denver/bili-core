@@ -3,7 +3,7 @@
 Unlike every other test in bili/iris/mcp/tests/ (which mock the server and
 transport entirely -- see test_server.py's own module docstring: "All tests
 run without a real MCP server or CLI binary. Network I/O is mocked."), this
-test spins up a REAL EphemeralMcpServer (real uvicorn thread, real FastMCP
+test spins up a REAL EphemeralMcpServer (real uvicorn thread, real MCPServer
 tool registration) and drives it with a REAL MCP client
 (streamable-HTTP transport, matching what EphemeralMcpServer actually
 serves) making a genuine HTTP tool call.
@@ -28,6 +28,7 @@ handling rather than making this a hard requirement for the base install.
 # defeating the pytestmark skip above).
 
 import asyncio
+import contextlib
 import os
 import threading
 import time
@@ -48,6 +49,30 @@ def _register_and_get_tool(responder):
 
     register_ask_user_tool(responder)
     return TOOL_REGISTRY[ASK_USER_TOOL_NAME](None, None, {})
+
+
+@contextlib.asynccontextmanager
+async def _client_session(handle):
+    """Open an authenticated streamable-HTTP MCP client session to *handle*.
+
+    Encapsulates the mcp client construction so each test states only the tool
+    call it makes.  The Bearer token is carried on a pre-built ``httpx2``
+    client because ``streamable_http_client`` takes an ``http_client`` rather
+    than a ``headers`` argument.  Imports are deferred to match this module's
+    optional-[mcp]-extra pattern.
+    """
+    import httpx2
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    headers = {"Authorization": f"Bearer {handle.token}"}
+    async with httpx2.AsyncClient(headers=headers) as http_client:
+        async with streamable_http_client(
+            handle.server_url, http_client=http_client
+        ) as (read, write, *_):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
 
 
 class TestAskUserMcpIntegration:
@@ -72,39 +97,24 @@ class TestAskUserMcpIntegration:
         tool = _register_and_get_tool(responder)
 
         async def _run():
-            from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
-
             _server = EphemeralMcpServer([tool])
             with _server as handle:
                 # This test process is the caller, so it is what the
                 # server must be bound to; build_mcp_node does the same
                 # for the CLI it spawns.
                 _server.authorize_subprocess(os.getpid())
-                headers = {"Authorization": f"Bearer {handle.token}"}
-                async with streamablehttp_client(
-                    handle.server_url, headers=headers
-                ) as (
-                    read,
-                    write,
-                    _get_session_id,
-                ):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        tools_result = await session.list_tools()
-                        assert [t.name for t in tools_result.tools] == ["ask_user"]
+                async with _client_session(handle) as session:
+                    tools_result = await session.list_tools()
+                    assert [t.name for t in tools_result.tools] == ["ask_user"]
 
-                        result = await session.call_tool(
-                            "ask_user",
-                            arguments={
-                                "question": "Which environment should I deploy to?"
-                            },
-                        )
-                        return result
+                    return await session.call_tool(
+                        "ask_user",
+                        arguments={"question": "Which environment should I deploy to?"},
+                    )
 
         result = asyncio.run(_run())
 
-        assert result.isError is False
+        assert result.is_error is False
         text_blocks = [
             block.text
             for block in result.content
@@ -127,32 +137,20 @@ class TestAskUserMcpIntegration:
         tool = _register_and_get_tool(responder)
 
         async def _run():
-            from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
-
             _server = EphemeralMcpServer([tool])
             with _server as handle:
                 # This test process is the caller, so it is what the
                 # server must be bound to; build_mcp_node does the same
                 # for the CLI it spawns.
                 _server.authorize_subprocess(os.getpid())
-                headers = {"Authorization": f"Bearer {handle.token}"}
-                async with streamablehttp_client(
-                    handle.server_url, headers=headers
-                ) as (
-                    read,
-                    write,
-                    _get_session_id,
-                ):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        return await session.call_tool(
-                            "ask_user",
-                            arguments={
-                                "question": "Which environment?",
-                                "options": ["staging", "production"],
-                            },
-                        )
+                async with _client_session(handle) as session:
+                    return await session.call_tool(
+                        "ask_user",
+                        arguments={
+                            "question": "Which environment?",
+                            "options": ["staging", "production"],
+                        },
+                    )
 
         asyncio.run(_run())
 
@@ -174,28 +172,16 @@ class TestAskUserMcpIntegration:
         tool = _register_and_get_tool(None)
 
         async def _run():
-            from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
-
             _server = EphemeralMcpServer([tool])
             with _server as handle:
                 # This test process is the caller, so it is what the
                 # server must be bound to; build_mcp_node does the same
                 # for the CLI it spawns.
                 _server.authorize_subprocess(os.getpid())
-                headers = {"Authorization": f"Bearer {handle.token}"}
-                async with streamablehttp_client(
-                    handle.server_url, headers=headers
-                ) as (
-                    read,
-                    write,
-                    _get_session_id,
-                ):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        return await session.call_tool(
-                            "ask_user", arguments={"question": "Which environment?"}
-                        )
+                async with _client_session(handle) as session:
+                    return await session.call_tool(
+                        "ask_user", arguments={"question": "Which environment?"}
+                    )
 
         result = asyncio.run(_run())
 
@@ -239,31 +225,19 @@ class TestAskUserMcpIntegration:
         tool = _register_and_get_tool(responder)
 
         async def _run():
-            from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
-
             _server = EphemeralMcpServer([tool])
             with _server as handle:
                 # This test process is the caller, so it is what the
                 # server must be bound to; build_mcp_node does the same
                 # for the CLI it spawns.
                 _server.authorize_subprocess(os.getpid())
-                headers = {"Authorization": f"Bearer {handle.token}"}
-                async with streamablehttp_client(
-                    handle.server_url, headers=headers
-                ) as (
-                    read,
-                    write,
-                    _get_session_id,
-                ):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        before = time.monotonic()
-                        result = await session.call_tool(
-                            "ask_user", arguments={"question": "Which environment?"}
-                        )
-                        after = time.monotonic()
-                        return result, before, after
+                async with _client_session(handle) as session:
+                    before = time.monotonic()
+                    result = await session.call_tool(
+                        "ask_user", arguments={"question": "Which environment?"}
+                    )
+                    after = time.monotonic()
+                    return result, before, after
 
         _result, before, after = asyncio.run(_run())
 
@@ -299,24 +273,16 @@ class TestAskUserMcpIntegration:
                 tool = _register_and_get_tool_isolated(responder)
 
                 async def _run():
-                    from mcp import ClientSession
-                    from mcp.client.streamable_http import streamablehttp_client
-
                     _server = EphemeralMcpServer([tool])
                     with _server as handle:
                         # This test process is the caller, so it is what the
                         # server must be bound to; build_mcp_node does the
                         # same for the CLI it spawns.
                         _server.authorize_subprocess(os.getpid())
-                        headers = {"Authorization": f"Bearer {handle.token}"}
-                        async with streamablehttp_client(
-                            handle.server_url, headers=headers
-                        ) as (read, write, _get_session_id):
-                            async with ClientSession(read, write) as session:
-                                await session.initialize()
-                                return await session.call_tool(
-                                    "ask_user", arguments={"question": question}
-                                )
+                        async with _client_session(handle) as session:
+                            return await session.call_tool(
+                                "ask_user", arguments={"question": question}
+                            )
 
                 results[index] = asyncio.run(_run())
             except Exception as exc:  # pylint: disable=broad-exception-caught

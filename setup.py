@@ -255,15 +255,19 @@ _EXTRAS = {
     # rather than an enhancement).                                       #
     # Usage: pip install bili-core[mcp]                                  #
     #                                                                    #
-    # The mcp ceiling is a capability pin, not caution: 2.0 removed      #
-    # mcp.server.fastmcp, which bili/iris/mcp/server.py builds the       #
-    # ephemeral server from. Raising it means porting to the replacement #
-    # API, not relaxing the bound. The failure is silent without the     #
-    # ceiling -- the import guard reports the extra as uninstalled and   #
-    # the whole subsystem turns itself off -- so the bound is what makes #
-    # an incompatible SDK a resolver error instead.                      #
+    # The floor is a capability pin, not caution. The ephemeral server   #
+    # (bili/iris/mcp/server.py) builds on mcp.server.MCPServer, the      #
+    # high-level server API introduced in mcp 2.0; the 1.x               #
+    # mcp.server.fastmcp it replaced was removed in the same release, so #
+    # the two never coexist and the code requires 2.x. Without the floor #
+    # the failure is silent -- against a 1.x SDK the server-side import  #
+    # guard reports the extra as uninstalled and the whole subsystem     #
+    # turns itself off -- so the bound is what makes an incompatible SDK #
+    # a resolver error instead. A <3 ceiling is the standard next-       #
+    # major guard: 3.0 may move the API again and is unverified here;    #
+    # uvicorn is floored at the version mcp 2.0 itself requires.         #
     # ------------------------------------------------------------------ #
-    "mcp": ["mcp>=1.0,<2", "uvicorn>=0.30", "psutil>=5.9"],
+    "mcp": ["mcp>=2.0,<3", "uvicorn>=0.31.1", "psutil>=5.9"],
     # ------------------------------------------------------------------ #
     # Development tooling.                                                 #
     # Usage: pip install bili-core[dev]                                   #
@@ -304,7 +308,7 @@ _EXTRAS["all"] = sorted(
 
 setup(
     name="bili-core",
-    version="5.5.0",
+    version="5.6.0",
     # Detect runtime packages while excluding every test subpackage. Without
     # the exclude, find_packages() bundles 200+ .py test modules (under
     # bili/<component>/tests/ and bili/<component>/<subcomponent>/tests/)

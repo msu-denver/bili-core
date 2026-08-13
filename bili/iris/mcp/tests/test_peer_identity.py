@@ -13,7 +13,7 @@ about identity, so a test that lets the token be wrong passes vacuously with
 the identity check deleted.
 
 The end-to-end cases below drive a real :class:`EphemeralMcpServer` (real
-uvicorn thread, real FastMCP app, real HTTP over loopback) and real spawned
+uvicorn thread, real MCPServer app, real HTTP over loopback) and real spawned
 processes.  Attribution is a property of actual sockets owned by actual
 processes; a mocked peer would only prove that the mock was consulted.
 """
@@ -70,18 +70,20 @@ _CLIENT_SOURCE = textwrap.dedent(
     import asyncio, json, sys
 
     async def _call(url, token):
+        import httpx2
         from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        async with streamablehttp_client(url, headers=headers, timeout=10) as (
-            read, write, _,
-        ):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                res = await session.call_tool(
-                    "privileged_capability", arguments={"value": "x"}
-                )
-                return res.content[0].text
+        async with httpx2.AsyncClient(headers=headers, timeout=10) as http_client:
+            async with streamable_http_client(url, http_client=http_client) as (
+                read, write, *_,
+            ):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    res = await session.call_tool(
+                        "privileged_capability", arguments={"value": "x"}
+                    )
+                    return res.content[0].text
 
     def main(url, token):
         try:
