@@ -468,40 +468,55 @@ def _build_prompted_react_loop(
 
 
 def _with_prompt_caching(middleware: list, llm_model) -> list:
-    """Return the effective middleware for the native path, with Anthropic
-    prompt caching appended when the model supports it.
+    """Return the effective middleware for the native path, with provider prompt
+    caching appended when the model supports it.
 
-    Prompt caching is on by default for Anthropic direct-API models: a caching
-    middleware is appended *innermost* (last), so it applies to the final
-    request after any caller-supplied middleware has run.  A multi-call agent
-    run then re-reads its stable conversation prefix from cache instead of
-    re-billing it in full on every model call.
+    Prompt caching is on by default for the providers that need explicit wiring
+    (Anthropic direct-API, and Claude/Nova via AWS Bedrock): the applicable
+    caching middleware is appended *innermost* (last), so it applies to the
+    final request after any caller-supplied middleware has run.  A multi-call
+    agent run then re-reads its stable prefix from the provider's cache instead
+    of re-billing it in full on every model call.  Providers that cache
+    automatically (OpenAI, Gemini, and others) need no middleware and get the
+    discount server-side.
 
-    For every other model -- and whenever caching cannot be built (older
-    ``langchain_anthropic``) -- the caller's ``middleware`` is returned
-    unchanged (``()`` when it is ``None``), so behaviour for non-Anthropic
-    models is exactly what it was before.
+    Each provider's builder returns ``None`` for a model it does not apply to,
+    so at most one builder contributes.  When none applies -- and whenever a
+    caching middleware cannot be built -- the caller's ``middleware`` is
+    returned unchanged (``()`` when it is ``None``), so behaviour for every
+    non-target model is exactly what it was before.
 
     :param middleware: The caller-supplied middleware list, or ``None``.
     :param llm_model: The chat model the agent will run on.
     :return: A middleware list/tuple ready to pass to ``create_agent``.
     """
     from bili.iris.providers.anthropic_provider import (  # noqa: E501  pylint: disable=import-outside-toplevel
-        build_prompt_caching_middleware,
+        build_prompt_caching_middleware as _anthropic_caching,
+    )
+    from bili.iris.providers.bedrock_provider import (  # noqa: E501  pylint: disable=import-outside-toplevel
+        build_prompt_caching_middleware as _bedrock_caching,
     )
 
-    caching_mw = build_prompt_caching_middleware(llm_model)
-    if caching_mw is None:
-        # No change for non-Anthropic models: preserve the caller's exact value
-        # (including object identity) so existing behaviour is unchanged.
+    caching_mws = [
+        mw
+        for build in (_anthropic_caching, _bedrock_caching)
+        if (mw := build(llm_model)) is not None
+    ]
+    if not caching_mws:
+        # No change for models that need no explicit wiring: preserve the
+        # caller's exact value (including object identity) so existing
+        # behaviour is unchanged.
         return middleware or ()
 
-    existing = list(middleware or ())
-    # Do not double-add if a caching middleware of the same kind is already
-    # present (e.g. a caller wired one explicitly).
-    if any(isinstance(m, type(caching_mw)) for m in existing):
-        return existing
-    return existing + [caching_mw]
+    result = list(middleware or ())
+    # Do not double-add a caching middleware of a kind already present (e.g. a
+    # caller wired one explicitly).
+    present_types = {type(m) for m in result}
+    for mw in caching_mws:
+        if type(mw) not in present_types:
+            result.append(mw)
+            present_types.add(type(mw))
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
