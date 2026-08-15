@@ -1409,3 +1409,84 @@ class TestNativeReactLoopCap:
 
         assert result["current_agent"] == "api_agent"
         assert "tool-use limit" in result["messages"][0].content
+
+
+# =========================================================================
+# MAS-path prompt caching: the native tool-calling path applies provider
+# prompt caching, the same as the IRIS single-agent path.
+# =========================================================================
+
+
+def _capture_native_create_agent(agent, llm):
+    """Drive generate_agent_node down the native create_agent path and return
+    the create_agent call args.
+
+    Stubs ``langchain.agents.create_agent`` (it may not be importable in the
+    test env) and forces ``tool_strategy='native'`` so the branch under test is
+    taken regardless of catalog state.
+    """
+    mock_tool = MagicMock()
+    mock_react = MagicMock()
+    mock_react.invoke.return_value = {
+        "messages": [AIMessage(content="ok", name=agent.agent_id)]
+    }
+    create_agent_fn = MagicMock(return_value=mock_react)
+    langchain_stub = types.ModuleType("langchain")
+    agents_stub = types.ModuleType("langchain.agents")
+    agents_stub.create_agent = create_agent_fn
+    langchain_stub.agents = agents_stub
+
+    with (
+        patch(_MOCK_CREATE, return_value=llm),
+        patch(_MOCK_TOOLS, return_value=[mock_tool]),
+        patch(_MOCK_TOOL_STRATEGY, return_value="native"),
+        patch.dict(
+            sys.modules,
+            {"langchain": langchain_stub, "langchain.agents": agents_stub},
+        ),
+    ):
+        generate_agent_node(agent)
+
+    create_agent_fn.assert_called_once()
+    return create_agent_fn.call_args
+
+
+def test_native_mas_path_appends_anthropic_prompt_caching():
+    """The AETHER native tool-calling path applies Anthropic prompt caching.
+
+    Before this, only the IRIS single-agent path (react_agent_node) applied the
+    caching middleware; a multi-agent run re-billed its stable prefix on every
+    model call.  Now the native path routes middleware through the same
+    ``_with_prompt_caching`` helper, so an Anthropic agent gets a cache
+    breakpoint on its stable prefix.
+    """
+    from langchain_anthropic import ChatAnthropic
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    llm = ChatAnthropic(
+        model="claude-opus-5", max_tokens=1024, api_key="dummy-not-used"
+    )
+    agent = _agent("cached_agent", model_name="claude-opus-5", tools=["mock_tool"])
+
+    call = _capture_native_create_agent(agent, llm)
+    middleware = call.kwargs["middleware"]
+    assert any(
+        isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware
+    ), "native MAS path must append AnthropicPromptCachingMiddleware for an Anthropic model"
+
+
+def test_native_mas_path_no_caching_for_non_anthropic_model():
+    """A non-Anthropic, non-Bedrock model gets no caching middleware appended;
+    the middleware is unchanged (OpenAI/Gemini cache server-side)."""
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    # A plain object is neither ChatAnthropic nor ChatBedrockConverse and has no
+    # 'primary', so both caching builders return None.
+    llm = object()
+    agent = _agent("plain_agent", model_name="gpt-4o", tools=["mock_tool"])
+
+    call = _capture_native_create_agent(agent, llm)
+    middleware = call.kwargs["middleware"]
+    assert not any(isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware)
+    # No configured middleware and no caching middleware added: exactly ().
+    assert list(middleware) == []

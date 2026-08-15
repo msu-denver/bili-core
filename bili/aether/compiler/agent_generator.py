@@ -215,9 +215,20 @@ def _generate_tool_agent_node(
 
         from bili.iris.nodes.react_agent_node import (  # pylint: disable=import-outside-toplevel
             _DEFAULT_MAX_REACT_ITERATIONS,
+            _with_prompt_caching,
         )
 
-        react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
+        # Append provider prompt caching (Anthropic direct-API, Claude/Nova via
+        # Bedrock) the same way the IRIS single-agent native path does, so a
+        # multi-agent run re-reads its stable prefix from the provider cache
+        # instead of re-billing it on every model call.  A no-op for every
+        # non-target provider (the helper returns the middleware unchanged), so
+        # behaviour is byte-for-byte identical off the Anthropic/Bedrock path.
+        react_agent = create_agent(
+            model=llm,
+            tools=tools,
+            middleware=_with_prompt_caching(middleware or (), llm),
+        )
         executor_mode = "tool-agent (native)"
 
         # Bound the inner react loop the same way the facilitated path is bounded.
