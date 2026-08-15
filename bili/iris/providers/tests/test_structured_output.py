@@ -22,6 +22,7 @@ Covers:
 
 # pylint: disable=too-few-public-methods,duplicate-code
 
+import json
 import sys
 from contextlib import contextmanager
 from types import ModuleType
@@ -270,6 +271,35 @@ class TestParseStructuredContent:
         content = f"```\n{self.VALID_DOC}\n```"
         doc = parse_structured_content(content)
         assert doc["title"] == "T"
+
+    def test_think_preamble_json_parses(self):
+        """Verify a reasoning model's <think>...</think> preamble is stripped."""
+        content = f"<think>Let me reason about this.</think>{self.VALID_DOC}"
+        doc = parse_structured_content(content, schema=NESTED_SCHEMA)
+        assert doc["title"] == "T"
+
+    def test_multiline_think_preamble_parses(self):
+        """Verify a multi-line preamble in any casing is stripped (DOTALL)."""
+        content = f"<Think>\nstep one\nstep two\n</Think>\n{self.VALID_DOC}"
+        doc = parse_structured_content(content)
+        assert doc["title"] == "T"
+
+    def test_think_preamble_then_fenced_json_parses(self):
+        """Verify a preamble followed by a markdown fence parses (composition)."""
+        content = f"<think>reason</think>\n```json\n{self.VALID_DOC}\n```"
+        doc = parse_structured_content(content, schema=NESTED_SCHEMA)
+        assert doc["title"] == "T"
+
+    def test_think_preamble_without_strip_would_not_parse(self):
+        """The raw <think>-prefixed content is not itself valid JSON, so the
+        strip candidate is load-bearing (without it, this raises)."""
+        content = f"<think>reason</think>{self.VALID_DOC}"
+        # The raw text is not valid JSON; parsing only succeeds via the stripped
+        # candidate.  Sanity-check the precondition so this test cannot silently
+        # pass if the preamble ever became parseable on its own.
+        with pytest.raises((json.JSONDecodeError, ValueError)):
+            json.loads(content)
+        assert parse_structured_content(content)["title"] == "T"
 
     def test_invalid_json_raises_parse_error(self):
         """Verify non-JSON content raises StructuredOutputParseError."""

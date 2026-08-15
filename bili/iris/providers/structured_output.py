@@ -115,6 +115,14 @@ _SCHEMA_NAME_INVALID_RE = re.compile(r"[^a-zA-Z0-9_-]")
 #: models commonly wrap JSON in markdown fences.
 _CODE_FENCE_RE = re.compile(r"```(?:[a-zA-Z0-9_-]+)?\s*\n?(.*?)```", re.DOTALL)
 
+#: Matches a ``<think>...</think>`` reasoning preamble so
+#: :func:`parse_structured_content` can accept output from a reasoning model
+#: running unconstrained, which emits its chain-of-thought in such a block
+#: before the JSON.  Case-insensitive and DOTALL so a multi-line block in any
+#: casing is stripped; only the first block is removed (the JSON payload does
+#: not contain the tag).
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
 # Provider types with decode-time schema enforcement wired.  Mutable so that
 # external provider authors can declare support at application startup via
 # register_structured_output_provider(), mirroring the provider registry.
@@ -354,8 +362,10 @@ def parse_structured_content(content: str, schema: Optional[dict] = None) -> Any
 
     The complement of the load-time binding: turns the schema-constrained
     JSON string in ``response.content`` into a Python object, validating it
-    against *schema* when one is given.  Also tolerates markdown code fences,
-    so it can post-hoc validate output from providers running unconstrained.
+    against *schema* when one is given.  Also tolerates a markdown code fence
+    and a ``<think>...</think>`` reasoning preamble, so it can post-hoc
+    validate output from providers running unconstrained (including reasoning
+    models that emit chain-of-thought before the JSON).
 
     :param content: The raw ``.content`` string from the model response.
     :param schema: Optional JSON schema ``dict`` to validate against.
@@ -367,9 +377,23 @@ def parse_structured_content(content: str, schema: Optional[dict] = None) -> Any
     text = (content or "").strip()
 
     candidates = [text]
-    fence_match = _CODE_FENCE_RE.search(text)
-    if fence_match:
-        candidates.append(fence_match.group(1).strip())
+
+    # A reasoning model running unconstrained emits its chain-of-thought in a
+    # <think>...</think> block before the JSON; strip it and offer the
+    # remainder.  Additive: the raw text is tried first, so a payload that
+    # somehow contained the tag still parses from candidates[0].
+    if _THINK_BLOCK_RE.search(text):
+        think_stripped = _THINK_BLOCK_RE.sub("", text, count=1).strip()
+        if think_stripped and think_stripped != text:
+            candidates.append(think_stripped)
+
+    # Providers running unconstrained commonly wrap JSON in a markdown fence;
+    # accept the fence contents from each candidate produced so far (the raw
+    # text and, when present, the think-stripped text).
+    for base in list(candidates):
+        fence_match = _CODE_FENCE_RE.search(base)
+        if fence_match:
+            candidates.append(fence_match.group(1).strip())
 
     parsed: Any = None
     parse_error: Optional[Exception] = None
