@@ -142,11 +142,14 @@ class TestOpenAIResponseFormat:
     """Verify the OpenAI response_format payload builder."""
 
     def test_payload_shape_and_strict(self):
-        """Verify the json_schema payload embeds the schema with strict=True."""
+        """Verify the json_schema payload embeds the adapted schema with strict."""
         payload = openai_response_format(NESTED_SCHEMA)
         assert payload["type"] == "json_schema"
-        assert payload["json_schema"]["schema"] is NESTED_SCHEMA
         assert payload["json_schema"]["strict"] is True
+        # The schema is adapted to OpenAI's strict subset before embedding.
+        schema = payload["json_schema"]["schema"]
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == set(schema["properties"])
 
     def test_name_derived_from_title_is_sanitized(self):
         """Verify the schema title becomes the name with invalid chars replaced."""
@@ -407,7 +410,7 @@ class TestGoogleStructuredOutput:
                 model_name="gemini-2.5-pro", structured_output_schema=NESTED_SCHEMA
             )
         kwargs = mock_cls.call_args[1]
-        assert kwargs["response_schema"] is NESTED_SCHEMA
+        assert kwargs["response_schema"] == NESTED_SCHEMA
         assert kwargs["response_mime_type"] == "application/json"
 
     def test_vertex_native_params_still_work(self):
@@ -447,7 +450,7 @@ class TestGoogleStructuredOutput:
                 structured_output_schema=NESTED_SCHEMA,
             )
         kwargs = mock_cls.call_args[1]
-        assert kwargs["response_schema"] is NESTED_SCHEMA
+        assert kwargs["response_schema"] == NESTED_SCHEMA
         assert kwargs["response_mime_type"] == "application/json"
 
     def test_genai_params_absent_without_schema(self):

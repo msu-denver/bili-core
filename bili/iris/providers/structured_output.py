@@ -93,10 +93,11 @@ decode-time constrained where the provider API does it natively (OpenAI
 content only, never to tool-call arguments.
 """
 
+import copy
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 LOGGER = logging.getLogger(__name__)
 
@@ -219,6 +220,92 @@ def _sanitize_schema_name(name: str) -> str:
     return sanitized or _DEFAULT_SCHEMA_NAME
 
 
+def adapt_schema_for_openai_strict(schema: dict) -> dict:
+    """Adapt a JSON schema to OpenAI's strict structured-output subset.
+
+    OpenAI ``strict`` mode requires every object to declare
+    ``additionalProperties: false`` and to list *every* property in
+    ``required``.  A schema with optional properties (the ordinary Pydantic
+    shape) is otherwise rejected.  This recursively, on every object node
+    (including inside ``$defs``):
+
+    - sets ``required`` to all property names, and
+    - makes each previously-optional property nullable
+      (``{"anyOf": [<original>, {"type": "null"}]}``) so it stays semantically
+      optional (the model emits ``null`` when it has nothing), and
+    - sets ``additionalProperties: false``.
+
+    ``$defs`` / ``$ref`` are preserved (OpenAI strict supports them).  The input
+    is not mutated.
+
+    :param schema: A normalized JSON schema ``dict``.
+    :returns: A new schema conforming to the OpenAI strict subset.
+    """
+
+    def _adapt(node: Any) -> Any:
+        if isinstance(node, list):
+            return [_adapt(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        adapted = {key: _adapt(value) for key, value in node.items()}
+        properties = adapted.get("properties")
+        if adapted.get("type") == "object" and isinstance(properties, dict):
+            originally_required = set(adapted.get("required", []) or [])
+            for prop_name, prop_schema in list(properties.items()):
+                if prop_name not in originally_required:
+                    # Keep the property optional in spirit by allowing null,
+                    # while satisfying strict's "every property required" rule.
+                    properties[prop_name] = {"anyOf": [prop_schema, {"type": "null"}]}
+            adapted["required"] = list(properties.keys())
+            adapted["additionalProperties"] = False
+        return adapted
+
+    return _adapt(copy.deepcopy(schema))
+
+
+def adapt_schema_for_gemini(schema: dict) -> dict:
+    """Adapt a JSON schema to Gemini's ``response_schema`` subset.
+
+    Gemini rejects ``$defs`` / ``$ref`` and ``additionalProperties``; langchain
+    strips them, which leaves dangling ``$ref``s (a broken schema).  This inlines
+    every ``$ref`` from ``$defs`` (dereference), then drops ``$defs`` and
+    ``additionalProperties``, producing a self-contained schema within the
+    subset.  A recursive schema (a definition that references itself) cannot be
+    inlined; on a cycle the offending reference is replaced with a permissive
+    ``{"type": "object"}`` so the request still dispatches.  The input is not
+    mutated.
+
+    :param schema: A normalized JSON schema ``dict``.
+    :returns: A new self-contained schema within the Gemini subset.
+    """
+    defs = schema.get("$defs", {}) or {}
+
+    def _inline(node: Any, expanding: List[str]) -> Any:
+        if isinstance(node, list):
+            return [_inline(item, expanding) for item in node]
+        if not isinstance(node, dict):
+            return node
+        if "$ref" in node:
+            ref_name = str(node["$ref"]).rsplit("/", maxsplit=1)[-1]
+            if ref_name in expanding or ref_name not in defs:
+                # Cycle, or a ref we cannot resolve: fall back to a permissive
+                # object so the schema stays valid within the subset.
+                return {"type": "object"}
+            target = copy.deepcopy(defs[ref_name])
+            # Sibling keys alongside a $ref override the target (JSON Schema 2020-12).
+            for key, value in node.items():
+                if key != "$ref":
+                    target[key] = value
+            return _inline(target, expanding + [ref_name])
+        return {
+            key: _inline(value, expanding)
+            for key, value in node.items()
+            if key not in ("$defs", "additionalProperties")
+        }
+
+    return _inline(copy.deepcopy(schema), [])
+
+
 def openai_response_format(schema: dict, *, name: Optional[str] = None) -> dict:
     """Build the OpenAI ``response_format`` payload for a JSON schema.
 
@@ -228,11 +315,10 @@ def openai_response_format(schema: dict, *, name: Optional[str] = None) -> dict:
         {"type": "json_schema",
          "json_schema": {"name": ..., "schema": ..., "strict": True}}
 
-    ``strict`` is always ``True`` because decode-time enforcement is the
-    point of this seam.  OpenAI's strict mode additionally requires the
-    schema to declare ``additionalProperties: false`` on every object and to
-    list every property in ``required``; schemas that do not meet those
-    requirements are rejected by the API with a descriptive error.
+    ``strict`` is always ``True`` because decode-time enforcement is the point of
+    this seam.  The schema is adapted to OpenAI's strict subset first (see
+    :func:`adapt_schema_for_openai_strict`), so a schema with optional properties
+    is accepted rather than rejected.
 
     :param schema: A JSON schema ``dict`` (already normalized).
     :param name: Optional payload name; defaults to the schema's ``title``
@@ -244,10 +330,23 @@ def openai_response_format(schema: dict, *, name: Optional[str] = None) -> dict:
         "type": "json_schema",
         "json_schema": {
             "name": resolved_name,
-            "schema": schema,
+            "schema": adapt_schema_for_openai_strict(schema),
             "strict": True,
         },
     }
+
+
+def gemini_response_schema(schema: Any) -> dict:
+    """Normalize *schema* and adapt it to Gemini's ``response_schema`` subset.
+
+    The Gemini-side complement of :func:`openai_response_format`: the one call
+    the Vertex and Google GenAI providers use so schema adaptation lives in the
+    seam rather than in each provider.
+
+    :param schema: A JSON schema ``dict`` or Pydantic model class.
+    :returns: A self-contained schema within the Gemini subset.
+    """
+    return adapt_schema_for_gemini(normalize_schema(schema))
 
 
 def parse_structured_content(content: str, schema: Optional[dict] = None) -> Any:
