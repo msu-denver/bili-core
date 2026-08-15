@@ -182,7 +182,16 @@ def load_model(
         )
         llm_model = provider_class().load(**kwargs)
 
-    return llm_model
+    # Make the loaded model self-heal when a provider rejects ``temperature``
+    # (current reasoning models 400 on it).  Applied at this single choke point
+    # so every caller -- IRIS, AETHER, and callers that invoke the model
+    # directly -- benefits; a no-op for models that set no temperature or are
+    # not standard chat models.  See temperature_resilience for the mechanism.
+    from bili.iris.providers.temperature_resilience import (  # pylint: disable=import-outside-toplevel
+        apply_temperature_resilience,
+    )
+
+    return apply_temperature_resilience(llm_model)
 
 
 def prepare_runtime_config(
