@@ -11,6 +11,7 @@ models.  No network is used: a fake chat model raises a temperature-style error.
 import asyncio
 import sys
 from typing import List, Optional
+from unittest.mock import patch
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -22,7 +23,10 @@ from bili.iris.providers import LLMProvider, register_provider
 from bili.iris.providers.temperature_resilience import (
     _is_temperature_error,
     apply_temperature_resilience,
+    model_supports_temperature,
 )
+
+_SUPPORTS_TEMP = "bili.iris.providers.temperature_resilience.model_supports_temperature"
 
 
 class _TemperatureError(Exception):
@@ -309,6 +313,70 @@ class TestApplyTemperatureResilience:
 # ---------------------------------------------------------------------------
 # Wiring: load_model applies resilience to every loaded model.
 # ---------------------------------------------------------------------------
+
+
+class TestModelSupportsTemperature:
+    """The catalog flag is read correctly (primary mechanism)."""
+
+    def test_cataloged_reasoning_model_is_false(self):
+        """A cataloged reasoning model declares no temperature support."""
+        assert model_supports_temperature("remote_openai", "o3-mini") is False
+
+    def test_cataloged_standard_model_is_true(self):
+        """A cataloged standard model supports temperature."""
+        assert model_supports_temperature("remote_openai", "gpt-4o") is True
+
+    def test_uncataloged_model_is_none(self):
+        """A passthrough (uncataloged) model has an unknown flag -> None."""
+        assert model_supports_temperature("remote_openai", "claude-sonnet-5") is None
+
+    def test_unknown_provider_is_none(self):
+        """An unknown provider type is unknown -> None."""
+        assert model_supports_temperature("not_a_provider", "x") is None
+
+    def test_none_model_name_is_none(self):
+        """A missing model name is unknown -> None."""
+        assert model_supports_temperature("remote_openai", None) is None
+
+
+class TestLoadModelTemperatureFlag:
+    """load_model omits temperature for a cataloged not-supported model and keeps
+    it otherwise (the primary path); the retry covers passthrough."""
+
+    @staticmethod
+    def _recording_provider():
+        seen: dict = {}
+
+        class _Rec(LLMProvider):  # pylint: disable=too-few-public-methods
+            def load(self, **kwargs):  # pylint: disable=arguments-differ
+                seen.update(kwargs)
+                return FakeChat(temperature=kwargs.get("temperature"))
+
+        return _Rec, seen
+
+    def test_omits_temperature_when_flag_false(self):
+        """A cataloged not-supported model has temperature dropped before load."""
+        provider, seen = self._recording_provider()
+        register_provider("remote_flagtest_false", provider)
+        with patch(_SUPPORTS_TEMP, return_value=False):
+            load_model("remote_flagtest_false", model_name="x", temperature=0.7)
+        assert "temperature" not in seen
+
+    def test_keeps_temperature_when_flag_true(self):
+        """A cataloged supported model keeps its temperature."""
+        provider, seen = self._recording_provider()
+        register_provider("remote_flagtest_true", provider)
+        with patch(_SUPPORTS_TEMP, return_value=True):
+            load_model("remote_flagtest_true", model_name="x", temperature=0.7)
+        assert seen.get("temperature") == 0.7
+
+    def test_keeps_temperature_for_passthrough(self):
+        """A passthrough model keeps its temperature (retry is the fallback)."""
+        provider, seen = self._recording_provider()
+        register_provider("remote_flagtest_none", provider)
+        with patch(_SUPPORTS_TEMP, return_value=None):
+            load_model("remote_flagtest_none", model_name="x", temperature=0.7)
+        assert seen.get("temperature") == 0.7
 
 
 def test_load_model_applies_resilience():

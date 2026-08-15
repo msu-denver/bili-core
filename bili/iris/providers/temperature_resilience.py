@@ -1,4 +1,4 @@
-"""Temperature resilience for chat-model providers.
+"""Temperature handling for chat-model providers.
 
 Current frontier "reasoning" models reject a ``temperature`` parameter: the
 request fails with a ``400`` such as ``temperature is deprecated for this
@@ -7,15 +7,25 @@ supported`` (OpenAI o-series / GPT-5.x).  bili-core sends a temperature on
 essentially every agent call (from role presets and defaults), so without this
 module it simply cannot drive those models.
 
-:func:`apply_temperature_resilience` makes a loaded chat model self-adapt: when a
-generation call fails with a temperature-rejection ``400``, it retries the same
-request once with ``temperature`` removed, and remembers (for the rest of the
-process) that the model rejects temperature so subsequent calls strip it up
-front.  That is one wasted round-trip per model per process, not per call, and it
-needs no per-model catalog metadata, so it works for any new model automatically.
+Two layers, primary first:
 
-Design
-------
+1. **Catalog flag (primary).**  :func:`model_supports_temperature` reads the
+   per-model ``supports_temperature`` flag from the model definition; the loader
+   omits ``temperature`` when a cataloged model declares ``False``.  This is the
+   clean, proactive path: the parameter is simply not sent, with no wasted
+   round-trip.  It handles the "removed entirely" case (temperature is a setting
+   the model no longer has); a parameter that CHANGED SHAPE would be a different,
+   larger change and is deliberately out of scope.
+2. **Runtime retry (passthrough fallback).**  The catalog is not always current,
+   so the newest models are often reached as passthrough (uncataloged) with no
+   flag yet.  :func:`apply_temperature_resilience` makes a loaded model
+   self-adapt: when a generation call fails with a temperature-rejection ``400``
+   it retries the same request once with ``temperature`` removed, and remembers
+   (for the rest of the process) that the model rejects it so later calls strip
+   it up front.  One wasted round-trip per model per process, not per call.
+
+Design of the retry layer
+-------------------------
 - **Type identity is preserved.**  The model's generation methods are wrapped in
   place on the instance rather than the object being wrapped in a proxy, so
   provider-specific ``isinstance`` checks elsewhere (prompt-caching gates,
@@ -36,9 +46,44 @@ Design
 # access is intrinsic rather than a smell.
 # pylint: disable=protected-access
 import logging
-from typing import Any
+from typing import Any, Optional
 
 LOGGER = logging.getLogger(__name__)
+
+
+def model_supports_temperature(
+    model_type: str, model_name: Optional[str]
+) -> Optional[bool]:
+    """Return the cataloged ``supports_temperature`` flag for a model.
+
+    This is the primary mechanism: a model definition declares whether the model
+    accepts ``temperature``, and the loader omits the parameter when it does not.
+
+    :param model_type: The provider type key (e.g. ``"remote_openai"``).
+    :param model_name: The model id the loader was given.
+    :returns: ``True`` / ``False`` for a cataloged model; ``None`` when the model
+        is not in the catalog (a passthrough model, where the flag is unknown and
+        the runtime retry is the fallback).
+    :rtype: Optional[bool]
+    """
+    if not model_name:
+        return None
+    try:
+        from bili.iris.config.llm_config import (  # pylint: disable=import-outside-toplevel
+            LLM_MODELS,
+        )
+    except ImportError:  # pragma: no cover - config always importable in practice
+        return None
+    provider_info = LLM_MODELS.get(model_type)
+    if not provider_info:
+        return None
+    for entry in provider_info.get("models", []):
+        if entry.get("model_id") == model_name:
+            # A cataloged entry without the flag defaults to supported, which
+            # preserves current behaviour for models that predate the flag.
+            return bool(entry.get("supports_temperature", True))
+    return None
+
 
 #: Substrings that, together with the word "temperature" in an error message,
 #: mark a provider rejecting the parameter (rather than an unrelated 400).  Kept

@@ -138,6 +138,23 @@ def load_model(
         )
 
         require_structured_output_support(model_type)
+
+    # Primary temperature handling: omit `temperature` for a cataloged model
+    # whose definition declares it unsupported (current reasoning models 400 on
+    # it).  Passthrough (uncataloged) models keep their temperature and rely on
+    # the runtime retry applied below.  See temperature_resilience.
+    if kwargs.get("temperature") is not None:
+        from bili.iris.providers.temperature_resilience import (  # pylint: disable=import-outside-toplevel
+            model_supports_temperature,
+        )
+
+        if model_supports_temperature(model_type, kwargs.get("model_name")) is False:
+            LOGGER.info(
+                "Model '%s' is cataloged as not supporting temperature; omitting it.",
+                kwargs.get("model_name"),
+            )
+            kwargs.pop("temperature")
+
     # Built-in provider dispatch — handles the six types shipped with bili-core.
     # This if/elif block is intentionally preserved for backward compatibility;
     # the individual loader functions are part of the public API and may be
