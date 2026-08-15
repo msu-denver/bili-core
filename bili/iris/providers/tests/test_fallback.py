@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bili.aether.compiler.llm_resolver import create_llm
+from bili.aether.compiler.llm_resolver import _load_fallback_member, create_llm
 from bili.aether.schema import AgentSpec
 from bili.iris.providers.base import LLMProvider
 from bili.iris.providers.fallback import (
@@ -31,6 +31,7 @@ from bili.iris.providers.fallback import (
     FallbackPolicy,
     ProviderChain,
     _is_retryable_by_name,
+    _registry_load,
     build_fallback_llm,
 )
 from bili.iris.providers.registry import PROVIDER_REGISTRY
@@ -788,27 +789,32 @@ class TestCreateLLMIntegration:
         assert result.chain_length == 2
 
     def test_fallback_resolution_propagates_temperature(self):
-        """Temperature from AgentSpec is forwarded to each fallback's load kwargs.
+        """Temperature from AgentSpec reaches the fallback member's load.
 
-        Because fallbacks are lazy, load() is only called when the chain
-        actually reaches that fallback.  The test triggers a primary failure
-        so that the fallback provider is loaded and temperature is captured.
+        A fallback member is loaded lazily through the ``load_model`` choke
+        point (so it gets the same catalog-derived defaults as the primary),
+        not by the bare provider.  The declared temperature must therefore
+        reach that ``load_model`` call.  The test triggers a primary failure so
+        the lazy fallback is loaded, then inspects the second ``load_model``
+        call (the first is the eager primary load).
         """
         primary_llm = MagicMock(name="primary")
         primary_llm.invoke.side_effect = _RetryableError("rate limited")
-        captured_kwargs: list = []
+        fallback_llm_obj = MagicMock(name="fallback")
 
-        class _CapturingProv(LLMProvider):
+        class _TrivialProv(LLMProvider):
+            # Registered only so build_fallback_llm's registration check passes;
+            # the member itself is loaded through the patched load_model.
             def load(self, **kwargs):
-                captured_kwargs.append(dict(kwargs))
-                return MagicMock()
+                return fallback_llm_obj
 
         type_key = "_test_cllm_temp_type"
-        PROVIDER_REGISTRY.register(type_key, _CapturingProv)
+        PROVIDER_REGISTRY.register(type_key, _TrivialProv)
         try:
             with patch(
-                "bili.iris.loaders.llm_loader.load_model", return_value=primary_llm
-            ):
+                "bili.iris.loaders.llm_loader.load_model",
+                side_effect=[primary_llm, fallback_llm_obj],
+            ) as mock_load:
                 with patch(
                     "bili.aether.compiler.llm_resolver._resolve_model_full",
                     side_effect=[
@@ -831,12 +837,17 @@ class TestCreateLLMIntegration:
                     try:
                         result_llm.invoke(["msg"])
                     except _RetryableError:
-                        pass  # all-fail path is fine; we just need load() called
+                        pass  # all-fail path is fine; we just need the load call
+
         finally:
             PROVIDER_REGISTRY.unregister(type_key)
 
-        assert len(captured_kwargs) == 1
-        assert captured_kwargs[0].get("temperature") == 0.3
+        # Two load_model calls: [0] eager primary, [1] the lazy fallback member.
+        assert mock_load.call_count == 2
+        fb_call = mock_load.call_args_list[1]
+        assert fb_call.args[0] == type_key
+        assert fb_call.kwargs.get("model_name") == "test-fallback-id"
+        assert fb_call.kwargs.get("temperature") == 0.3
 
     def test_create_llm_fallback_invokes_correctly(self):
         """FallbackLLM returned by create_llm() correctly falls back on failure.
@@ -1018,3 +1029,149 @@ class TestFallbackLLMAstream:
         assert len(chunks) == 1
         assert chunks[0].content == "async-fb-tok"
         assert fb_calls == 1  # fallback was called exactly once
+
+
+# ---------------------------------------------------------------------------
+# Fallback-member load resilience: members load through the same path as the
+# primary (the load_model choke point), not the bare provider.
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackMemberLoaderInjection:
+    """A FallbackLLM loads lazy members through an injectable loader."""
+
+    def test_injected_loader_used_for_lazy_member(self):
+        """The injected loader (not the registry) loads a lazy fallback spec."""
+        primary = MagicMock(name="primary")
+        primary.invoke.side_effect = _RetryableError("down")
+        loaded = MagicMock(name="loaded-by-injected-loader")
+        seen: list = []
+
+        def _loader(provider_type, kwargs):
+            seen.append((provider_type, dict(kwargs)))
+            return loaded
+
+        llm = FallbackLLM(
+            primary=primary,
+            fallback_specs=[("some_type", {"model_name": "m", "temperature": 0.2})],
+            policy=FallbackPolicy(retryable_exceptions=(_RetryableError,)),
+            loader=_loader,
+        )
+        # The injected loader must not touch the registry; use a type that is
+        # not registered, so a registry path would raise instead of returning.
+        loaded.invoke.return_value = MagicMock(content="ok")
+        result = llm.invoke(["msg"])
+
+        assert result.content == "ok"
+        assert seen == [("some_type", {"model_name": "m", "temperature": 0.2})]
+
+    def test_default_loader_is_registry(self):
+        """With no loader, a lazy member loads via the registry (_registry_load)."""
+        primary = MagicMock(name="primary")
+        primary.invoke.side_effect = _RetryableError("down")
+        fb_obj = MagicMock(name="fallback")
+        fb_obj.invoke.return_value = MagicMock(content="fb")
+
+        class _Prov(LLMProvider):
+            def load(self, **kwargs):
+                return fb_obj
+
+        type_key = "_test_default_loader_type"
+        PROVIDER_REGISTRY.register(type_key, _Prov)
+        try:
+            llm = FallbackLLM(
+                primary=primary,
+                fallback_specs=[(type_key, {"model_name": "m"})],
+                policy=FallbackPolicy(retryable_exceptions=(_RetryableError,)),
+            )
+            result = llm.invoke(["msg"])
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
+
+        assert result.content == "fb"
+
+    def test_registry_load_helper(self):
+        """_registry_load looks the type up and calls its provider.load."""
+        obj = MagicMock(name="obj")
+
+        class _Prov(LLMProvider):
+            def load(self, **kwargs):
+                return obj
+
+        type_key = "_test_registry_load_helper"
+        PROVIDER_REGISTRY.register(type_key, _Prov)
+        try:
+            assert _registry_load(type_key, {"model_name": "m"}) is obj
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
+
+    def test_build_fallback_llm_forwards_loader(self):
+        """build_fallback_llm forwards the loader to the FallbackLLM."""
+        primary = MagicMock(name="primary")
+        primary.invoke.side_effect = _RetryableError("down")
+        loaded = MagicMock(name="loaded")
+        loaded.invoke.return_value = MagicMock(content="ok")
+
+        def _loader(provider_type, kwargs):  # noqa: ARG001
+            return loaded
+
+        # An unregistered type would fail build_fallback_llm's registration
+        # check, so register a trivial provider for the build-time validation.
+        class _Prov(LLMProvider):
+            def load(self, **kwargs):
+                return MagicMock()
+
+        type_key = "_test_build_forwards_loader"
+        PROVIDER_REGISTRY.register(type_key, _Prov)
+        try:
+            llm = build_fallback_llm(
+                primary_llm=primary,
+                fallback_chain=[(type_key, {"model_name": "m"})],
+                policy=FallbackPolicy(retryable_exceptions=(_RetryableError,)),
+                loader=_loader,
+            )
+            result = llm.invoke(["msg"])
+        finally:
+            PROVIDER_REGISTRY.unregister(type_key)
+
+        assert result.content == "ok"
+
+
+class TestFallbackMemberResilience:
+    """A fallback member receives the same catalog-derived defaults the primary
+    does, because it is loaded through the load_model choke point."""
+
+    def test_load_fallback_member_routes_through_load_model(self):
+        """_load_fallback_member calls load_model with the member's kwargs."""
+        sentinel = MagicMock(name="loaded")
+        with patch(
+            "bili.iris.loaders.llm_loader.load_model", return_value=sentinel
+        ) as mock_load:
+            result = _load_fallback_member(
+                "remote_anthropic", {"model_name": "m", "temperature": 0.1}
+            )
+        assert result is sentinel
+        mock_load.assert_called_once_with(
+            "remote_anthropic", model_name="m", temperature=0.1
+        )
+
+    def test_cataloged_anthropic_member_gets_catalog_max_tokens(self):
+        """A cataloged Anthropic fallback member with no explicit max_tokens gets
+        the catalog budget, not the bare provider's 1024 default.  This is the
+        resilience a fallback member missed when loaded by the bare provider."""
+        mock_cls = MagicMock()
+        with patch("langchain_anthropic.ChatAnthropic", mock_cls):
+            _load_fallback_member("remote_anthropic", {"model_name": "claude-sonnet-5"})
+        kwargs = mock_cls.call_args.kwargs
+        assert kwargs["model"] == "claude-sonnet-5"
+        assert kwargs["max_tokens"] == 16000
+
+    def test_uncataloged_anthropic_member_gets_the_floor_not_1024(self):
+        """An uncataloged Anthropic fallback member floors at 4096, not 1024."""
+        mock_cls = MagicMock()
+        with patch("langchain_anthropic.ChatAnthropic", mock_cls):
+            _load_fallback_member(
+                "remote_anthropic", {"model_name": "claude-unlisted-fallback"}
+            )
+        kwargs = mock_cls.call_args.kwargs
+        assert kwargs["max_tokens"] == 4096

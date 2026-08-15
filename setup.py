@@ -103,7 +103,13 @@ _EXTRAS = {
     "anthropic": ["langchain-anthropic~=1.0.0"],
     "mistral": ["langchain-mistralai>=0.2.0"],
     "cohere": ["langchain-cohere>=0.3.0"],
-    "google-genai": ["langchain-google-genai>=2.0.0"],
+    # Capped to the langchain-core-1.0 line: unbounded >=2.0.0 resolves to the
+    # 4.x line, which requires langchain-core>=1.1.2 (violating the ~=1.0.3 pin)
+    # and switches to google-genai>=1.53 (violating google-cloud-aiplatform's
+    # google-genai<2.0.0). 3.0.x keeps langchain-core<2 and the
+    # google-ai-generativelanguage transitive; 3.2.0 is the first to require
+    # langchain-core 1.1, so the ceiling stays below it.
+    "google-genai": ["langchain-google-genai>=3.0,<3.1"],
     "deepseek": ["langchain-deepseek>=0.1.0"],
     "xai": ["langchain-xai>=0.2.0"],
     "groq": ["langchain-groq>=0.2.0"],
@@ -112,7 +118,8 @@ _EXTRAS = {
         "langchain-anthropic~=1.0.0",
         "langchain-mistralai>=0.2.0",
         "langchain-cohere>=0.3.0",
-        "langchain-google-genai>=2.0.0",
+        # See the google-genai extra above for why this is capped to <3.1.
+        "langchain-google-genai>=3.0,<3.1",
         "langchain-deepseek>=0.1.0",
         "langchain-xai>=0.2.0",
         "langchain-groq>=0.2.0",
@@ -308,7 +315,7 @@ _EXTRAS["all"] = sorted(
 
 setup(
     name="bili-core",
-    version="5.7.0",
+    version="5.8.0",
     # Detect runtime packages while excluding every test subpackage. Without
     # the exclude, find_packages() bundles 200+ .py test modules (under
     # bili/<component>/tests/ and bili/<component>/<subcomponent>/tests/)

@@ -10,6 +10,7 @@ from langchain_core.messages import (  # pylint: disable=import-error
     AIMessage,
     HumanMessage,
 )
+from langgraph.errors import GraphRecursionError  # pylint: disable=import-error
 from langgraph.graph import StateGraph  # pylint: disable=import-error
 from langgraph.graph.state import CompiledStateGraph  # pylint: disable=import-error
 
@@ -25,6 +26,7 @@ from bili.aether.schema import (
     WorkflowEdge,
     WorkflowType,
 )
+from bili.iris.nodes.react_agent_node import _DEFAULT_MAX_REACT_ITERATIONS
 
 _EXAMPLES_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -1325,3 +1327,166 @@ class TestPromptedToolCalling:
 
             mock_llm.invoke.assert_called_once()
             assert result["current_agent"] == "reasoner"
+
+
+class TestNativeReactLoopCap:
+    """The native tool-calling path bounds its inner react loop (cost-safety).
+
+    create_agent produces a compiled LangGraph whose invoke() defaults to
+    recursion_limit=5000, and the outer MAS graph's recursion_limit does not
+    bound this inner loop, so a native agent that never emits a final answer
+    would otherwise make thousands of billed model calls.  The native branch
+    now passes an explicit recursion_limit and fails clean when it is hit.
+    """
+
+    @staticmethod
+    def _build_native_node(agent, mock_react_agent):
+        """Build a native tool-agent node with create_agent stubbed to return
+        *mock_react_agent*.  Returns the node callable."""
+        langchain_stub = types.ModuleType("langchain")
+        agents_stub = types.ModuleType("langchain.agents")
+        agents_stub.create_agent = MagicMock(return_value=mock_react_agent)
+        langchain_stub.agents = agents_stub
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[MagicMock()]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="native"),
+            patch.dict(
+                sys.modules,
+                {"langchain": langchain_stub, "langchain.agents": agents_stub},
+            ),
+        ):
+            mock_create_llm.return_value = MagicMock()
+            return generate_agent_node(agent)
+
+    def test_native_invoke_passes_recursion_limit_cap(self):
+        """The native react invoke is bounded by an explicit recursion_limit.
+
+        An N-iteration budget maps to 2N+1 supersteps (N model+tools cycles
+        plus the terminal model turn).
+        """
+        agent = _agent("api_agent", model_name="gpt-4o", tools=["mock_tool"])
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.return_value = {"messages": [AIMessage(content="done")]}
+
+        node_fn = self._build_native_node(agent, mock_react_agent)
+        node_fn({"messages": [], "agent_outputs": {}})
+
+        config = mock_react_agent.invoke.call_args.kwargs["config"]
+        assert config["recursion_limit"] == 2 * _DEFAULT_MAX_REACT_ITERATIONS + 1
+
+    def test_native_cap_honors_metadata_override(self):
+        """agent.metadata['max_react_iterations'] tunes the native cap, mirroring
+        the facilitated path."""
+        agent = _agent(
+            "api_agent",
+            model_name="gpt-4o",
+            tools=["mock_tool"],
+            metadata={"max_react_iterations": 5},
+        )
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.return_value = {"messages": [AIMessage(content="done")]}
+
+        node_fn = self._build_native_node(agent, mock_react_agent)
+        node_fn({"messages": [], "agent_outputs": {}})
+
+        config = mock_react_agent.invoke.call_args.kwargs["config"]
+        assert config["recursion_limit"] == 2 * 5 + 1
+
+    def test_native_cap_hit_fails_clean_without_aborting(self):
+        """When the cap is hit, the node returns a bounded result and does not
+        propagate GraphRecursionError, so one stuck agent cannot abort the MAS."""
+        agent = _agent("api_agent", model_name="gpt-4o", tools=["mock_tool"])
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.side_effect = GraphRecursionError(
+            "Recursion limit reached"
+        )
+
+        node_fn = self._build_native_node(agent, mock_react_agent)
+        # Must not raise.
+        result = node_fn({"messages": [], "agent_outputs": {}})
+
+        assert result["current_agent"] == "api_agent"
+        assert "tool-use limit" in result["messages"][0].content
+
+
+# =========================================================================
+# MAS-path prompt caching: the native tool-calling path applies provider
+# prompt caching, the same as the IRIS single-agent path.
+# =========================================================================
+
+
+def _capture_native_create_agent(agent, llm):
+    """Drive generate_agent_node down the native create_agent path and return
+    the create_agent call args.
+
+    Stubs ``langchain.agents.create_agent`` (it may not be importable in the
+    test env) and forces ``tool_strategy='native'`` so the branch under test is
+    taken regardless of catalog state.
+    """
+    mock_tool = MagicMock()
+    mock_react = MagicMock()
+    mock_react.invoke.return_value = {
+        "messages": [AIMessage(content="ok", name=agent.agent_id)]
+    }
+    create_agent_fn = MagicMock(return_value=mock_react)
+    langchain_stub = types.ModuleType("langchain")
+    agents_stub = types.ModuleType("langchain.agents")
+    agents_stub.create_agent = create_agent_fn
+    langchain_stub.agents = agents_stub
+
+    with (
+        patch(_MOCK_CREATE, return_value=llm),
+        patch(_MOCK_TOOLS, return_value=[mock_tool]),
+        patch(_MOCK_TOOL_STRATEGY, return_value="native"),
+        patch.dict(
+            sys.modules,
+            {"langchain": langchain_stub, "langchain.agents": agents_stub},
+        ),
+    ):
+        generate_agent_node(agent)
+
+    create_agent_fn.assert_called_once()
+    return create_agent_fn.call_args
+
+
+def test_native_mas_path_appends_anthropic_prompt_caching():
+    """The AETHER native tool-calling path applies Anthropic prompt caching.
+
+    Before this, only the IRIS single-agent path (react_agent_node) applied the
+    caching middleware; a multi-agent run re-billed its stable prefix on every
+    model call.  Now the native path routes middleware through the same
+    ``_with_prompt_caching`` helper, so an Anthropic agent gets a cache
+    breakpoint on its stable prefix.
+    """
+    from langchain_anthropic import ChatAnthropic
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    llm = ChatAnthropic(
+        model="claude-opus-5", max_tokens=1024, api_key="dummy-not-used"
+    )
+    agent = _agent("cached_agent", model_name="claude-opus-5", tools=["mock_tool"])
+
+    call = _capture_native_create_agent(agent, llm)
+    middleware = call.kwargs["middleware"]
+    assert any(
+        isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware
+    ), "native MAS path must append AnthropicPromptCachingMiddleware for an Anthropic model"
+
+
+def test_native_mas_path_no_caching_for_non_anthropic_model():
+    """A non-Anthropic, non-Bedrock model gets no caching middleware appended;
+    the middleware is unchanged (OpenAI/Gemini cache server-side)."""
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    # A plain object is neither ChatAnthropic nor ChatBedrockConverse and has no
+    # 'primary', so both caching builders return None.
+    llm = object()
+    agent = _agent("plain_agent", model_name="gpt-4o", tools=["mock_tool"])
+
+    call = _capture_native_create_agent(agent, llm)
+    middleware = call.kwargs["middleware"]
+    assert not any(isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware)
+    # No configured middleware and no caching middleware added: exactly ().
+    assert list(middleware) == []

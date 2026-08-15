@@ -372,13 +372,13 @@ class TestAnthropicProvider:
     """Verify AnthropicProvider.load() constructs ChatAnthropic correctly."""
 
     def test_minimal_load_applies_default_max_tokens(self):
-        """Verify minimal config uses 1024 as the default max_tokens."""
+        """Verify minimal config uses the 4096 default max_tokens floor."""
         mock_cls = MagicMock()
         with patch("langchain_anthropic.ChatAnthropic", mock_cls):
             AnthropicProvider().load(model_name="claude-sonnet-4-6")
         kwargs = mock_cls.call_args[1]
         assert kwargs["model"] == "claude-sonnet-4-6"
-        assert kwargs["max_tokens"] == 1024
+        assert kwargs["max_tokens"] == 4096
 
     def test_explicit_max_tokens_overrides_default(self):
         """Verify provided max_tokens takes precedence over the default."""
@@ -416,12 +416,12 @@ class TestAnthropicProvider:
         assert mock_cls.called
 
     def test_none_max_tokens_uses_default(self):
-        """Verify passing max_tokens=None applies the 1024 default."""
+        """Verify passing max_tokens=None applies the 4096 default floor."""
         mock_cls = MagicMock()
         with patch("langchain_anthropic.ChatAnthropic", mock_cls):
             AnthropicProvider().load(model_name="claude-haiku-4-5", max_tokens=None)
         kwargs = mock_cls.call_args[1]
-        assert kwargs["max_tokens"] == 1024
+        assert kwargs["max_tokens"] == 4096
 
 
 # ---------------------------------------------------------------------------

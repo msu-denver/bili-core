@@ -22,6 +22,7 @@ Covers:
 
 # pylint: disable=too-few-public-methods,duplicate-code
 
+import json
 import sys
 from contextlib import contextmanager
 from types import ModuleType
@@ -142,11 +143,14 @@ class TestOpenAIResponseFormat:
     """Verify the OpenAI response_format payload builder."""
 
     def test_payload_shape_and_strict(self):
-        """Verify the json_schema payload embeds the schema with strict=True."""
+        """Verify the json_schema payload embeds the adapted schema with strict."""
         payload = openai_response_format(NESTED_SCHEMA)
         assert payload["type"] == "json_schema"
-        assert payload["json_schema"]["schema"] is NESTED_SCHEMA
         assert payload["json_schema"]["strict"] is True
+        # The schema is adapted to OpenAI's strict subset before embedding.
+        schema = payload["json_schema"]["schema"]
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == set(schema["properties"])
 
     def test_name_derived_from_title_is_sanitized(self):
         """Verify the schema title becomes the name with invalid chars replaced."""
@@ -267,6 +271,35 @@ class TestParseStructuredContent:
         content = f"```\n{self.VALID_DOC}\n```"
         doc = parse_structured_content(content)
         assert doc["title"] == "T"
+
+    def test_think_preamble_json_parses(self):
+        """Verify a reasoning model's <think>...</think> preamble is stripped."""
+        content = f"<think>Let me reason about this.</think>{self.VALID_DOC}"
+        doc = parse_structured_content(content, schema=NESTED_SCHEMA)
+        assert doc["title"] == "T"
+
+    def test_multiline_think_preamble_parses(self):
+        """Verify a multi-line preamble in any casing is stripped (DOTALL)."""
+        content = f"<Think>\nstep one\nstep two\n</Think>\n{self.VALID_DOC}"
+        doc = parse_structured_content(content)
+        assert doc["title"] == "T"
+
+    def test_think_preamble_then_fenced_json_parses(self):
+        """Verify a preamble followed by a markdown fence parses (composition)."""
+        content = f"<think>reason</think>\n```json\n{self.VALID_DOC}\n```"
+        doc = parse_structured_content(content, schema=NESTED_SCHEMA)
+        assert doc["title"] == "T"
+
+    def test_think_preamble_without_strip_would_not_parse(self):
+        """The raw <think>-prefixed content is not itself valid JSON, so the
+        strip candidate is load-bearing (without it, this raises)."""
+        content = f"<think>reason</think>{self.VALID_DOC}"
+        # The raw text is not valid JSON; parsing only succeeds via the stripped
+        # candidate.  Sanity-check the precondition so this test cannot silently
+        # pass if the preamble ever became parseable on its own.
+        with pytest.raises((json.JSONDecodeError, ValueError)):
+            json.loads(content)
+        assert parse_structured_content(content)["title"] == "T"
 
     def test_invalid_json_raises_parse_error(self):
         """Verify non-JSON content raises StructuredOutputParseError."""
@@ -407,7 +440,7 @@ class TestGoogleStructuredOutput:
                 model_name="gemini-2.5-pro", structured_output_schema=NESTED_SCHEMA
             )
         kwargs = mock_cls.call_args[1]
-        assert kwargs["response_schema"] is NESTED_SCHEMA
+        assert kwargs["response_schema"] == NESTED_SCHEMA
         assert kwargs["response_mime_type"] == "application/json"
 
     def test_vertex_native_params_still_work(self):
@@ -447,7 +480,7 @@ class TestGoogleStructuredOutput:
                 structured_output_schema=NESTED_SCHEMA,
             )
         kwargs = mock_cls.call_args[1]
-        assert kwargs["response_schema"] is NESTED_SCHEMA
+        assert kwargs["response_schema"] == NESTED_SCHEMA
         assert kwargs["response_mime_type"] == "application/json"
 
     def test_genai_params_absent_without_schema(self):

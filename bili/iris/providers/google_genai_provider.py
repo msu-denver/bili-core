@@ -33,7 +33,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
-from .structured_output import normalize_schema
+from .structured_output import gemini_response_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class GoogleGenAIProvider(LLMProvider):
         if max_retries is not None:
             config["max_retries"] = max_retries
         if structured_output_schema is not None:
-            config["response_schema"] = normalize_schema(structured_output_schema)
+            config["response_schema"] = gemini_response_schema(structured_output_schema)
             config["response_mime_type"] = "application/json"
 
         llm = ChatGoogleGenerativeAI(**config)

@@ -153,7 +153,10 @@ class TestCreateLLMStructuredBinding:
         agent = _structured_agent(fallback_models=["cli:some-cli-tool"])
         captured = {}
 
-        def _capture_fallback(primary_llm, fallback_chain):  # noqa: ANN001
+        def _capture_fallback(primary_llm, fallback_chain, **_kwargs):  # noqa: ANN001
+            # **_kwargs tolerates the injected loader= that create_llm now
+            # passes so a fallback member loads through the load_model choke
+            # point; this test only inspects the per-provider chain kwargs.
             captured["chain"] = fallback_chain
             return primary_llm
 

@@ -7,10 +7,24 @@ the Anthropic API endpoint directly, as a complement to the existing
 
 Authentication reads ``ANTHROPIC_API_KEY`` from the environment.
 
+Prompt caching
+--------------
+:func:`build_prompt_caching_middleware` returns a LangChain agent middleware
+that enables Anthropic prompt caching on the native tool-calling agent path.
+An agent run makes one model call per Thought/Action/Observation turn and
+re-sends the whole stable conversation prefix (system prompt plus the
+accumulated tool turns) on every call.  The middleware marks that prefix with
+an ``ephemeral`` cache breakpoint so subsequent calls in the same run read it
+from the provider cache (billed at roughly a tenth of the standard input rate)
+instead of re-billing it in full.  It is a no-op for non-Anthropic models and
+degrades cleanly when the installed ``langchain_anthropic`` predates the
+middleware.  See :mod:`bili.iris.nodes.react_agent_node` for the wiring.
+
 Heavy dependencies
 ------------------
-``langchain_anthropic`` is imported inside :meth:`AnthropicProvider.load` to
-avoid module-level import cost when this provider is not in use.
+``langchain_anthropic`` is imported inside :meth:`AnthropicProvider.load` and
+inside the caching helpers to avoid module-level import cost when this provider
+is not in use.
 """
 
 # pylint: disable=duplicate-code
@@ -20,6 +34,71 @@ from typing import Any, Optional
 from .base import LLMProvider
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _is_anthropic_model(llm_model: Any) -> bool:
+    """Return ``True`` when *llm_model* is (or transparently wraps) a
+    ``ChatAnthropic`` instance.
+
+    A :class:`~bili.iris.providers.fallback.FallbackLLM` is unwrapped via its
+    ``primary`` attribute so a chain whose first provider is Anthropic is still
+    recognised.  Returns ``False`` (never raises) when ``langchain_anthropic``
+    is not installed.
+
+    :param llm_model: Any LangChain-compatible chat model or transparent proxy.
+    :returns: ``True`` if the model is an Anthropic direct-API model.
+    :rtype: bool
+    """
+    try:
+        from langchain_anthropic import (  # pylint: disable=import-outside-toplevel
+            ChatAnthropic,
+        )
+    except ImportError:
+        return False
+
+    if isinstance(llm_model, ChatAnthropic):
+        return True
+    # Unwrap a FallbackLLM (or any transparent proxy) whose primary is Anthropic.
+    primary = getattr(llm_model, "primary", None)
+    return isinstance(primary, ChatAnthropic) if primary is not None else False
+
+
+def build_prompt_caching_middleware(llm_model: Any) -> Optional[Any]:
+    """Build an Anthropic prompt-caching middleware for *llm_model*, or ``None``.
+
+    Returns an ``AnthropicPromptCachingMiddleware`` configured to place an
+    ``ephemeral`` cache breakpoint on the stable conversation prefix, so that a
+    multi-call agent run re-reads that prefix from cache instead of re-billing
+    it at the full input rate on every model call.
+
+    The result is ``None`` (a graceful no-op) when either:
+
+    - *llm_model* is not an Anthropic direct-API model (caching here is
+      Anthropic specific; OpenAI caches automatically and other providers have
+      their own mechanisms), or
+    - the installed ``langchain_anthropic`` predates the caching middleware.
+
+    The middleware is constructed with ``unsupported_model_behavior="ignore"``
+    as a second line of defence: even if the effective model at call time turns
+    out not to be a ``ChatAnthropic`` (for example a wrapped or swapped model),
+    caching is skipped silently rather than warning or raising.  Anthropic
+    enforces its own minimum cacheable prompt size server-side, so a prefix too
+    small to cache is a silent no-op with no error.
+
+    :param llm_model: The chat model the agent will run on.
+    :returns: An ``AgentMiddleware`` instance, or ``None`` to skip caching.
+    :rtype: Optional[Any]
+    """
+    if not _is_anthropic_model(llm_model):
+        return None
+    try:
+        from langchain_anthropic.middleware import (  # noqa: E501  pylint: disable=import-outside-toplevel
+            AnthropicPromptCachingMiddleware,
+        )
+    except ImportError:
+        # Older langchain-anthropic without the caching middleware: no-op.
+        return None
+    return AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore")
 
 
 # pylint: disable=too-few-public-methods
@@ -32,9 +111,13 @@ class AnthropicProvider(LLMProvider):
         Anthropic model identifier (e.g. ``"claude-opus-4-8"``,
         ``"claude-sonnet-4-6"``).
     max_tokens : int, optional
-        Maximum completion tokens.  Defaults to 1024 when not set
-        (``ChatAnthropic`` requires an explicit value; 1024 is a safe
-        minimum compatible with all Claude models).
+        Maximum completion tokens.  Defaults to 4096 when not set
+        (``ChatAnthropic`` requires an explicit value).  This default is
+        reached only by an uncataloged model with no caller-supplied value:
+        the ``load_model`` choke point fills ``max_tokens`` from the catalog
+        for a cataloged model first.  4096 rather than a smaller value keeps
+        an uncataloged model from silently truncating a multi-KB tool
+        argument, which a 1024 floor did.
     temperature : float, optional
         Sampling temperature.
     top_p : float, optional
@@ -67,10 +150,13 @@ class AnthropicProvider(LLMProvider):
 
         LOGGER.info("Initializing Anthropic model: %s", model_name)
 
-        # ChatAnthropic requires max_tokens; use 1024 as a safe default.
+        # ChatAnthropic requires max_tokens.  A cataloged model already has this
+        # filled from its max_output_tokens at the load_model choke point; this
+        # 4096 floor is the safety net for an uncataloged model with no explicit
+        # value, large enough not to truncate a multi-KB tool argument.
         config: dict = {
             "model": model_name,
-            "max_tokens": max_tokens if max_tokens is not None else 1024,
+            "max_tokens": max_tokens if max_tokens is not None else 4096,
         }
         if temperature is not None:
             config["temperature"] = temperature
