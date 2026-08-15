@@ -61,7 +61,10 @@ class TestModelMaxOutputTokens:
 
     def test_uncataloged_model_returns_none(self):
         """A passthrough (uncataloged) model returns None."""
-        assert model_max_output_tokens("remote_anthropic", "claude-sonnet-5") is None
+        assert (
+            model_max_output_tokens("remote_anthropic", "claude-unlisted-test-model")
+            is None
+        )
 
     def test_unknown_provider_returns_none(self):
         """An unknown provider type returns None."""

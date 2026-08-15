@@ -77,8 +77,9 @@ LOGGER = get_logger(__name__)
 
 #: Provider types for which load_model defaults max_tokens from the catalog's
 #: max_output_tokens when the caller supplies none.  Scoped to the providers
-#: whose own default is unsuitable: Anthropic forces a 1024 fallback, and Bedrock
-#: never applies the catalog value.  Others default sensibly and are excluded to
+#: whose own default is unsuitable: Anthropic falls back to a fixed floor (a
+#: usable minimum, but below a model's real budget), and Bedrock never applies
+#: the catalog value.  Others default sensibly and are excluded to
 #: avoid capping (or context-overflowing) an otherwise-fine request.
 _CATALOG_MAX_TOKENS_PROVIDERS = ("remote_anthropic", "remote_aws_bedrock")
 
