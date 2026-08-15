@@ -270,6 +270,30 @@ def _resolve_structured_schema(agent: AgentSpec, provider: str) -> Optional[dict
     return agent.output_schema
 
 
+def _load_fallback_member(provider_type: str, member_kwargs: dict) -> Any:
+    """Load one fallback-chain member through the ``load_model`` choke point.
+
+    A ``FallbackLLM`` loads its members through an injected loader.  The primary
+    LLM is created via ``load_model``, which applies catalog-derived load
+    defaults (the output-token budget and temperature resilience).  A fallback
+    member loaded by the bare provider would miss those, so a fail-over would
+    silently drop to the provider's own small ``max_tokens`` default and lose
+    the temperature handling.  Routing members through the same ``load_model``
+    gives the whole chain identical treatment.
+
+    :param provider_type: The member's provider type.
+    :param member_kwargs: The member's load kwargs (already carrying only a
+        ``structured_output_schema`` the provider supports, so ``load_model``'s
+        fail-fast gate does not trip on an unconstrained member).
+    :returns: The loaded LLM object.
+    """
+    from bili.iris.loaders.llm_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
+        load_model,
+    )
+
+    return load_model(provider_type, **member_kwargs)
+
+
 def create_llm(agent: AgentSpec) -> Any:
     """Create a LangChain-compatible chat model from an ``AgentSpec``.
 
@@ -362,7 +386,8 @@ def create_llm(agent: AgentSpec) -> Any:
             fb_kwargs["max_tokens"] = agent.max_tokens
         # Structured-output support is evaluated per fallback provider: a
         # chain may mix constrained and unconstrained backends, and an
-        # unsupported fallback must not fail load_model's fail-fast gate.
+        # unsupported fallback must not fail load_model's fail-fast gate when
+        # the member is loaded through it (see _load_fallback_member).
         fb_schema = _resolve_structured_schema(agent, fb_provider)
         if fb_schema is not None:
             fb_kwargs["structured_output_schema"] = fb_schema
@@ -384,7 +409,11 @@ def create_llm(agent: AgentSpec) -> Any:
         len(fallback_chain),
         [entry[0] for entry in fallback_chain],
     )
-    return build_fallback_llm(primary_llm=primary_llm, fallback_chain=fallback_chain)
+    return build_fallback_llm(
+        primary_llm=primary_llm,
+        fallback_chain=fallback_chain,
+        loader=_load_fallback_member,
+    )
 
 
 def resolve_tool_strategy(model_name: str) -> str:

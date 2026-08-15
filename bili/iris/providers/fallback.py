@@ -56,11 +56,48 @@ receives an LLM object.
 # pylint: disable=too-few-public-methods
 
 import logging
-from typing import Any, AsyncIterator, Iterator, List, Optional, Sequence, Tuple, Type
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 LOGGER = logging.getLogger(__name__)
+
+#: The signature of a provider loader: ``(provider_type, load_kwargs) -> llm``.
+#: A loader turns one chain entry into an LLM object.  It is injectable so a
+#: caller can route chain members through the same load path as the primary LLM
+#: (for example the ``load_model`` choke point, which applies catalog-derived
+#: load defaults such as the output-token budget and temperature resilience);
+#: without it a fallback member would be constructed by the bare provider and
+#: miss those defaults that the primary received.
+ProviderLoader = Callable[[str, dict], Any]
+
+
+def _registry_load(provider_type: str, kwargs: dict) -> Any:
+    """Load a provider directly from the registry (the default loader).
+
+    This is the backward-compatible behaviour: look the provider type up in
+    :data:`~bili.iris.providers.registry.PROVIDER_REGISTRY` and call its
+    ``load``.  It applies no catalog-derived defaults; a caller that wants
+    those injects a loader that does.
+
+    :param provider_type: A registered provider type string.
+    :param kwargs: Load kwargs forwarded to the provider's ``load``.
+    :returns: The loaded LLM object.
+    :raises ValueError: If *provider_type* is not registered.
+    """
+    provider_class = PROVIDER_REGISTRY.get_or_raise(provider_type)
+    return provider_class().load(**kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Default retryable exception types
@@ -253,19 +290,19 @@ class ProviderChain:
         types = [e[0] for e in self._entries]
         return f"ProviderChain({types})"
 
-    def load_all(self) -> List[Any]:
+    def load_all(self, loader: Optional[ProviderLoader] = None) -> List[Any]:
         """Instantiate all providers in the chain and return their LLM objects.
 
+        :param loader: Optional loader turning each ``(provider_type, kwargs)``
+            entry into an LLM.  Defaults to :func:`_registry_load` (a bare
+            registry lookup); pass a loader that applies catalog-derived load
+            defaults to give every member the same treatment as a primary LLM.
         :returns: Ordered list of LLM objects, one per chain entry.
         :raises ValueError: If a provider type is not registered.
         :raises ImportError: If a provider's optional dependency is absent.
         """
-        llms = []
-        for provider_type, kwargs in self._entries:
-            provider_class = PROVIDER_REGISTRY.get_or_raise(provider_type)
-            llm = provider_class().load(**kwargs)
-            llms.append(llm)
-        return llms
+        load = loader or _registry_load
+        return [load(provider_type, kwargs) for provider_type, kwargs in self._entries]
 
 
 # ---------------------------------------------------------------------------
@@ -300,11 +337,17 @@ class FallbackLLM:
         have already-instantiated LLM objects.
     fallback_specs : list of (str, dict), optional
         Lazy-loaded fallback specs as ``(provider_type, load_kwargs)`` pairs.
-        Each entry is loaded via :data:`~bili.iris.providers.registry.PROVIDER_REGISTRY`
-        on first use.  Mutually exclusive with *fallbacks*.
+        Each entry is loaded via *loader* on first use.  Mutually exclusive
+        with *fallbacks*.
     policy : FallbackPolicy, optional
         Exception classification policy.  Defaults to
         :data:`DEFAULT_POLICY`.
+    loader : callable, optional
+        ``(provider_type, load_kwargs) -> llm`` used to load each lazy spec.
+        Defaults to :func:`_registry_load` (a bare registry lookup).  Inject a
+        loader that applies catalog-derived load defaults (for example the
+        ``load_model`` choke point) so a fallback member receives the same
+        defaults the primary got, rather than the bare provider's own.
 
     Class methods
     -------------
@@ -318,6 +361,7 @@ class FallbackLLM:
         fallbacks: Optional[List[Any]] = None,
         fallback_specs: Optional[List[Tuple[str, dict]]] = None,
         policy: Optional[FallbackPolicy] = None,
+        loader: Optional[ProviderLoader] = None,
     ) -> None:
         if fallbacks and fallback_specs:
             raise ValueError(
@@ -332,13 +376,17 @@ class FallbackLLM:
         )
         self._loaded_fallbacks: List[Optional[Any]] = [None] * len(self._fallback_specs)
         self._policy = policy if policy is not None else DEFAULT_POLICY
+        # A lazy fallback spec is loaded through this on first use.  Defaults to
+        # a bare registry lookup; inject a loader (e.g. the load_model choke
+        # point) so a fallback member receives the same catalog-derived load
+        # defaults the primary got.
+        self._loader: ProviderLoader = loader or _registry_load
 
     def _get_fallback(self, spec_index: int) -> Any:
         """Return the fallback LLM at *spec_index*, loading it on first use."""
         if self._loaded_fallbacks[spec_index] is None:
             provider_type, kwargs = self._fallback_specs[spec_index]
-            provider_class = PROVIDER_REGISTRY.get_or_raise(provider_type)
-            self._loaded_fallbacks[spec_index] = provider_class().load(**kwargs)
+            self._loaded_fallbacks[spec_index] = self._loader(provider_type, kwargs)
         return self._loaded_fallbacks[spec_index]
 
     @classmethod
@@ -346,29 +394,37 @@ class FallbackLLM:
         cls,
         chain: ProviderChain,
         policy: Optional[FallbackPolicy] = None,
+        loader: Optional[ProviderLoader] = None,
     ) -> "FallbackLLM":
         """Construct a ``FallbackLLM`` from a :class:`ProviderChain`.
 
         The primary LLM is loaded immediately.  Fallback providers are stored
-        as lazy specs and loaded on first use.
+        as lazy specs and loaded on first use.  The same *loader* loads the
+        primary and every fallback, so the whole chain gets identical
+        treatment.
 
         :param chain: An ordered :class:`ProviderChain` with at least one
             entry.  The first entry is the primary; the rest are fallbacks.
         :param policy: Optional :class:`FallbackPolicy`.  Defaults to
             :data:`DEFAULT_POLICY`.
+        :param loader: Optional loader turning each ``(provider_type, kwargs)``
+            entry into an LLM.  Defaults to :func:`_registry_load`; pass a
+            loader that applies catalog-derived load defaults to give the whole
+            chain the same treatment.
         :returns: A ``FallbackLLM`` ready to use.
         :raises ValueError: If the chain is empty or a type is unregistered.
         """
         entries = list(chain)
         if not entries:
             raise ValueError("ProviderChain must have at least one entry.")
+        load = loader or _registry_load
         primary_type, primary_kwargs = entries[0]
-        primary_class = PROVIDER_REGISTRY.get_or_raise(primary_type)
-        primary_llm = primary_class().load(**primary_kwargs)
+        primary_llm = load(primary_type, primary_kwargs)
         return cls(
             primary=primary_llm,
             fallback_specs=entries[1:] if len(entries) > 1 else None,
             policy=policy,
+            loader=loader,
         )
 
     # ------------------------------------------------------------------
@@ -616,6 +672,7 @@ def build_fallback_llm(
     primary_llm: Any,
     fallback_chain: Sequence[Tuple[str, dict]],
     policy: Optional[FallbackPolicy] = None,
+    loader: Optional[ProviderLoader] = None,
 ) -> FallbackLLM:
     """Build a :class:`FallbackLLM` from a primary LLM and a fallback spec.
 
@@ -633,11 +690,16 @@ def build_fallback_llm(
     :param primary_llm: An already-instantiated primary LLM object.
     :param fallback_chain: Ordered list of ``(provider_type, load_kwargs)``
         pairs for the fallback providers.  Each entry is validated (provider
-        type must be registered) and then stored; the provider's
-        :meth:`~bili.iris.providers.base.LLMProvider.load` is called only
-        on first use.
+        type must be registered) and then stored; loading is deferred to
+        *loader* on first use.
     :param policy: Optional :class:`FallbackPolicy`.  Defaults to
         :data:`DEFAULT_POLICY`.
+    :param loader: Optional loader turning each ``(provider_type, kwargs)``
+        entry into an LLM on first use.  Defaults to :func:`_registry_load`.
+        Pass the same loader that produced *primary_llm* (for example the
+        ``load_model`` choke point) so a fallback member receives the same
+        catalog-derived load defaults the primary got, rather than the bare
+        provider's own (the output-token budget and temperature resilience).
     :returns: A :class:`FallbackLLM` wrapping the primary with lazy
         fallback specs.
     :raises ValueError: If a provider type in *fallback_chain* is not
@@ -663,6 +725,8 @@ def build_fallback_llm(
         specs.append((provider_type, dict(kwargs)))
 
     if not specs:
-        return FallbackLLM(primary=primary_llm, policy=policy)
+        return FallbackLLM(primary=primary_llm, policy=policy, loader=loader)
 
-    return FallbackLLM(primary=primary_llm, fallback_specs=specs, policy=policy)
+    return FallbackLLM(
+        primary=primary_llm, fallback_specs=specs, policy=policy, loader=loader
+    )
