@@ -206,12 +206,63 @@ def _generate_tool_agent_node(
         from langchain.agents import (  # pylint: disable=import-error,import-outside-toplevel
             create_agent,
         )
+        from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
+            AIMessage,
+        )
+        from langgraph.errors import (  # pylint: disable=import-error,import-outside-toplevel
+            GraphRecursionError,
+        )
+
+        from bili.iris.nodes.react_agent_node import (  # pylint: disable=import-outside-toplevel
+            _DEFAULT_MAX_REACT_ITERATIONS,
+        )
 
         react_agent = create_agent(model=llm, tools=tools, middleware=middleware or ())
         executor_mode = "tool-agent (native)"
 
+        # Bound the inner react loop the same way the facilitated path is bounded.
+        # create_agent produces a compiled LangGraph whose invoke() defaults to
+        # recursion_limit=5000; that is a per-agent budget of thousands of billed
+        # model calls, and the outer MAS graph's recursion_limit does NOT bound
+        # this inner loop.  A native agent that never emits a final answer would
+        # otherwise spin unbounded.  LangGraph counts SUPERSTEPS: N tool cycles
+        # (model + tools = 2 steps each) plus the terminal model turn is 2N + 1,
+        # so an N-iteration cap maps to recursion_limit 2N + 1.  The cap is
+        # tunable per agent via metadata, mirroring the facilitated path.
+        native_max_iterations = int(
+            agent.metadata.get("max_react_iterations", _DEFAULT_MAX_REACT_ITERATIONS)
+        )
+        native_recursion_limit = 2 * native_max_iterations + 1
+
         def _invoke_executor(messages: list) -> list:
-            result = react_agent.invoke({"messages": messages})
+            try:
+                result = react_agent.invoke(
+                    {"messages": messages},
+                    config={"recursion_limit": native_recursion_limit},
+                )
+            except GraphRecursionError:
+                # Fail clean and loud, not silently: the agent hit its cap without
+                # producing a final answer.  Return a bounded result so one stuck
+                # agent does not abort the whole MAS run, matching the facilitated
+                # path's warn-and-return behaviour.  Raise
+                # agent.metadata["max_react_iterations"] if a longer tool loop is
+                # genuinely expected.
+                LOGGER.warning(
+                    "Agent '%s': native react loop hit the %d-iteration cap "
+                    "(recursion_limit=%d) without producing a final answer; "
+                    "returning a bounded result.",
+                    agent.agent_id,
+                    native_max_iterations,
+                    native_recursion_limit,
+                )
+                return [
+                    AIMessage(
+                        content=(
+                            f"[Agent stopped: reached the {native_max_iterations}-"
+                            "iteration tool-use limit without a final answer.]"
+                        )
+                    )
+                ]
             return result.get("messages", [])
 
     elif tool_strategy == "facilitated":
