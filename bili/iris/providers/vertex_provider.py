@@ -19,7 +19,7 @@ import logging
 from typing import Any, Optional
 
 from .base import LLMProvider
-from .structured_output import normalize_schema
+from .structured_output import gemini_response_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class VertexAIProvider(LLMProvider):
                 "response_schema/response_mime_type (Vertex-native), not both."
             )
         if structured_output_schema is not None:
-            response_schema = normalize_schema(structured_output_schema)
+            response_schema = gemini_response_schema(structured_output_schema)
             response_mime_type = "application/json"
         from langchain_google_vertexai import (  # pylint: disable=import-outside-toplevel
             ChatVertexAI,
