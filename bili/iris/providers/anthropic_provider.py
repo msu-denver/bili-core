@@ -111,9 +111,13 @@ class AnthropicProvider(LLMProvider):
         Anthropic model identifier (e.g. ``"claude-opus-4-8"``,
         ``"claude-sonnet-4-6"``).
     max_tokens : int, optional
-        Maximum completion tokens.  Defaults to 1024 when not set
-        (``ChatAnthropic`` requires an explicit value; 1024 is a safe
-        minimum compatible with all Claude models).
+        Maximum completion tokens.  Defaults to 4096 when not set
+        (``ChatAnthropic`` requires an explicit value).  This default is
+        reached only by an uncataloged model with no caller-supplied value:
+        the ``load_model`` choke point fills ``max_tokens`` from the catalog
+        for a cataloged model first.  4096 rather than a smaller value keeps
+        an uncataloged model from silently truncating a multi-KB tool
+        argument, which a 1024 floor did.
     temperature : float, optional
         Sampling temperature.
     top_p : float, optional
@@ -146,10 +150,13 @@ class AnthropicProvider(LLMProvider):
 
         LOGGER.info("Initializing Anthropic model: %s", model_name)
 
-        # ChatAnthropic requires max_tokens; use 1024 as a safe default.
+        # ChatAnthropic requires max_tokens.  A cataloged model already has this
+        # filled from its max_output_tokens at the load_model choke point; this
+        # 4096 floor is the safety net for an uncataloged model with no explicit
+        # value, large enough not to truncate a multi-KB tool argument.
         config: dict = {
             "model": model_name,
-            "max_tokens": max_tokens if max_tokens is not None else 1024,
+            "max_tokens": max_tokens if max_tokens is not None else 4096,
         }
         if temperature is not None:
             config["temperature"] = temperature
