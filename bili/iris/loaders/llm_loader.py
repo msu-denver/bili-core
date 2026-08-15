@@ -75,6 +75,13 @@ from bili.utils.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)
 
+#: Provider types for which load_model defaults max_tokens from the catalog's
+#: max_output_tokens when the caller supplies none.  Scoped to the providers
+#: whose own default is unsuitable: Anthropic forces a 1024 fallback, and Bedrock
+#: never applies the catalog value.  Others default sensibly and are excluded to
+#: avoid capping (or context-overflowing) an otherwise-fine request.
+_CATALOG_MAX_TOKENS_PROVIDERS = ("remote_anthropic", "remote_aws_bedrock")
+
 
 def _log_available_device() -> None:
     """Log which compute device is available (Apple MPS, CUDA GPU, or CPU).
@@ -154,6 +161,30 @@ def load_model(
                 kwargs.get("model_name"),
             )
             kwargs.pop("temperature")
+
+    # Default max_tokens from the model's cataloged max_output_tokens when the
+    # caller supplies none, for the providers whose own default is unsuitable for
+    # authoring: langchain_anthropic falls back to 1024 (far too small to emit a
+    # multi-KB document as a required tool argument), and Bedrock never applies
+    # the catalog value.  Other providers default sensibly, and forcing
+    # max_tokens to the model max there could overflow the context window on a
+    # long input, so they are deliberately excluded.  The catalog already carries
+    # the correct per-model value; this is where it reaches those providers.
+    if kwargs.get("max_tokens") is None and model_type in _CATALOG_MAX_TOKENS_PROVIDERS:
+        from bili.iris.providers.catalog_defaults import (  # pylint: disable=import-outside-toplevel
+            model_max_output_tokens,
+        )
+
+        catalog_max_tokens = model_max_output_tokens(
+            model_type, kwargs.get("model_name")
+        )
+        if catalog_max_tokens is not None:
+            LOGGER.info(
+                "Defaulting max_tokens=%d for model '%s' from the catalog.",
+                catalog_max_tokens,
+                kwargs.get("model_name"),
+            )
+            kwargs["max_tokens"] = catalog_max_tokens
 
     # Built-in provider dispatch — handles the six types shipped with bili-core.
     # This if/elif block is intentionally preserved for backward compatibility;
