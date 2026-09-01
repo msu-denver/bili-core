@@ -34,8 +34,15 @@ pipeline, AETHER agent, or IRIS node without modification.
 
 Message rendering
 -----------------
-CLI tools accept a single text prompt, not a structured message list.  The
-provider supports three ``message_format`` strategies:
+CLI tools accept a single text prompt, not a structured message list.  This
+transport is therefore text-only by construction: whichever format is chosen
+below, the message list ends up as one prompt string.  A message carrying an
+image content part is REFUSED with
+:class:`~bili.iris.providers.modality.UnsupportedInputModalityError` rather
+than stringified, because a stringified image is a dropped image that looks
+like a successful turn.
+
+The provider supports three ``message_format`` strategies:
 
 ``"last"`` (default)
     Send only the content of the last ``HumanMessage``.  Use this for
@@ -108,8 +115,11 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
+from bili.iris.multimodal import non_text_part_types
+
 from .base import LLMProvider
 from .cli_model_flags import DEFAULT_MODEL_FLAG_TEMPLATE, build_model_and_effort_args
+from .modality import UnsupportedInputModalityError, describe_message_modalities
 
 LOGGER = logging.getLogger(__name__)
 
@@ -212,6 +222,38 @@ def _is_transient_failure(error_text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _require_text_only(msg: BaseMessage) -> BaseMessage:
+    """Return *msg*, or raise if it carries a non-text content part.
+
+    A CLI tool consumes text on stdin or as an argv value, so this transport
+    has no channel for an image.  ``str(msg.content)`` on a multimodal message
+    yields the *repr* of the parts list, which loses the image while producing
+    a plausible-looking prompt: the subprocess succeeds, the caller gets an
+    answer, and nothing anywhere says the image was never sent.  Refusing by
+    name is the honest behaviour -- the caller can then route that turn to an
+    image-capable provider.
+
+    :param msg: The message about to be rendered into the prompt string.
+    :returns: *msg*, unchanged, when its content is text.
+    :raises UnsupportedInputModalityError: When it carries a recognised
+        non-text content part.
+    """
+    kinds = non_text_part_types(getattr(msg, "content", None))
+    if not kinds:
+        return msg
+    # Name the modality where the part type maps to one ("image"), and fall
+    # back to the raw part types for a part outside that vocabulary, so the
+    # refusal always says what it refused.
+    named = describe_message_modalities([msg]) or kinds
+    raise UnsupportedInputModalityError(
+        f"A CLI provider cannot carry {', '.join(named)} content "
+        f"(content part(s): {', '.join(kinds)}): CLI tools consume a single "
+        "text prompt, so the part would be dropped. Route this turn to a "
+        "provider whose model accepts it (see "
+        "bili.iris.providers.modality.models_supporting_input_modality)."
+    )
+
+
 def _role_label(msg: BaseMessage) -> str:
     """Return a human-readable role label for *msg*."""
     if isinstance(msg, SystemMessage):
@@ -236,6 +278,10 @@ def render_messages(
     :returns: A single string ready to send to the CLI tool.
     :raises ValueError: If ``message_format`` is not recognised, or if the
         message list is empty.
+    :raises UnsupportedInputModalityError: If a message that would be rendered
+        carries a non-text content part.  The check is scoped to the messages
+        this format actually renders, so ``"last"`` does not refuse over an
+        image in history it was never going to carry.
     """
     if not messages:
         raise ValueError("Cannot render an empty message list")
@@ -249,23 +295,24 @@ def render_messages(
         # Find the last human message (most common case)
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
-                return str(msg.content)
+                return str(_require_text_only(msg).content)
         # Fall back to the very last message if no HumanMessage found
-        return str(messages[-1].content)
+        return str(_require_text_only(messages[-1]).content)
 
     if message_format == "roles":
         parts = []
         for msg in messages:
-            label = _role_label(msg)
-            parts.append(f"{label}: {msg.content}")
+            checked = _require_text_only(msg)
+            parts.append(f"{_role_label(checked)}: {checked.content}")
         return "\n".join(parts)
 
     # chatml
     parts = []
     for msg in messages:
-        role = _role_label(msg).lower()
+        checked = _require_text_only(msg)
         # Normalise "User" -> "user", "System" -> "system", etc.
-        parts.append(f"<|im_start|>{role}\n{msg.content}\n<|im_end|>")
+        role = _role_label(checked).lower()
+        parts.append(f"<|im_start|>{role}\n{checked.content}\n<|im_end|>")
     # Append the open assistant turn so the model knows to continue
     parts.append("<|im_start|>assistant")
     return "\n".join(parts)

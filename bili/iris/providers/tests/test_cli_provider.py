@@ -48,6 +48,7 @@ from bili.iris.providers.fallback import (
     DEFAULT_POLICY,
     FallbackLLM,
 )
+from bili.iris.providers.modality import UnsupportedInputModalityError
 from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 # ---------------------------------------------------------------------------
@@ -1250,3 +1251,91 @@ class TestCliLLMErrorRetryability:
 
         # The fallback must NOT have been called
         fallback_llm.invoke.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Text-only transport: a non-text content part is refused, never dropped
+# ---------------------------------------------------------------------------
+
+
+class TestRenderMessagesRefusesNonTextContent:
+    """A CLI tool consumes one text prompt, so it has no channel for an image.
+
+    ``str()`` on a multimodal message yields the repr of the parts list: the
+    subprocess succeeds, the caller gets an answer, and nothing says the image
+    was never sent.  Refusing by name is the honest behaviour, and it is what
+    lets a caller route that turn to an image-capable provider.
+    """
+
+    IMAGE_PART = {"type": "image_url", "image_url": {"url": "https://x.invalid/i.png"}}
+    MULTIMODAL = [{"type": "text", "text": "what is this"}, IMAGE_PART]
+
+    @pytest.mark.parametrize("message_format", ["last", "roles", "chatml"])
+    def test_every_format_refuses(self, message_format):
+        """All three message formats refuse an image part."""
+        with pytest.raises(UnsupportedInputModalityError):
+            render_messages([_human(self.MULTIMODAL)], message_format)
+
+    def test_the_refusal_names_the_modality_and_the_part_type(self):
+        """The refusal names the modality and the part type."""
+        with pytest.raises(UnsupportedInputModalityError) as excinfo:
+            render_messages([_human(self.MULTIMODAL)], "last")
+        message = str(excinfo.value)
+        assert "image" in message
+        assert "image_url" in message
+
+    def test_the_refusal_points_at_the_routing_helper(self):
+        """Actionable: it says where to look for a provider that can take it."""
+        with pytest.raises(UnsupportedInputModalityError, match="modality"):
+            render_messages([_human(self.MULTIMODAL)], "last")
+
+    def test_an_audio_part_is_refused_too(self):
+        """An audio part is refused too."""
+        with pytest.raises(UnsupportedInputModalityError, match="audio"):
+            render_messages([_human([{"type": "input_audio"}])], "last")
+
+    def test_the_fallback_branch_refuses_when_no_human_message_exists(self):
+        """``last`` falls back to the final message; that path is checked too."""
+        with pytest.raises(UnsupportedInputModalityError):
+            render_messages([_system("sys"), _ai(self.MULTIMODAL)], "last")
+
+    def test_last_ignores_an_image_it_was_never_going_to_carry(self):
+        """``last`` renders only the final human turn, so an image earlier in
+        history is already dropped by the documented format contract; refusing
+        over it would fail a turn that loses nothing new."""
+        msgs = [_human(self.MULTIMODAL), _ai("ok"), _human("plain follow-up")]
+        assert render_messages(msgs, "last") == "plain follow-up"
+
+    @pytest.mark.parametrize("message_format", ["roles", "chatml"])
+    def test_history_formats_do_refuse_over_an_earlier_image(self, message_format):
+        """``roles`` and ``chatml`` render the whole list, so the same image
+        WOULD be dropped by them and is therefore refused."""
+        msgs = [_human(self.MULTIMODAL), _ai("ok"), _human("plain follow-up")]
+        with pytest.raises(UnsupportedInputModalityError):
+            render_messages(msgs, message_format)
+
+    @pytest.mark.parametrize("message_format", ["last", "roles", "chatml"])
+    def test_text_only_rendering_is_unchanged(self, message_format):
+        """The refusal must be invisible to every text-only caller."""
+        msgs = [_system("sys"), _human("hi"), _ai("hello")]
+        assert render_messages(msgs, message_format)
+
+    def test_a_text_only_part_list_still_renders(self):
+        """List-shaped content that carries only text is not multimodal."""
+        assert render_messages(
+            [_human([{"type": "text", "text": "hi"}])], "last"
+        ) == str([{"type": "text", "text": "hi"}])
+
+
+class TestCliCatalogDeclaresTextOnly:
+    """The catalog agrees with the transport."""
+
+    def test_every_cli_preset_declares_text_only(self):
+        """Every CLI preset declares text only."""
+        cli_types = [
+            key for key in LLM_MODELS if key == "cli" or key.startswith("cli_")
+        ]
+        assert cli_types
+        for provider_type in cli_types:
+            for entry in LLM_MODELS[provider_type]["models"]:
+                assert entry.get("input_modalities") == ["text"], provider_type

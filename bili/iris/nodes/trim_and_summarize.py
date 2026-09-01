@@ -53,6 +53,7 @@ from langchain_core.messages import (
 )
 
 from bili.iris.graph_builder.classes.node import Node
+from bili.iris.multimodal import message_text
 from bili.utils.langgraph_utils import State, format_message_with_citations
 from bili.utils.logging_utils import get_logger
 
@@ -158,7 +159,9 @@ def build_trim_and_summarize_node(
         user_profile_message_id = None
         for message in all_messages:
             if isinstance(message, HumanMessage):
-                if message.content.startswith("USER PROFILE:"):
+                # message_text, not .content: a multimodal turn's content is a
+                # list of parts and .startswith() on it raises AttributeError.
+                if message_text(message).startswith("USER PROFILE:"):
                     user_profile_message = message
                     user_profile_message_id = user_profile_message.id
                 break

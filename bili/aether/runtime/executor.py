@@ -63,6 +63,23 @@ Usage::
 
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
+
+Multimodal input
+----------------
+``input_data["messages"]`` is a list of ``BaseMessage``, so an image reaches a
+run by building the message with an image content part::
+
+    from bili.iris.multimodal import build_human_message
+
+    result = executor.run({
+        "messages": [build_human_message(
+            text="What does this diagram show?",
+            images=["https://example.invalid/diagram.png"],
+        )]
+    })
+
+Whether the agents' bound models accept an image is a per-model question;
+``bili.iris.providers.modality`` answers it from the catalog.
 """
 
 import json
@@ -72,7 +89,17 @@ import queue
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from bili.aether.runtime.context import RuntimeContext
 from bili.aether.runtime.execution_result import (
@@ -81,6 +108,7 @@ from bili.aether.runtime.execution_result import (
 )
 from bili.aether.runtime.streaming import StreamEvent, StreamEventType, StreamFilter
 from bili.aether.schema import MASConfig, WorkflowType
+from bili.iris.multimodal import normalise_prompt
 
 LOGGER = logging.getLogger(__name__)
 
@@ -765,7 +793,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
     def resume_streaming(
         self,
-        human_input: str,
+        human_input: Union[str, Sequence[Any]],
         thread_id: str,
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
         """Resume a graph that was paused at a human-interrupt node.
@@ -776,7 +804,11 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         ``__human_interrupt__`` sentinel was yielded.
 
         Args:
-            human_input: The human reviewer's text response.
+            human_input: The human reviewer's response.  A plain string for a
+                text reply, or a list of content parts (text plus image) to
+                answer with an image; see
+                :func:`bili.iris.multimodal.build_human_message`.  A string
+                builds exactly the message it always did.
             thread_id: Thread ID originally reported in the
                 ``__human_interrupt__`` sentinel.
 
@@ -802,7 +834,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         }
         self._compiled_graph.update_state(
             invoke_config,
-            {"messages": [HumanMessage(content=human_input)]},
+            {"messages": [HumanMessage(content=normalise_prompt(human_input))]},
         )
 
         LOGGER.info("Resuming HITL execution for thread '%s'", thread_id)
@@ -837,7 +869,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
     # (reading ``messages`` and its pending-message context), so an injected
     # directive is picked up with no agent, compiler, or schema change.
 
-    def submit_steer(self, message: str) -> None:
+    def submit_steer(self, message: Union[str, Sequence[Any]]) -> None:
         """Enqueue an operator directive for a steerable run to pick up.
 
         Thread-safe: intended to be called from a different thread than the
@@ -848,7 +880,8 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         observed by the next node to start.
 
         Args:
-            message: The operator's steering directive (free text).
+            message: The operator's steering directive: free text, or a list
+                of content parts to redirect the run with an image.
 
         Raises:
             RuntimeError: If the executor was not constructed with
@@ -861,14 +894,14 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             )
         self._steer_queue.put(message)
 
-    def _drain_steer_queue(self) -> List[str]:
+    def _drain_steer_queue(self) -> List[Union[str, Sequence[Any]]]:
         """Remove and return every currently-queued operator directive.
 
         Non-blocking: returns only what is already queued at call time (an
         empty list when nothing is pending), so a steerable run never waits
         on the queue.
         """
-        directives: List[str] = []
+        directives: List[Union[str, Sequence[Any]]] = []
         if self._steer_queue is None:
             return directives
         while True:
@@ -879,7 +912,9 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         return directives
 
     def _apply_steer_directives(
-        self, invoke_config: Dict[str, Any], messages: List[str]
+        self,
+        invoke_config: Dict[str, Any],
+        messages: Sequence[Union[str, Sequence[Any]]],
     ) -> None:
         """Write operator directives into graph state as ``HumanMessage`` s.
 
@@ -887,6 +922,9 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         shared by :meth:`steer` and :meth:`run_streaming_steerable` so the
         two cannot drift on how a directive is applied. The next agent node
         reads ``messages`` at the start of its step and observes them.
+
+        A directive is a plain string, or a list of content parts when the
+        operator is redirecting the run with an image.
         """
         from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
             HumanMessage,
@@ -894,12 +932,12 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         self._compiled_graph.update_state(
             invoke_config,
-            {"messages": [HumanMessage(content=m) for m in messages]},
+            {"messages": [HumanMessage(content=normalise_prompt(m)) for m in messages]},
         )
 
     def steer(
         self,
-        message: str,
+        message: Union[str, Sequence[Any]],
         thread_id: str,
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
         """Inject one operator directive into a paused run and resume it.
@@ -918,7 +956,8 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         ``enable_steering=True``).
 
         Args:
-            message: The operator's steering directive (free text).
+            message: The operator's steering directive: free text, or a list
+                of content parts to redirect the run with an image.
             thread_id: Thread ID of the run to steer.
 
         Yields:
