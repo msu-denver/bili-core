@@ -372,3 +372,12 @@ class TestCatalogDeclarations:
             "remote_google_genai",
         ):
             assert result.get(provider_type), provider_type
+
+    def test_a_legacy_text_only_snapshot_does_not_claim_vision(self):
+        """A model id whose vendor-published capability is text-only must
+        not declare "image", even when a sibling entry for a *different*
+        model id (a later, actually vision-capable snapshot) legitimately
+        does. A declaration that outstrips the real model would let an
+        image-bearing request reach a text-only endpoint undetected by the
+        modality gate this module implements."""
+        assert model_input_modalities("remote_openai", "gpt-4") == frozenset({TEXT})
