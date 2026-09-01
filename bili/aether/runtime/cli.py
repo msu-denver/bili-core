@@ -11,6 +11,10 @@ Usage (from project root)::
     python bili/aether/runtime/cli.py configs/production.yaml \\
         --input-file input.txt --log-dir my_logs
 
+    # With an image attached to the input turn (repeat --input-image for more)
+    python bili/aether/runtime/cli.py configs/vision.yaml \\
+        --input "What does this diagram show?" --input-image diagram.png
+
     # Test checkpoint persistence (RQ1)
     python bili/aether/runtime/cli.py configs/production.yaml \\
         --input "Test payload" --test-checkpoint --thread-id test_001
@@ -68,6 +72,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to a text file containing input",
     )
     parser.add_argument(
+        "--input-image",
+        action="append",
+        default=None,
+        metavar="PATH_OR_URL",
+        help=(
+            "Attach an image to the input turn as a multimodal content part. "
+            "Accepts a local file path or an http(s)/data URL. Repeatable. "
+            "Requires the MAS agents to be bound to image-capable models."
+        ),
+    )
+    parser.add_argument(
         "--thread-id",
         help="Thread ID for checkpointed execution",
     )
@@ -106,8 +121,12 @@ def _build_input_data(args: argparse.Namespace) -> dict:
     """Construct initial state from CLI arguments.
 
     Returns a dict that can be passed to ``MASExecutor.run()``.
-    Contains a ``messages`` key with a ``HumanMessage`` if input text
-    is provided, otherwise returns an empty dict.
+    Contains a ``messages`` key with a ``HumanMessage`` when input text or at
+    least one ``--input-image`` is provided, otherwise returns an empty dict.
+
+    With text only, the message is byte-for-byte the one this function has
+    always built.  Each ``--input-image`` becomes an image content part, so the
+    turn reaches the model as a multimodal message.
     """
     text = None
 
@@ -117,14 +136,37 @@ def _build_input_data(args: argparse.Namespace) -> dict:
         with open(args.input_file, "r", encoding="utf-8") as fh:
             text = fh.read()
 
-    if text is None:
+    images = getattr(args, "input_image", None) or []
+
+    if text is None and not images:
         return {}
 
-    from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
-        HumanMessage,
+    from bili.iris.multimodal import (  # pylint: disable=import-outside-toplevel
+        build_human_message,
     )
 
-    return {"messages": [HumanMessage(content=text)]}
+    return {
+        "messages": [
+            build_human_message(text=text, images=[_as_image(i) for i in images])
+        ]
+    }
+
+
+def _as_image(reference: str) -> dict:
+    """Turn one ``--input-image`` value into an image content part.
+
+    A value carrying a URL scheme is passed through as a URL; anything else is
+    read from disk and inlined as a ``data:`` URI, so the CLI works against a
+    local screenshot without the caller hosting it first.
+    """
+    from bili.iris.multimodal import (  # pylint: disable=import-outside-toplevel
+        image_part,
+        image_part_from_path,
+    )
+
+    if reference.startswith(("http://", "https://", "data:")):
+        return image_part(url=reference)
+    return image_part_from_path(reference)
 
 
 def main() -> None:

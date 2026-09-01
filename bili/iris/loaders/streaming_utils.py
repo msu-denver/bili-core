@@ -18,19 +18,41 @@ Usage::
     # Async streaming
     async for token in astream_agent(agent, "Hello", thread_id="user1"):
         print(token, end="", flush=True)
+
+A prompt may also be a list of content parts, which is how an image reaches
+the model::
+
+    from bili.iris.multimodal import image_part
+
+    answer = invoke_agent(agent, [
+        {"type": "text", "text": "What is in this picture?"},
+        image_part(url="https://example.invalid/chart.png"),
+    ])
+
+Whether the bound model accepts an image is a separate, per-model question;
+declare it at load time with ``load_model(..., required_input_modalities=
+["image"])`` so an unsuitable model is refused at selection.
 """
 
 import logging
-from typing import Any, AsyncGenerator, Dict, Generator, Optional
+from typing import Any, AsyncGenerator, Dict, Generator, Optional, Sequence, Union
 
 from langchain_core.messages import AIMessageChunk, HumanMessage
+
+from bili.iris.multimodal import normalise_prompt
+
+#: What the three public entry points accept as their prompt: the historical
+#: plain string, or a list of content parts for a multimodal turn (see
+#: :mod:`bili.iris.multimodal`).  A string builds exactly the message it
+#: always did.
+Prompt = Union[str, Sequence[Any]]
 
 LOGGER = logging.getLogger(__name__)
 
 
 def stream_agent(
     agent: Any,
-    prompt: str,
+    prompt: Prompt,
     thread_id: Optional[str] = None,
     input_overrides: Optional[Dict[str, Any]] = None,
 ) -> Generator[str, None, None]:
@@ -41,7 +63,9 @@ def stream_agent(
 
     Args:
         agent: A compiled LangGraph (``CompiledStateGraph``).
-        prompt: The user prompt string.
+        prompt: The user prompt.  A plain string for a text turn, or a list
+            of content parts (text plus image) for a multimodal turn; see
+            :func:`bili.iris.multimodal.build_human_message`.
         thread_id: Optional thread ID for checkpointed conversations.
         input_overrides: Optional extra keys to merge into the input
             state dict (e.g. ``{"verbose": True}``).
@@ -70,7 +94,7 @@ def stream_agent(
 
 async def astream_agent(
     agent: Any,
-    prompt: str,
+    prompt: Prompt,
     thread_id: Optional[str] = None,
     input_overrides: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
@@ -81,7 +105,9 @@ async def astream_agent(
 
     Args:
         agent: A compiled LangGraph (``CompiledStateGraph``).
-        prompt: The user prompt string.
+        prompt: The user prompt.  A plain string for a text turn, or a list
+            of content parts (text plus image) for a multimodal turn; see
+            :func:`bili.iris.multimodal.build_human_message`.
         thread_id: Optional thread ID for checkpointed conversations.
         input_overrides: Optional extra keys to merge into the input
             state dict.
@@ -114,7 +140,7 @@ async def astream_agent(
 
 def invoke_agent(
     agent: Any,
-    prompt: str,
+    prompt: Prompt,
     thread_id: Optional[str] = None,
     input_overrides: Optional[Dict[str, Any]] = None,
 ) -> str:
@@ -125,7 +151,9 @@ def invoke_agent(
 
     Args:
         agent: A compiled LangGraph (``CompiledStateGraph``).
-        prompt: The user prompt string.
+        prompt: The user prompt.  A plain string for a text turn, or a list
+            of content parts (text plus image) for a multimodal turn; see
+            :func:`bili.iris.multimodal.build_human_message`.
         thread_id: Optional thread ID for checkpointed conversations.
         input_overrides: Optional extra keys to merge into the input
             state dict.
@@ -166,10 +194,15 @@ def _build_config(thread_id: Optional[str]) -> Dict[str, Any]:
     return {}
 
 
-def _build_input(prompt: str, overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build initial state dict from prompt and optional overrides."""
+def _build_input(prompt: Prompt, overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build initial state dict from prompt and optional overrides.
+
+    A ``str`` prompt produces exactly ``HumanMessage(content=<str>)``, the
+    message this function has always built.  A list of content parts is
+    carried through unchanged so an image part reaches the model.
+    """
     state: Dict[str, Any] = {
-        "messages": [HumanMessage(content=prompt)],
+        "messages": [HumanMessage(content=normalise_prompt(prompt))],
         "verbose": False,
     }
     if overrides:

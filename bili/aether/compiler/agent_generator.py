@@ -46,6 +46,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from bili.aether.schema import AgentSpec, OutputFormat
+from bili.iris.multimodal import content_has_non_text_parts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -89,15 +90,25 @@ def _normalise_content_value(content: Any) -> str:
 
 
 def _normalise_message_content(msg: Any) -> Any:
-    """Return *msg* with its ``content`` coerced to ``str`` if it is a list.
+    """Return *msg* with text-only list ``content`` coerced to ``str``.
 
     Some LLM providers (e.g. Google Vertex / Gemini) return ``content`` as a
     list of content-part dicts.  Forwarding such messages as conversation
     history to the same or a different provider can cause serialisation errors
     (e.g. Vertex rejects a message with an unrecognised parts structure).
     Delegates to :func:`_normalise_content_value` for the join logic.
+
+    A message carrying a recognised NON-TEXT part (an image) is returned
+    unchanged instead.  Coercing it would join ``part.get("text", str(part))``
+    over parts that have no ``"text"`` key, so the image is stringified into
+    the prompt and effectively dropped -- silently, since the join succeeds.
+    The safety this coercion exists for is unaffected: a text-only list, which
+    is what a provider returning parts produces, still collapses to a string
+    exactly as before.
     """
     if not hasattr(msg, "content") or not isinstance(msg.content, list):
+        return msg
+    if content_has_non_text_parts(msg.content):
         return msg
     return msg.model_copy(update={"content": _normalise_content_value(msg.content)})
 

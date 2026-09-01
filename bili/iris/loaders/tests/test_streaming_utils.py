@@ -13,6 +13,7 @@ from bili.iris.loaders.streaming_utils import (
     invoke_agent,
     stream_agent,
 )
+from bili.iris.multimodal import MultimodalContentError
 
 # ---------------------------------------------------------------------------
 # _build_input (format_input_for_agent equivalent)
@@ -298,3 +299,87 @@ class TestAstreamAgent:
         assert len(tokens) == 1
         assert "Async streaming response failed" in tokens[0]
         assert "RuntimeError" in tokens[0]
+
+
+# ---------------------------------------------------------------------------
+# Multimodal input at the IRIS entry points
+# ---------------------------------------------------------------------------
+
+
+class TestMultimodalPrompt:
+    """A prompt may be a list of content parts, so an image reaches the model.
+
+    The string path is pinned alongside every list case: widening the accepted
+    type is only backwards compatible if a ``str`` still produces exactly the
+    message it always did.
+    """
+
+    IMAGE_PART = {"type": "image_url", "image_url": {"url": "https://x.invalid/i.png"}}
+    PARTS = [{"type": "text", "text": "What is this?"}, IMAGE_PART]
+
+    def test_build_input_carries_content_parts(self):
+        """The parts reach the HumanMessage intact: no join, no str()."""
+        result = _build_input(self.PARTS, None)
+        assert result["messages"][0].content == self.PARTS
+
+    def test_build_input_copies_rather_than_aliasing_the_caller_list(self):
+        """A caller reusing its parts list must not see it mutated later."""
+        parts = list(self.PARTS)
+        result = _build_input(parts, None)
+        assert result["messages"][0].content is not parts
+
+    def test_build_input_accepts_a_tuple_of_parts(self):
+        """Build input accepts a tuple of parts."""
+        result = _build_input(tuple(self.PARTS), None)
+        assert result["messages"][0].content == self.PARTS
+
+    def test_build_input_string_path_is_unchanged(self):
+        """The backwards-compatibility claim, stated as an equality against a
+        message built the historical way."""
+        result = _build_input("Hello", None)
+        assert result["messages"][0].content == HumanMessage(content="Hello").content
+
+    def test_build_input_rejects_an_unsupported_prompt_type(self):
+        """Build input rejects an unsupported prompt type."""
+        with pytest.raises(MultimodalContentError):
+            _build_input(42, None)
+
+    def test_invoke_agent_passes_parts_through_to_the_agent(self):
+        """Invoke agent passes parts through to the agent."""
+        agent = MagicMock()
+        agent.invoke.return_value = {"messages": [MagicMock(content="an answer")]}
+
+        assert invoke_agent(agent, self.PARTS) == "an answer"
+
+        state = agent.invoke.call_args.args[0]
+        assert state["messages"][0].content == self.PARTS
+
+    def test_stream_agent_passes_parts_through_to_the_agent(self):
+        """Stream agent passes parts through to the agent."""
+        agent = MagicMock()
+        agent.stream.return_value = iter(
+            [(AIMessageChunk(content="tok"), {"langgraph_node": "n"})]
+        )
+
+        assert list(stream_agent(agent, self.PARTS)) == ["tok"]
+
+        state = agent.stream.call_args.args[0]
+        assert state["messages"][0].content == self.PARTS
+
+    @pytest.mark.anyio
+    async def test_astream_agent_passes_parts_through_to_the_agent(self):
+        """Astream agent passes parts through to the agent."""
+        captured = {}
+
+        async def fake_events(state, *_args, **_kwargs):
+            captured["state"] = state
+            chunk = MagicMock()
+            chunk.content = "tok"
+            yield {"event": "on_chat_model_stream", "data": {"chunk": chunk}}
+
+        agent = MagicMock()
+        agent.astream_events = fake_events
+
+        tokens = [tok async for tok in astream_agent(agent, self.PARTS)]
+        assert tokens == ["tok"]
+        assert captured["state"]["messages"][0].content == self.PARTS

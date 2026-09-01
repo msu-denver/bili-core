@@ -29,6 +29,24 @@ Example:
 """
 
 # pylint: disable=too-many-lines
+#
+# Per-model ``input_modalities``
+# ------------------------------
+# An entry may declare the input kinds the model accepts, drawn from
+# ``text`` / ``image`` / ``audio``.  ``bili.iris.providers.modality`` reads it
+# so ``load_model(..., required_input_modalities=["image"])`` refuses a
+# text-only model at selection instead of failing opaquely at the provider
+# call, and so a caller can look up which models accept an image rather than
+# guessing.  The field is DECLARATIVE, not derived: the three occurrences of
+# "Vision" below are ``model_name`` display strings and carry no capability.
+#
+# An entry OMITS the key when bili-core has no defensible record of what the
+# model accepts -- a moving ``-latest`` alias whose capability changes under
+# it, or a model whose input kind is outside this vocabulary (e.g. video).
+# Omission means "not declared" and degrades to a warning at load time; it is
+# deliberate, because asserting either value there would produce a false
+# refusal or a false assurance.
+#
 # Available LLM Models and Types
 LLM_MODELS = {
     # https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html
@@ -49,6 +67,7 @@ LLM_MODELS = {
             {
                 "model_name": "Amazon Nova Pro",
                 "model_id": "amazon.nova-pro-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 300000,
                 "max_output_tokens": 5000,
@@ -66,6 +85,7 @@ LLM_MODELS = {
                 # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-premier.html
                 "model_name": "Amazon Nova Premier",
                 "model_id": "us.amazon.nova-premier-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 10000,
@@ -81,6 +101,7 @@ LLM_MODELS = {
             {
                 "model_name": "Amazon Nova Lite",
                 "model_id": "amazon.nova-lite-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 300000,
                 "max_output_tokens": 5000,
@@ -96,6 +117,7 @@ LLM_MODELS = {
             {
                 "model_name": "Amazon Nova Micro",
                 "model_id": "amazon.nova-micro-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 5000,
@@ -114,6 +136,7 @@ LLM_MODELS = {
             {
                 "model_name": "Amazon Titan Text G1 - Premier",
                 "model_id": "amazon.titan-text-premier-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 32000,
                 "max_output_tokens": 3072,
@@ -129,6 +152,7 @@ LLM_MODELS = {
             {
                 "model_name": "Amazon Titan Text G1 - Express ",
                 "model_id": "amazon.titan-text-express-v1",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 8192,
                 "max_output_tokens": 8192,
@@ -144,6 +168,7 @@ LLM_MODELS = {
             {
                 "model_name": "Amazon Titan Text G1 - Lite",
                 "model_id": "amazon.titan-text-lite-v1",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 4096,
                 "max_output_tokens": 4096,
@@ -161,6 +186,7 @@ LLM_MODELS = {
             {
                 "model_name": "AI21 Jamba 1.5 Large",
                 "model_id": "ai21.jamba-1-5-large-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 256000,
                 "max_output_tokens": 4096,
@@ -177,6 +203,7 @@ LLM_MODELS = {
             {
                 "model_name": "AI21 Jamba 1.5 Mini",
                 "model_id": "ai21.jamba-1-5-mini-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 256000,
                 "max_output_tokens": 4096,
@@ -196,6 +223,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3 Haiku",
                 "model_id": "anthropic.claude-3-haiku-20240307-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 4096,
@@ -211,6 +239,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3.5 Haiku",
                 "model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8192,
@@ -226,6 +255,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3 Opus",
                 "model_id": "anthropic.claude-3-opus-20240229-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 4096,
@@ -241,6 +271,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude Opus 4",
                 "model_id": "us.anthropic.claude-opus-4-20250514-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 32000,
@@ -256,6 +287,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude Opus 4.1",
                 "model_id": "us.anthropic.claude-opus-4-1-20250805-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 32000,
@@ -271,6 +303,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3 Sonnet",
                 "model_id": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 4096,
@@ -286,6 +319,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet",
                 "model_id": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8192,
@@ -301,6 +335,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3.5 Sonnet v2",
                 "model_id": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8192,
@@ -316,6 +351,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude 3.7 Sonnet",
                 "model_id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 64000,
@@ -331,6 +367,7 @@ LLM_MODELS = {
             {
                 "model_name": "Anthropic Claude Sonnet 4.6",
                 "model_id": "us.anthropic.claude-sonnet-4-6",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 64000,
@@ -348,6 +385,7 @@ LLM_MODELS = {
                 # Launched 2026-04-16. 1M-token context, 128K output.
                 "model_name": "Anthropic Claude Opus 4.7",
                 "model_id": "us.anthropic.claude-opus-4-7",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 128000,
@@ -367,6 +405,7 @@ LLM_MODELS = {
             {
                 "model_name": "Cohere Command R",
                 "model_id": "cohere.command-r-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4096,
@@ -382,6 +421,7 @@ LLM_MODELS = {
             {
                 "model_name": "Cohere Command R+",
                 "model_id": "cohere.command-r-plus-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4096,
@@ -399,6 +439,7 @@ LLM_MODELS = {
             {
                 "model_name": "DeepSeek-R1",
                 "model_id": "us.deepseek.r1-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32000,
@@ -420,6 +461,7 @@ LLM_MODELS = {
                 # docs confirm that cross-region profile ID for V3.1.
                 "model_name": "DeepSeek-V3.1",
                 "model_id": "deepseek.v3-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 65536,
                 "max_output_tokens": 32768,
@@ -437,6 +479,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3 8B Instruct",
                 "model_id": "meta.llama3-8b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 8192,
                 "max_output_tokens": 2048,
@@ -451,6 +494,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3 70B Instruct",
                 "model_id": "meta.llama3-70b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 8192,
                 "max_output_tokens": 2048,
@@ -465,6 +509,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.1 8B Instruct",
                 "model_id": "us.meta.llama3-1-8b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -480,6 +525,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.1 70B Instruct",
                 "model_id": "us.meta.llama3-1-70b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -498,6 +544,7 @@ LLM_MODELS = {
                 # as all Llama models via ChatBedrockConverse (langchain-aws #175).
                 "model_name": "Meta Llama 3.1 405B Instruct",
                 "model_id": "us.meta.llama3-1-405b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4096,
@@ -513,6 +560,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.2 11B Instruct",
                 "model_id": "us.meta.llama3-2-11b-instruct-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -528,6 +576,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.2 1B Instruct",
                 "model_id": "us.meta.llama3-2-1b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -543,6 +592,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.2 3B Instruct",
                 "model_id": "us.meta.llama3-2-3b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -558,6 +608,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.2 90B Vision Instruct",
                 "model_id": "us.meta.llama3-2-90b-instruct-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -573,6 +624,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 3.3 70B Instruct",
                 "model_id": "us.meta.llama3-3-70b-instruct-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 2048,
@@ -588,6 +640,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 4 Scout 17B Instruct",
                 "model_id": "us.meta.llama4-scout-17b-instruct-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 3500000,
                 "max_output_tokens": 4096,
@@ -607,6 +660,7 @@ LLM_MODELS = {
             {
                 "model_name": "Meta Llama 4 Maverick 17B Instruct",
                 "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 4096,
@@ -628,6 +682,7 @@ LLM_MODELS = {
                 # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Large",
                 "model_id": "mistral.mistral-large-2402-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 131000,
                 "max_output_tokens": 8192,
@@ -643,6 +698,7 @@ LLM_MODELS = {
                 # Superseded by Mistral Large 2407 and Large 3. Kept for existing deployments.
                 "model_name": "Mistral Small",
                 "model_id": "mistral.mistral-small-2402-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 32000,
                 "max_output_tokens": 8192,
@@ -657,6 +713,7 @@ LLM_MODELS = {
             {
                 "model_name": "Mistral 7B Instruct",
                 "model_id": "mistral.mistral-7b-instruct-v0:2",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 131000,
                 "max_output_tokens": 8192,
@@ -672,6 +729,7 @@ LLM_MODELS = {
             {
                 "model_name": "Mistral Mixtral 8x7B Instruct",
                 "model_id": "mistral.mixtral-8x7b-instruct-v0:1",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 32000,
                 "max_output_tokens": 4096,
@@ -687,6 +745,7 @@ LLM_MODELS = {
             {
                 "model_name": "Mistral Pixtral Large",
                 "model_id": "us.mistral.pixtral-large-2502-v1:0",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 8192,
@@ -702,6 +761,7 @@ LLM_MODELS = {
                 # https://aws.amazon.com/blogs/aws/amazon-bedrock-adds-mistral-large-24-07-model/
                 "model_name": "Mistral Large 24.07",
                 "model_id": "mistral.mistral-large-2407-v1:0",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 131000,
                 "max_output_tokens": 8192,
@@ -820,6 +880,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.5 Pro",
                 "model_id": "gemini-2.5-pro",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -841,6 +902,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.5 Flash",
                 "model_id": "gemini-2.5-flash",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -862,6 +924,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.5 Flash Lite",
                 "model_id": "gemini-2.5-flash-lite",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1000000,
                 "max_output_tokens": 65536,
@@ -883,6 +946,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.0 Flash",
                 "model_id": "gemini-2.0-flash",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 8192,
@@ -898,6 +962,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.0 Flash Lite",
                 "model_id": "gemini-2.0-flash-lite",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 8192,
@@ -913,6 +978,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 1.5 Pro 002",
                 "model_id": "gemini-1.5-pro-002",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 2097152,
                 "max_output_tokens": 8192,
@@ -928,6 +994,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 1.5 Pro",
                 "model_id": "gemini-1.5-pro",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 2097152,
                 "max_output_tokens": 8192,
@@ -943,6 +1010,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 1.5 Flash",
                 "model_id": "gemini-1.5-flash",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 8192,
@@ -958,6 +1026,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 1.5 Flash 002",
                 "model_id": "gemini-1.5-flash-002",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 8192,
@@ -973,6 +1042,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 1.0 Pro",
                 "model_id": "gemini-1.0-pro",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 32760,
                 "max_output_tokens": 8192,
@@ -1003,6 +1073,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-4.1",
                 "model_id": "gpt-41",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32768,
@@ -1020,6 +1091,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-4.1 mini",
                 "model_id": "gpt-41-mini",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32768,
@@ -1037,6 +1109,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-4.1 nano",
                 "model_id": "gpt-41-nano",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32768,
@@ -1054,6 +1127,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-4o Omni",
                 "model_id": "gpt-4o",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 16384,
@@ -1071,6 +1145,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-4o mini",
                 "model_id": "gpt-4o-mini",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 16384,
@@ -1088,6 +1163,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-4 Turbo with Vision",
                 "model_id": "gpt-4",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4096,
@@ -1105,6 +1181,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI o1",
                 "model_id": "o1",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1122,6 +1199,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI o1-mini",
                 "model_id": "o1-mini",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 65536,
@@ -1139,6 +1217,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI o3",
                 "model_id": "o3",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1156,6 +1235,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI o3-mini",
                 "model_id": "o3-mini",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1173,6 +1253,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI o3-pro",
                 "model_id": "o3-pro",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1190,6 +1271,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI o4-mini",
                 "model_id": "o4-mini",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1207,6 +1289,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT 3.5 Turbo 16K",
                 "model_id": "gpt-35-turbo-16k",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 16384,
                 "max_output_tokens": 16384,
@@ -1224,6 +1307,7 @@ LLM_MODELS = {
             {
                 "model_name": "Azure OpenAI GPT-3.5 Turbo",
                 "model_id": "gpt-35-turbo",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 16385,
                 "max_output_tokens": 4096,
@@ -1256,6 +1340,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-5.6",
                 "model_id": "gpt-5.6",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1050000,
                 "max_output_tokens": 128000,
@@ -1273,6 +1358,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-5.6 Sol",
                 "model_id": "gpt-5.6-sol",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1050000,
                 "max_output_tokens": 128000,
@@ -1290,6 +1376,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-5.6 Terra",
                 "model_id": "gpt-5.6-terra",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1050000,
                 "max_output_tokens": 128000,
@@ -1307,6 +1394,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-5.6 Luna",
                 "model_id": "gpt-5.6-luna",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1050000,
                 "max_output_tokens": 128000,
@@ -1324,6 +1412,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-4o Omni",
                 "model_id": "gpt-4o",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 16384,
@@ -1341,6 +1430,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-4o mini",
                 "model_id": "gpt-4o-mini",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 16384,
@@ -1358,6 +1448,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-4 Turbo with Vision",
                 "model_id": "gpt-4",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 8192,
                 "max_output_tokens": 4096,
@@ -1375,6 +1466,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI o1",
                 "model_id": "o1",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1395,6 +1487,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI o1-mini",
                 "model_id": "o1-mini",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 65536,
@@ -1412,6 +1505,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI o3-mini",
                 "model_id": "o3-mini",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 100000,
@@ -1429,6 +1523,7 @@ LLM_MODELS = {
             {
                 "model_name": "OpenAI GPT-3.5 Turbo",
                 "model_id": "gpt-35-turbo",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 16385,
                 "max_output_tokens": 4096,
@@ -1461,6 +1556,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Opus 5",
                 "model_id": "claude-opus-5",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 32000,
@@ -1478,6 +1574,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Sonnet 5",
                 "model_id": "claude-sonnet-5",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 16000,
@@ -1495,6 +1592,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Opus 4.8",
                 "model_id": "claude-opus-4-8",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 32000,
@@ -1512,6 +1610,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Sonnet 4.6",
                 "model_id": "claude-sonnet-4-6",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 16000,
@@ -1529,6 +1628,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Haiku 4.5",
                 "model_id": "claude-haiku-4-5",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8096,
@@ -1550,6 +1650,7 @@ LLM_MODELS = {
                 # same output budget rather than the provider's small default.
                 "model_name": "Claude Haiku 4.5 (2025-10-01)",
                 "model_id": "claude-haiku-4-5-20251001",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 8096,
@@ -1567,6 +1668,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Fable 5",
                 "model_id": "claude-fable-5",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 200000,
                 "max_output_tokens": 16000,
@@ -1632,6 +1734,7 @@ LLM_MODELS = {
             {
                 "model_name": "Codestral Latest",
                 "model_id": "codestral-latest",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 262144,
                 "max_output_tokens": 8192,
@@ -1680,6 +1783,7 @@ LLM_MODELS = {
             {
                 "model_name": "Command R+",
                 "model_id": "command-r-plus",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4000,
@@ -1697,6 +1801,7 @@ LLM_MODELS = {
             {
                 "model_name": "Command R",
                 "model_id": "command-r",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 4000,
@@ -1739,6 +1844,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 3.1 Pro Preview (Direct API)",
                 "model_id": "gemini-3.1-pro-preview",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -1756,6 +1862,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 3 Flash Preview (Direct API)",
                 "model_id": "gemini-3-flash-preview",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -1773,6 +1880,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 3.1 Flash Lite (Direct API)",
                 "model_id": "gemini-3.1-flash-lite",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -1790,6 +1898,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.5 Flash (Direct API)",
                 "model_id": "gemini-2.5-flash",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -1807,6 +1916,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.5 Flash Lite (Direct API)",
                 "model_id": "gemini-2.5-flash-lite",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 65536,
@@ -1824,6 +1934,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.0 Flash (Direct API)",
                 "model_id": "gemini-2.0-flash",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 8192,
@@ -1841,6 +1952,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini 2.0 Flash Lite (Direct API)",
                 "model_id": "gemini-2.0-flash-lite",
+                "input_modalities": ["text", "image"],
                 "custom_model_path": False,
                 "max_input_tokens": 1048576,
                 "max_output_tokens": 8192,
@@ -1873,6 +1985,7 @@ LLM_MODELS = {
             {
                 "model_name": "DeepSeek Chat",
                 "model_id": "deepseek-chat",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 65536,
                 "max_output_tokens": 8192,
@@ -1890,6 +2003,7 @@ LLM_MODELS = {
             {
                 "model_name": "DeepSeek Reasoner",
                 "model_id": "deepseek-reasoner",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 65536,
                 "max_output_tokens": 32768,
@@ -1938,6 +2052,7 @@ LLM_MODELS = {
             {
                 "model_name": "Grok Beta",
                 "model_id": "grok-beta",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 131072,
                 "max_output_tokens": 131072,
@@ -1969,6 +2084,7 @@ LLM_MODELS = {
             {
                 "model_name": "Llama 3.3 70B Versatile",
                 "model_id": "llama-3.3-70b-versatile",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 128000,
                 "max_output_tokens": 32768,
@@ -1986,6 +2102,7 @@ LLM_MODELS = {
             {
                 "model_name": "Llama 3.1 8B Instant",
                 "model_id": "llama-3.1-8b-instant",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 131072,
                 "max_output_tokens": 8000,
@@ -2061,6 +2178,7 @@ LLM_MODELS = {
                 # The model_id is a sentinel; the real executable is set via
                 # the "command" kwarg when calling CliProvider.load().
                 "model_id": "cli:custom",
+                "input_modalities": ["text"],
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,
@@ -2097,6 +2215,7 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Code CLI",
                 "model_id": "cli:claude_code",
+                "input_modalities": ["text"],
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,
@@ -2120,6 +2239,7 @@ LLM_MODELS = {
             {
                 "model_name": "Codex CLI",
                 "model_id": "cli:codex",
+                "input_modalities": ["text"],
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,
@@ -2143,6 +2263,7 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini CLI",
                 "model_id": "cli:gemini_cli",
+                "input_modalities": ["text"],
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,
@@ -2164,6 +2285,7 @@ LLM_MODELS = {
                     "/app/bili-core/models/Llama-3.2-1B-Instruct-GGUF/"
                     "Llama-3.2-1B-Instruct-Q5_K_M.gguf"
                 ),
+                "input_modalities": ["text"],
                 "custom_model_path": True,
                 "supports_temperature": True,
                 "supports_seed": True,
@@ -2190,6 +2312,7 @@ LLM_MODELS = {
             {
                 "model_name": "HuggingFace Local (In Memory) Model",
                 "model_id": "/app/bili-core/models/Llama-3.2-1B-Instruct",
+                "input_modalities": ["text"],
                 "custom_model_path": True,
                 "supports_temperature": True,
                 "supports_seed": True,
@@ -2223,6 +2346,7 @@ LLM_MODELS = {
                 # models (Qwen3, Llama 3.1+, Mistral) honour native tool calls.
                 "model_name": "Ollama Local (Server) Model",
                 "model_id": "qwen3",
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "supports_temperature": True,
                 "supports_seed": True,

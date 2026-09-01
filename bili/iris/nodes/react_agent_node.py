@@ -113,6 +113,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import Tool
 
 from bili.iris.graph_builder.classes.node import Node
+from bili.iris.multimodal import message_has_non_text_parts
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -724,8 +725,20 @@ def build_react_agent_node(
             # There are some bugs out there right now with limitations of the kinds
             # of messages that can be sent to certain models, and this is a way to work around
             # that for now.
+            #
+            # A message carrying a recognised non-text content part (an image)
+            # is the one exception: str() on its list content produces the
+            # repr of the parts, which drops the image while looking like it
+            # worked.  Such a message keeps its list content so the part
+            # reaches the model.  Text-only content -- a plain string, or a
+            # list of text parts -- takes the coercion above unchanged.
             messages_to_send = [
-                HumanMessage(content=str(message.content)) for message in messages
+                (
+                    HumanMessage(content=message.content)
+                    if message_has_non_text_parts(message)
+                    else HumanMessage(content=str(message.content))
+                )
+                for message in messages
             ]
 
             # Load the llm config if one exists, otherwise pass an empty dict
