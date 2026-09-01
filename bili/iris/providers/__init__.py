@@ -25,6 +25,13 @@ Public API
   for an externally-registered provider
 - :func:`parse_structured_content` — parse + validate a structured response
 - :exc:`StructuredOutputError` (+ parse/validation subclasses)
+- :func:`model_input_modalities` / :func:`supports_input_modality`: the input
+  kinds a cataloged model accepts (``text`` / ``image`` / ``audio``)
+- :func:`require_input_modality` / :func:`require_input_modalities`: refuse a
+  model that is cataloged as unable to accept an input kind
+- :func:`models_supporting_input_modality`: route to a model that accepts one
+- :exc:`UnsupportedInputModalityError`: raised by both of the above and by a
+  text-only transport asked to carry a non-text part
 
 Design contract
 ---------------
@@ -58,6 +65,15 @@ from .fallback import (
     FallbackPolicy,
     ProviderChain,
     build_fallback_llm,
+)
+from .modality import (
+    KNOWN_INPUT_MODALITIES,
+    UnsupportedInputModalityError,
+    model_input_modalities,
+    models_supporting_input_modality,
+    require_input_modalities,
+    require_input_modality,
+    supports_input_modality,
 )
 from .registry import (
     PROVIDER_REGISTRY,
@@ -93,4 +109,11 @@ __all__ = [
     "register_structured_output_provider",
     "structured_output_providers",
     "supports_structured_output",
+    "KNOWN_INPUT_MODALITIES",
+    "UnsupportedInputModalityError",
+    "model_input_modalities",
+    "models_supporting_input_modality",
+    "require_input_modalities",
+    "require_input_modality",
+    "supports_input_modality",
 ]

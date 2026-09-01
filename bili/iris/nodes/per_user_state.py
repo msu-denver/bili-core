@@ -41,6 +41,7 @@ from functools import partial
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 
 from bili.iris.graph_builder.classes.node import Node
+from bili.iris.multimodal import message_text
 from bili.utils.langgraph_utils import State
 from bili.utils.logging_utils import get_logger
 
@@ -123,8 +124,11 @@ def buld_per_user_state_node(current_user: dict = None, **kwargs):
         profile_info = HumanMessage(content=profile_msg)
 
         # Check if there is already a HumanMessage at position 1 that has the same prefix. If so, remove it.
+        # Read the prefix through message_text: a multimodal turn's content is
+        # a list of parts, and .startswith() on it raises AttributeError, which
+        # would take down the whole node for an image-bearing conversation.
         if len(all_messages) > 1 and isinstance(all_messages[1], HumanMessage):
-            if all_messages[1].content.startswith(profile_prefix):
+            if message_text(all_messages[1]).startswith(profile_prefix):
                 all_messages.append(RemoveMessage(id=all_messages[1].id))
 
         # Insert the new profile message after the first SystemMessage

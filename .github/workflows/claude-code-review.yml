@@ -83,7 +83,13 @@ jobs:
   # distinct test-application job, so we poll the run for this head commit and
   # then read that specific job's conclusion by name via the jobs API.
   await-tests:
-    if: ${{ github.actor != 'dependabot[bot]' }}
+    # Gate on who AUTHORED the pull request, not github.actor, which is whoever
+    # triggered THIS run. The two diverge the moment anyone re-runs a dependabot
+    # PR's checks or updates its branch, and branch protection makes updating
+    # mandatory before merge. Keying on the actor flipped these jobs from skipped
+    # to running against a PR the review never comments on, so verdict-extract
+    # found nothing and a required check failed, leaving dependabot PRs unmergeable.
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -148,7 +154,7 @@ jobs:
           gh pr comment "$PR" --repo "$REPO" --body-file ci-tests-comment.md
 
   claude-review:
-    if: ${{ github.actor != 'dependabot[bot]' }}
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
     # Both gates post their sticky comments before the review runs:
     #   semgrep -> "Semgrep (OSS)"; await-tests -> "CI Tests".
     needs: [semgrep, await-tests]
@@ -222,7 +228,7 @@ jobs:
   verdict-extract:
     needs: [claude-review]
     # Only run when the review actually produced something to extract from.
-    if: ${{ needs.claude-review.result == 'success' && github.actor != 'dependabot[bot]' }}
+    if: ${{ needs.claude-review.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     # The verdict travels to the gate as a JOB OUTPUT built from the action's
     # STRUCTURED OUTPUT (claude-code-action's `--json-schema` feature, v1.0.152+):
@@ -369,7 +375,7 @@ jobs:
     # always(): the gate must still run (and report INCONCLUSIVE) when the review
     # or extractor errored — `needs` would otherwise SKIP it, and a skipped
     # required check could be misread as non-blocking. Skip only for dependabot.
-    if: ${{ always() && github.actor != 'dependabot[bot]' }}
+    if: ${{ always() && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

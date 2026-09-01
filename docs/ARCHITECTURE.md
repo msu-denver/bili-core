@@ -29,7 +29,7 @@ bili-core/
 │   │   │   ├── pg_checkpointer.py
 │   │   │   └── memory_checkpointer.py
 │   │   ├── config/                #   Configuration management
-│   │   │   ├── llm_config.py      #     LLM model configurations (107 models, 18 provider types)
+│   │   │   ├── llm_config.py      #     LLM model configurations (118 models, 18 provider types)
 │   │   │   ├── tool_config.py     #     Tool configurations
 │   │   │   └── middleware_config.py
 │   │   ├── graph_builder/         #   LangGraph construction utilities
@@ -206,9 +206,9 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 
 ### 3. LLM Configuration (`bili/iris/config/`) -- IRIS
 
-The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
+The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), which input kinds it accepts (`input_modalities`), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
-107 model configurations across 18 provider types registered in `llm_config.py`:
+118 model configurations across 18 provider types registered in `llm_config.py`:
 
 | Provider type | Description |
 |---|---|
@@ -257,6 +257,40 @@ raise `ValueError` at load time; external providers declare support via
 `output_schema` through this seam automatically when
 `output_format: structured` (tool-less agents, supported providers) and
 validates post-hoc otherwise.
+
+**Multimodal input (`bili/iris/multimodal.py`,
+`bili/iris/providers/modality.py`):** the provider contract is a list of
+`BaseMessage` in and a response with `.content` out, and
+`HumanMessage.content` is `Union[str, list]`, so a message whose content is a
+list of content parts reaches a vision-capable chat model with no
+per-provider change. `bili.iris.multimodal` is the construction seam
+(`build_human_message`, `text_part`, `image_part`, `image_part_from_path`);
+it defines no wire format of its own and emits the shapes the LangChain
+ecosystem already exchanges. Every entry point that takes message content
+accepts a parts list as well as a string: the IRIS streaming helpers
+(`stream_agent` / `astream_agent` / `invoke_agent`), an AETHER run's
+`input_data["messages"]`, `MASExecutor.resume_streaming`,
+`MASExecutor.steer`, and the AETHER runtime CLI's repeatable
+`--input-image`. A string input builds exactly the message it always did.
+
+Whether a given model accepts an image is a per-model question the catalog
+answers: each entry may declare `input_modalities` (`text` / `image` /
+`audio`), and `load_model(..., required_input_modalities=["image"])` raises
+`UnsupportedInputModalityError` before any client is constructed when the
+catalog says the model cannot take one.
+`models_supporting_input_modality("image")` answers the routing direction.
+The reader is tri-state on purpose: an entry that declares nothing (or a
+passthrough model the catalog does not list, such as a locally-served vision
+model reached by a sentinel-prefixed name) warns and proceeds, because
+bili-core cannot assert a capability it has no record of and refusing there
+would block a model that works.
+
+The message-history flatteners in AETHER and on the IRIS tool-less path keep
+a message that carries a recognised non-text part instead of coercing it to
+text; the text-only coercion those paths were written for is unchanged. A
+text-only transport (the CLI subprocess providers) refuses an image part by
+name rather than stringifying it, because a stringified image is a dropped
+image that still looks like a successful turn.
 
 ### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`) -- IRIS
 

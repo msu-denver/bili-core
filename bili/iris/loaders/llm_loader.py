@@ -126,6 +126,9 @@ def load_model(
     :type model_type: str
     :param kwargs: Additional keyword arguments specific to the loader function for
         the chosen model type. These arguments differ depending on the model type.
+        ``required_input_modalities`` (a modality string or an iterable of them,
+        e.g. ``["image"]``) is consumed here rather than forwarded; see
+        "Multimodal input" below.
     :type kwargs: dict
     :return: The loaded model object as returned by the appropriate model loader
         function. The return value may differ in format depending on the chosen
@@ -135,7 +138,38 @@ def load_model(
         types and is not registered in the provider registry, or if
         ``structured_output_schema`` is requested for a provider type without
         decode-time schema enforcement.
+    :raises bili.iris.providers.modality.UnsupportedInputModalityError: If
+        ``required_input_modalities`` names an input kind the catalog declares
+        the chosen model does not accept.
+
+    Multimodal input
+    ----------------
+    A caller that intends to send a non-text part (an image) declares it with
+    ``required_input_modalities`` so an unsuitable model is rejected here, at
+    selection, rather than opaquely at the provider call::
+
+        llm = load_model("remote_openai", model_name="gpt-4o",
+                         required_input_modalities=["image"])
+
+    The kwarg is consumed by this function and never forwarded to the loader,
+    so omitting it leaves every existing call byte-for-byte unchanged.
     """
+    # Fail fast on an input-modality the chosen model is cataloged as unable to
+    # accept.  Same posture as the structured-output check below: refusing at
+    # selection is actionable, whereas the provider's own rejection (or, worse,
+    # a silently ignored image) surfaces at the invoke boundary.  Popped rather
+    # than passed through: it is a precondition on the selection, not a
+    # provider kwarg.
+    required_input_modalities = kwargs.pop("required_input_modalities", None)
+    if required_input_modalities:
+        from bili.iris.providers.modality import (  # pylint: disable=import-outside-toplevel
+            require_input_modalities,
+        )
+
+        require_input_modalities(
+            model_type, kwargs.get("model_name"), required_input_modalities
+        )
+
     # Fail fast on structured-output requests the provider cannot honour.
     # Silently returning an unconstrained model would let the caller believe
     # generation is schema-constrained when it is not -- the exact failure
