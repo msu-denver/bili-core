@@ -32,6 +32,7 @@ import bili.iris.providers.builtin  # noqa: F401  pylint: disable=unused-import
 from bili.aether.compiler.llm_resolver import resolve_provider
 from bili.iris.config.llm_config import LLM_MODELS
 from bili.iris.providers.base import KNOWN_PROVIDER_TYPES
+from bili.iris.providers.cli_presets import CLI_PRESET_CATALOG
 from bili.iris.providers.cli_provider import (
     DEFAULT_MODEL_FLAG_TEMPLATE,
     CliLLM,
@@ -48,7 +49,14 @@ from bili.iris.providers.fallback import (
     DEFAULT_POLICY,
     FallbackLLM,
 )
-from bili.iris.providers.modality import UnsupportedInputModalityError
+from bili.iris.providers.modality import (
+    IMAGE,
+    IMAGE_DELIVERY_CATALOG_KEY,
+    IMAGE_DELIVERY_OFFERED_BY_PATH,
+    TEXT,
+    UnsupportedInputModalityError,
+    image_delivery_kind,
+)
 from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 # ---------------------------------------------------------------------------
@@ -888,7 +896,7 @@ class TestGenerate:
     def test_uses_parsed_output(self):
         """_generate delegates parsing to _call_cli, not raw stdout."""
         llm = _llm()
-        with patch.object(llm, "_call_cli", return_value="parsed") as mock_call:
+        with patch.object(llm, "_call_cli", return_value=("parsed", None)) as mock_call:
             result = llm._generate(messages=[_human("q")])
         mock_call.assert_called_once()
         assert result.generations[0].message.content == "parsed"
@@ -905,7 +913,7 @@ class TestStream:
     def test_yields_single_chunk(self):
         """_stream yields exactly one ChatGenerationChunk."""
         llm = _llm()
-        with patch.object(llm, "_call_cli", return_value="response text"):
+        with patch.object(llm, "_call_cli", return_value=("response text", None)):
             chunks = list(llm._stream(messages=[_human("hi")]))
         assert len(chunks) == 1
         assert isinstance(chunks[0], ChatGenerationChunk)
@@ -913,7 +921,7 @@ class TestStream:
     def test_chunk_contains_full_content(self):
         """The single chunk contains the complete CLI response."""
         llm = _llm()
-        with patch.object(llm, "_call_cli", return_value="the full text"):
+        with patch.object(llm, "_call_cli", return_value=("the full text", None)):
             chunks = list(llm._stream(messages=[_human("hi")]))
         msg = chunks[0].message
         assert isinstance(msg, AIMessageChunk)
@@ -941,7 +949,7 @@ class TestAStream:
         async def _run():
             """Async inner coroutine to collect chunks from _astream."""
             llm = _llm()
-            with patch.object(llm, "_call_cli", return_value="async result"):
+            with patch.object(llm, "_call_cli", return_value=("async result", None)):
                 chunks = []
                 async for chunk in llm._astream(messages=[_human("hi")]):
                     chunks.append(chunk)
@@ -968,7 +976,7 @@ class TestAStream:
             async def fake_to_thread(func, *args, **kwargs):
                 """Capture the call and return a fixed value."""
                 to_thread_calls.append((func, args, kwargs))
-                return "threaded result"
+                return ("threaded result", None)
 
             with patch("asyncio.to_thread", side_effect=fake_to_thread):
                 chunks = []
@@ -1327,15 +1335,76 @@ class TestRenderMessagesRefusesNonTextContent:
         ) == str([{"type": "text", "text": "hi"}])
 
 
-class TestCliCatalogDeclaresTextOnly:
-    """The catalog agrees with the transport."""
+class TestCliCatalogAgreesWithTheTransport:
+    """What the catalog claims about images is what the transport can do.
 
-    def test_every_cli_preset_declares_text_only(self):
-        """Every CLI preset declares text only."""
-        cli_types = [
-            key for key in LLM_MODELS if key == "cli" or key.startswith("cli_")
-        ]
+    Two claims are made in two places -- a catalog entry says a model accepts
+    an image, and a preset carries (or does not carry) a file-read route --
+    and they are only useful if they cannot drift apart.  A preset that
+    gained a route without the catalog declaring image would leave the model
+    refused at selection while the provider could have delivered; a catalog
+    entry that declared image without a route would pass selection and then
+    refuse mid-turn.  So the two are asserted against each other rather than
+    each against a hand-written list.
+    """
+
+    @staticmethod
+    def _cli_types():
+        """Return the CLI provider-type keys, derived from the catalog."""
+        return [key for key in LLM_MODELS if key == "cli" or key.startswith("cli_")]
+
+    def test_declaring_image_and_carrying_a_route_are_the_same_set(self):
+        """Declared image capability equals a shipped file-read route."""
+        cli_types = self._cli_types()
         assert cli_types
         for provider_type in cli_types:
+            preset = CLI_PRESET_CATALOG.get(provider_type)
+            has_route = preset is not None and preset.image_route is not None
             for entry in LLM_MODELS[provider_type]["models"]:
-                assert entry.get("input_modalities") == ["text"], provider_type
+                declares_image = IMAGE in (entry.get("input_modalities") or ())
+                assert declares_image == has_route, (provider_type, entry["model_id"])
+
+    def test_the_generic_cli_type_stays_text_only(self):
+        """The generic type drives an arbitrary executable.
+
+        bili-core has no record of whether it can open a file, so an image
+        part sent to it is still refused by name.  This is the negative space
+        the whole route mechanism is scoped against; if it ever declared
+        image, the refusal would have no remaining test subject.
+        """
+        assert "cli" not in CLI_PRESET_CATALOG
+        for entry in LLM_MODELS["cli"]["models"]:
+            assert entry.get("input_modalities") == [TEXT]
+            assert IMAGE_DELIVERY_CATALOG_KEY not in entry
+
+    def test_every_image_capable_cli_entry_declares_delivery_by_path(self):
+        """A CLI harness is offered a path; it is never handed the bytes.
+
+        Left to the default the entry would read ``bytes``, which is a
+        stronger claim than this transport can make: it cannot verify from
+        the response that the harness opened the file.
+        """
+        declared = [
+            (provider_type, entry)
+            for provider_type in self._cli_types()
+            for entry in LLM_MODELS[provider_type]["models"]
+            if IMAGE in (entry.get("input_modalities") or ())
+        ]
+        assert declared, "expected at least one image-capable CLI entry"
+        for provider_type, entry in declared:
+            assert (
+                image_delivery_kind(provider_type, entry["model_id"])
+                == IMAGE_DELIVERY_OFFERED_BY_PATH
+            ), provider_type
+
+    def test_text_is_declared_alongside_image(self):
+        """Declaring image must not drop the text declaration.
+
+        ``input_modalities`` is a complete statement of what an entry
+        accepts, so an entry that listed only ``image`` would read as a model
+        that cannot take a text prompt -- which is the one thing every CLI
+        tool certainly does.
+        """
+        for provider_type in self._cli_types():
+            for entry in LLM_MODELS[provider_type]["models"]:
+                assert TEXT in (entry.get("input_modalities") or ()), provider_type

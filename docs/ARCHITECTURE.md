@@ -287,10 +287,38 @@ would block a model that works.
 
 The message-history flatteners in AETHER and on the IRIS tool-less path keep
 a message that carries a recognised non-text part instead of coercing it to
-text; the text-only coercion those paths were written for is unchanged. A
-text-only transport (the CLI subprocess providers) refuses an image part by
-name rather than stringifying it, because a stringified image is a dropped
-image that still looks like a successful turn.
+text; the text-only coercion those paths were written for is unchanged.
+
+**Image delivery for CLI providers (`bili/iris/providers/cli_image.py`):** a
+CLI tool consumes one text prompt, so an image cannot ride inside the
+request. It is delivered as a file instead: the bytes are written into the
+directory the subprocess already runs in (its configured `cwd`, never a
+system temp directory, because a harness that gates filesystem access by
+directory may refuse to open anything outside the one it was pointed at), the
+invocation is rewritten with that harness's own file-read mechanism, and the
+file is removed once the call returns, on the success and the failure path
+alike. The filename is generated and carries nothing about the image's
+origin, and the reference is a bare filename, so neither the harness nor the
+model behind it learns anything about where the image came from or how the
+host's directories are laid out.
+
+The mechanism is per harness and is recorded with the tool version it was
+verified against: Claude Code opens a path its prompt names (it exposes no
+image flag), the Gemini CLI reads an `@<path>` reference out of the prompt,
+and Codex takes `--image=<path>` in its attached-value form (the flag is
+variadic, so the separated form consumes the prompt positional that follows
+it).
+
+This delivery is a weaker claim than a message-based provider's, and the two
+are named apart rather than collapsed: a message-based provider is handed the
+BYTES, while a CLI harness is OFFERED A PATH and nothing in the response
+proves it opened the file. A catalog entry may declare `image_delivery`
+(`bytes`, the default, or `offered_by_path`) beside its `input_modalities`,
+and a turn that carried an image reports on the response which kind was
+performed. A CLI tool with no known file-read route -- including the generic
+`cli` provider type, which drives an arbitrary executable -- still refuses an
+image part by name rather than stringifying it, because a stringified image
+is a dropped image that still looks like a successful turn.
 
 ### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`) -- IRIS
 

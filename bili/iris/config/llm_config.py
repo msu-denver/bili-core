@@ -2206,6 +2206,19 @@ LLM_MODELS = {
     # strategy, and output config so callers need no per-tool knowledge. #
     # The subprocess inherits os.environ; whatever credential the tool   #
     # holds (OAuth session, API key env var, etc.) is reused.            #
+    #                                                                    #
+    # Each declares "image" with image_delivery "offered_by_path": the   #
+    # model behind each of these harnesses is vision-capable, and the    #
+    # provider delivers an image by writing it into the directory the    #
+    # subprocess runs in and pointing the tool at that file (see         #
+    # bili/iris/providers/cli_image.py). That is a weaker claim than the #
+    # "bytes" every message-based entry makes -- the harness is offered  #
+    # a path, and whether it opened the file is not verifiable from the  #
+    # response -- which is why the two are named apart rather than both  #
+    # reading as "image supported". The GENERIC "cli" entry above stays  #
+    # text-only on purpose: it drives an arbitrary executable whose      #
+    # ability to open a file bili-core has no record of, so an image     #
+    # part sent to it is still refused by name.                          #
     # ------------------------------------------------------------------ #
     "cli_claude_code": {
         "name": "Claude Code CLI (Preset)",
@@ -2221,7 +2234,8 @@ LLM_MODELS = {
             {
                 "model_name": "Claude Code CLI",
                 "model_id": "cli:claude_code",
-                "input_modalities": ["text"],
+                "input_modalities": ["text", "image"],
+                "image_delivery": "offered_by_path",
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,
@@ -2245,7 +2259,8 @@ LLM_MODELS = {
             {
                 "model_name": "Codex CLI",
                 "model_id": "cli:codex",
-                "input_modalities": ["text"],
+                "input_modalities": ["text", "image"],
+                "image_delivery": "offered_by_path",
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,
@@ -2269,7 +2284,8 @@ LLM_MODELS = {
             {
                 "model_name": "Gemini CLI",
                 "model_id": "cli:gemini_cli",
-                "input_modalities": ["text"],
+                "input_modalities": ["text", "image"],
+                "image_delivery": "offered_by_path",
                 "supports_temperature": False,
                 "supports_seed": False,
                 "supports_max_output_tokens": False,

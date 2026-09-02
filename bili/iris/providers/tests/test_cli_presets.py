@@ -11,6 +11,7 @@ in any environment without a CLI LLM tool installed.
 
 # pylint: disable=protected-access
 
+import inspect
 import subprocess
 from dataclasses import fields
 from typing import List
@@ -31,7 +32,7 @@ from bili.iris.providers.cli_presets import (
     CliPreset,
     register_cli_preset,
 )
-from bili.iris.providers.cli_provider import CliLLM, CliLLMError
+from bili.iris.providers.cli_provider import CliLLM, CliLLMError, CliProvider
 from bili.iris.providers.preset_provider import CliPresetProvider
 from bili.iris.providers.registry import PROVIDER_REGISTRY
 
@@ -133,25 +134,21 @@ class TestCliPreset:
         assert preset.model_flag_template is None
 
     def test_dataclass_has_expected_fields(self):
-        """CliPreset exposes exactly the fields that CliProvider.load accepts."""
+        """CliPreset exposes exactly the fields that CliProvider.load accepts.
+
+        Both sides are read out of the code rather than compared against a
+        list written here.  A preset field is only useful if the provider
+        takes it, and a provider parameter a preset cannot express is one no
+        preset can ever set; a hand-written expectation agrees with itself
+        forever and would have caught neither.
+        """
         field_names = {f.name for f in fields(CliPreset)}
-        expected = {
-            "command",
-            "prompt_via",
-            "message_format",
-            "output_format",
-            "json_path",
-            "strip_ansi",
-            "timeout_seconds",
-            "cwd",
-            "max_retries",
-            "retry_backoff_seconds",
-            "model",
-            "reasoning_effort",
-            "model_flag_template",
-            "reasoning_effort_flag_template",
+        accepted = {
+            name
+            for name, param in inspect.signature(CliProvider.load).parameters.items()
+            if name != "self" and param.kind is not param.VAR_KEYWORD
         }
-        assert expected == field_names
+        assert field_names == accepted
 
 
 # ---------------------------------------------------------------------------
