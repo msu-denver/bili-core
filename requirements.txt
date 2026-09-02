@@ -40,9 +40,9 @@ langgraph==1.0.2
 # These are the built-in providers IRIS ships support for out of the box.
 # Additional providers (Anthropic, Mistral, Cohere, etc.) are in extras.
 # -----------------------------------------------------------------------------
-langchain-aws~=1.0.0
-langchain-google-vertexai~=3.0.1
-langchain-openai~=1.0.1
+langchain-aws~=1.7.4
+langchain-google-vertexai~=3.2.4
+langchain-openai~=1.6.0
 
 # -----------------------------------------------------------------------------
 # Core Utilities
