@@ -34,13 +34,28 @@ pipeline, AETHER agent, or IRIS node without modification.
 
 Message rendering
 -----------------
-CLI tools accept a single text prompt, not a structured message list.  This
-transport is therefore text-only by construction: whichever format is chosen
-below, the message list ends up as one prompt string.  A message carrying an
-image content part is REFUSED with
-:class:`~bili.iris.providers.modality.UnsupportedInputModalityError` rather
-than stringified, because a stringified image is a dropped image that looks
-like a successful turn.
+CLI tools accept a single text prompt, not a structured message list, so
+whichever format is chosen below, the message list ends up as one prompt
+string.  An image content part therefore cannot ride inside the request, and
+what happens to one depends on whether the configured CLI has a file-read
+route (``image_route``, see :mod:`bili.iris.providers.cli_image`):
+
+*No route* (the default, and what the generic ``cli`` provider type always
+uses, because bili-core knows nothing about an arbitrary executable)
+    The message is REFUSED with
+    :class:`~bili.iris.providers.modality.UnsupportedInputModalityError`
+    rather than stringified, because a stringified image is a dropped image
+    that looks like a successful turn.
+
+*A route* (the named presets, whose tool's mechanism is known)
+    The image is written into the directory the subprocess runs in, the
+    invocation is rewritten to point the harness at it, and the file is
+    removed once the call returns.  The response reports
+    :data:`~bili.iris.providers.modality.IMAGE_DELIVERY_OFFERED_BY_PATH`,
+    because the harness was offered a path rather than handed the bytes and
+    nothing in the response proves it opened the file.
+
+A turn carrying no image is unaffected either way.
 
 The provider supports three ``message_format`` strategies:
 
@@ -115,11 +130,28 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from bili.iris.multimodal import non_text_part_types
+from bili.iris.multimodal import (
+    is_image_part,
+    is_non_text_part,
+    message_text,
+    non_text_part_types,
+)
 
 from .base import LLMProvider
+from .cli_image import (
+    CliImageRoute,
+    ImagePayload,
+    apply_route,
+    image_payloads,
+    materialized_images,
+)
 from .cli_model_flags import DEFAULT_MODEL_FLAG_TEMPLATE, build_model_and_effort_args
-from .modality import UnsupportedInputModalityError, describe_message_modalities
+from .modality import (
+    IMAGE_DELIVERY_OFFERED_BY_PATH,
+    IMAGE_DELIVERY_RESPONSE_KEY,
+    UnsupportedInputModalityError,
+    describe_message_modalities,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -225,13 +257,19 @@ def _is_transient_failure(error_text: str) -> bool:
 def _require_text_only(msg: BaseMessage) -> BaseMessage:
     """Return *msg*, or raise if it carries a non-text content part.
 
-    A CLI tool consumes text on stdin or as an argv value, so this transport
-    has no channel for an image.  ``str(msg.content)`` on a multimodal message
-    yields the *repr* of the parts list, which loses the image while producing
-    a plausible-looking prompt: the subprocess succeeds, the caller gets an
-    answer, and nothing anywhere says the image was never sent.  Refusing by
-    name is the honest behaviour -- the caller can then route that turn to an
-    image-capable provider.
+    A CLI tool consumes text on stdin or as an argv value, so the only way an
+    image reaches the model behind it is as a file the harness opens.  This
+    function is what runs when there is no known way to point that harness at
+    one (see :class:`~bili.iris.providers.cli_image.CliImageRoute`); a message
+    whose image is being delivered that way has already had the part lifted
+    out before it gets here.
+
+    ``str(msg.content)`` on a multimodal message yields the *repr* of the
+    parts list, which loses the image while producing a plausible-looking
+    prompt: the subprocess succeeds, the caller gets an answer, and nothing
+    anywhere says the image was never sent.  Refusing by name is the honest
+    behaviour -- the caller can then route that turn to a provider that can
+    carry it.
 
     :param msg: The message about to be rendered into the prompt string.
     :returns: *msg*, unchanged, when its content is text.
@@ -246,12 +284,30 @@ def _require_text_only(msg: BaseMessage) -> BaseMessage:
     # refusal always says what it refused.
     named = describe_message_modalities([msg]) or kinds
     raise UnsupportedInputModalityError(
-        f"A CLI provider cannot carry {', '.join(named)} content "
+        f"This CLI provider cannot carry {', '.join(named)} content "
         f"(content part(s): {', '.join(kinds)}): CLI tools consume a single "
-        "text prompt, so the part would be dropped. Route this turn to a "
-        "provider whose model accepts it (see "
+        "text prompt, and this one has no configured file-read route, so the "
+        "part would be dropped. Configure an image_route for it (see "
+        "bili.iris.providers.cli_image.CliImageRoute), use a named CLI preset "
+        "whose harness already has one, or route this turn to a provider "
+        "whose model accepts it (see "
         "bili.iris.providers.modality.models_supporting_input_modality)."
     )
+
+
+def _delivery_metadata(image_delivery: Optional[str]) -> dict:
+    """Return the response metadata describing how an image was delivered.
+
+    Empty for a turn that carried no image, so a text-only response is
+    byte-for-byte what it was before this path existed and the key's presence
+    is itself the signal that an image was in play.
+
+    :param image_delivery: The delivery kind performed, or ``None``.
+    :returns: ``{}``, or ``{IMAGE_DELIVERY_RESPONSE_KEY: <kind>}``.
+    """
+    if image_delivery is None:
+        return {}
+    return {IMAGE_DELIVERY_RESPONSE_KEY: image_delivery}
 
 
 def _role_label(msg: BaseMessage) -> str:
@@ -265,6 +321,41 @@ def _role_label(msg: BaseMessage) -> str:
     # Generic fallback for any other message type
     msg_type = type(msg).__name__
     return msg_type.replace("Message", "").replace("message", "") or "Unknown"
+
+
+def messages_rendered_by(
+    messages: List[BaseMessage],
+    message_format: str = "last",
+) -> List[BaseMessage]:
+    """Return the subset of *messages* that *message_format* actually renders.
+
+    The single answer to "which messages does this format carry", so the
+    modality refusal, the image extraction, and the prompt itself cannot
+    disagree about scope.  ``"last"`` carries one message, so an image
+    earlier in history is neither refused nor materialized; the history
+    formats carry everything.
+
+    :param messages: The message list from a LangChain invocation.
+    :param message_format: One of ``"last"``, ``"roles"``, or ``"chatml"``.
+    :returns: The messages this format renders, in order.
+    :raises ValueError: If the message list is empty or ``message_format`` is
+        not recognised.
+    """
+    if not messages:
+        raise ValueError("Cannot render an empty message list")
+    if message_format not in SUPPORTED_MESSAGE_FORMATS:
+        raise ValueError(
+            f"Unknown message_format {message_format!r}. "
+            f"Supported: {sorted(SUPPORTED_MESSAGE_FORMATS)}"
+        )
+    if message_format == "last":
+        # The last human message (most common case), falling back to the very
+        # last message when the list holds none.
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                return [msg]
+        return [messages[-1]]
+    return list(messages)
 
 
 def render_messages(
@@ -281,34 +372,26 @@ def render_messages(
     :raises UnsupportedInputModalityError: If a message that would be rendered
         carries a non-text content part.  The check is scoped to the messages
         this format actually renders, so ``"last"`` does not refuse over an
-        image in history it was never going to carry.
+        image in history it was never going to carry.  A CLI tool configured
+        with a file-read route (see :class:`~bili.iris.providers.cli_image.CliImageRoute`)
+        strips the image parts out *before* this function sees them, so the
+        refusal remains exactly what happens for a harness with no such route.
     """
-    if not messages:
-        raise ValueError("Cannot render an empty message list")
-    if message_format not in SUPPORTED_MESSAGE_FORMATS:
-        raise ValueError(
-            f"Unknown message_format {message_format!r}. "
-            f"Supported: {sorted(SUPPORTED_MESSAGE_FORMATS)}"
-        )
+    rendered = messages_rendered_by(messages, message_format)
 
     if message_format == "last":
-        # Find the last human message (most common case)
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                return str(_require_text_only(msg).content)
-        # Fall back to the very last message if no HumanMessage found
-        return str(_require_text_only(messages[-1]).content)
+        return str(_require_text_only(rendered[0]).content)
 
     if message_format == "roles":
         parts = []
-        for msg in messages:
+        for msg in rendered:
             checked = _require_text_only(msg)
             parts.append(f"{_role_label(checked)}: {checked.content}")
         return "\n".join(parts)
 
     # chatml
     parts = []
-    for msg in messages:
+    for msg in rendered:
         checked = _require_text_only(msg)
         # Normalise "User" -> "user", "System" -> "system", etc.
         role = _role_label(checked).lower()
@@ -316,6 +399,34 @@ def render_messages(
     # Append the open assistant turn so the model knows to continue
     parts.append("<|im_start|>assistant")
     return "\n".join(parts)
+
+
+def _without_image_parts(message: BaseMessage) -> BaseMessage:
+    """Return *message* with its image parts removed, and nothing else.
+
+    Applied to a message whose images are being delivered as files, so the
+    images are the one thing the prompt should no longer mention.  Every
+    other part is kept, which is what matters when the message carries a
+    non-text part this transport has no channel for: dropping it here would
+    silently lose it, and silently losing a non-text part is the exact
+    failure the refusal exists to prevent.  Keeping it means the refusal in
+    :func:`_require_text_only` fires on the way through
+    :func:`render_messages`, naming the modality, rather than a second
+    check being written here that could disagree with the first.
+
+    The message keeps its class (and therefore its role label), because the
+    rendered prompt reads from that.
+
+    :param message: A message carrying at least one image part.
+    :returns: A copy carrying the remaining parts: the plain text string when
+        only text is left (which is what the prompt should say), or the
+        remaining parts list when a non-text part survives.
+    """
+    content = getattr(message, "content", None)
+    remaining = [part for part in content or [] if not is_image_part(part)]
+    if any(is_non_text_part(part) for part in remaining):
+        return message.model_copy(update={"content": remaining})
+    return message.model_copy(update={"content": message_text(message)})
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +594,16 @@ class CliLLM(BaseChatModel):
         there is no cross-CLI convention for this control, so named presets
         that know a specific CLI's syntax configure this explicitly (see
         :mod:`bili.iris.providers.cli_presets`).
+    image_route : CliImageRoute or None
+        How this CLI is pointed at an image file (see
+        :mod:`bili.iris.providers.cli_image`).  Default ``None``: bili-core
+        knows nothing about an arbitrary executable's ability to open a file,
+        so an image part is refused by name, which is the behaviour every CLI
+        provider had before a route existed.  Named presets that know their
+        tool's mechanism set this explicitly.  With a route configured, an
+        image part is written into the subprocess's working directory, the
+        invocation is rewritten to point at it, and the file is removed once
+        the call returns; a text-only turn is unaffected either way.
     """
 
     # ------------------------------------------------------------------
@@ -503,6 +624,7 @@ class CliLLM(BaseChatModel):
     reasoning_effort: Optional[str] = None
     model_flag_template: Optional[List[str]] = list(DEFAULT_MODEL_FLAG_TEMPLATE)
     reasoning_effort_flag_template: Optional[List[str]] = None
+    image_route: Optional[CliImageRoute] = None
 
     # ------------------------------------------------------------------
     # BaseChatModel required property
@@ -517,23 +639,32 @@ class CliLLM(BaseChatModel):
     # ------------------------------------------------------------------
 
     def _build_run_args(
-        self, prompt: str
+        self, prompt: str, extra_args: Optional[Sequence[str]] = None
     ) -> Tuple[List[str], Optional[str], Optional[str]]:
         """Return ``(cmd, stdin_text, tmp_file_path)`` for the subprocess call.
 
         The base command is ``self.command`` with any configured ``model`` /
         ``reasoning_effort`` flags appended (see
-        :func:`build_model_and_effort_args`), before the prompt itself is
-        added according to ``prompt_via``.
+        :func:`build_model_and_effort_args`), then *extra_args*, before the
+        prompt itself is added according to ``prompt_via``.
+
+        :param prompt: The rendered prompt text.
+        :param extra_args: Argument tokens contributed by the image route, if
+            any.  They precede the prompt because a prompt delivered as a
+            positional argument must stay last.
 
         The caller is responsible for cleaning up ``tmp_file_path`` if set.
         """
-        base_command = list(self.command) + build_model_and_effort_args(
-            self.model,
-            self.model_flag_template,
-            self.reasoning_effort,
-            self.reasoning_effort_flag_template,
-            cli_name=self.command[0] if self.command else "",
+        base_command = (
+            list(self.command)
+            + build_model_and_effort_args(
+                self.model,
+                self.model_flag_template,
+                self.reasoning_effort,
+                self.reasoning_effort_flag_template,
+                cli_name=self.command[0] if self.command else "",
+            )
+            + list(extra_args or ())
         )
         if self.prompt_via == "stdin":
             return base_command, prompt, None
@@ -551,7 +682,9 @@ class CliLLM(BaseChatModel):
             tmp_path = tmp.name
         return base_command + [tmp_path], None, tmp_path
 
-    def _run_subprocess(self, prompt: str) -> str:
+    def _run_subprocess(
+        self, prompt: str, extra_args: Optional[Sequence[str]] = None
+    ) -> str:
         """Execute the CLI with *prompt*, retrying transient failures.
 
         Calls :meth:`_run_subprocess_once` up to ``max_retries + 1`` times.
@@ -567,7 +700,7 @@ class CliLLM(BaseChatModel):
         last_error: Optional[CliLLMError] = None
         for attempt in range(max_attempts):
             try:
-                return self._run_subprocess_once(prompt)
+                return self._run_subprocess_once(prompt, extra_args)
             except CliLLMError as exc:
                 last_error = exc
                 attempts_remaining = max_attempts - attempt - 1
@@ -589,7 +722,9 @@ class CliLLM(BaseChatModel):
         # satisfy static analysis that every code path returns or raises.
         raise last_error  # pragma: no cover
 
-    def _run_subprocess_once(self, prompt: str) -> str:
+    def _run_subprocess_once(
+        self, prompt: str, extra_args: Optional[Sequence[str]] = None
+    ) -> str:
         """Execute the CLI once with *prompt* and return captured output text.
 
         A single subprocess invocation, no retry.  Called by
@@ -597,7 +732,7 @@ class CliLLM(BaseChatModel):
 
         :raises CliLLMError: On non-zero exit code or timeout.
         """
-        cmd, stdin_text, tmp_path = self._build_run_args(prompt)
+        cmd, stdin_text, tmp_path = self._build_run_args(prompt, extra_args)
         timeout_display: Union[str, float] = (
             self.timeout_seconds if self.timeout_seconds is not None else "none"
         )
@@ -662,11 +797,73 @@ class CliLLM(BaseChatModel):
                 f"json_path={self.json_path!r} not found in CLI output: {exc}"
             ) from exc
 
-    def _call_cli(self, messages: List[BaseMessage]) -> str:
-        """Render messages, run the CLI, and return the parsed response text."""
-        prompt = render_messages(messages, self.message_format)
-        raw = self._run_subprocess(prompt)
-        return self._parse_output(raw)
+    def _prepare_prompt(
+        self, messages: List[BaseMessage]
+    ) -> Tuple[str, List[ImagePayload]]:
+        """Render the prompt, splitting out images when a route can carry them.
+
+        With no ``image_route``, this is exactly ``render_messages``, so an
+        image part raises :exc:`UnsupportedInputModalityError` the way it
+        always has.  With a route, the image parts of the messages this
+        format renders are lifted out first and the remaining text is
+        rendered, so the refusal is never reached for an image this transport
+        can actually deliver.
+
+        :param messages: The message list from a LangChain invocation.
+        :returns: ``(prompt, payloads)``.  ``payloads`` is empty for a
+            text-only turn, which is what keeps such a turn byte-for-byte
+            unchanged.
+        """
+        if self.image_route is None:
+            return render_messages(messages, self.message_format), []
+
+        rendered = messages_rendered_by(messages, self.message_format)
+        payloads: List[ImagePayload] = []
+        stripped: List[BaseMessage] = []
+        for message in rendered:
+            found = image_payloads(getattr(message, "content", None))
+            if not found:
+                # Untouched, so a message with no image renders exactly as before.
+                stripped.append(message)
+                continue
+            payloads.extend(found)
+            stripped.append(_without_image_parts(message))
+        return render_messages(stripped, self.message_format), payloads
+
+    def _call_cli(self, messages: List[BaseMessage]) -> Tuple[str, Optional[str]]:
+        """Render messages, run the CLI, and return ``(text, image_delivery)``.
+
+        ``image_delivery`` is ``None`` for a turn that carried no image, and
+        :data:`~bili.iris.providers.modality.IMAGE_DELIVERY_OFFERED_BY_PATH`
+        for one that did: this transport can offer a path and cannot hand
+        over bytes, and it cannot verify from the response that the harness
+        opened the file, so the distinction is reported rather than implied.
+        """
+        prompt, payloads = self._prepare_prompt(messages)
+        if not payloads:
+            return self._parse_output(self._run_subprocess(prompt)), None
+
+        # The whole retry loop runs inside the with-block: a file removed
+        # between attempts would leave the retry pointing at nothing.
+        with materialized_images(payloads, self.cwd) as images:
+            routed_prompt, extra_args = apply_route(self.image_route, prompt, images)
+            if not routed_prompt.strip() and not self.image_route.prompt_template:
+                raise CliLLMError(
+                    f"This turn carries {len(images)} image(s) and no text, and "
+                    f"{self.command[0]!r} takes an image through a command-line "
+                    "flag rather than a prompt reference, so the invocation "
+                    "would carry no instruction at all. Add a text part to the "
+                    "message, or route the turn to a provider that accepts an "
+                    "image-only message."
+                )
+            LOGGER.info(
+                "CliLLM: offering %d image(s) to %s by path via the %s route",
+                len(images),
+                self.command[0] if self.command else "<empty>",
+                self.image_route.name,
+            )
+            raw = self._run_subprocess(routed_prompt, extra_args)
+        return self._parse_output(raw), IMAGE_DELIVERY_OFFERED_BY_PATH
 
     # ------------------------------------------------------------------
     # BaseChatModel abstract method implementation
@@ -680,9 +877,15 @@ class CliLLM(BaseChatModel):
         **kwargs: Any,  # pylint: disable=unused-argument
     ) -> ChatResult:
         """Run the CLI and return the result as a :class:`ChatResult`."""
-        content = self._call_cli(messages)
+        content, image_delivery = self._call_cli(messages)
+        metadata = _delivery_metadata(image_delivery)
         return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content=content))]
+            generations=[
+                ChatGeneration(
+                    message=AIMessage(content=content, response_metadata=metadata)
+                )
+            ],
+            llm_output=metadata or None,
         )
 
     # ------------------------------------------------------------------
@@ -704,8 +907,12 @@ class CliLLM(BaseChatModel):
         iteration, which is fully compatible with LangChain streaming
         consumers.
         """
-        content = self._call_cli(messages)
-        yield ChatGenerationChunk(message=AIMessageChunk(content=content))
+        content, image_delivery = self._call_cli(messages)
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content=content, response_metadata=_delivery_metadata(image_delivery)
+            )
+        )
 
     async def _astream(
         self,
@@ -722,8 +929,12 @@ class CliLLM(BaseChatModel):
         executes.  Yields the full response as a single
         :class:`ChatGenerationChunk` once the subprocess completes.
         """
-        content = await asyncio.to_thread(self._call_cli, messages)
-        yield ChatGenerationChunk(message=AIMessageChunk(content=content))
+        content, image_delivery = await asyncio.to_thread(self._call_cli, messages)
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content=content, response_metadata=_delivery_metadata(image_delivery)
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -828,6 +1039,14 @@ class CliProvider(LLMProvider):
         there is no cross-CLI convention for this control, so named presets
         that know a specific CLI's syntax configure this explicitly (see
         :mod:`bili.iris.providers.cli_presets`).
+
+    image_route : CliImageRoute or None, optional
+        How this CLI is pointed at an image file
+        (:mod:`bili.iris.providers.cli_image`).  Default ``None``, which
+        keeps the pre-existing refusal: bili-core cannot assume an arbitrary
+        executable can open a file, and an image silently dropped into a
+        prompt is a turn that looks successful and is not.  Named presets
+        that know their tool's mechanism set this explicitly.
     """
 
     # The `strip_ansi` parameter intentionally shares its name with the
@@ -851,6 +1070,7 @@ class CliProvider(LLMProvider):
         reasoning_effort: Optional[str] = None,
         model_flag_template: Optional[Sequence[str]] = DEFAULT_MODEL_FLAG_TEMPLATE,
         reasoning_effort_flag_template: Optional[Sequence[str]] = None,
+        image_route: Optional[CliImageRoute] = None,
         **_extra: Any,
     ) -> CliLLM:
         """Create and return a :class:`CliLLM` instance.
@@ -886,6 +1106,9 @@ class CliProvider(LLMProvider):
             *reasoning_effort*.  Default ``None`` (no known cross-CLI
             convention); named presets configure this explicitly for CLIs
             that support a reasoning-effort control.
+        :param image_route: How this CLI is pointed at an image file.
+            Default ``None``, which keeps an image content part refused by
+            name rather than delivered.
         :returns: A configured :class:`CliLLM` instance.
         :raises ValueError: If ``command`` is empty, any config value is not
             among the supported options, or ``max_retries``/
@@ -938,6 +1161,7 @@ class CliProvider(LLMProvider):
                 if reasoning_effort_flag_template is not None
                 else None
             ),
+            image_route=image_route,
         )
         LOGGER.debug(llm)
         return llm
