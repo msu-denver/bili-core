@@ -55,10 +55,11 @@ class CliPresetProvider(LLMProvider):
         """Merge caller-supplied *overrides* with preset defaults.
 
         Caller-supplied values win over the preset default.  ``None`` is a
-        valid caller value for ``timeout_seconds`` (meaning "no timeout") and
-        for ``cwd`` (meaning "inherit the calling process's cwd"), so the
-        sentinel :data:`_UNSET` is used to distinguish "not provided" from
-        "explicitly set to None".
+        valid caller value for ``timeout_seconds`` (meaning "no timeout"),
+        for ``cwd`` (meaning "inherit the calling process's cwd"), and for
+        ``image_route`` (meaning "refuse an image part rather than
+        materializing it"), so the sentinel :data:`_UNSET` is used to
+        distinguish "not provided" from "explicitly set to None".
 
         :param overrides: Mapping of parameter name to caller-supplied value,
             where the sentinel :data:`_UNSET` indicates "not provided by
@@ -82,6 +83,7 @@ class CliPresetProvider(LLMProvider):
             "retry_backoff_seconds",
             "model",
             "reasoning_effort",
+            "image_route",
         ):
             val = overrides.get(field, _UNSET)
             resolved[field] = val if val is not _UNSET else getattr(preset, field)
@@ -117,6 +119,7 @@ class CliPresetProvider(LLMProvider):
         reasoning_effort: Optional[str] = _UNSET,
         model_flag_template: Optional[List[str]] = _UNSET,
         reasoning_effort_flag_template: Optional[List[str]] = _UNSET,
+        image_route: Optional[Any] = _UNSET,
         **extra: Any,
     ) -> CliLLM:
         """Create a :class:`~bili.iris.providers.cli_provider.CliLLM` using
@@ -147,6 +150,9 @@ class CliPresetProvider(LLMProvider):
             ``model_flag_template``.
         :param reasoning_effort_flag_template: Override the preset's
             ``reasoning_effort_flag_template``.
+        :param image_route: Override the preset's ``image_route``.  Pass
+            ``None`` to strip the route from a preset that has one, which
+            restores the refusal for an image part.
         :returns: A configured :class:`~bili.iris.providers.cli_provider.CliLLM`.
         :raises RuntimeError: If the provider was not created via
             :meth:`for_preset` (i.e. ``_preset`` is ``None``).
@@ -172,6 +178,7 @@ class CliPresetProvider(LLMProvider):
                 "reasoning_effort": reasoning_effort,
                 "model_flag_template": model_flag_template,
                 "reasoning_effort_flag_template": reasoning_effort_flag_template,
+                "image_route": image_route,
             }
         )
         LOGGER.info(

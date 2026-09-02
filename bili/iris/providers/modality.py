@@ -70,6 +70,35 @@ Routing
 :func:`models_supporting_input_modality` answers the other direction, which
 cataloged models accept a given input kind, so a caller can *select* a
 vision-capable model instead of guessing at one.
+
+How an image is delivered
+-------------------------
+Accepting an image and being handed its bytes are different claims.  A
+message-based provider carries the bytes inside the request.  A CLI harness
+consumes one text prompt, so bili-core writes the image into the directory
+the subprocess runs in and points the invocation at it
+(:mod:`bili.iris.providers.cli_image`): the harness is *offered a path*, and
+whether the agent behind it opened that file is not recoverable from the
+response text.
+
+An entry that declares ``image`` may therefore also declare
+``image_delivery``, read by :func:`image_delivery_kind`::
+
+    {
+        "model_id": "cli:some_agentic_cli",
+        "input_modalities": ["text", "image"],
+        "image_delivery": "offered_by_path",
+        ...
+    }
+
+The key is a *sibling* of ``input_modalities`` rather than a value inside it,
+so the tri-state reader above is untouched: whether a model accepts an image
+still gates ``load_model``, and how the bytes get there is a separate
+question that gates nothing.  Omitting it means
+:data:`IMAGE_DELIVERY_BYTES`, which is what a message-based provider does, so
+no existing entry changes meaning.  The same two names are used for the
+declared kind and for the kind a provider reports having performed, so a
+caller comparing the two compares like with like.
 """
 
 import logging
@@ -93,6 +122,34 @@ KNOWN_INPUT_MODALITIES = frozenset({TEXT, IMAGE, AUDIO})
 
 #: The catalog key this module reads.
 CATALOG_KEY = "input_modalities"
+
+#: The image bytes ride inside the request the provider sends.  The default
+#: for any entry that declares ``image`` without saying otherwise, because it
+#: is what a message-based provider does.
+IMAGE_DELIVERY_BYTES = "bytes"
+
+#: The image is written to a file the model's harness can open, and the
+#: invocation points at that path.  Whether the harness actually opened it is
+#: not verifiable from the response, which is why this is a distinct kind
+#: rather than a variation of :data:`IMAGE_DELIVERY_BYTES`.
+IMAGE_DELIVERY_OFFERED_BY_PATH = "offered_by_path"
+
+#: The delivery kinds a catalog entry may declare.
+KNOWN_IMAGE_DELIVERIES = frozenset(
+    {IMAGE_DELIVERY_BYTES, IMAGE_DELIVERY_OFFERED_BY_PATH}
+)
+
+#: The key under which a provider reports, on its response, how it delivered
+#: the image input of that turn.  Present only when the turn actually carried
+#: an image, so its absence is "no image", never "an image, delivered somehow".
+IMAGE_DELIVERY_RESPONSE_KEY = "image_input_delivery"
+
+#: The catalog key declaring how an entry's image input is delivered.  A
+#: sibling of :data:`CATALOG_KEY` rather than a value inside it, so the
+#: tri-state reader above keeps its meaning: "does this model accept an
+#: image" and "how do the bytes get there" are separate questions, and only
+#: the first one gates ``load_model``.
+IMAGE_DELIVERY_CATALOG_KEY = "image_delivery"
 
 
 class UnsupportedInputModalityError(ValueError):
@@ -162,6 +219,50 @@ def supports_input_modality(
     if declared is None:
         return None
     return modality in declared
+
+
+def image_delivery_kind(model_type: str, model_name: Optional[str]) -> Optional[str]:
+    """Return how a model's image input is delivered, or ``None``.
+
+    The honesty half of the image path.  A message-based provider is handed
+    the image BYTES; a CLI harness is OFFERED A PATH to a file, and whether
+    the agent behind it opened that file cannot be read back out of the
+    response.  A caller's own audit surface needs to be able to say which of
+    those happened rather than recording both as "an image was sent", so the
+    two are named separately and the catalog declares which one an entry
+    performs.
+
+    :param model_type: The provider type key.
+    :param model_name: The model id.
+    :returns: :data:`IMAGE_DELIVERY_OFFERED_BY_PATH` or
+        :data:`IMAGE_DELIVERY_BYTES` when the entry declares ``image`` input;
+        ``None`` when it does not declare image input at all, or is
+        uncataloged.  ``None`` is the same "no record" state
+        :func:`model_input_modalities` returns, kept distinct from
+        :data:`IMAGE_DELIVERY_BYTES` so an undeclared model is never read as
+        a positive claim that it takes bytes.
+    :rtype: Optional[str]
+    """
+    declared = model_input_modalities(model_type, model_name)
+    if declared is None or IMAGE not in declared:
+        return None
+    entry = _catalog_entry(model_type, model_name) or {}
+    kind = entry.get(IMAGE_DELIVERY_CATALOG_KEY)
+    if kind is None:
+        return IMAGE_DELIVERY_BYTES
+    if kind not in KNOWN_IMAGE_DELIVERIES:
+        LOGGER.warning(
+            "Model '%s' (%s) declares an unknown %s value %r; reading it as %r. "
+            "Known kinds: %s.",
+            model_name,
+            model_type,
+            IMAGE_DELIVERY_CATALOG_KEY,
+            kind,
+            IMAGE_DELIVERY_BYTES,
+            ", ".join(sorted(KNOWN_IMAGE_DELIVERIES)),
+        )
+        return IMAGE_DELIVERY_BYTES
+    return kind
 
 
 def require_input_modality(

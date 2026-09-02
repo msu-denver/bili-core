@@ -68,6 +68,36 @@ otherwise use.  Support and mechanism are CLI-specific:
 Both settings default to ``None`` (no override -- the CLI's own default
 model and reasoning depth are used, matching historical behaviour).
 
+Per-CLI image support
+---------------------
+A CLI tool takes one text prompt, so an image is delivered by writing it into
+the directory the subprocess runs in and pointing the tool at that file.  The
+mechanism differs per tool, so each preset carries its own ``image_route``
+(:class:`~bili.iris.providers.cli_image.CliImageRoute`); the generic ``cli``
+provider type carries none, because bili-core cannot know whether an
+arbitrary executable can open a file, and an image part sent to it is refused
+by name exactly as before.
+
+``cli_claude_code``
+    No image flag exists on the CLI.  The path is named in the prompt and the
+    agent opens it with its own file-read tool.
+
+``cli_codex``
+    ``--image=<path>``.  The **attached-value** form is required: the flag is
+    variadic (``-i, --image <FILE>...``), so the separated form
+    ``-i <path> <prompt>`` consumes the prompt positional as a second image
+    path and the CLI then reports it received no prompt at all.
+
+``cli_gemini_cli``
+    ``@<path>`` inside the prompt.  The headless (``-p``) path runs the same
+    at-command file injection as the interactive one, so the file is read
+    into the request as a content part.
+
+Each route records the tool and version it was verified against.  These are
+facts about third-party software that nothing here can detect changing, so a
+route is worth re-checking against the tool's own ``--help`` when its
+behaviour looks wrong.
+
 Adding custom presets
 ---------------------
 Call :func:`register_cli_preset` at application startup to register an
@@ -90,6 +120,8 @@ additional preset under its own provider-type string:
 # pylint: disable=duplicate-code  # CliPreset fields intentionally mirror CliLLM by design
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+from .cli_image import CliImageRoute
 
 # ---------------------------------------------------------------------------
 # CliPreset dataclass
@@ -170,6 +202,12 @@ class CliPreset:  # pylint: disable=too-many-instance-attributes
         ``model_flag_template``.  Default ``None`` (no known cross-CLI
         convention); set explicitly for CLIs that support a
         reasoning-effort control.
+    :param image_route: How this CLI is pointed at an image file written into
+        its working directory (see
+        :class:`~bili.iris.providers.cli_image.CliImageRoute`).  Default
+        ``None``: a preset for a tool whose file-read mechanism is unknown
+        declares no route, and an image part sent through it is refused by
+        name rather than dropped into the prompt.
     """
 
     command: List[str] = field(default_factory=list)
@@ -188,6 +226,54 @@ class CliPreset:  # pylint: disable=too-many-instance-attributes
         default_factory=lambda: ["--model", "{value}"]
     )
     reasoning_effort_flag_template: Optional[List[str]] = None
+    image_route: Optional[CliImageRoute] = None
+
+
+# ---------------------------------------------------------------------------
+# Per-CLI image routes
+# ---------------------------------------------------------------------------
+#
+# Each route below was verified by invoking the tool headlessly against an
+# image containing a word no model could guess, and checking that the word
+# came back.  The version each was verified against is recorded on the route:
+# these are facts about third-party software, and nothing here can detect one
+# of them changing.
+
+#: Claude Code exposes no image flag (checked against ``claude --help``), and
+#: does not need one: it reads a path with its own file-read tool when the
+#: prompt names one.  The instruction is its own paragraph ahead of the
+#: caller's prompt, which is left untouched.
+CLAUDE_CODE_IMAGE_ROUTE = CliImageRoute(
+    name="claude-code-file-read",
+    prompt_template=(
+        "Read the image file {path} in the current working directory "
+        "before answering."
+    ),
+    prompt_separator="\n\n",
+    verified_against="claude 2.1.258 (claude -p)",
+)
+
+#: Codex takes ``-i, --image <FILE>...``.  The value is ATTACHED
+#: (``--image=<path>``) because the flag is variadic: given the separated
+#: form, the prompt positional that follows is consumed as a second image
+#: path and the CLI reports it received no prompt at all.  The prompt itself
+#: is unchanged, since the image arrives as a real attachment.
+CODEX_IMAGE_ROUTE = CliImageRoute(
+    name="codex-image-flag",
+    argv_template=("--image={path}",),
+    verified_against="codex-cli 0.147.0 (codex exec)",
+)
+
+#: The Gemini CLI reads ``@<path>`` out of the prompt and injects the file as
+#: a content part.  Its headless (``-p``) path runs the same at-command
+#: processing as the interactive one.  The reference is joined to the prompt
+#: with a space, so it reads as part of the sentence the caller wrote.
+GEMINI_CLI_IMAGE_ROUTE = CliImageRoute(
+    name="gemini-at-reference",
+    prompt_template="@{path}",
+    prompt_separator=" ",
+    verified_against="gemini-cli 0.51.0 (gemini -p)",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +303,7 @@ CLAUDE_CODE_PRESET = CliPreset(
     timeout_seconds=1800.0,
     model_flag_template=["--model", "{value}"],
     reasoning_effort_flag_template=["--effort", "{value}"],
+    image_route=CLAUDE_CODE_IMAGE_ROUTE,
 )
 
 #: OpenAI Codex CLI -- ``codex exec <prompt>``
@@ -241,6 +328,7 @@ CODEX_PRESET = CliPreset(
     timeout_seconds=1800.0,
     model_flag_template=["--model", "{value}"],
     reasoning_effort_flag_template=["-c", 'model_reasoning_effort="{value}"'],
+    image_route=CODEX_IMAGE_ROUTE,
 )
 
 #: Google Gemini CLI -- ``gemini -p <prompt>``
@@ -268,6 +356,7 @@ GEMINI_CLI_PRESET = CliPreset(
     timeout_seconds=1800.0,
     model_flag_template=["--model", "{value}"],
     reasoning_effort_flag_template=None,
+    image_route=GEMINI_CLI_IMAGE_ROUTE,
 )
 
 # ---------------------------------------------------------------------------
