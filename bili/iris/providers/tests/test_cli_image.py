@@ -29,6 +29,7 @@ from bili.iris.providers.cli_image import (
     CliImageMaterializationError,
     CliImageRoute,
     ImagePayload,
+    MaterializedImage,
     apply_route,
     image_payload,
     image_payloads,
@@ -188,6 +189,35 @@ class TestAHarnessWithNoFileReadRouteStillRefuses:
         llm = load_model("cli_claude_code", cwd=str(tmp_path), image_route=None)
         with pytest.raises(UnsupportedInputModalityError):
             llm._call_cli([_human_with_image()])
+
+    @pytest.mark.parametrize(
+        "part",
+        [
+            {"type": "audio", "audio": {"data": "..."}},
+            {"type": "file", "file": {"file_data": "..."}},
+        ],
+        ids=["audio", "file"],
+    )
+    def test_a_part_riding_beside_a_deliverable_image_is_still_refused(
+        self, tmp_path, part
+    ):
+        """Delivering the image must not smuggle its neighbour past the gate.
+
+        Lifting the image out and rendering "the remaining text" would drop
+        any other non-text part in the same message, which is the silent drop
+        the refusal exists to prevent, reintroduced by the very path that
+        exists to honour it.  bili-core ships no builder for either of these
+        part types, but it recognises both precisely so neither is ever
+        stringified away, and a caller can hand-build one.
+        """
+        llm = _routed_llm(tmp_path)
+        message = HumanMessage(content=[text_part("look"), _png_part(), part])
+        with patch("subprocess.run", return_value=_completed()) as run:
+            with pytest.raises(UnsupportedInputModalityError) as excinfo:
+                llm._call_cli([message])
+        assert part["type"] in str(excinfo.value)
+        run.assert_not_called()
+        assert _materialized_names(tmp_path) == []
 
     def test_a_route_declaring_no_mechanism_is_refused_at_construction(self):
         """A route that points the harness at nothing is not a route.
@@ -743,12 +773,29 @@ class TestTheShippedRoutesMatchWhatEachHarnessTakes:
 
     def test_an_image_only_turn_through_a_prompt_route_still_asks(self, tmp_path):
         """A prompt-reference route produces a non-empty instruction on its
-        own, so an image with no question is a legitimate turn there."""
+        own, so an image with no question is a legitimate turn there.
+
+        And the instruction is the whole prompt: with no caller text there is
+        nothing to separate it from, so joining anyway would send the harness
+        a trailing separator followed by nothing.
+        """
         llm = _routed_llm(tmp_path, route=CLAUDE_CODE_IMAGE_ROUTE)
         seen = {}
         with patch("subprocess.run", side_effect=_capture_argv(seen)):
             llm._call_cli([HumanMessage(content=[_png_part()])])
-        assert seen["argv"][-1].startswith("Read the image file ")
+        prompt = seen["argv"][-1]
+        assert prompt.startswith("Read the image file ")
+        assert prompt == prompt.strip()
+
+    def test_an_image_only_prompt_carries_no_dangling_separator(self):
+        """The same property as a unit, for every prompt-rewriting route."""
+        for route in (CLAUDE_CODE_IMAGE_ROUTE, GEMINI_CLI_IMAGE_ROUTE):
+            image = MaterializedImage(path="/tmp/x.png", filename="x.png")
+            prompt, _argv = apply_route(route, "", [image])
+            assert prompt == prompt.strip()
+            assert route.prompt_separator.strip() or (
+                route.prompt_separator not in prompt
+            )
 
 
 # ---------------------------------------------------------------------------

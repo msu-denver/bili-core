@@ -130,7 +130,12 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from bili.iris.multimodal import message_text, non_text_part_types
+from bili.iris.multimodal import (
+    is_image_part,
+    is_non_text_part,
+    message_text,
+    non_text_part_types,
+)
 
 from .base import LLMProvider
 from .cli_image import (
@@ -396,14 +401,31 @@ def render_messages(
     return "\n".join(parts)
 
 
-def _text_only_copy(message: BaseMessage) -> BaseMessage:
-    """Return *message* with its non-text content parts removed.
+def _without_image_parts(message: BaseMessage) -> BaseMessage:
+    """Return *message* with its image parts removed, and nothing else.
 
-    Only ever applied to a message that carries an image being delivered by
-    another channel, so the text that remains is the whole of what the prompt
-    should say.  The message keeps its class (and therefore its role label),
-    because the rendered prompt reads from that.
+    Applied to a message whose images are being delivered as files, so the
+    images are the one thing the prompt should no longer mention.  Every
+    other part is kept, which is what matters when the message carries a
+    non-text part this transport has no channel for: dropping it here would
+    silently lose it, and silently losing a non-text part is the exact
+    failure the refusal exists to prevent.  Keeping it means the refusal in
+    :func:`_require_text_only` fires on the way through
+    :func:`render_messages`, naming the modality, rather than a second
+    check being written here that could disagree with the first.
+
+    The message keeps its class (and therefore its role label), because the
+    rendered prompt reads from that.
+
+    :param message: A message carrying at least one image part.
+    :returns: A copy carrying the remaining parts: the plain text string when
+        only text is left (which is what the prompt should say), or the
+        remaining parts list when a non-text part survives.
     """
+    content = getattr(message, "content", None)
+    remaining = [part for part in content or [] if not is_image_part(part)]
+    if any(is_non_text_part(part) for part in remaining):
+        return message.model_copy(update={"content": remaining})
     return message.model_copy(update={"content": message_text(message)})
 
 
@@ -805,7 +827,7 @@ class CliLLM(BaseChatModel):
                 stripped.append(message)
                 continue
             payloads.extend(found)
-            stripped.append(_text_only_copy(message))
+            stripped.append(_without_image_parts(message))
         return render_messages(stripped, self.message_format), payloads
 
     def _call_cli(self, messages: List[BaseMessage]) -> Tuple[str, Optional[str]]:

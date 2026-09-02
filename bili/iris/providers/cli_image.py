@@ -416,6 +416,12 @@ def apply_route(
         fragments = [
             route.prompt_template.replace("{path}", image.filename) for image in images
         ]
-        prompt = route.prompt_separator.join([" ".join(fragments), prompt])
+        reference = " ".join(fragments)
+        # With no caller text there is nothing to separate the reference
+        # from, and joining anyway sends the harness a trailing separator
+        # followed by an empty prompt.
+        prompt = (
+            route.prompt_separator.join([reference, prompt]) if prompt else reference
+        )
 
     return prompt, extra_argv
