@@ -69,7 +69,7 @@ langgraph-prebuilt==1.0.8  # Pin: 1.0.9 imports ExecutionInfo absent in langgrap
 anyio==4.12.0
 
 # Google Cloud packages (from langchain-google-vertexai)
-google-api-core==2.28.1
+google-api-core==2.32.0
 google-cloud-aiplatform==1.128.0
 google-cloud-resource-manager==1.15.0
 google-cloud-storage==3.6.0
