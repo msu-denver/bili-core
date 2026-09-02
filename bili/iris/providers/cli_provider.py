@@ -252,13 +252,19 @@ def _is_transient_failure(error_text: str) -> bool:
 def _require_text_only(msg: BaseMessage) -> BaseMessage:
     """Return *msg*, or raise if it carries a non-text content part.
 
-    A CLI tool consumes text on stdin or as an argv value, so this transport
-    has no channel for an image.  ``str(msg.content)`` on a multimodal message
-    yields the *repr* of the parts list, which loses the image while producing
-    a plausible-looking prompt: the subprocess succeeds, the caller gets an
-    answer, and nothing anywhere says the image was never sent.  Refusing by
-    name is the honest behaviour -- the caller can then route that turn to an
-    image-capable provider.
+    A CLI tool consumes text on stdin or as an argv value, so the only way an
+    image reaches the model behind it is as a file the harness opens.  This
+    function is what runs when there is no known way to point that harness at
+    one (see :class:`~bili.iris.providers.cli_image.CliImageRoute`); a message
+    whose image is being delivered that way has already had the part lifted
+    out before it gets here.
+
+    ``str(msg.content)`` on a multimodal message yields the *repr* of the
+    parts list, which loses the image while producing a plausible-looking
+    prompt: the subprocess succeeds, the caller gets an answer, and nothing
+    anywhere says the image was never sent.  Refusing by name is the honest
+    behaviour -- the caller can then route that turn to a provider that can
+    carry it.
 
     :param msg: The message about to be rendered into the prompt string.
     :returns: *msg*, unchanged, when its content is text.
@@ -273,10 +279,13 @@ def _require_text_only(msg: BaseMessage) -> BaseMessage:
     # refusal always says what it refused.
     named = describe_message_modalities([msg]) or kinds
     raise UnsupportedInputModalityError(
-        f"A CLI provider cannot carry {', '.join(named)} content "
+        f"This CLI provider cannot carry {', '.join(named)} content "
         f"(content part(s): {', '.join(kinds)}): CLI tools consume a single "
-        "text prompt, so the part would be dropped. Route this turn to a "
-        "provider whose model accepts it (see "
+        "text prompt, and this one has no configured file-read route, so the "
+        "part would be dropped. Configure an image_route for it (see "
+        "bili.iris.providers.cli_image.CliImageRoute), use a named CLI preset "
+        "whose harness already has one, or route this turn to a provider "
+        "whose model accepts it (see "
         "bili.iris.providers.modality.models_supporting_input_modality)."
     )
 

@@ -160,6 +160,22 @@ class TestAHarnessWithNoFileReadRouteStillRefuses:
             llm._call_cli([_human_with_image()])
         assert "image" in str(excinfo.value)
 
+    def test_the_refusal_names_the_way_forward(self, tmp_path):
+        """A refusal a caller cannot act on is a dead end.
+
+        Two of the three remedies did not exist when this refusal was
+        written, so it pointed only at switching providers; a CLI whose
+        harness can open a file is now a supported answer and the message
+        says so.
+        """
+        llm = CliProvider().load(command=["some-cli"], cwd=str(tmp_path))
+        with pytest.raises(UnsupportedInputModalityError) as excinfo:
+            llm._call_cli([_human_with_image()])
+        message = str(excinfo.value)
+        assert "image_route" in message
+        assert "preset" in message
+        assert "models_supporting_input_modality" in message
+
     def test_nothing_is_written_when_the_image_is_refused(self, tmp_path):
         """A refusal materializes nothing; the refusal comes first."""
         llm = CliProvider().load(command=["some-cli"], cwd=str(tmp_path))
@@ -745,9 +761,21 @@ class TestApplyRoute:
 
     IMAGES = []
 
-    def test_no_images_changes_nothing(self):
-        """A text-only turn through a routed preset is untouched."""
-        prompt, argv = apply_route(CODEX_IMAGE_ROUTE, "hello", [])
+    @pytest.mark.parametrize(
+        "route",
+        [CODEX_IMAGE_ROUTE, CLAUDE_CODE_IMAGE_ROUTE, GEMINI_CLI_IMAGE_ROUTE],
+        ids=["argv-route", "prompt-route", "at-reference-route"],
+    )
+    def test_no_images_changes_nothing(self, route):
+        """A text-only turn through a routed preset is untouched.
+
+        Every route shape, because an argv-only route leaves the prompt alone
+        whether or not the guard exists: only a route that rewrites the
+        prompt can show the guard doing anything, and without it the
+        separator would be joined onto an empty reference list and prefixed
+        to every text-only prompt.
+        """
+        prompt, argv = apply_route(route, "hello", [])
         assert prompt == "hello"
         assert argv == []
 
@@ -846,9 +874,17 @@ class TestImagePayloadExtraction:
         assert "image_part_from_path" in str(excinfo.value)
 
     def test_a_non_base64_data_uri_is_refused(self):
-        """A percent-encoded data URI is not something to write blindly."""
-        part = {"type": "image_url", "image_url": {"url": "data:image/png,raw"}}
-        with pytest.raises(CliImageMaterializationError, match="base64"):
+        """A data URI that does not declare base64 is refused on that ground.
+
+        The payload here is valid base64 on purpose, so the only thing that
+        can refuse it is the missing ``;base64`` declaration.  Given an
+        undecodable payload the decode step refuses too, under a message that
+        also says "base64", and the test would then pass with the header
+        check deleted.
+        """
+        encoded = base64.b64encode(PNG_BYTES).decode("ascii")
+        part = {"type": "image_url", "image_url": {"url": f"data:image/png,{encoded}"}}
+        with pytest.raises(CliImageMaterializationError, match="declared as"):
             image_payload(part)
 
     def test_an_undecodable_data_uri_is_refused(self):
