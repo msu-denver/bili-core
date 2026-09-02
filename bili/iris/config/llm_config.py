@@ -1446,9 +1446,15 @@ LLM_MODELS = {
                 "max_retries_max": 10,
             },
             {
-                "model_name": "OpenAI GPT-4 Turbo with Vision",
+                # The bare "gpt-4" id is the original GPT-4 snapshot (8K
+                # context); it is text-only. Vision arrived on later
+                # model ids (gpt-4-turbo, gpt-4o); declaring "image" here
+                # would let an image-bearing request reach this model
+                # undetected by the modality gate in
+                # bili.iris.providers.modality.
+                "model_name": "OpenAI GPT-4",
                 "model_id": "gpt-4",
-                "input_modalities": ["text", "image"],
+                "input_modalities": ["text"],
                 "custom_model_path": False,
                 "max_input_tokens": 8192,
                 "max_output_tokens": 4096,
