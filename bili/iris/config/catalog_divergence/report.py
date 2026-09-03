@@ -14,7 +14,7 @@ reflected in the process exit code.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .compare import ERROR, INFO, SEVERITY_ORDER, WARNING, DivergenceReport, Finding
 
@@ -25,11 +25,12 @@ from .compare import ERROR, INFO, SEVERITY_ORDER, WARNING, DivergenceReport, Fin
 STICKY_MARKER = "<!-- catalog-divergence-sticky-issue -->"
 
 
-def _finding_sort_key(finding: Finding):
+def _finding_sort_key(finding: Finding) -> Tuple[int, str, str, str]:
     """Order findings most severe first, then stably by provider and model.
 
     :param finding: The finding to key.
     :returns: A sortable tuple.
+    :rtype: Tuple[int, str, str, str]
     """
     return (
         SEVERITY_ORDER.index(finding.severity),

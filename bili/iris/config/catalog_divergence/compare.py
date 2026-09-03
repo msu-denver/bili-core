@@ -63,7 +63,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from bili.iris.config.llm_config import LLM_MODELS
 
-from .datasets import Dataset, DatasetResult, Unavailable
+from .datasets import CapabilityRecord, Dataset, DatasetResult, Unavailable
 from .mapping import (
     ADVISORY_ONLY_PROVIDER_TYPES,
     LITELLM_PROVIDERS,
@@ -243,7 +243,7 @@ def _resolve(
     provider_ids: Sequence[str],
     provider_type: str,
     model_id: str,
-):
+) -> Optional[CapabilityRecord]:
     """Find *model_id*'s record in *dataset*, provider-scoped.
 
     :param dataset: The dataset to search, or ``None`` when unavailable.
@@ -266,7 +266,7 @@ def _resolve(
 def _modality_findings(  # pylint: disable=too-many-locals
     provider_type: str,
     entry: dict,
-    records: Sequence[Any],
+    records: Sequence[CapabilityRecord],
     field_name: str,
     catalog_key: str,
 ) -> List[Finding]:
@@ -284,42 +284,40 @@ def _modality_findings(  # pylint: disable=too-many-locals
     if not declared:
         return []
     declared_set = frozenset(declared)
-    attribute = (
-        "input_modalities" if catalog_key == "input_modalities" else "output_modalities"
-    )
 
     findings: List[Finding] = []
     for record in records:
-        dataset_set = getattr(record, attribute)
-        if dataset_set is None:
-            continue
-        if dataset_set == declared_set:
+        axis = record.axis(catalog_key)
+        if axis.declared is None or axis.declared == declared_set:
             continue
 
         # The untrimmed upstream set is shown so the reader sees what the
         # dataset really said, including the kinds this vocabulary drops.
-        # Only the input axis keeps one; the output axis has nothing trimmed.
-        if attribute == "input_modalities":
-            shown = sorted(record.input_modalities_verbatim or dataset_set)
-        else:
-            shown = sorted(dataset_set)
+        shown = sorted(axis.verbatim or axis.declared)
         value = DatasetValue(record.source, record.provider_id, record.key, shown)
 
-        overclaimed = declared_set - dataset_set
-        underclaimed = dataset_set - declared_set
-        # An over-claim is a finding only when the dataset ENUMERATES its
-        # modalities; a dataset that merely confirms one cannot deny another.
-        denies = bool(overclaimed) and record.states_modalities_explicitly
+        overclaimed = declared_set - axis.declared
+        underclaimed = axis.declared - declared_set
 
-        # Both directions can hold at once, and reporting only the more severe
-        # half would leave the other stated nowhere.  They are one finding
-        # rather than two, at the higher severity, because they are one fact
-        # about one field.
+        # An over-claim is a finding only when the dataset ENUMERATES this
+        # axis; a dataset that merely confirms one kind cannot deny another.
+        # And it is an ERROR only when the enumeration names at least one kind
+        # this vocabulary can express: an upstream listing nothing but kinds
+        # outside it (a model whose only output is video) leaves the framework
+        # unable to tell a wrong declaration from a vocabulary too narrow to
+        # describe the model at all, so the finding is made and the stronger
+        # reading is not.
         parts = []
-        if denies:
+        denies = bool(overclaimed) and axis.explicit
+        if denies and axis.declared:
             parts.append(
                 f"catalog claims {sorted(overclaimed)}, which the dataset "
                 f"does not list"
+            )
+        elif denies:
+            parts.append(
+                f"catalog claims {sorted(overclaimed)}; the dataset lists only "
+                f"kinds outside this vocabulary"
             )
         if underclaimed:
             parts.append(
@@ -328,9 +326,14 @@ def _modality_findings(  # pylint: disable=too-many-locals
         if not parts:
             continue
 
+        # Both directions can hold at once, and reporting only the more severe
+        # half would leave the other stated nowhere.  They are one finding
+        # rather than two, at the higher severity, because they are one fact
+        # about one field.
+        severity = _cap(ERROR, provider_type) if (denies and axis.declared) else WARNING
         findings.append(
             Finding(
-                severity=_cap(ERROR, provider_type) if denies else WARNING,
+                severity=severity,
                 provider_type=provider_type,
                 model_id=entry["model_id"],
                 model_name=entry.get("model_name", ""),
@@ -344,7 +347,7 @@ def _modality_findings(  # pylint: disable=too-many-locals
 
 
 def _temperature_findings(
-    provider_type: str, entry: dict, records: Sequence[Any]
+    provider_type: str, entry: dict, records: Sequence[CapabilityRecord]
 ) -> List[Finding]:
     """Compare the declared temperature support against the datasets.
 
@@ -387,7 +390,7 @@ def _temperature_findings(
 
 
 def _context_findings(
-    provider_type: str, entry: dict, records: Sequence[Any]
+    provider_type: str, entry: dict, records: Sequence[CapabilityRecord]
 ) -> List[Finding]:
     """Compare the declared context window against the datasets.
 

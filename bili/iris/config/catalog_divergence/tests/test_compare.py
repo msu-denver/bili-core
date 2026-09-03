@@ -236,12 +236,18 @@ class TestModalityUnderClaim:
 
 
 class TestOutputModalities:
-    """The output axis is compared wherever the catalog declares one."""
+    """The output axis is compared wherever the catalog declares one.
+
+    Every case here states the OUTPUT array alone, with no input array. That
+    is deliberate: setting both makes the input axis's explicitness stand in
+    for the output axis's, so a test written that way passes whether the flag
+    is read per axis or not, and cannot observe the difference.
+    """
 
     def test_a_declared_output_over_claim_is_an_error(self):
         """The same asymmetry applies on the output side."""
         report = compare_catalog(
-            models_dev(modalities={"input": ["text"], "output": ["text"]}),
+            models_dev(modalities={"output": ["text"]}),
             NO_LITELLM,
             catalog(output_modalities=["text", "image"]),
         )
@@ -252,12 +258,98 @@ class TestOutputModalities:
     def test_a_declared_output_under_claim_is_a_warning(self):
         """Declaring less on the output side is a prompt to review."""
         report = compare_catalog(
-            models_dev(modalities={"input": ["text"], "output": ["text", "image"]}),
+            models_dev(modalities={"output": ["text", "image"]}),
             NO_LITELLM,
             catalog(output_modalities=["text"]),
         )
         findings = only(report.findings, FIELD_OUTPUT_MODALITIES)
         assert [f.severity for f in findings] == [WARNING]
+
+    def test_an_input_array_does_not_license_an_output_denial(self):
+        """Explicitness is per axis, and reading the wrong one is silent.
+
+        An upstream that enumerates its inputs and records nothing for its
+        outputs denies no output kind. Reading the input flag for the output
+        axis would report an ERROR the upstream never supported.
+        """
+        report = compare_catalog(
+            models_dev(modalities={"input": ["text"]}),
+            NO_LITELLM,
+            catalog(output_modalities=["text", "image"]),
+        )
+        assert only(report.findings, FIELD_OUTPUT_MODALITIES) == []
+
+    def test_an_output_array_does_not_license_an_input_denial(self):
+        """The mirror direction, so neither axis can borrow the other's flag."""
+        report = compare_catalog(
+            models_dev(modalities={"output": ["text"]}),
+            NO_LITELLM,
+            catalog(input_modalities=["text", "image"]),
+        )
+        assert only(report.findings, FIELD_INPUT_MODALITIES) == []
+
+
+class TestUncomparableUpstreamKinds:
+    """An upstream can enumerate only kinds this vocabulary cannot express."""
+
+    def test_it_is_reported_but_never_as_an_error(self):
+        """The framework cannot tell a wrong declaration from a narrow vocabulary.
+
+        This is the real shape: a video-generation model whose only output the
+        upstream records is video. The catalog's claim is unsupported, which
+        is worth reporting, but calling it an ERROR asserts that the catalog
+        is wrong when the other reading is that this vocabulary cannot
+        describe the model at all.
+        """
+        report = compare_catalog(
+            models_dev(modalities={"input": ["text", "image"], "output": ["video"]}),
+            NO_LITELLM,
+            catalog(output_modalities=["text"]),
+        )
+        findings = only(report.findings, FIELD_OUTPUT_MODALITIES)
+        assert [f.severity for f in findings] == [WARNING]
+        assert "outside this vocabulary" in findings[0].message
+        assert report.has_errors is False
+
+    def test_the_citation_shows_what_the_upstream_actually_listed(self):
+        """A citation of the trimmed set would read as an empty statement.
+
+        The trimmed set is empty by construction here, so citing it tells the
+        reader nothing about why their declaration is unsupported.
+        """
+        report = compare_catalog(
+            models_dev(modalities={"input": ["text", "image"], "output": ["video"]}),
+            NO_LITELLM,
+            catalog(output_modalities=["text"]),
+        )
+        finding = only(report.findings, FIELD_OUTPUT_MODALITIES)[0]
+        assert finding.dataset_values[0].value == ["video"]
+
+    def test_the_same_shape_on_the_input_axis_is_also_capped(self):
+        """Neither axis may reach ERROR from an empty comparable set."""
+        report = compare_catalog(
+            models_dev(modalities={"input": ["pdf", "video"]}),
+            NO_LITELLM,
+            catalog(input_modalities=["text"]),
+        )
+        findings = only(report.findings, FIELD_INPUT_MODALITIES)
+        assert [f.severity for f in findings] == [WARNING]
+        assert findings[0].dataset_values[0].value == ["pdf", "video"]
+
+    def test_an_upstream_naming_one_comparable_kind_still_errors(self):
+        """The cap must not swallow an ordinary denial.
+
+        Without this pair the cap could be a rule that fires on everything,
+        which would silence the whole ERROR class and look identical.
+        """
+        report = compare_catalog(
+            models_dev(modalities={"input": ["text", "pdf"]}),
+            NO_LITELLM,
+            catalog(input_modalities=["text", "image"]),
+        )
+        assert [f.severity for f in only(report.findings, FIELD_INPUT_MODALITIES)] == [
+            ERROR
+        ]
 
 
 class TestTemperature:

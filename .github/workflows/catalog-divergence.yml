@@ -62,11 +62,6 @@ jobs:
             # install step would be a second thing that can fail, and a job
             # whose install failed reports a red run that says nothing about
             # the catalog.
-            # No dependency install. The check imports nothing outside the
-            # standard library and the catalog itself, which a test pins. An
-            # install step would be a second thing that can fail, and a job
-            # whose install failed reports a red run that says nothing about
-            # the catalog.
             - name: Run the divergence check against the live datasets
               id: check
               env:
@@ -120,9 +115,15 @@ jobs:
                 retention-days: 90
 
             # One sticky issue, found by a marker the REPORT emits rather than
-            # by a label or a title match, so the job needs no label to exist,
-            # cannot adopt a human-filed issue that happens to share a title,
+            # by a label or a title match, so the job needs no label to exist
             # and cannot drift from the marker it looks for.
+            #
+            # The lookup requires the marker AND bot authorship. On a public
+            # repository anyone can open an issue whose body carries a known
+            # string, and a marker-only lookup would then edit and close that
+            # issue instead of the maintainers' own, so the genuine report is
+            # filed nowhere anybody controls. Authorship is the half a
+            # non-bot cannot forge.
             - name: Open or update the tracking issue
               if: steps.check.outputs.raise_issue == 'true'
               env:
@@ -134,8 +135,8 @@ jobs:
                 grep -qF "${marker}" issue-body.md
 
                 existing=$(gh issue list --state open --limit 100 \
-                    --json number,body \
-                    --jq "[.[] | select(.body | contains(\"${marker}\"))] | .[0].number // \"\"")
+                    --json number,body,author \
+                    --jq "[.[] | select(.author.is_bot and (.body | contains(\"${marker}\")))] | .[0].number // \"\"")
 
                 if [ -n "${existing}" ]; then
                     gh issue edit "${existing}" --body-file issue-body.md
@@ -159,8 +160,8 @@ jobs:
               run: |
                 marker=$(python -c 'from bili.iris.config.catalog_divergence import STICKY_MARKER; print(STICKY_MARKER)')
                 existing=$(gh issue list --state open --limit 100 \
-                    --json number,body \
-                    --jq "[.[] | select(.body | contains(\"${marker}\"))] | .[0].number // \"\"")
+                    --json number,body,author \
+                    --jq "[.[] | select(.author.is_bot and (.body | contains(\"${marker}\")))] | .[0].number // \"\"")
                 if [ -n "${existing}" ]; then
                     gh issue close "${existing}" \
                         --comment "The check now reads every dataset and reports no over-claimed capability. ${RUN_URL}"

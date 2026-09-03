@@ -182,7 +182,7 @@ class TestParseModelsDev:
     def test_an_explicit_modality_array_is_marked_explicit(self, models_dev_dataset):
         """This dataset states modalities, which is what licenses a denial."""
         record = models_dev_dataset.lookup("openai", "gpt-4")
-        assert record.states_modalities_explicitly is True
+        assert record.states_input_modalities is True
         assert record.input_modalities == frozenset({"text"})
 
     def test_modalities_outside_the_vocabulary_are_dropped(self, models_dev_dataset):
@@ -195,6 +195,57 @@ class TestParseModelsDev:
         assert record.input_modalities <= COMPARABLE_MODALITIES
         assert "pdf" in record.input_modalities_verbatim
         assert "pdf" not in record.input_modalities
+
+    def test_the_two_axes_carry_their_own_explicitness(self):
+        """One axis's explicitness must not license the other's denial.
+
+        A record can state one array and not the other, and reading the input
+        flag for the output axis either invents a denial the upstream never
+        made or silences one it did.
+        """
+        result = parse_models_dev(
+            {"openai": {"models": {"m": {"modalities": {"output": ["text"]}}}}}
+        )
+        record = result.lookup("openai", "m")
+        assert record.states_output_modalities is True
+        assert record.states_input_modalities is False
+
+    def test_an_axis_view_reports_that_axis_and_no_other(self):
+        """The view is what a consumer reads, so it must not cross the axes."""
+        result = parse_models_dev(
+            {
+                "openai": {
+                    "models": {
+                        "m": {
+                            "modalities": {
+                                "input": ["text", "image"],
+                                "output": ["video"],
+                            }
+                        }
+                    }
+                }
+            }
+        )
+        record = result.lookup("openai", "m")
+        assert record.axis("input_modalities").declared == frozenset({"text", "image"})
+        assert record.axis("output_modalities").declared == frozenset()
+        assert record.axis("output_modalities").verbatim == frozenset({"video"})
+        assert record.axis("output_modalities").explicit is True
+
+    def test_an_array_of_only_uncomparable_kinds_is_empty_not_absent(self):
+        """Empty and absent are different upstream statements.
+
+        An array listing only kinds outside this vocabulary is a statement
+        that was made; a missing array is one that was not. Collapsing them
+        would either silence a real over-claim or invent one.
+        """
+        result = parse_models_dev(
+            {"openai": {"models": {"m": {"modalities": {"input": ["pdf", "video"]}}}}}
+        )
+        record = result.lookup("openai", "m")
+        assert record.input_modalities == frozenset()
+        assert record.input_modalities is not None
+        assert record.input_modalities_verbatim == frozenset({"pdf", "video"})
 
     def test_the_temperature_field_is_read(self, models_dev_dataset):
         """This dataset carries a temperature boolean and it is parsed."""
@@ -233,7 +284,8 @@ class TestParseModelsDev:
         assert record.input_modalities is None
         assert record.temperature is None
         assert record.context_window is None
-        assert record.states_modalities_explicitly is False
+        assert record.states_input_modalities is False
+        assert record.states_output_modalities is False
 
     @pytest.mark.parametrize(
         "modalities",
@@ -329,7 +381,8 @@ class TestParseLitellm:
         """Its silence is unrecorded, so no record here may deny a modality."""
         for models in litellm_dataset.records.values():
             for record in models.values():
-                assert record.states_modalities_explicitly is False
+                assert record.states_input_modalities is False
+                assert record.states_output_modalities is False
 
     def test_this_dataset_carries_no_temperature_answer(self, litellm_dataset):
         """It has no such field, so it must never assert one."""
@@ -344,7 +397,7 @@ class TestParseLitellm:
         )
         record = result.lookup("openai", "m")
         assert record.input_modalities == frozenset({"text", "image"})
-        assert record.states_modalities_explicitly is False
+        assert record.states_input_modalities is False
 
     @pytest.mark.parametrize("flag", [False, None, "true"])
     def test_an_absent_or_negative_vision_flag_is_not_a_denial(self, flag):

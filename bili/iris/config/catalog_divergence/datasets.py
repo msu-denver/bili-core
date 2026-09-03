@@ -87,6 +87,25 @@ class Unavailable:
 
 
 @dataclass(frozen=True)
+class ModalityAxis:
+    """One modality axis of one upstream record.
+
+    :ivar declared: The upstream's kinds, restricted to
+        :data:`COMPARABLE_MODALITIES`. ``None`` when the upstream records
+        nothing for this axis.
+    :ivar verbatim: The upstream's kinds as it states them, before that
+        restriction, so a report can show what was really said.
+    :ivar explicit: Whether the upstream states this axis as an explicit
+        array. Only an explicit axis can DENY a kind; a dataset that merely
+        confirms one says nothing about the rest.
+    """
+
+    declared: Optional[FrozenSet[str]]
+    verbatim: Optional[FrozenSet[str]]
+    explicit: bool
+
+
+@dataclass(frozen=True)
 class CapabilityRecord:  # pylint: disable=too-many-instance-attributes
     """One upstream model record, reduced to the axes this compares.
 
@@ -101,12 +120,18 @@ class CapabilityRecord:  # pylint: disable=too-many-instance-attributes
     :ivar input_modalities_verbatim: Declared input kinds as the upstream
         states them, before that restriction, for the report.
     :ivar output_modalities: Declared output kinds, similarly restricted.
+    :ivar output_modalities_verbatim: Declared output kinds as the upstream
+        states them, before that restriction, for the report.
     :ivar temperature: Whether the upstream records the model as accepting a
         ``temperature`` parameter.
     :ivar context_window: The upstream's input context window in tokens.
-    :ivar states_modalities_explicitly: ``True`` only when the upstream states
-        input modalities as an explicit array, which is what makes an absent
-        modality a denial rather than an omission.
+    :ivar states_input_modalities: ``True`` only when the upstream states input
+        modalities as an explicit array, which is what makes an absent modality
+        a denial rather than an omission.
+    :ivar states_output_modalities: The same, for the output axis. The two are
+        separate because a record can state one and not the other, and reading
+        one axis's explicitness as the other's licenses a denial the upstream
+        never made (or silences one it did).
     """
 
     source: str
@@ -115,9 +140,30 @@ class CapabilityRecord:  # pylint: disable=too-many-instance-attributes
     input_modalities: Optional[FrozenSet[str]] = None
     input_modalities_verbatim: Optional[FrozenSet[str]] = None
     output_modalities: Optional[FrozenSet[str]] = None
+    output_modalities_verbatim: Optional[FrozenSet[str]] = None
     temperature: Optional[bool] = None
     context_window: Optional[int] = None
-    states_modalities_explicitly: bool = False
+    states_input_modalities: bool = False
+    states_output_modalities: bool = False
+
+    def axis(self, name: str) -> ModalityAxis:
+        """Return one modality axis as a self-contained view.
+
+        :param name: ``"input_modalities"`` or ``"output_modalities"``.
+        :returns: That axis's restricted set, verbatim set, and explicitness.
+        :rtype: ModalityAxis
+        """
+        if name == "input_modalities":
+            return ModalityAxis(
+                self.input_modalities,
+                self.input_modalities_verbatim,
+                self.states_input_modalities,
+            )
+        return ModalityAxis(
+            self.output_modalities,
+            self.output_modalities_verbatim,
+            self.states_output_modalities,
+        )
 
 
 @dataclass(frozen=True)
@@ -276,6 +322,7 @@ def parse_models_dev(payload: Any, origin: str = MODELS_DEV_URL) -> DatasetResul
             modalities = model.get("modalities")
             modalities = modalities if isinstance(modalities, dict) else {}
             declared_input = modalities.get("input")
+            declared_output = modalities.get("output")
             temperature = model.get("temperature")
             limit = model.get("limit")
             limit = limit if isinstance(limit, dict) else {}
@@ -285,12 +332,14 @@ def parse_models_dev(payload: Any, origin: str = MODELS_DEV_URL) -> DatasetResul
                 key=key,
                 input_modalities=_restrict(declared_input),
                 input_modalities_verbatim=_verbatim(declared_input),
-                output_modalities=_restrict(modalities.get("output")),
+                output_modalities=_restrict(declared_output),
+                output_modalities_verbatim=_verbatim(declared_output),
                 temperature=(
                     bool(temperature) if isinstance(temperature, bool) else None
                 ),
                 context_window=_positive_int(limit.get("context")),
-                states_modalities_explicitly=isinstance(declared_input, list),
+                states_input_modalities=isinstance(declared_input, list),
+                states_output_modalities=isinstance(declared_output, list),
             )
         if bucket:
             records[provider_id] = bucket
@@ -348,10 +397,15 @@ def parse_litellm(payload: Any, origin: str = LITELLM_URL) -> DatasetResult:
             input_modalities=restricted,
             input_modalities_verbatim=verbatim,
             output_modalities=_restrict(model.get("supported_output_modalities")),
+            output_modalities_verbatim=_verbatim(
+                model.get("supported_output_modalities")
+            ),
             temperature=None,  # this dataset carries no temperature field
             context_window=_positive_int(model.get("max_input_tokens")),
-            # Never explicit: an omission here is unrecorded, not a denial.
-            states_modalities_explicitly=False,
+            # Neither axis is ever explicit here: an omission in this dataset
+            # is unrecorded, not a denial.
+            states_input_modalities=False,
+            states_output_modalities=False,
         )
         bucket = records.setdefault(provider_id, {})
         short = key.split("/")[-1]
