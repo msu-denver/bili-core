@@ -211,6 +211,36 @@ class TestRenderIssueBody:
             report([finding()]), run_url="https://ci.example/run/1"
         )
 
+    def test_the_fence_is_sized_to_the_embedded_report(self):
+        """An upstream string can carry backticks, and must not escape the block.
+
+        The report embeds keys and provider ids that come from third-party
+        data, so a fixed three-backtick fence could be closed early by an
+        upstream model id and spill the rest of the report into the issue as
+        markup.
+        """
+        nasty = Finding(
+            severity=ERROR,
+            provider_type="remote_openai",
+            model_id="m",
+            model_name="Test Model",
+            field_name="input_modalities",
+            catalog_value=["text"],
+            dataset_values=(DatasetValue(MODELS_DEV, "openai", "a```b", ["text"]),),
+            message="m",
+        )
+        body = render_issue_body(report([nasty]))
+        assert "````" in body
+        # The fence that opens the block is the one that closes it, and the
+        # embedded report sits between exactly one pair.
+        assert body.count("\n````\n") == 2
+
+    def test_a_report_with_no_backticks_uses_the_ordinary_fence(self):
+        """The sizing must not inflate every ordinary body."""
+        body = render_issue_body(report([finding()]))
+        assert "\n```\n" in body
+        assert "````" not in body
+
     def test_it_carries_the_sticky_marker(self):
         """The job that posts this finds its own issue by the marker.
 

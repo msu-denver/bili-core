@@ -200,6 +200,20 @@ def render_json(report: DivergenceReport, indent: int = 2) -> str:
     return json.dumps(to_dict(report), indent=indent, sort_keys=False) + "\n"
 
 
+def _longest_backtick_run(text: str) -> int:
+    """Return the length of the longest consecutive backtick run in *text*.
+
+    :param text: The text to scan.
+    :returns: The run length, zero when there are no backticks.
+    :rtype: int
+    """
+    longest = current = 0
+    for character in text:
+        current = current + 1 if character == "`" else 0
+        longest = max(longest, current)
+    return longest
+
+
 def render_issue_body(report: DivergenceReport, run_url: str = "") -> str:
     """Render a compact Markdown body for the sticky tracking issue.
 
@@ -234,10 +248,17 @@ def render_issue_body(report: DivergenceReport, run_url: str = "") -> str:
     lines.append("A finding is a prompt to adjudicate, not a value to adopt: a")
     lines.append("dataset may fill a gap in the catalog and may never overturn a")
     lines.append("declared value.")
+    # The embedded report carries strings from third-party datasets, so the
+    # fence is sized to the content rather than fixed at three backticks: an
+    # upstream model id containing a run of backticks would otherwise close
+    # the block early and spill the rest of the report into the issue as
+    # markup.
+    body = render_text(report).rstrip("\n")
+    fence = "`" * max(3, _longest_backtick_run(body) + 1)
     lines.append("")
-    lines.append("```")
-    lines.append(render_text(report).rstrip("\n"))
-    lines.append("```")
+    lines.append(fence)
+    lines.append(body)
+    lines.append(fence)
     if run_url:
         lines.append("")
         lines.append(f"Produced by {run_url}")
