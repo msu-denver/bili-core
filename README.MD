@@ -22,14 +22,22 @@ Originally developed for the [**Colorado Sustainability Hub**](https://sustainab
 BiliCore is organized into three named components, each solving a distinct problem:
 
 ### IRIS — Interactive Reasoning and Integration Services
-**Single-agent orchestration.** 60+ models across 6 providers.
+**Single-agent orchestration.** 118 model configurations across 18 provider types.
 
 IRIS bridges users to LLMs, tools, and data sources. It provides a node-based workflow pipeline where each step (persona injection, tool execution, memory management, response normalization) is a composable node. Switch models mid-conversation, configure tools on the fly, and persist state across sessions.
 
-- **Providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Ollama, local models
+- **API providers:** AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic (direct), Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI (Grok), Groq
+- **CLI providers:** Claude Code CLI, OpenAI Codex CLI, Google Gemini CLI (subprocess, `tool_strategy="mcp"`), plus a generic CLI subprocess provider for any text-in/text-out LLM tool
+- **Local providers:** llama.cpp (GGUF models), HuggingFace (GPTQ/transformers), Ollama (local daemon over HTTP, native tool calling for tool-capable models)
+- **Fallback engine:** `FallbackLLM` chains multiple providers so a transient error on the primary silently retries the next in the list
+- **Multimodal input:** build a message that carries an image content part with `bili.iris.multimodal` (`build_human_message`, `image_part`, `image_part_from_path`) and hand it to any entry point that takes message content: the IRIS streaming helpers, an AETHER run's `messages`, a HITL resume, or an operator steer. Each catalog entry declares `input_modalities` (`text` / `image` / `audio`), so `load_model(..., required_input_modalities=["image"])` refuses a model cataloged as text-only at selection instead of failing opaquely at the provider call, and `models_supporting_input_modality("image")` answers the routing direction. Text-only transports (the CLI subprocess providers) refuse an image part by name rather than stringifying it away
+- **Structured output:** pass `structured_output_schema` (JSON schema dict or Pydantic class) to `load_model()` and generation is constrained to schema-valid JSON at decode time — Ollama (llama.cpp GBNF grammar), OpenAI + Azure OpenAI (`response_format` with `strict: true`), Vertex AI + Google GenAI (controlled generation); `parse_structured_content()` parses and validates the response, and unsupported providers fail fast instead of silently returning an unconstrained model
+- **Tool-calling modes:** `native` (bind_tools; API providers and tool-capable local models via Ollama), `facilitated` (prompted ReAct hand-rolled loop for text-only/in-process local models), `mcp` (agent tools exposed as an ephemeral authenticated MCP server; CLI self-orchestrates), `none` (no tool support, plain path)
+- **Ephemeral MCP server:** `tool_strategy="mcp"` starts a per-call in-process MCP server (`mcp.server.MCPServer` + uvicorn, Streamable HTTP transport) on a random loopback port. Two independent checks guard it: a per-call Bearer token (`401` without it), and the requirement that the caller's connection belong to the spawned subprocess or one of its descendants (`403` otherwise), because the token has to be delivered through a file or an environment variable that every process of the same user can read. Per-CLI injectors for Claude Code, Codex, and Gemini CLI; falls back to tool-less if no injector is registered (never starts unauthenticated). See `docs/ARCHITECTURE.md` §7 for the boundary this does and does not establish
 - **Tools:** FAISS vector search, OpenSearch, weather APIs, web search, extensible tool registry
 - **Middleware:** Summarization, model call limiting, custom middleware
 - **Checkpointers:** MongoDB, PostgreSQL, in-memory — all with queryable conversation management
+- **MCP subsystem:** `bili/iris/mcp/` covers two directions: (1) MCP client — agents consume tools from external MCP servers (stdio or HTTP/SSE) as LangChain tools; (2) MCP server — expose an agent's tools to a spawned CLI LLM via the ephemeral server. Install: `pip install bili-core[mcp]`
 - **Streaming:** Token-by-token responses via sync and async APIs
 - **Location:** `bili/iris/`
 
@@ -60,6 +68,54 @@ AEGIS provides a systematic framework for testing how adversarial payloads propa
 
 ---
 
+
+## Running Alongside Other Projects and In Worktrees
+
+By default this project binds its historical host ports (Flask 5001, Streamlit 8501,
+PostGIS 5432, MongoDB 27017, LocalStack 4566/4571), so the normal workflow is
+unchanged. Other lab projects use overlapping ports, so only one stack can hold a
+given port at a time.
+
+```bash
+# run beside another project
+PORT_OFFSET=100 ./scripts/development/start-container -d
+
+# run a second copy of THIS project beside a running one
+CONTAINER_SUFFIX=-test PORT_OFFSET=110 ./scripts/development/start-container -d
+CONTAINER_SUFFIX=-test ./scripts/development/attach-container
+CONTAINER_SUFFIX=-test ./scripts/development/stop-container
+```
+
+`PORT_OFFSET` shifts every host binding; container-internal ports never move, so
+traffic inside the compose network is unaffected. `CONTAINER_SUFFIX` suffixes the
+container and network names and drives the Compose project name, so a second
+instance gets its own containers, network, and volumes.
+
+Pass the same `CONTAINER_SUFFIX` to **every** script in `scripts/development/`
+(including `start-opensearch-dashboard`), or you will attach to, tear down, or point
+a dashboard at the wrong stack. A suffixed instance starts with **empty databases**:
+two MongoDB processes cannot share a data directory, so isolation is required.
+
+`start-container` refuses to start when a resolved host port is held by another
+process, naming the port. Ports published by your own instance are excluded, so
+re-running against your own running stack stays idempotent.
+
+### Working in a git worktree inside the container
+
+The container mounts `../bili-core-worktrees` as a sibling of the repo, so several
+people or agents can build and test in parallel against one container:
+
+```bash
+git worktree add ../bili-core-worktrees/my-task -b feature/my-task
+./scripts/development/start-container -d
+docker exec -w /app/bili-core-worktrees/my-task bili-core pytest
+```
+
+Bring the stack up from the **main checkout**, not from inside a worktree: a
+worktree's `.git` is a file rather than a directory, so a stack started from one
+cannot resolve nested worktrees. The pointer rewrite needs **host git 2.48 or
+newer**; on older git the script warns and only the worktree feature degrades.
+
 ## Quick Start
 
 ### Prerequisites
@@ -80,11 +136,11 @@ cp .env.example .env
 
 ```bash
 cd scripts/development
-./start-container.sh
-./attach-container.sh
+./start-container
+./attach-container
 ```
 
-This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases.
+This starts the bili-core container along with PostgreSQL (with PostGIS), MongoDB, and LocalStack services. The container automatically activates a Python virtual environment and sets up shell aliases. The compute profile (`cpu` or `gpu`) is auto-detected from the presence of an NVIDIA GPU; pass `cpu` or `gpu` as an argument to force one.
 
 ### 3. Run the application
 
@@ -93,6 +149,30 @@ Inside the container:
 ```bash
 streamlit    # Start the Streamlit UI on port 8501
 flask        # Start the Flask API on port 5001
+```
+
+#### Detached mode (background bringup)
+
+To bring the same environment up in the background without holding a terminal (useful for automation, CI, or when you just want the services running), pass `-d`:
+
+```bash
+./scripts/development/start-container -d          # auto-detect cpu/gpu profile
+./scripts/development/start-container -d cpu       # force the cpu profile
+```
+
+Detached mode brings up compose, starts Flask (`:5001`) and Streamlit (`:8501`) inside the container, waits for the Flask API to respond, and prints the log-tail and stop commands. The foreground behavior above is unchanged.
+
+Tail the logs:
+
+```bash
+docker exec bili-core tail -f /tmp/flask.log
+docker exec bili-core tail -f /tmp/streamlit.log
+```
+
+Tear the environment down (works for foreground or detached, safe to run when nothing is up):
+
+```bash
+./scripts/development/stop-container
 ```
 
 ### 4. Access the application

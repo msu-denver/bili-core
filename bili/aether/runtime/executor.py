@@ -48,17 +48,58 @@ Usage::
         elif event_type == "__node_complete__":
             print(f"\n[{event_data['node']} complete]")
 
+    # ask_user (or any tool calling langgraph.types.interrupt()) pauses the
+    # run_streaming() generator with a __ask_user_pending__ sentinel;
+    # resume_with_value() supplies the answer and continues execution:
+    for node_name, state_update in executor.run_streaming(
+        {"messages": [HumanMessage(content="Deploy the app.")]}, thread_id="my-thread"
+    ):
+        if node_name == "__ask_user_pending__":
+            question = state_update["interrupts"][0]["question"]
+            for node_name2, state_update2 in executor.resume_with_value(
+                "staging", thread_id="my-thread"
+            ):
+                print(f"{node_name2}: {state_update2}")
+
     # Or use the convenience function:
     result = execute_mas(config, {"messages": [HumanMessage(content="Hello")]})
+
+Multimodal input
+----------------
+``input_data["messages"]`` is a list of ``BaseMessage``, so an image reaches a
+run by building the message with an image content part::
+
+    from bili.iris.multimodal import build_human_message
+
+    result = executor.run({
+        "messages": [build_human_message(
+            text="What does this diagram show?",
+            images=["https://example.invalid/diagram.png"],
+        )]
+    })
+
+Whether the agents' bound models accept an image is a per-model question;
+``bili.iris.providers.modality`` answers it from the catalog.
 """
 
 import json
 import logging
 import os
+import queue
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from bili.aether.runtime.context import RuntimeContext
 from bili.aether.runtime.execution_result import (
@@ -67,6 +108,7 @@ from bili.aether.runtime.execution_result import (
 )
 from bili.aether.runtime.streaming import StreamEvent, StreamEventType, StreamFilter
 from bili.aether.schema import MASConfig, WorkflowType
+from bili.iris.multimodal import normalise_prompt
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +130,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         conversation_id: Optional[str] = None,
         custom_node_registry: Optional[Dict[str, Any]] = None,
         runtime_context: Optional[RuntimeContext] = None,
+        enable_steering: bool = False,
     ) -> None:
         """Initialize the executor.
 
@@ -110,6 +153,16 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 Checked before the global ``GRAPH_NODE_REGISTRY``.
             runtime_context: Optional :class:`RuntimeContext` holding
                 named services injected into pipeline node builders.
+            enable_steering: When ``True``, an operator may inject a
+                directive into a running graph that the next node observes
+                at the next superstep boundary (see :meth:`submit_steer`,
+                :meth:`steer`, :meth:`run_streaming_steerable`). This makes
+                :meth:`initialize` pause after every agent node
+                (``interrupt_after``) and guarantees a checkpointer is
+                attached, so directives can be applied via ``update_state``
+                and picked up on resume. Defaults to ``False``: when unset,
+                compilation and every existing run/stream path are
+                unchanged (no interrupt points, no directive queue).
         """
         self._config = config
         self._log_dir = log_dir or os.getcwd()
@@ -118,8 +171,19 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         self._conversation_id = conversation_id
         self._custom_node_registry = custom_node_registry
         self._runtime_context = runtime_context
+        self._enable_steering = enable_steering
+        # Thread-safe queue of operator directives drained at each superstep
+        # boundary by run_streaming_steerable(). Only allocated when steering
+        # is enabled, so the feature is inert (and allocates nothing) by
+        # default.
+        self._steer_queue: Optional["queue.Queue[str]"] = (
+            queue.Queue() if enable_steering else None
+        )
         self._compiled_mas = None
         self._compiled_graph = None
+        # Populated by initialize(); used by run/stream methods to decide
+        # whether to inject a thread_id into invoke_config.
+        self._checkpointer = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -145,8 +209,18 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         Calls ``compile_mas()`` (which validates the config) and then
         ``compile_graph()`` to produce the executable graph.
 
-        If ``user_id`` was provided to ``__init__()``, creates a checkpointer
-        with multi-tenant security enabled.
+        Checkpointer attachment (mirrors IRIS always-on behaviour):
+        - ``checkpoint_enabled=True`` (the default) always attaches a
+          checkpointer, even without ``user_id``:
+            - With ``user_id``: ownership-validating saver keyed to that user.
+            - Without ``user_id``: configured backend (default: memory).
+        - ``checkpoint_enabled=False``: explicit opt-out; no saver attached
+          (HITL override still applies).
+        - HITL: a ``MemorySaver`` is always attached when human-interrupt
+          nodes are present, even when ``checkpoint_enabled=False``.
+
+        After initialization, ``self._checkpointer`` reflects whether a
+        checkpointer is actually attached (``None`` = no persistence).
 
         Raises:
             ValueError: If config validation fails.
@@ -168,31 +242,73 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                 a.agent_id for a in self._config.agents if getattr(a, "is_human", False)
             ]
 
-        # Create checkpointer — required for HITL resumption even when
-        # checkpoint_enabled is False in the config.
+        # Always-on checkpointing: attach a checkpointer whenever
+        # checkpoint_enabled=True, regardless of whether user_id is set.
+        # checkpoint_enabled=False is the explicit opt-out.
         checkpointer = None
-        if self._user_id and self._config.checkpoint_enabled:
-            checkpointer = self._create_checkpointer_with_user_id()
-        elif human_nodes and not self._config.checkpoint_enabled:
-            # HITL requires a checkpointer so state can be resumed after the
-            # interrupt.  Fall back to an in-process MemorySaver.
+        if self._config.checkpoint_enabled:
+            if self._user_id:
+                # Multi-tenant: ownership-validating saver keyed to this user
+                checkpointer = self._create_checkpointer_with_user_id()
+            else:
+                # Local / single-instance: configured backend, no ownership
+                # validation
+                checkpointer = self._create_checkpointer_local()
+
+        # HITL override: state resumption requires a checkpointer even when
+        # checkpoint_enabled=False.  Fall back to an in-process MemorySaver.
+        if human_nodes and checkpointer is None:
             from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
                 MemorySaver,
             )
 
             checkpointer = MemorySaver()
+            LOGGER.info(
+                "HITL mode: attaching MemorySaver for state resumption "
+                "(checkpoint_enabled=False)"
+            )
 
+        # Steering override: injecting a directive mid-run uses the same
+        # update_state + resume seam as HITL, so it likewise requires a
+        # checkpointer even when checkpoint_enabled=False.
+        if self._enable_steering and checkpointer is None:
+            from langgraph.checkpoint.memory import (  # pylint: disable=import-outside-toplevel
+                MemorySaver,
+            )
+
+            checkpointer = MemorySaver()
+            LOGGER.info(
+                "Steering enabled: attaching MemorySaver for directive "
+                "injection and resume (checkpoint_enabled=False)"
+            )
+
+        # When steering is enabled, pause after every agent node so a
+        # steerable run has a guaranteed boundary at which to drain the
+        # directive queue and apply pending directives before resuming.
+        # Empty (the default) means no interrupt points are added, so
+        # compilation is byte-for-byte identical to the non-steering path.
+        interrupt_after_nodes: List[str] = []
+        if self._enable_steering:
+            interrupt_after_nodes = list(self._compiled_mas.agent_nodes)
+
+        self._checkpointer = checkpointer
         self._compiled_graph = self._compiled_mas.compile_graph(
             checkpointer=checkpointer,
             interrupt_before=human_nodes,
+            interrupt_after=interrupt_after_nodes or None,
         )
 
         LOGGER.info(
-            "MASExecutor initialized for '%s' (%d agents, %s workflow%s)",
+            "MASExecutor initialized for '%s' (%d agents, %s workflow%s%s)",
             self._config.mas_id,
             len(self._config.agents),
             self._config.workflow_type.value,
             f", user_id={self._user_id}" if self._user_id else "",
+            (
+                ", checkpointer={}".format(type(checkpointer).__name__)
+                if checkpointer
+                else ", checkpointer=None"
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -239,7 +355,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         # Build invoke config
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
-        if self._config.checkpoint_enabled:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -269,8 +385,8 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             final_state
         )
 
-        checkpoint_saved = self._config.checkpoint_enabled
-        # JSONL logging deprecated - communication now persists in checkpointer state
+        checkpoint_saved = self._checkpointer is not None
+        # Communication now persists in checkpointer state
         comm_log_path = None
 
         result = MASExecutionResult(
@@ -342,7 +458,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
-        if self._config.checkpoint_enabled:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -434,8 +550,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         effective_thread_id: Optional[str] = None
-        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
-        if needs_checkpoint:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -469,6 +584,104 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
                     )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 LOGGER.warning("Could not inspect graph state for HITL check: %s", exc)
+
+        # Separately, check for a langgraph.types.interrupt() pause (e.g. the
+        # ask_user tool) — distinct from the human_in_loop / is_human whole-
+        # agent-slot mechanism above, and not gated on human_in_loop, since a
+        # tool-level interrupt can occur in any MAS regardless of that flag.
+        # Additive: existing __human_interrupt__ callers are unaffected.
+        if invoke_config:
+            try:
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                pending_interrupts = [
+                    interrupt_obj
+                    for task in graph_state.tasks
+                    for interrupt_obj in task.interrupts
+                ]
+                if pending_interrupts:
+                    yield (
+                        "__ask_user_pending__",
+                        {
+                            # Raw interrupt payload(s) as passed to interrupt(...),
+                            # e.g. {"type": "ask_user", "question": ..., "options": ...}.
+                            "interrupts": [i.value for i in pending_interrupts],
+                            "thread_id": effective_thread_id,
+                        },
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.warning(
+                    "Could not inspect graph state for ask_user interrupt check: %s",
+                    exc,
+                )
+
+    def resume_with_value(
+        self,
+        value: Any,
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Resume a graph paused at a ``langgraph.types.interrupt()`` call.
+
+        Unlike :meth:`resume_streaming` (which injects a ``HumanMessage`` and
+        lets the graph continue routing normally — the ``human_in_loop`` /
+        ``is_human`` whole-agent-slot mechanism), this supplies *value*
+        directly as the return value of the ``interrupt(...)`` call that
+        paused execution, via ``Command(resume=value)``. Use this to resume
+        after a ``__ask_user_pending__`` sentinel from :meth:`run_streaming`.
+
+        The outer AETHER/IRIS node that called into the tool-calling agent
+        re-executes from its own start on resume (not just the single
+        interrupted tool call) — this is ``langgraph.types.interrupt()``'s
+        documented behavior, not a bili-core choice. Verified against
+        ``create_agent``'s tool-calling subgraph specifically: its own
+        internal LLM-call node is NOT re-invoked on resume (LangGraph tracks
+        that node's own already-completed task independently, even without
+        an explicit checkpointer passed to ``create_agent``, when the
+        subgraph is invoked from inside an already-checkpointed outer node —
+        which is how every bili-core tool-calling node uses it). Code in the
+        outer node before the tool-calling agent is invoked (e.g. system
+        prompt / comm-context assembly) does re-run; this is harmless as
+        long as it is pure computation with no external side effect, which
+        holds for AETHER's own pre-invoke bookkeeping today.
+
+        Args:
+            value: The value returned to the paused ``interrupt(...)`` call
+                (e.g. the human's answer to an ``ask_user`` question).
+            thread_id: Thread ID originally reported in the
+                ``__ask_user_pending__`` sentinel.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the interrupt, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before resume_with_value()."
+            )
+
+        from langgraph.types import Command  # pylint: disable=import-outside-toplevel
+
+        invoke_config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._config.max_iterations,
+        }
+
+        LOGGER.info("Resuming interrupt()-paused execution for thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                Command(resume=value),
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("resume_with_value failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("interrupt() resume complete for thread '%s'", thread_id)
 
     def run_streaming_tokens(
         self,
@@ -523,8 +736,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
         effective_thread_id: Optional[str] = None
-        needs_checkpoint = self._config.checkpoint_enabled or self._config.human_in_loop
-        if needs_checkpoint:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -581,7 +793,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
 
     def resume_streaming(
         self,
-        human_input: str,
+        human_input: Union[str, Sequence[Any]],
         thread_id: str,
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
         """Resume a graph that was paused at a human-interrupt node.
@@ -592,7 +804,11 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         ``__human_interrupt__`` sentinel was yielded.
 
         Args:
-            human_input: The human reviewer's text response.
+            human_input: The human reviewer's response.  A plain string for a
+                text reply, or a list of content parts (text plus image) to
+                answer with an image; see
+                :func:`bili.iris.multimodal.build_human_message`.  A string
+                builds exactly the message it always did.
             thread_id: Thread ID originally reported in the
                 ``__human_interrupt__`` sentinel.
 
@@ -618,7 +834,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         }
         self._compiled_graph.update_state(
             invoke_config,
-            {"messages": [HumanMessage(content=human_input)]},
+            {"messages": [HumanMessage(content=normalise_prompt(human_input))]},
         )
 
         LOGGER.info("Resuming HITL execution for thread '%s'", thread_id)
@@ -635,6 +851,230 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
             raise
         finally:
             LOGGER.info("HITL resume complete for thread '%s'", thread_id)
+
+    # ------------------------------------------------------------------
+    # Operator steering (user-initiated mid-run redirect)
+    # ------------------------------------------------------------------
+    #
+    # HITL and ``ask_user`` are the agent->user direction: an agent pauses to
+    # ask, a human answers.  Steering is the opposite direction: a human
+    # supervising a long-running run injects a mid-run redirect ("emphasize
+    # X", "stop pursuing that branch") that the next agent observes at the
+    # next natural boundary, without killing the run and starting over.
+    #
+    # It reuses the existing update_state + resume seam (the same one HITL's
+    # resume_streaming uses): a directive is written into ``messages`` via
+    # ``update_state``, and the run resumes with ``.stream(None)``.  Every
+    # agent node rebuilds its prompt from state at the start of its step
+    # (reading ``messages`` and its pending-message context), so an injected
+    # directive is picked up with no agent, compiler, or schema change.
+
+    def submit_steer(self, message: Union[str, Sequence[Any]]) -> None:
+        """Enqueue an operator directive for a steerable run to pick up.
+
+        Thread-safe: intended to be called from a different thread than the
+        one driving :meth:`run_streaming_steerable`, so a supervising
+        operator can inject a directive while the run is in flight. The
+        directive is drained and applied at the next superstep boundary (the
+        pause after the currently executing agent node completes), then
+        observed by the next node to start.
+
+        Args:
+            message: The operator's steering directive: free text, or a list
+                of content parts to redirect the run with an image.
+
+        Raises:
+            RuntimeError: If the executor was not constructed with
+                ``enable_steering=True``.
+        """
+        if self._steer_queue is None:
+            raise RuntimeError(
+                "Steering is not enabled. Construct "
+                "MASExecutor(..., enable_steering=True) to submit directives."
+            )
+        self._steer_queue.put(message)
+
+    def _drain_steer_queue(self) -> List[Union[str, Sequence[Any]]]:
+        """Remove and return every currently-queued operator directive.
+
+        Non-blocking: returns only what is already queued at call time (an
+        empty list when nothing is pending), so a steerable run never waits
+        on the queue.
+        """
+        directives: List[Union[str, Sequence[Any]]] = []
+        if self._steer_queue is None:
+            return directives
+        while True:
+            try:
+                directives.append(self._steer_queue.get_nowait())
+            except queue.Empty:
+                break
+        return directives
+
+    def _apply_steer_directives(
+        self,
+        invoke_config: Dict[str, Any],
+        messages: Sequence[Union[str, Sequence[Any]]],
+    ) -> None:
+        """Write operator directives into graph state as ``HumanMessage`` s.
+
+        This is the single point at which a steer directive lands in state,
+        shared by :meth:`steer` and :meth:`run_streaming_steerable` so the
+        two cannot drift on how a directive is applied. The next agent node
+        reads ``messages`` at the start of its step and observes them.
+
+        A directive is a plain string, or a list of content parts when the
+        operator is redirecting the run with an image.
+        """
+        from langchain_core.messages import (  # pylint: disable=import-outside-toplevel
+            HumanMessage,
+        )
+
+        self._compiled_graph.update_state(
+            invoke_config,
+            {"messages": [HumanMessage(content=normalise_prompt(m)) for m in messages]},
+        )
+
+    def steer(
+        self,
+        message: Union[str, Sequence[Any]],
+        thread_id: str,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Inject one operator directive into a paused run and resume it.
+
+        The explicit counterpart to :meth:`run_streaming_steerable`'s queue:
+        use this when the caller is itself driving the run (e.g. it broke out
+        of a streaming loop at a boundary) and wants to inject a single
+        directive and continue. Generalises :meth:`resume_streaming` (which
+        answers an agent's question) to the operator->run direction: the
+        directive is applied via ``update_state`` and execution resumes from
+        the checkpoint, so the next node observes it.
+
+        Requires the run to be paused at a boundary (steering attaches an
+        ``interrupt_after`` on every agent node, so a steerable run pauses
+        after each one) and a checkpointer to be attached (guaranteed when
+        ``enable_steering=True``).
+
+        Args:
+            message: The operator's steering directive: free text, or a list
+                of content parts to redirect the run with an image.
+            thread_id: Thread ID of the run to steer.
+
+        Yields:
+            ``(node_name, state_update)`` tuples for every node that executes
+            after the directive is applied, in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. Call initialize() before steer()."
+            )
+
+        invoke_config: Dict[str, Any] = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._config.max_iterations,
+        }
+        self._apply_steer_directives(invoke_config, [message])
+
+        LOGGER.info("Applying operator steer directive to thread '%s'", thread_id)
+        try:
+            for chunk in self._compiled_graph.stream(
+                None,
+                config=invoke_config,
+                stream_mode="updates",
+            ):
+                for node_name, state_update in chunk.items():
+                    yield (node_name, state_update)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("steer failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("Steer resume complete for thread '%s'", thread_id)
+
+    def run_streaming_steerable(
+        self,
+        input_data: Optional[Dict[str, Any]] = None,
+        thread_id: Optional[str] = None,
+    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+        """Stream node outputs, draining operator directives at each boundary.
+
+        A steer-aware variant of :meth:`run_streaming`. Because steering
+        compiles the graph to pause after every agent node
+        (``interrupt_after``), this drives the graph one superstep at a time:
+        it yields each node's ``(node_name, state_update)`` as it completes,
+        and at each pause it drains the directive queue (see
+        :meth:`submit_steer`) and applies any pending directives via
+        ``update_state`` before resuming. A directive submitted while an
+        agent is executing is therefore observed by the next agent to start.
+
+        Directives are drained non-blocking, so an empty queue makes this a
+        plain streamed run: it yields the same nodes in the same order and
+        produces the same final state, just paused and resumed at each
+        boundary. That equivalence is what makes steering safe to leave
+        enabled: an unused steer channel changes nothing.
+
+        Args:
+            input_data: Initial state overrides (may include a ``"messages"``
+                key with a list of LangChain messages).
+            thread_id: Thread ID for checkpointed execution.
+
+        Yields:
+            ``(node_name, state_update)`` tuples in execution order.
+
+        Raises:
+            RuntimeError: If ``initialize()`` has not been called, or the
+                executor was not constructed with ``enable_steering=True``.
+        """
+        if self._compiled_graph is None:
+            raise RuntimeError(
+                "Executor not initialized. "
+                "Call initialize() before run_streaming_steerable()."
+            )
+        if not self._enable_steering:
+            raise RuntimeError(
+                "Steering is not enabled. Construct "
+                "MASExecutor(..., enable_steering=True) for a steerable run."
+            )
+
+        execution_id = f"{self._config.mas_id}_{uuid.uuid4().hex[:8]}"
+        LOGGER.info("Starting steerable MAS streaming execution: %s", execution_id)
+        initial_state = self._build_initial_state(input_data)
+
+        # Steering guarantees a checkpointer (see initialize()), so a
+        # thread_id is always constructed for the run.
+        invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
+        effective_thread_id = self._construct_thread_id(thread_id, execution_id)
+        invoke_config["configurable"] = {"thread_id": effective_thread_id}
+
+        stream_input: Any = initial_state
+        try:
+            while True:
+                for chunk in self._compiled_graph.stream(
+                    stream_input,
+                    config=invoke_config,
+                    stream_mode="updates",
+                ):
+                    for node_name, state_update in chunk.items():
+                        yield (node_name, state_update)
+
+                # The stream exhausted: the graph either completed or paused
+                # at an interrupt_after boundary. If nothing is left to run,
+                # the run is done; otherwise drain any pending directives,
+                # apply them, and resume.
+                graph_state = self._compiled_graph.get_state(invoke_config)
+                if not graph_state.next:
+                    break
+                directives = self._drain_steer_queue()
+                if directives:
+                    self._apply_steer_directives(invoke_config, directives)
+                stream_input = None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error("run_streaming_steerable failed: %s", exc, exc_info=True)
+            raise
+        finally:
+            LOGGER.info("Steerable MAS streaming complete: %s", execution_id)
 
     async def astream(
         self,
@@ -669,7 +1109,7 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         initial_state = self._build_initial_state(input_data)
 
         invoke_config: Dict[str, Any] = {"recursion_limit": self._config.max_iterations}
-        if self._config.checkpoint_enabled:
+        if self._checkpointer is not None:
             effective_thread_id = self._construct_thread_id(thread_id, execution_id)
             invoke_config["configurable"] = {"thread_id": effective_thread_id}
 
@@ -916,6 +1356,42 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
     # Internal helpers
     # ==================================================================
 
+    def _create_checkpointer_local(self) -> Any:
+        """Create a checkpointer for local/single-instance runs (no user_id).
+
+        Uses the MASConfig's ``checkpoint_config`` to select the backend but
+        does NOT set ``user_id``, so thread ownership validation is disabled.
+        Falls back to ``MemorySaver`` if the factory is unavailable.
+
+        Returns:
+            A checkpointer instance without ownership validation.
+        """
+        try:
+            from bili.aether.integration.checkpointer_factory import (  # pylint: disable=import-outside-toplevel
+                create_checkpointer_from_config,
+            )
+
+            checkpointer = create_checkpointer_from_config(
+                self._config.checkpoint_config, user_id=None
+            )
+            LOGGER.info(
+                "Created local checkpointer (type=%s) for always-on persistence",
+                type(checkpointer).__name__,
+            )
+            return checkpointer
+
+        except ImportError:
+            LOGGER.warning(
+                "Checkpointer factory not available; "
+                "falling back to MemorySaver for local checkpointing"
+            )
+
+        from langgraph.checkpoint.memory import (  # pylint: disable=import-error,import-outside-toplevel
+            MemorySaver,
+        )
+
+        return MemorySaver()
+
     def _create_checkpointer_with_user_id(self) -> Any:
         """Create a checkpointer with multi-tenant security enabled.
 
@@ -1049,11 +1525,16 @@ class MASExecutor:  # pylint: disable=too-many-instance-attributes
         if wtype == WorkflowType.CUSTOM and self._config.human_in_loop:
             state["needs_human_review"] = False
 
-        # Communication fields (only when channels are configured)
+        # communication_log is always initialised so per-agent provenance is
+        # captured for every run, regardless of whether explicit channels are
+        # configured.
+        state["communication_log"] = []
+
+        # channel_messages and pending_messages are only needed for MAS
+        # configurations that declare explicit inter-agent channels.
         if self._config.channels:
             state["channel_messages"] = {}
             state["pending_messages"] = {}
-            state["communication_log"] = []
 
         # Merge user-provided data (overrides defaults)
         if input_data:

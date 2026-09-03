@@ -31,6 +31,7 @@ AETHER is a domain-agnostic multi-agent system (MAS) framework built as an exten
 - [Executing a MAS](#executing-a-mas)
   - [Basic Execution](#basic-execution)
   - [MASExecutor Methods](#masexecutor-methods)
+  - [Human-in-the-Loop](#human-in-the-loop)
   - [MASExecutionResult](#masexecutionresult)
   - [Checkpoint Persistence Testing](#checkpoint-persistence-testing)
   - [Cross-Model Transfer Testing](#cross-model-transfer-testing)
@@ -221,11 +222,13 @@ agents:
 | `model_name` | No | `None` | LLM model (e.g., `gpt-4`, `claude-sonnet-3-5-20241022`) |
 | `temperature` | No | `0.0` | LLM sampling temperature (0.0-2.0) |
 | `max_tokens` | No | `None` | Maximum tokens in LLM response |
-| `system_prompt` | No | `None` | Instructions for the LLM (up to 10,000 chars) |
+| `fallback_models` | No | `[]` | Ordered fallback model names tried on a transient error from `model_name` |
+| `cli_subprocess_timeout` | No | `None` | Per-call subprocess timeout in seconds for CLI-backed providers; `None` uses the preset default (1800s), `0` disables the timeout entirely. See [Human-in-the-Loop](#human-in-the-loop) for the `ask_user` CLI-path caveat. |
+| `system_prompt` | No | `None` | Instructions for the LLM. No fixed length cap — checked against the bound model's own declared input-token limit when `model_name` resolves to a catalog entry with a known limit; unconstrained otherwise. See [`get_prompt_length_limit()`](#per-model-prompt-length-limits). |
 | `capabilities` | No | `[]` | Agent capabilities (free-form strings) |
 | `tools` | No | `[]` | Tool names from the tool registry |
-| `output_format` | No | `text` | Output format: `text`, `json`, or `structured` |
-| `output_schema` | No | `None` | JSON schema (required when `output_format: structured`) |
+| `output_format` | No | `text` | Output format: `text`, `json`, or `structured` (see [Structured Output Enforcement](#structured-output-enforcement)) |
+| `output_schema` | No | `None` | JSON schema (required when `output_format: structured`); bound for decode-time constrained generation on supported providers and validated post-hoc otherwise |
 | `middleware` | No | `[]` | Middleware names for agent execution (see Per-Agent Middleware) |
 | `middleware_params` | No | `{}` | Parameters for middleware, keyed by name |
 | `inherit_from_bili_core` | No | `false` | Master toggle: inherit config from bili-core |
@@ -237,6 +240,7 @@ agents:
 | `tier` | No | `None` | Tier in hierarchical workflows (1 = highest authority) |
 | `voting_weight` | No | `1.0` | Weight in voting/consensus workflows |
 | `is_supervisor` | No | `false` | Whether agent can dynamically route to specialists |
+| `is_human` | No | `false` | Whether this agent slot is filled by a human reviewer; when `true` and `human_in_loop: true` on the MAS, execution pauses before this node (see [Human-in-the-Loop](#human-in-the-loop)) |
 | `consensus_vote_field` | No | `None` | Field name in output containing vote |
 | `metadata` | No | `{}` | Arbitrary key-value pairs for custom use |
 
@@ -252,6 +256,33 @@ Each agent has two distinct text fields that serve different purposes:
 The `objective` is required and describes the agent's role in the system. The `system_prompt` is optional and controls the LLM's behavior when executing that agent. When `system_prompt` is omitted, the agent inherits its prompt from bili-core (if `inherit_from_bili_core: true` and `inherit_system_prompt: true`) or uses the LLM's default behavior.
 
 Each agent can also specify its own LLM via `model_name` — different agents in the same MAS can use different models (e.g., a fast model for initial screening and a more capable model for final judgment).
+
+### Per-Model Prompt Length Limits
+
+`system_prompt` has no fixed character cap — every model has a different prompt/context budget, so a single hardcoded number is wrong for the catalog as a whole regardless of what it is. Instead, `AgentSpec` checks `system_prompt` length against the *bound model's own* declared limit:
+
+- When `model_name` resolves to a catalog entry with a known `max_input_tokens`, the prompt is checked against an approximate character budget derived from that limit.
+- When `model_name` is unset, unrecognized, or resolves to a catalog entry with no declared limit (e.g. CLI-subprocess and local providers, whose real limits depend on the underlying tool/hardware), the check is skipped — an unknown limit never becomes an arbitrary cap.
+
+Call `agent.get_prompt_length_limit()` to query the bound model's declared input-token limit directly (returns `None` when unknown), so you can budget a composed prompt against the model it will actually run on before constructing the `AgentSpec`:
+
+```python
+from bili.aether.schema import AgentSpec
+
+agent = AgentSpec(agent_id="researcher", role="researcher", objective="Research topics", model_name="claude-opus-4-8")
+agent.get_prompt_length_limit()  # -> 200000 (max_input_tokens from the catalog)
+```
+
+The same lookup is available directly from a model name via `bili.aether.compiler.llm_resolver.resolve_prompt_length_limit(model_name)`, useful for budgeting a prompt before an `AgentSpec` exists at all.
+
+### Structured Output Enforcement
+
+`output_format: structured` + `output_schema` is enforced end to end, not just declared:
+
+1. **Decode-time constraint (when possible).** At LLM-creation time the agent's `output_schema` is bound into the model via the provider-level `structured_output_schema` capability, so generation is *constrained* to schema-valid JSON — the model cannot emit output that violates the schema. This applies when the resolved provider supports decode-time enforcement (Ollama via llama.cpp grammar; OpenAI/Azure OpenAI via strict `response_format`; Vertex/Google GenAI via controlled generation) **and** the agent has no tools. Tool-bearing agents skip the binding (a constrained generation cannot also drive a tool-calling loop) with a logged warning; produce large structured documents with a dedicated tool-less agent.
+2. **Post-hoc validation (always).** The agent's output is parsed and validated against `output_schema` when the output dict is built. On success `output["parsed"]` holds the validated object — this is also what consensus vote extraction reads. On failure `output["raw"]` holds the content and `output["schema_error"]` describes the violation.
+
+Fallback chains evaluate decode-time support per fallback provider, so a chain can mix constrained and unconstrained backends; the post-hoc validation covers whichever backend answered.
 
 ### Use Presets for Common Patterns
 
@@ -584,6 +615,11 @@ The validator checks for **errors** (fatal — block execution) and **warnings**
 | Warning | Hierarchical tier gap (e.g., tier 1 and 3 but no 2) |
 | Warning | Supervisor entry point not marked `is_supervisor` |
 | Warning | `human_in_loop` enabled without `human_escalation_condition` |
+| Warning | Pipeline node unreachable from entry point |
+| Warning | Pipeline has only stub agents (no `model_name` anywhere) |
+| Warning | Pipeline conditional edges with no unconditional fallback |
+| Warning | `ask_user` agent on a CLI `tool_strategy="mcp"` model with a `cli_subprocess_timeout` below 5 minutes (see [Human-in-the-Loop](#human-in-the-loop)) |
+| Warning | `ask_user` agent on a CLI `tool_strategy="mcp"` model -- reminder that a `HitlResponder` must be registered |
 
 Validation runs on top of Pydantic's field-level validation — it catches cross-field and structural issues that individual field constraints can't express.
 
@@ -656,15 +692,36 @@ Each compiled graph gets a dynamic `TypedDict` state schema. Base fields are alw
 
 ### Agent Nodes
 
-Agent nodes are generated in one of three modes based on the `AgentSpec` configuration:
+Agent nodes are generated in one of four modes based on the `AgentSpec` configuration and the
+model's capability flags:
 
-1. **Tool-enabled LLM node** — When `model_name` is set and `tools` are configured, the node uses `create_agent()` from `langchain.agents` with resolved tool instances. This mirrors the pattern used by `bili/iris/nodes/react_agent_node.py`.
+1. **Tool-enabled LLM node (native)** — `model_name` set, `tools` configured, and the model
+   supports `bind_tools` (`supports_tools: true` in `LLM_MODELS`, the default for all API
+   providers). Uses `create_agent()` from `langchain.agents` with resolved tool instances.
 
-2. **Direct LLM node** — When `model_name` is set but no tools are configured, the node calls `llm.invoke(messages)` directly. Messages are filtered to compatible types (`AIMessage`, `HumanMessage`, `SystemMessage`).
+2. **Tool-enabled LLM node (prompted)** — `model_name` set, `tools` configured, and the model
+   does **not** support `bind_tools` (`supports_tools: false` in `LLM_MODELS`, set for CLI
+   models and some legacy providers). Uses the shared prompted ReAct loop from IRIS
+   (`_build_prompted_react_loop` in `bili/iris/nodes/react_agent_node.py`). Tools are described
+   in a system-message preamble; the model's text output is parsed for `Action:` /
+   `Final Answer:` markers — the same protocol IRIS uses. This path works with any model that
+   can follow text instructions, including `CliLLM` instances. Tune the iteration cap via
+   `AgentSpec.metadata["max_react_iterations"]` (default 10).
 
-3. **Stub node** — When `model_name` is `None`, the node emits a placeholder `AIMessage` without making LLM calls. This allows compilation and graph execution without API keys (all example YAMLs use this mode).
+3. **Direct LLM node** — When `model_name` is set but no tools are configured, the node calls
+   `llm.invoke(messages)` directly. Messages are filtered to compatible types (`AIMessage`,
+   `HumanMessage`, `SystemMessage`).
 
-Model resolution is handled by `llm_resolver.py`, which maps `AgentSpec.model_name` to a `(provider_type, model_id)` pair. It searches `bili.iris.config.llm_config.LLM_MODELS` first (by `model_id`, then by display name), and falls back to heuristic prefix-based detection. LLM instances are created via `bili.iris.loaders.llm_loader.load_model()`. Tool names are resolved via `bili.iris.loaders.tools_loader.initialize_tools()`.
+4. **Stub node** — When `model_name` is `None`, the node emits a placeholder `AIMessage`
+   without making LLM calls. This allows compilation and graph execution without API keys (all
+   example YAMLs use this mode).
+
+Model resolution is handled by `llm_resolver.py`, which maps `AgentSpec.model_name` to a
+`(provider_type, model_id)` pair. It searches `bili.iris.config.llm_config.LLM_MODELS` first
+(by `model_id`, then by display name), and falls back to heuristic prefix-based detection. The
+`supports_tools` flag is also read from `LLM_MODELS` to select native vs prompted path. LLM
+instances are created via `bili.iris.loaders.llm_loader.load_model()`. Tool names are resolved
+via `bili.iris.loaders.tools_loader.initialize_tools()`.
 
 Each agent node callable has an `.agent_spec` attribute attached for introspection:
 
@@ -796,11 +853,24 @@ agents:
 
 ### Checkpointer Configuration
 
+> **Behavior change (v5.1+):** `checkpoint_enabled: true` (the default) now always attaches a
+> checkpointer — even when no `user_id` is passed to `MASExecutor`. In earlier releases, omitting
+> `user_id` left the graph with no checkpointer, so `thread_id` had no persistence effect. Now,
+> two `run()` calls on the same `MASExecutor` instance passing the **same explicit `thread_id`**
+> will share and accumulate state (`agent_outputs`, `communication_log`). Runs that do **not**
+> supply a `thread_id` still receive an auto-generated `execution_id` per call and are unaffected.
+>
+> **Migration guidance:** If you relied on the previous no-checkpointer behaviour for stateless
+> local runs, either (a) pass a distinct `thread_id` per logically-separate run so executions
+> stay isolated, or (b) set `checkpoint_enabled: false` in your `MASConfig` to opt out
+> entirely. All existing code that already provided a `user_id` is unchanged.
+
 The `checkpoint_config` dict in `MASConfig` controls which checkpointer backend is used when compiling the graph. The factory maps `config["type"]` to a bili-core checkpointer:
 
 | Type | Backend | Notes |
 |------|---------|-------|
 | `memory` (default) | `QueryableMemorySaver` | In-memory, no persistence across restarts |
+| `jsonl` / `file` | `JSONLCheckpointSaver` | Local file — no server required; set `path` key or `JSONL_CHECKPOINT_PATH` env var |
 | `postgres` / `pg` | `PruningPostgresSaver` | Requires `POSTGRES_CONNECTION_STRING` env var |
 | `mongo` / `mongodb` | `PruningMongoDBSaver` | Requires `MONGO_CONNECTION_STRING` env var |
 | `auto` | Auto-detected | Tries postgres, then mongo, then memory (based on env vars) |
@@ -809,9 +879,14 @@ Additional keys are forwarded to the checkpointer constructor:
 
 ```yaml
 checkpoint_config:
-  type: postgres
-  keep_last_n: 10      # Prune to last 10 checkpoints per thread
+  type: jsonl
+  path: /var/data/run.jsonl  # optional; defaults to JSONL_CHECKPOINT_PATH env var
+  keep_last_n: 10            # prune to last 10 checkpoints per thread
 ```
+
+**Always-on default:** When `checkpoint_enabled: true` (the default), AETHER always attaches a checkpointer — even without a `user_id`. Without a `user_id`, the executor uses `_create_checkpointer_local()` which reads `checkpoint_config` directly. This means a plain `jsonl` config persists run state to disk with no database server and no user identity required.
+
+**JSONL file growth:** The default `keep_last_n: -1` retains full checkpoint history, which is ideal for a durable audit trail but grows the file and in-memory index as O(supersteps × full_state). For long-lived or high-frequency runs, set `keep_last_n` to a finite value (e.g. `10`) to cap file size and first-load time.
 
 **Fallback behaviour:** If the requested backend is unavailable (missing dependency or env var), the factory falls back to `MemorySaver` with a warning. The graph always compiles successfully.
 
@@ -824,9 +899,25 @@ compiled = compile_mas(config)
 graph = compiled.compile_graph(checkpointer=get_pg_checkpointer(keep_last_n=5))
 ```
 
+### Audit View
+
+`audit_view()` builds a human-readable timeline from a MAS run's checkpoint history. It iterates `checkpointer.list()` in chronological order, diffs `agent_outputs` and `communication_log` between consecutive supersteps, and returns one entry per superstep where something changed.
+
+```python
+from bili.iris.checkpointers.jsonl_checkpointer import get_jsonl_checkpointer
+from bili.aether.runtime import audit_view
+
+saver = get_jsonl_checkpointer(path="run.jsonl")
+timeline = audit_view(saver, thread_id="run-001")
+for step in timeline:
+    print(step["ts"], step["agent_id"], step["output_summary"])
+```
+
+Each entry contains: `step` (1-based), `ts` (ISO-8601), `checkpoint_id`, `agent_id`, `output_summary` (first 200 chars), `messages_sent` (new `communication_log` entries this step), and `raw_agent_outputs` (delta). Works with any checkpointer that exposes `list()` — JSONL, Postgres, Mongo, or in-memory.
+
 ### Per-Agent Middleware
 
-Agents can configure middleware to intercept and modify their execution. Middleware is resolved via bili-core's `initialize_middleware()` and passed to `create_agent()` for tool-enabled agents.
+Agents can configure middleware to intercept and modify their execution. Middleware is resolved via bili-core's `initialize_middleware()` and passed to `create_agent()` for tool-enabled agents on the **native** path.
 
 ```yaml
 agents:
@@ -862,7 +953,7 @@ agents:
 | `model_call_limit` | Circuit-breaker for runaway agent loops | `run_limit` (default: 10), `exit_behavior` (`"end"` or `"error"`) |
 
 **Limitations:**
-- Middleware only applies to **tool-enabled agents** (agents with `tools` configured). If middleware is set on an agent without tools, a warning is logged and middleware is skipped.
+- Middleware only applies to **native tool-enabled agents** (agents with `tools` configured and a model that supports `bind_tools`). If middleware is set on an agent without tools, or on an agent using the prompted ReAct path (`supports_tools: false`), a warning is logged and middleware is skipped.
 - Middleware requires `langchain.agents.middleware` — if unavailable, agents run without middleware.
 
 ### CLI Tool (Compiler)
@@ -907,6 +998,205 @@ result = execute_mas(config, {"messages": [HumanMessage(content="Test")]})
 | `run(input_data, thread_id, save_results)` | `MASExecutionResult` | Execute graph, collect results |
 | `run_with_checkpoint_persistence(input_data, thread_id)` | `(original, restored)` | Run twice with checkpoint save/restore |
 | `run_cross_model_test(input_data, source_model, target_model, thread_id)` | `(source, target)` | Run with two different model configurations |
+| `run_streaming(input_data, thread_id)` | generator of `(node_name, state_update)` | Stream node outputs; yields a `__human_interrupt__` / `__ask_user_pending__` sentinel if the run pauses (see [Human-in-the-Loop](#human-in-the-loop)) |
+| `resume_streaming(human_input, thread_id)` | generator | Resume after a `__human_interrupt__` sentinel |
+| `resume_with_value(value, thread_id)` | generator | Resume after a `__ask_user_pending__` sentinel |
+| `run_streaming_steerable(input_data, thread_id)` | generator of `(node_name, state_update)` | Stream node outputs, draining operator directives at each superstep boundary (requires `enable_steering=True`; see [Operator Steering](#operator-steering)) |
+| `submit_steer(message)` | `None` | Enqueue an operator directive for a steerable run to pick up (thread-safe; call from a supervising thread) |
+| `steer(message, thread_id)` | generator | Inject one operator directive into a paused run and resume |
+
+### Human-in-the-Loop
+
+AETHER has two distinct human-in-the-loop mechanisms. They pause execution
+for different reasons and at different granularities; pick the one that
+matches what you actually need a human for.
+
+| | `human_in_loop` | `ask_user` |
+|---|---|---|
+| **What pauses** | The whole workflow, before a designated human-reviewer agent's turn | One tool call, mid-turn, inside an agent's own reasoning |
+| **Granularity** | Whole-turn handoff | A single question |
+| **Who answers** | A human filling the role of an `AgentSpec` with `is_human: true` | Any `HitlResponder` implementation the host provides |
+| **Config** | `human_in_loop: true` + an agent with `is_human: true` | `tools: ["ask_user"]` on any tool-enabled agent |
+| **Resume with** | `MASExecutor.resume_streaming(human_input, thread_id)` | `MASExecutor.resume_with_value(value, thread_id)` (native path) |
+| **Use for** | "This decision needs a human reviewer in the loop as a workflow step" (approval gates, escalation) | "This agent needs one piece of information or judgment it cannot infer, then it keeps going" |
+
+They compose: a MAS can use both, independently, in the same config.
+
+#### `human_in_loop`: whole-turn escalation to a human reviewer
+
+Set `human_in_loop: true` on the `MASConfig` and mark one agent
+`is_human: true`. AETHER compiles the graph with `interrupt_before` set on
+that agent's node, so execution pauses immediately before it would run.
+`run_streaming()` detects the pause after the stream exhausts (via
+`graph_state.next`) and yields a `("__human_interrupt__", {"next": [...],
+"thread_id": ...})` sentinel; the caller collects the human's review and
+calls `resume_streaming(human_input, thread_id)`, which injects it as a
+`HumanMessage` and lets the graph continue routing normally.
+
+```yaml
+human_in_loop: true
+human_escalation_condition: >-           # documents *why* this MAS escalates
+  state.tie_breaker_needed or state.confidence < 0.5
+agents:
+  - agent_id: human_reviewer
+    role: reviewer
+    is_human: true
+    objective: "Review the escalated decision"
+```
+
+```python
+for node_name, state_update in executor.run_streaming(input_data, thread_id="t1"):
+    if node_name == "__human_interrupt__":
+        human_input = collect_review_from_a_ui()  # your own UI/CLI/queue
+        for node_name2, state_update2 in executor.resume_streaming(human_input, "t1"):
+            ...
+```
+
+The validator warns (`W10`) if `human_in_loop` is set without a
+`human_escalation_condition` -- the condition is documentation, not an
+enforced gate, but omitting it usually means the escalation trigger was
+never actually thought through.
+
+#### `ask_user`: an agent asks one question and keeps going
+
+`ask_user` is a generic tool (`bili.iris.tools.ask_user`), not a workflow-level
+config field. Any tool-enabled agent that lists `"ask_user"` in `tools` can
+call it mid-turn to ask the human operating the run a question it cannot
+answer from the conversation or its other tools, then continue its OWN turn
+with the answer folded back into context -- no handoff to a separate
+reviewer agent, no restart of the workflow's routing.
+
+```python
+from bili.iris.tools.ask_user import register_ask_user_tool
+from bili.iris.tools.hitl import HitlResponder
+
+class MyResponder:
+    """Implement HitlResponder however your host wants to surface questions --
+    a CLI prompt, an HTTP endpoint, a desktop modal, a message queue. bili-core
+    never renders the question itself."""
+    def ask(self, question: str, options: list[str] | None = None) -> str:
+        return my_own_ui.prompt(question, options)
+
+register_ask_user_tool(MyResponder())  # opt-in: no effect until called
+```
+
+Then declare it like any other tool:
+
+```yaml
+agents:
+  - agent_id: deployer
+    role: deployer
+    model_name: gpt-4o
+    tools: ["ask_user"]
+```
+
+**The `HitlResponder` seam.** `HitlResponder` (`bili.iris.tools.hitl`) is the
+one surface-agnostic contract a host implements: a single blocking
+`ask(question, options) -> str` method. bili-core does not render questions,
+pick a delivery surface, or impose a timeout policy -- that is entirely the
+host's responsibility. On timeout or an explicit skip, a `HitlResponder`
+should return a string starting with `NO_RESPONSE_PREFIX`
+(`"[no response:"`) instead of raising, so a headless run never hangs and the
+calling agent can branch on "no answer" like any other tool observation.
+`register_ask_user_tool()` defaults to `NullHitlResponder` when no responder
+is given, so a MAS config that lists `ask_user` still compiles and runs in an
+environment with no real responder wired up -- it just degrades to the
+no-response sentinel. `ScriptedHitlResponder` is a thread-safe test double
+for exercising the pause/resume seam without a real human.
+
+A single `HitlResponder` instance may see more than one `ask_user` call *at
+the same time* if a host runs multiple agent runs concurrently (e.g. a
+fan-out batch) -- implementations must be safe to call from multiple threads
+at once.
+
+**Two pause mechanisms, one tool.** Because
+`resolve_tools()` resolves an agent's tool list before its model's
+`tool_strategy` is known, `ask_user` cannot be two separately-registered
+tools for the native and CLI/MCP paths -- it is one `TOOL_REGISTRY` entry
+whose `func` dispatches at call time:
+
+- **Native tool-calling** (`tool_strategy="native"`, i.e.
+  `langchain.agents.create_agent` / `bind_tools`): calls
+  `langgraph.types.interrupt()` from inside the tool call itself -- a
+  different LangGraph primitive than `human_in_loop`'s compile-time
+  `interrupt_before` node list, and one that resumes the SAME agent's turn
+  rather than handing off to a different node. `run_streaming()` yields a
+  `("__ask_user_pending__", {"interrupts": [...], "thread_id": ...})`
+  sentinel with the raw question/options payload; resume with
+  `MASExecutor.resume_with_value(answer, thread_id)`.
+- **CLI/MCP** (`tool_strategy="mcp"`): the tool is served over the ephemeral
+  authenticated MCP server to a spawned CLI agent (Claude Code, Codex, Gemini
+  CLI) that self-orchestrates. There is no LangGraph node to interrupt there,
+  so the tool instead BLOCKS the MCP tool-call handler by calling
+  `HitlResponder.ask(...)` directly -- the block itself is what leaves the
+  CLI subprocess's own outstanding tool call pending until a human answers.
+  No `resume_*` call is needed on this path; the answer returns synchronously
+  as the tool's result.
+
+**CLI subprocess timeout caveat.** On the CLI/MCP path, the whole subprocess
+call is bounded by `AgentSpec.cli_subprocess_timeout` (default: the CLI
+preset's 1800s). If a human has not answered by the time that timeout
+expires, the ENTIRE turn is discarded, not just the pending question -- the
+timeout is a blunt instrument with no special accommodation for a pending
+`ask_user` call. Leave `cli_subprocess_timeout` unset (the generous preset
+default) or set it to `0` (no timeout) for agents that use `ask_user` on a
+CLI model, unless there is a specific reason to bound how long that agent
+waits for a human. The validator warns (`W14`) if an `ask_user` agent on a
+`tool_strategy="mcp"` model has an explicit timeout below 5 minutes, and
+separately reminds (`W15`) that the CLI/MCP path requires a real
+`HitlResponder` to be registered -- that reminder fires whenever an
+`ask_user` + CLI/MCP agent is declared, since whether a responder is
+actually registered is host runtime state a static config validator cannot
+see.
+
+### Operator Steering
+
+Human-in-the-loop and `ask_user` are the **agent -> user** direction: an agent
+pauses to ask, and a human answers. **Operator steering is the opposite
+direction, user -> run**: a human supervising a long-running workflow injects a
+mid-run redirect ("emphasize X", "stop pursuing that branch", "redirect toward
+Y") *while it runs*, and the next agent picks it up at the next natural boundary
+without the run being killed and restarted.
+
+Steering is opt-in per executor and additive: with `enable_steering=False` (the
+default) compilation and every existing run/stream path are unchanged. Enabling
+it makes the graph pause after every agent node (`interrupt_after`) and
+guarantees a checkpointer is attached, so a directive can be written into state
+via `update_state` and observed on resume. A directive is delivered as a
+`HumanMessage`; every agent rebuilds its prompt from state at the start of its
+step (reading `messages` and its pending-message context), so a directive is
+picked up with no agent, compiler, or schema change.
+
+```python
+executor = MASExecutor(config, enable_steering=True)
+executor.initialize()
+
+# A supervising thread injects a directive while the run is in flight.
+# It is drained at the next superstep boundary and observed by the next agent.
+for node_name, state_update in executor.run_streaming_steerable(
+    {"messages": [HumanMessage(content="Draft the report.")]}, thread_id="run-1"
+):
+    if some_condition(node_name, state_update):
+        executor.submit_steer("Shift the emphasis toward the risk analysis.")
+```
+
+`submit_steer(message)` is thread-safe and intended to be called from a
+different thread than the one driving `run_streaming_steerable`. The directive
+lands at the pause after the currently executing agent completes, so it takes
+effect at the next natural boundary, not mid-step.
+
+For a caller that drives the run itself and wants to inject a single directive
+and continue, `steer(message, thread_id)` is the explicit counterpart: it
+applies one directive and resumes a paused run, generalising `resume_streaming`
+(which answers an agent's question) to the operator -> run direction.
+
+| | HITL / `ask_user` | Operator steering |
+|---|---|---|
+| **Direction** | agent -> user (agent asks, human answers) | user -> run (human redirects) |
+| **Who initiates** | The agent, mid-turn | The operator, at any time |
+| **When observed** | Immediately on resume | At the next superstep boundary |
+| **Config** | `human_in_loop` / `tools: ["ask_user"]` | `enable_steering=True` |
+| **Inject with** | `resume_streaming` / `resume_with_value` | `submit_steer` / `steer` |
 
 ### MASExecutionResult
 
@@ -1041,7 +1331,7 @@ The table below shows which AETHER features each example demonstrates:
 - **Middleware**: Per-agent middleware (summarization, call limits)
 - **Checkpointer**: State persistence configuration
 - **Inheritance**: Inherit defaults from bili-core role registry
-- **Human-in-Loop**: Pause execution for human approval
+- **Human-in-Loop**: Whole-turn escalation to a human-reviewer agent (`human_in_loop`); see [Human-in-the-Loop](#human-in-the-loop) for this and the finer-grained `ask_user` tool
 - **Vote Fields**: Extract consensus votes from structured output
 
 ### Examples by Domain

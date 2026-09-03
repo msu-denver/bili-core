@@ -132,7 +132,9 @@ agents:
 | `model_name` | No | `None` | LLM model (e.g., `gpt-4`, `claude-sonnet-3-5-20241022`) |
 | `temperature` | No | `0.0` | LLM sampling temperature (0.0-2.0) |
 | `max_tokens` | No | `None` | Maximum tokens in LLM response |
-| `system_prompt` | No | `None` | Instructions for the LLM (up to 10,000 chars) |
+| `fallback_models` | No | `[]` | Ordered fallback model names tried on a transient error from `model_name` |
+| `cli_subprocess_timeout` | No | `None` | Per-call subprocess timeout in seconds for CLI-backed providers; `None` uses the preset default (1800s), `0` disables the timeout entirely. See the README's Human-in-the-Loop section for the `ask_user` CLI-path caveat. |
+| `system_prompt` | No | `None` | Instructions for the LLM. No fixed length cap — checked against the bound model's own declared input-token limit when known (see below); unconstrained otherwise. |
 | `capabilities` | No | `[]` | Agent capabilities (free-form strings) |
 | `tools` | No | `[]` | Tool names from the tool registry |
 | `output_format` | No | `text` | Output format: `text`, `json`, or `structured` |
@@ -148,6 +150,7 @@ agents:
 | `tier` | No | `None` | Tier in hierarchical workflows (1 = highest authority) |
 | `voting_weight` | No | `1.0` | Weight in voting/consensus workflows |
 | `is_supervisor` | No | `false` | Whether agent can dynamically route to specialists |
+| `is_human` | No | `false` | Whether this agent slot is filled by a human reviewer; when `true` and `human_in_loop: true` on the MAS, execution pauses before this node |
 | `consensus_vote_field` | No | `None` | Field name in output containing vote |
 | `metadata` | No | `{}` | Arbitrary key-value pairs for custom use |
 
@@ -161,6 +164,12 @@ agents:
 `objective` is required. `system_prompt` is optional — when omitted, the agent inherits from bili-core (if `inherit_from_bili_core: true` and `inherit_system_prompt: true`) or uses the LLM's default behavior.
 
 Each agent can specify its own LLM via `model_name`. Different agents in the same MAS can use different models.
+
+### Per-Model Prompt Length Limits
+
+Every model has a different prompt/context budget, so `system_prompt` is not checked against a single hardcoded number. When `model_name` resolves to a catalog entry with a known `max_input_tokens`, the prompt is checked against an approximate character budget derived from that limit; when the model is unset, unrecognized, or has no declared limit (e.g. CLI-subprocess and local providers), the check is skipped rather than imposing an arbitrary cap.
+
+Call `agent.get_prompt_length_limit()` to query the bound model's declared input-token limit directly (`None` when unknown), or `bili.aether.compiler.llm_resolver.resolve_prompt_length_limit(model_name)` to look it up from a model name before an `AgentSpec` exists, so you can budget a composed prompt against the model it will actually run on.
 
 ### Preset System
 
@@ -395,7 +404,7 @@ metadata:
 | `consensus_threshold` | No* | `None` | Fraction of agents needed for consensus (0.0-1.0) |
 | `max_consensus_rounds` | No | `10` | Maximum deliberation rounds before timeout |
 | `consensus_detection` | No | `"majority"` | Detection method: `majority`, `similarity`, `explicit`, `any` |
-| `human_in_loop` | No | `false` | Whether MAS can escalate to human review |
+| `human_in_loop` | No | `false` | Whether MAS can escalate to human review (see the README's [Human-in-the-Loop](../README.md#human-in-the-loop) section for this and the `ask_user` tool) |
 | `human_escalation_condition` | No | `None` | Python expression for escalation trigger |
 | `checkpoint_enabled` | No | `true` | Enable state persistence |
 | `checkpoint_config` | No | `{"type": "memory"}` | Checkpoint backend config |
@@ -470,6 +479,11 @@ Validation checks for **errors** (fatal — block execution) and **warnings** (n
 | Warning | Hierarchical tier gap (e.g., tier 1 and 3 but no 2) |
 | Warning | Supervisor entry point not marked `is_supervisor` |
 | Warning | `human_in_loop` enabled without `human_escalation_condition` |
+| Warning | Pipeline node unreachable from entry point |
+| Warning | Pipeline has only stub agents (no `model_name` anywhere) |
+| Warning | Pipeline conditional edges with no unconditional fallback |
+| Warning | `ask_user` agent on a CLI `tool_strategy="mcp"` model with a `cli_subprocess_timeout` below 5 minutes |
+| Warning | `ask_user` agent on a CLI `tool_strategy="mcp"` model -- reminder that a `HitlResponder` must be registered |
 
 Validation runs on top of Pydantic field-level validation — it catches cross-field and structural issues that individual field constraints can't express.
 

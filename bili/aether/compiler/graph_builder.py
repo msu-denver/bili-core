@@ -210,6 +210,33 @@ def safe_eval_condition(condition: str, context: Dict[str, Any]) -> bool:
     return bool(result)
 
 
+def _build_pipeline_provenance(state: dict, agent_id: str, content: str) -> dict:
+    """Return a state-update delta that records pipeline-agent provenance.
+
+    Pipeline agents run as compiled inner subgraphs whose state schemas do not
+    include ``communication_log`` (the outer MAS routing auxiliary).  Provenance
+    must therefore be emitted explicitly at the outer-graph boundary — after the
+    inner subgraph returns — using the same helper that plain agent nodes use.
+
+    Args:
+        state: The current outer-graph state dict (read for existing log / channels).
+        agent_id: The pipeline agent's ID (becomes ``sender`` in the log entry).
+        content: The final output content produced by the pipeline.
+
+    Returns:
+        A partial state-update dict ready to merge into the outer node return
+        value.  Always includes ``communication_log`` (single-element delta).
+        Includes ``channel_messages`` / ``pending_messages`` when the outer
+        schema carries them; those keys are silently ignored by LangGraph when
+        the outer schema omits them.
+    """
+    from .agent_generator import (  # pylint: disable=import-outside-toplevel
+        _build_communication_update,
+    )
+
+    return _build_communication_update(state, agent_id, content)
+
+
 class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Builds a LangGraph ``StateGraph`` from a validated ``MASConfig``.
 
@@ -664,15 +691,36 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
 
         Creates a function that:
 
-        1. Maps outer MAS state → inner pipeline state (messages only)
-        2. Invokes the compiled sub-graph
-        3. Maps inner result → outer state update (explicit output mapping:
-           only ``messages`` and ``agent_outputs`` flow back)
-        4. Handles errors with attribution (``agent_id: pipeline error``)
+        1. Maps outer MAS state → inner pipeline state (messages + custom fields).
+        2. Invokes the compiled sub-graph.
+        3. Synthesises the full outer-state update at the outer-graph boundary:
 
-        This explicit output mapping prevents the "blind merge" danger
-        that Monica identified — inner pipeline state does NOT overwrite
-        arbitrary outer MAS state fields.
+           - ``messages``: a single ``AIMessage`` tagged ``name=agent_id``,
+             using the last non-empty content from the inner pipeline.  The
+             inner pipeline may emit unnamed messages (e.g. IRIS react nodes
+             that have no knowledge of AETHER provenance) — this synthesis
+             ensures the outer state always carries a named message for this
+             agent regardless.
+
+           - ``current_agent``: set to ``agent_id`` from the closure.
+
+           - ``agent_outputs[agent_id]``: built from the outer state plus a
+             new entry describing the completed pipeline.
+
+           - ``communication_log``: a single broadcast entry via
+             :func:`_build_pipeline_provenance`, matching what plain agent
+             nodes emit.
+
+           - Custom ``state_fields`` declared in the pipeline spec are
+             propagated from the inner result to the outer state.
+
+        4. Handles errors with the same provenance attribution.
+
+        The inner pipeline's own ``current_agent``, ``agent_outputs``, and
+        ``messages`` values are NOT blindly merged into the outer MAS state —
+        only the synthesized summary above reaches the outer graph.  This
+        prevents inner-pipeline internals (intermediate agent IDs, tool-call
+        messages, etc.) from corrupting the MAS-level provenance record.
         """
         from langchain_core.messages import (  # pylint: disable=import-error,import-outside-toplevel
             AIMessage,
@@ -718,13 +766,23 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
                     "status": "error",
                     "message": error_msg,
                 }
-                return {
+                err_output = {
                     "messages": [AIMessage(content=error_msg, name=agent_id)],
                     "current_agent": agent_id,
                     "agent_outputs": agent_outputs,
                 }
+                # Record provenance even on failure so the audit log reflects
+                # which agent faulted and what error it emitted.
+                err_output.update(
+                    _build_pipeline_provenance(state, agent_id, error_msg)
+                )
+                return err_output
 
-            # Output mapping: inner → outer (explicit — only messages + agent_outputs)
+            # Output mapping: inner → outer (explicit — only messages + agent_outputs
+            # + per-agent provenance).  The inner pipeline schema intentionally omits
+            # communication_log (routing auxiliaries are only for the outer MAS graph),
+            # so provenance is emitted here at the outer-graph boundary rather than
+            # propagated from the inner result.
             inner_messages = result.get("messages", [])
             inner_outputs = result.get("agent_outputs", {})
 
@@ -762,6 +820,10 @@ class GraphBuilder:  # pylint: disable=too-few-public-methods,too-many-instance-
             for field in custom_state_fields:
                 if field.name in result:
                     output[field.name] = result[field.name]
+            # Emit per-agent provenance to the outer communication_log so
+            # pipeline agents are observable in audit views just like plain
+            # agent nodes.
+            output.update(_build_pipeline_provenance(state, agent_id, final_content))
             return output
 
         _pipeline_node.__name__ = f"pipeline_{agent_id}"

@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Honors CONTAINER_SUFFIX so the dashboard attaches to the instance you started,
+# not whichever stack happens to hold the unsuffixed name.
 # https://docs.localstack.cloud/user-guide/aws/opensearch/#opensearch-dashboards
 
 # Exit on error
@@ -9,13 +12,13 @@ cd "$(dirname "$0")"
 
 # Wait for bili-core-localstack container to have started
 echo "Waiting for LocalStack container to have started..."
-until [ "$(docker inspect -f '{{.State.Running}}' bili-core-localstack)" == "true" ]; do
+until [ "$(docker inspect -f '{{.State.Running}}' "bili-core-localstack${CONTAINER_SUFFIX:-}")" == "true" ]; do
     sleep 5
     echo "Waiting for LocalStack container to have started..."
 done
 
 # Get LocalStack container's IP address
-localstack_ip=$(docker inspect bili-core-localstack | \
+localstack_ip=$(docker inspect "bili-core-localstack${CONTAINER_SUFFIX:-}" | \
                 jq -r '.[0].NetworkSettings.Networks | to_entries | .[].value.IPAddress')
 echo "LocalStack IP address: $localstack_ip"
 
@@ -23,8 +26,8 @@ echo "LocalStack IP address: $localstack_ip"
 # The version of the Dashboard has to exactly match the version
 # of OpenSearch that LocalStack is running
 echo "Starting OpenSearch Dashboards container..."
-docker run --rm --name bili-core-opensearch-dashboard \
-  --network bili-core \
+docker run --rm --name "bili-core-opensearch-dashboard${CONTAINER_SUFFIX:-}" \
+  --network "bili-core${CONTAINER_SUFFIX:-}" \
   --dns "$localstack_ip" \
   -p 5601:5601 \
   -e "OPENSEARCH_HOSTS=http://bilicore-dev.us-east-1.opensearch.localhost.localstack.cloud:4566" \

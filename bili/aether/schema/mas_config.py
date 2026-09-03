@@ -232,8 +232,12 @@ class MASConfig(BaseModel):
         description=(
             "Checkpoint backend configuration. Supported types: "
             "'memory' (default), 'postgres'/'pg', 'mongo'/'mongodb', "
-            "'auto' (env-based detection). Additional keys like "
-            "'keep_last_n' are forwarded to the checkpointer constructor."
+            "'jsonl'/'file' (local JSONL file, no server required; "
+            "set 'path' key to override the default path; "
+            "activated automatically via JSONL_CHECKPOINT_PATH env var), "
+            "'auto' (env-based detection of postgres/mongo, else memory). "
+            "Additional keys like 'keep_last_n' are forwarded to the "
+            "checkpointer constructor."
         ),
     )
 

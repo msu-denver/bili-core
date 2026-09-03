@@ -52,7 +52,18 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 # Install and upgrade pip using official script
-RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && rm get-pip.py
+# Bootstrap pip from the stdlib's bundled wheels rather than fetching
+# get-pip.py. Both land pip in /usr/local/lib/python3.x/dist-packages, which is
+# NOT distro-managed, so the upgrade on the next line still works. Do not
+# "simplify" this to `apt-get install python3-pip`: that installs a
+# distro-owned pip bound to the SYSTEM python, and on Ubuntu 23.04+ it refuses
+# to upgrade at all (PEP 668, externally-managed-environment).
+#
+# ensurepip needs no network. The wheels ship inside python3.11-venv, installed
+# above, so the build no longer depends on resolving and fetching from
+# bootstrap.pypa.io: one less host that has to be reachable, and one less
+# unpinned script executed at build time.
+RUN python3 -m ensurepip --upgrade
 
 # Ensure the latest versions of pip, setuptools, and wheel are installed
 RUN pip3 install --upgrade pip setuptools wheel

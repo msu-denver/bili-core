@@ -9,6 +9,54 @@ The PR review workflow enforces two rules the automated reviewer applies on ever
 - **Tests ship with code.** If a PR changes application or library source code in a way that warrants tests (new or changed behavior, bug fixes, new branches or edge cases) and does not add or update corresponding tests, the reviewer flags it as a HIGH-severity finding. Docs-only, README, comments, formatting, and pure-configuration changes (CI YAML, lockfile bumps, asset-only, version bumps) are exempt.
 - **Semgrep findings inform the review.** A free Semgrep (OSS) scan runs before the Claude review and posts its findings as a PR comment, which the reviewer folds into its analysis. It scans with the `p/python`, `p/secrets`, `p/ci`, and `p/dockerfile` rule packs. This replaces the metered Claude security-review job.
 
+
+## Running Alongside Other Projects and In Worktrees
+
+By default this project binds its historical host ports (Flask 5001, Streamlit 8501,
+PostGIS 5432, MongoDB 27017, LocalStack 4566/4571), so the normal workflow is
+unchanged. Other lab projects use overlapping ports, so only one stack can hold a
+given port at a time.
+
+```bash
+# run beside another project
+PORT_OFFSET=100 ./scripts/development/start-container -d
+
+# run a second copy of THIS project beside a running one
+CONTAINER_SUFFIX=-test PORT_OFFSET=110 ./scripts/development/start-container -d
+CONTAINER_SUFFIX=-test ./scripts/development/attach-container
+CONTAINER_SUFFIX=-test ./scripts/development/stop-container
+```
+
+`PORT_OFFSET` shifts every host binding; container-internal ports never move, so
+traffic inside the compose network is unaffected. `CONTAINER_SUFFIX` suffixes the
+container and network names and drives the Compose project name, so a second
+instance gets its own containers, network, and volumes.
+
+Pass the same `CONTAINER_SUFFIX` to **every** script in `scripts/development/`
+(including `start-opensearch-dashboard`), or you will attach to, tear down, or point
+a dashboard at the wrong stack. A suffixed instance starts with **empty databases**:
+two MongoDB processes cannot share a data directory, so isolation is required.
+
+`start-container` refuses to start when a resolved host port is held by another
+process, naming the port. Ports published by your own instance are excluded, so
+re-running against your own running stack stays idempotent.
+
+### Working in a git worktree inside the container
+
+The container mounts `../bili-core-worktrees` as a sibling of the repo, so several
+people or agents can build and test in parallel against one container:
+
+```bash
+git worktree add ../bili-core-worktrees/my-task -b feature/my-task
+./scripts/development/start-container -d
+docker exec -w /app/bili-core-worktrees/my-task bili-core pytest
+```
+
+Bring the stack up from the **main checkout**, not from inside a worktree: a
+worktree's `.git` is a file rather than a directory, so a stack started from one
+cannot resolve nested worktrees. The pointer rewrite needs **host git 2.48 or
+newer**; on older git the script warns and only the worktree feature degrades.
+
 ## Project Overview
 
 BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments. The framework is organized into three core components:
@@ -21,16 +69,31 @@ BiliCore is an open-source framework for benchmarking and building dynamic RAG (
 
 ### Container-Based Development (Recommended)
 ```bash
-# Start development environment
+# Start development environment (foreground; auto-detects cpu/gpu profile)
 cd scripts/development
-./start-container.sh
+./start-container
 
 # Attach to container
-./attach-container.sh
+./attach-container
 
 # Inside container
-streamlit  # Start Streamlit UI
-flask      # Start Flask API
+streamlit  # Start Streamlit UI (:8501)
+flask      # Start Flask API (:5001)
+```
+
+Detached mode brings the same environment up in the background (for automation, CI, or a hands-off bringup). It starts Flask and Streamlit inside the container, waits for the Flask API on `:5001`, and prints log-tail and stop commands. The foreground path is unchanged.
+
+```bash
+# Background bringup; optional cpu|gpu arg forces the profile
+./scripts/development/start-container -d
+./scripts/development/start-container -d cpu
+
+# Tail the in-container logs
+docker exec bili-core tail -f /tmp/flask.log
+docker exec bili-core tail -f /tmp/streamlit.log
+
+# Tear down (foreground or detached; idempotent)
+./scripts/development/stop-container
 ```
 
 ### Code Quality Commands
@@ -71,9 +134,9 @@ BiliCore is structured around three major components:
 
 The core single-agent pipeline for retrieval-augmented generation:
 
-1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, and memory storage. All checkpointers implement a queryable interface for conversation management with both sync and async APIs.
+1. **Checkpointers** (`bili/iris/checkpointers/`): State persistence layer supporting MongoDB, PostgreSQL, local-file JSONL, and in-memory storage (4 backends). All checkpointers implement a queryable interface for conversation management with both sync and async APIs. Set `JSONL_CHECKPOINT_PATH` to activate the JSONL backend without a database server.
 
-2. **LLM Configuration** (`bili/iris/config/`): Model configurations for 60+ LLMs across AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, and local models. Uses factory pattern for model initialization.
+2. **LLM Configuration** (`bili/iris/config/`): 118 model configurations across 18 provider types (11 remote API: AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq; 3 CLI presets: Claude Code, Codex, Gemini CLI; generic CLI subprocess; local: llama.cpp, HuggingFace, Ollama). Uses factory pattern for model initialization. Each entry declares a `tool_strategy` (one of `"native"`, `"facilitated"`, `"mcp"`, `"none"`) that selects the tool-calling path: `native` binds tools directly (API providers and tool-capable Ollama models), `facilitated` drives a prompted ReAct loop (text-only and in-process local models), `mcp` exposes tools through an ephemeral authenticated MCP server for self-orchestrating CLI agents, and `none` runs the plain path with no tools. A derived `supports_tools` boolean (`True` only when `tool_strategy == "native"`) is retained for backward compatibility. Schema-constrained structured output (`bili/iris/providers/structured_output.py`): pass `structured_output_schema` (JSON schema dict or Pydantic class) to `load_model()` and generation is constrained to schema-valid JSON at decode time — Ollama (llama.cpp GBNF grammar), OpenAI/Azure OpenAI (strict `response_format`), Vertex/Google GenAI (controlled generation); unsupported providers fail fast; `parse_structured_content()` parses + validates the response; AETHER binds an agent's `output_schema` through this seam when `output_format: structured`. Multimodal (image) input (`bili/iris/multimodal.py`, `bili/iris/providers/modality.py`): build a message carrying an image content part with `build_human_message` / `image_part` and pass it to any entry point that takes message content (the IRIS streaming helpers, an AETHER run's `messages`, a HITL resume, an operator steer, or the AETHER runtime CLI's `--input-image`); each catalog entry declares `input_modalities` (`text` / `image` / `audio`), so `load_model(..., required_input_modalities=["image"])` refuses a model cataloged as text-only at selection, `models_supporting_input_modality()` answers the routing direction, and an entry that declares nothing warns rather than refusing. A CLI (subprocess) provider renders the message list to one prompt string, so it delivers an image as a FILE (`bili/iris/providers/cli_image.py`): the bytes are written into the directory the subprocess runs in under a generated, origin-free filename, the invocation is rewritten with that harness's own file-read mechanism (a path named in the prompt, an `@` reference, or an image flag), and the file is removed when the call returns, on the success and failure paths alike. Because a harness is offered a path rather than handed the bytes, and nothing in the response proves it opened the file, the delivery kind is reported distinctly (`bytes` vs `offered_by_path`, declared per entry as `image_delivery` and reported on the response); a CLI with no known file-read route, including the generic `cli` type, still refuses an image part by name rather than stringifying it.
 
 3. **Tools Framework** (`bili/iris/tools/`): Extensible tool system including FAISS vector search, OpenSearch, weather APIs, and web search. Tools are dynamically loaded based on configuration.
 

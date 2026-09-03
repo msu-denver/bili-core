@@ -1,0 +1,91 @@
+cff-version: 1.2.0
+message: "If you use BiliCore in your research, please cite it using the metadata below."
+type: software
+title: "BiliCore: An Open-Source Framework for LLM-Powered Applications (IRIS / AETHER / AEGIS)"
+abstract: >
+  BiliCore is an open-source, MIT-licensed framework for building and testing
+  LLM-powered applications. It comprises three components: IRIS (Interactive
+  Reasoning and Integration Services) for single-agent orchestration across
+  100+ models from 18 provider types; AETHER (Agent Ecosystems for Testing,
+  Hardening, Evaluation, and Research) for declarative multi-agent system
+  creation via YAML; and AEGIS (Adversarial Evaluation and Guarding of
+  Intelligent Systems) for security testing of multi-agent systems. Originally
+  developed for the Colorado Sustainability Hub at the Metropolitan State
+  University of Denver Community-Centered Computing (C3) Lab.
+# Authors are ordered by code contribution to the bili-core repository.
+# The list reflects software development; co-authors on papers that cite
+# BiliCore but did not contribute code are not included here.
+authors:
+  - given-names: Daniel
+    family-names: Pittman
+    email: dpittma8@msudenver.edu
+    affiliation: "Metropolitan State University of Denver, Department of Computer Sciences"
+    orcid: "https://orcid.org/0000-0002-0888-3587"
+  - given-names: Monica
+    family-names: Ball
+    email: mball14@msudenver.edu
+    affiliation: "Metropolitan State University of Denver, Department of Computer Sciences"
+  - given-names: Kade
+    family-names: Shockey
+    affiliation: "DreamFace Technologies LLC; alumnus, Metropolitan State University of Denver"
+  - given-names: Lombe
+    family-names: Chileshe
+    email: lombe.chileshe@du.edu
+    affiliation: "University of Denver"
+  - given-names: Jeremy
+    family-names: Dougherty
+    affiliation: "Metropolitan State University of Denver (alumnus)"
+  - given-names: Alyssa
+    family-names: Williams
+    email: awill157@msudenver.edu
+    affiliation: "Metropolitan State University of Denver, Community-Centered Computing (C3) Lab"
+version: 5.7.0
+date-released: 2026-08-13
+license: MIT
+repository-code: "https://github.com/msu-denver/bili-core"
+url: "https://github.com/msu-denver/bili-core"
+keywords:
+  - large language models
+  - multi-agent systems
+  - LLM evaluation
+  - AI security
+  - adversarial testing
+  - LangGraph
+  - research software
+  - sustainability
+  - open-source
+identifiers:
+  - type: url
+    value: "https://github.com/msu-denver/bili-core"
+    description: "BiliCore source repository"
+references:
+  - type: grant
+    title: "CISE-MSI:RPEP:III:Sustainability Hub - A Community Data Hub for Sustainable Regional Systems Research in Colorado"
+    institution:
+      name: "National Science Foundation"
+    number: "2318730"
+  - type: grant
+    title: "Advancing Colorado Sustainability: Leveraging AWS and Azure for Enhanced Data Accessibility and Retrieval"
+    institution:
+      name: "NSF NAIRR Pilot"
+    number: "NAIRR240197"
+preferred-citation:
+  type: software
+  title: "BiliCore: An Open-Source Framework for LLM-Powered Applications (IRIS / AETHER / AEGIS)"
+  authors:
+    - given-names: Daniel
+      family-names: Pittman
+      orcid: "https://orcid.org/0000-0002-0888-3587"
+    - given-names: Monica
+      family-names: Ball
+    - given-names: Kade
+      family-names: Shockey
+    - given-names: Lombe
+      family-names: Chileshe
+    - given-names: Jeremy
+      family-names: Dougherty
+    - given-names: Alyssa
+      family-names: Williams
+  year: 2026
+  version: 5.7.0
+  url: "https://github.com/msu-denver/bili-core"

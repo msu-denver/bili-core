@@ -133,7 +133,9 @@ def _run_bilicore_page():
     )
     st.markdown(
         "Select a model from any supported provider (AWS Bedrock, Google "
-        "Vertex AI, Azure OpenAI, OpenAI, Ollama, or a local model), then "
+        "Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, "
+        "Google Generative AI, DeepSeek, xAI, Groq, CLI presets, or a "
+        "local model), then "
         "attach RAG tools like FAISS vector search or OpenSearch alongside "
         "web search, weather APIs, and other capabilities. Every "
         "conversation is checkpointed, so you can compare how different "

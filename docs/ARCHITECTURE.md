@@ -4,7 +4,7 @@ This document describes the architecture and organization of the BiliCore framew
 
 ## Overview
 
-BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across different cloud providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI) and local environments.
+BiliCore is an open-source framework for benchmarking and building dynamic RAG (Retrieval-Augmented Generation) implementations. It enables rapid testing of LLMs across 18 provider types — 11 remote API providers (AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI, Cohere, Google Generative AI, DeepSeek, xAI, Groq), 3 CLI presets (Claude Code, Codex, Gemini CLI), a generic CLI subprocess provider, and 3 local providers (llama.cpp, HuggingFace, Ollama).
 
 The codebase is split into **three major subsystems** plus a set of shared modules:
 
@@ -29,7 +29,7 @@ bili-core/
 │   │   │   ├── pg_checkpointer.py
 │   │   │   └── memory_checkpointer.py
 │   │   ├── config/                #   Configuration management
-│   │   │   ├── llm_config.py      #     LLM model configurations (60+ models)
+│   │   │   ├── llm_config.py      #     LLM model configurations (118 models, 18 provider types)
 │   │   │   ├── tool_config.py     #     Tool configurations
 │   │   │   └── middleware_config.py
 │   │   ├── graph_builder/         #   LangGraph construction utilities
@@ -206,19 +206,119 @@ Checkpointers provide cloud-native state persistence replacing file-based storag
 
 ### 3. LLM Configuration (`bili/iris/config/`) -- IRIS
 
-The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
+The configuration module holds declarative metadata for every supported LLM model. Each entry describes the model's API identifier, which parameters it supports (temperature, top-p, seed, etc.), which input kinds it accepts (`input_modalities`), and provider-specific details. This metadata drives the Streamlit UI's dynamic parameter controls and the factory-pattern initialization in the loaders.
 
-Configurations for 60+ LLMs across providers:
+118 model configurations across 18 provider types registered in `llm_config.py`:
 
-| Provider | Examples |
-|----------|----------|
-| AWS Bedrock | Claude 3/3.5, Llama, Mistral |
-| Google Vertex AI | Gemini Pro/Flash |
-| Azure OpenAI | GPT-4, GPT-4o |
-| OpenAI | GPT-4, GPT-4o, o1 |
-| Local | Ollama models |
+| Provider type | Description |
+|---|---|
+| `remote_aws_bedrock` | AWS Bedrock — Claude, Nova, Llama, Mistral, Cohere, DeepSeek |
+| `remote_google_vertex` | Google Vertex AI — Gemini 1.0–2.5 Pro/Flash/Flash-Lite |
+| `remote_azure_openai` | Azure OpenAI — GPT-4.1, GPT-4o, o1, o3, o3-mini, o4-mini |
+| `remote_openai` | OpenAI direct API — GPT-4o, GPT-4, o1, o3-mini |
+| `remote_anthropic` | Anthropic direct API — Claude Opus 4.8, Sonnet 4.6, Haiku 4.5, Fable 5 |
+| `remote_mistral` | Mistral AI — Large, Small, Codestral |
+| `remote_cohere` | Cohere — Command A+, Command R+, Command R |
+| `remote_google_genai` | Google Generative AI (developer API) — Gemini 2.0/2.5 Flash |
+| `remote_deepseek` | DeepSeek — Chat, Reasoner |
+| `remote_xai` | xAI (Grok) — Grok 3 Latest, Grok Beta |
+| `remote_groq` | Groq inference — Llama 3.3 70B, Llama 3.1 8B, Compound Beta |
+| `local_llamacpp` | llama.cpp in-memory (GGUF files) |
+| `local_huggingface` | HuggingFace local (GPTQ / transformers) |
+| `local_ollama` | Ollama local daemon over HTTP — open-source models (Qwen3, Llama 3.1+, Mistral); native tool calling for tool-capable models |
+| `cli` | Generic CLI subprocess (any text-in/text-out LLM tool) |
+| `cli_claude_code` | Claude Code CLI preset (`claude -p`) |
+| `cli_codex` | OpenAI Codex CLI preset (`codex exec`) |
+| `cli_gemini_cli` | Google Gemini CLI preset (`gemini -p`) |
+
+Each model entry carries a `tool_strategy` field (one of `"native"`,
+`"facilitated"`, `"mcp"`, `"none"`) and a derived `supports_tools` boolean
+(`True` only when `tool_strategy == "native"`). The strategy drives automatic
+path selection in `build_react_agent_node`. Pass `tool_strategy` explicitly in
+`node_kwargs` to override the catalog value; the legacy `supports_tools` kwarg
+is still accepted as a backward-compatible fallback.
 
 Factory pattern initialization via `llm_loader.py`.
+
+**Schema-constrained structured output
+(`bili/iris/providers/structured_output.py`):** pass
+`structured_output_schema` (a JSON schema dict or a Pydantic model class) to
+`load_model()` to constrain generation to schema-valid JSON at decode time.
+Wired providers and mechanisms: `local_ollama` (`ChatOllama format=` →
+llama.cpp GBNF grammar), `remote_openai` / `remote_azure_openai`
+(`response_format` `json_schema` with `strict: true`),
+`remote_google_vertex` / `remote_google_genai` (`response_schema` +
+`response_mime_type="application/json"`). The model's `.invoke()` contract is
+unchanged — `.content` stays a string, guaranteed schema-valid —
+and `parse_structured_content(content, schema=...)` turns it into a validated
+Python object. Requests against providers without decode-time enforcement
+raise `ValueError` at load time; external providers declare support via
+`register_structured_output_provider()`. AETHER binds an agent's
+`output_schema` through this seam automatically when
+`output_format: structured` (tool-less agents, supported providers) and
+validates post-hoc otherwise.
+
+**Multimodal input (`bili/iris/multimodal.py`,
+`bili/iris/providers/modality.py`):** the provider contract is a list of
+`BaseMessage` in and a response with `.content` out, and
+`HumanMessage.content` is `Union[str, list]`, so a message whose content is a
+list of content parts reaches a vision-capable chat model with no
+per-provider change. `bili.iris.multimodal` is the construction seam
+(`build_human_message`, `text_part`, `image_part`, `image_part_from_path`);
+it defines no wire format of its own and emits the shapes the LangChain
+ecosystem already exchanges. Every entry point that takes message content
+accepts a parts list as well as a string: the IRIS streaming helpers
+(`stream_agent` / `astream_agent` / `invoke_agent`), an AETHER run's
+`input_data["messages"]`, `MASExecutor.resume_streaming`,
+`MASExecutor.steer`, and the AETHER runtime CLI's repeatable
+`--input-image`. A string input builds exactly the message it always did.
+
+Whether a given model accepts an image is a per-model question the catalog
+answers: each entry may declare `input_modalities` (`text` / `image` /
+`audio`), and `load_model(..., required_input_modalities=["image"])` raises
+`UnsupportedInputModalityError` before any client is constructed when the
+catalog says the model cannot take one.
+`models_supporting_input_modality("image")` answers the routing direction.
+The reader is tri-state on purpose: an entry that declares nothing (or a
+passthrough model the catalog does not list, such as a locally-served vision
+model reached by a sentinel-prefixed name) warns and proceeds, because
+bili-core cannot assert a capability it has no record of and refusing there
+would block a model that works.
+
+The message-history flatteners in AETHER and on the IRIS tool-less path keep
+a message that carries a recognised non-text part instead of coercing it to
+text; the text-only coercion those paths were written for is unchanged.
+
+**Image delivery for CLI providers (`bili/iris/providers/cli_image.py`):** a
+CLI tool consumes one text prompt, so an image cannot ride inside the
+request. It is delivered as a file instead: the bytes are written into the
+directory the subprocess already runs in (its configured `cwd`, never a
+system temp directory, because a harness that gates filesystem access by
+directory may refuse to open anything outside the one it was pointed at), the
+invocation is rewritten with that harness's own file-read mechanism, and the
+file is removed once the call returns, on the success and the failure path
+alike. The filename is generated and carries nothing about the image's
+origin, and the reference is a bare filename, so neither the harness nor the
+model behind it learns anything about where the image came from or how the
+host's directories are laid out.
+
+The mechanism is per harness and is recorded with the tool version it was
+verified against: Claude Code opens a path its prompt names (it exposes no
+image flag), the Gemini CLI reads an `@<path>` reference out of the prompt,
+and Codex takes `--image=<path>` in its attached-value form (the flag is
+variadic, so the separated form consumes the prompt positional that follows
+it).
+
+This delivery is a weaker claim than a message-based provider's, and the two
+are named apart rather than collapsed: a message-based provider is handed the
+BYTES, while a CLI harness is OFFERED A PATH and nothing in the response
+proves it opened the file. A catalog entry may declare `image_delivery`
+(`bytes`, the default, or `offered_by_path`) beside its `input_modalities`,
+and a turn that carried an image reports on the response which kind was
+performed. A CLI tool with no known file-read route -- including the generic
+`cli` provider type, which drives an arbitrary executable -- still refuses an
+image part by name rather than stringifying it, because a stringified image
+is a dropped image that still looks like a successful turn.
 
 ### 4. LangGraph Workflow (`bili/iris/loaders/`, `bili/iris/nodes/`) -- IRIS
 
@@ -229,7 +329,141 @@ The heart of single-agent RAG execution. The loaders module (`bili/iris/loaders/
 START → persona_summary → datetime → react_agent → timestamp → trim_summarize → normalize → END
 ```
 
-### 5. Tools Framework (`bili/iris/tools/`) -- IRIS
+**Tool-calling modes in `react_agent_node.py`:**
+
+`build_react_agent_node` selects the execution path from `tool_strategy` in `node_kwargs` (or infers it from the legacy `supports_tools` bool):
+
+| `tool_strategy` | Condition | Mechanism |
+|---|---|---|
+| `"native"` (default) | `tools` provided | `create_agent` via `model.bind_tools` — all API providers |
+| `"facilitated"` | `tools` provided | Hand-rolled Action/Observation loop injected into system message — local and text-only models |
+| `"mcp"` | `tools` provided + known CLI | Registered tools exposed via an ephemeral authenticated MCP server; spawned CLI self-orchestrates via tool calls and returns the final answer — see Section 7 |
+| `"mcp"` | `tools` provided + unknown CLI | Falls back to tool-less plain path (no injector registered; unauthenticated servers are never started) |
+| `"none"` | `tools` provided | Tools dropped; model runs plain — models that reject tool kwargs (e.g. some reasoning models) |
+| any | `tools=None` | Direct `llm_model.invoke` call, no tool dispatch |
+
+AETHER resolves `tool_strategy` automatically from the catalog via
+`resolve_tool_strategy(model_name)`. IRIS callers can pass `tool_strategy`
+explicitly in `node_kwargs`; the legacy `supports_tools` kwarg remains
+accepted for backward compatibility.
+
+### 5. Fallback Engine (`bili/iris/providers/fallback.py`) -- IRIS
+
+`FallbackLLM` is a transparent proxy that tries each provider in a `ProviderChain` in order. If the primary raises a retryable exception (rate limit, transient server error), it silently retries with the next provider. Fatal errors (auth failure, bad request) re-raise immediately.
+
+```python
+from bili.iris.providers.fallback import FallbackLLM, ProviderChain
+
+chain = ProviderChain([
+    ("remote_anthropic", {"model_name": "claude-sonnet-4-6"}),
+    ("remote_openai",    {"model_name": "gpt-4o"}),
+])
+llm = FallbackLLM.from_chain(chain)
+```
+
+In AETHER, declare `fallback_models` on an `AgentSpec` and the compiler builds the chain automatically. `FallbackLLM` implements the same `.invoke()` / `.stream()` duck type as `BaseChatModel`, so it is a drop-in replacement anywhere an LLM is expected.
+
+### 6. MCP Subsystem (`bili/iris/mcp/`) -- IRIS
+
+`bili/iris/mcp/` covers two directions:
+
+**Direction 1 — MCP Client (agent consumes tools FROM an MCP server)**
+
+Lets agents consume tools from any MCP server (stdio subprocess or HTTP/SSE transport). Discovered tools are adapted as LangChain `Tool` objects and registered in `TOOL_REGISTRY`, so they are indistinguishable from built-in tools at the agent layer.
+
+```python
+import asyncio
+from bili.iris.mcp import initialize_mcp_servers, register_mcp_tools
+from bili.iris.mcp.config import MCP_SERVERS
+
+async def run():
+    servers = await initialize_mcp_servers(
+        active_servers=["my_server"],
+        server_configs=MCP_SERVERS,
+    )
+    async with register_mcp_tools(servers) as tool_names:
+        # tool_names: ["my_server__tool_a", ...]
+        # tools are now registered in TOOL_REGISTRY
+        ...
+
+asyncio.run(run())
+```
+
+Useful for BYO-CLI integration: start a CLI LLM as an MCP server (e.g. `claude mcp serve`) and let a bili-core agent call its tools over stdio with `auth: inherited`.
+
+**Direction 2 — Ephemeral MCP Server (`tool_strategy="mcp"`, `bili/iris/mcp/server.py`)**
+
+When a `CliLLM` agent node carries `tool_strategy="mcp"`, bili-core exposes its registered LangChain tools as a temporary in-process MCP server for the duration of the CLI call, so the spawned CLI binary can exercise tool-calling via its own native MCP protocol.
+
+```
+bili-core process
+┌─────────────────────────────────────────────────────────┐
+│  IRIS agent node                                         │
+│    tools: [tool_a, tool_b]  ──────────────────────────┐ │
+│                                                        │ │
+│  EphemeralMcpServer (MCPServer + auth middleware)     │ │
+│    ─ Streamable HTTP on 127.0.0.1:<random-port>  ◄────┘ │
+│    ─ per-call Bearer-token auth (256-bit random)        │
+│    ─ caller must be in the spawned process tree         │
+│    ─ uvicorn in background daemon thread                │
+│                                                        │ │
+│  CLI subprocess (claude / codex / gemini)              │ │
+│    ─ spawned with injected MCP config + auth token     │ │
+│    ─ self-orchestrates via MCP tool calls              │ │
+│    ─ returns final answer on stdout                    │ │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Security model — two independent checks.** Every call generates a fresh `secrets.token_urlsafe(32)` token and a unique server name, and a per-CLI injector embeds the token in the CLI's MCP configuration before the subprocess is spawned. A request must then satisfy both of:
+
+1. **It carries the token.** Without it the ASGI middleware returns `401 Unauthorized`.
+2. **Its connection belongs to the spawned subprocess or one of that subprocess's descendants** (`bili/iris/mcp/peer_identity.py`). Otherwise `403 Forbidden`.
+
+The second check exists because the first cannot stand alone. The token reaches the subprocess through a file or an environment variable, so every process running as the same user can read it: a valid token is evidence of file access, not of being the intended caller. Descendants are covered rather than just the spawned PID, because CLI agents dispatch tool calls from workers they spawn themselves, and the grant is keyed on `(pid, create_time)` so a recycled PID cannot inherit it. The server denies everything until `EphemeralMcpServer.authorize_subprocess()` records the spawned process, which closes the window between the server binding its port and the subprocess existing.
+
+**What this does not cover.** A same-user attacker who attaches to or injects into the spawned process is indistinguishable from it by construction, and same-user isolation is inherently weak on a workstation. The check raises the bar from "holds the secret" to "is inside the spawned process tree"; it does not make that tree a security boundary between programs run by one user. Do not expose tools on this path whose blast radius exceeds what the invoking user may already do for themselves.
+
+If no injector is registered for the CLI binary, bili-core falls back to the tool-less path rather than starting an unauthenticated server.
+
+**Per-CLI injection mechanisms.** Files carrying the token are created `0600`, and no injector puts the token in `argv`, because a process command line is world-readable.
+
+| CLI | Token delivery |
+|-----|---------------|
+| `claude` (Claude Code) | Temp JSON (`0600`) written to `--mcp-config <path> --strict-mcp-config`; `Authorization: Bearer <token>` header |
+| `codex` (OpenAI Codex) | `-c mcp_servers.<name>.bearer_token_env_var=...` pointing at a unique per-call env var; the value never appears in `argv` |
+| `gemini` (Gemini CLI) | Temp `.gemini/settings.json` (`0600`) written in a temp dir; subprocess `cwd` set to that dir |
+
+**Install:** `pip install bili-core[mcp]` (includes `mcp>=2.0,<3`, `uvicorn>=0.31.1`, and `psutil>=5.9`)
+
+**Model / reasoning-effort control:** `CliLLM.model` and `CliLLM.reasoning_effort`
+(set via `AgentSpec.cli_subprocess_model` / `cli_subprocess_reasoning_effort` in
+AETHER, or directly on `CliProvider.load()`) pin a specific model and reasoning
+depth for the spawned CLI, instead of inheriting whatever the CLI's own global
+default or interactive session is set to. Applied identically on both the
+direct subprocess path and the ephemeral-MCP path above, via
+`bili.iris.providers.cli_model_flags.build_model_and_effort_args`:
+
+| Preset | `model` flag | `reasoning_effort` flag |
+|--------|-------------|--------------------------|
+| `cli_claude_code` | `--model <value>` | `--effort <value>` (e.g. `low`/`medium`/`high`/`xhigh`/`max`) |
+| `cli_codex` | `--model <value>` | `-c model_reasoning_effort="<value>"` (e.g. `low`/`medium`/`high`/`xhigh`) |
+| `cli_gemini_cli` | `--model <value>` | Not CLI-settable (Gemini exposes thinking-budget only via `.gemini/settings.json` or interactive slash commands); setting it is a documented no-op with a logged warning |
+
+Both settings default to `None` (no override -- unconfigured behaviour is unchanged).
+
+**Extension point:** Register injectors for additional CLIs at startup:
+
+```python
+from bili.iris.mcp.cli_injectors import register_cli_mcp_injector, McpCliInjector, InjectionResult
+
+class MyCLIInjector(McpCliInjector):
+    def inject(self, command, handle) -> InjectionResult:
+        ...
+
+register_cli_mcp_injector("my-cli", MyCLIInjector())
+```
+
+### 7. Tools Framework (`bili/iris/tools/`) -- IRIS
 
 Tools give agents the ability to call external services (weather APIs, search engines) or query internal data stores (FAISS, OpenSearch). Each tool is a LangChain `Tool` object created by a factory function in `bili/iris/loaders/tools_loader.py` and registered in the `TOOL_REGISTRY`. See [TOOLS.md](./TOOLS.md) for details.
 

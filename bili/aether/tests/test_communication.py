@@ -564,6 +564,11 @@ class TestStateSchemaIntegration:
         schema = generate_state_schema(config)
         annotations = schema.__annotations__
 
+        # channel_messages and pending_messages are routing auxiliaries — present
+        # only when the MAS declares explicit inter-agent channels.
         assert "channel_messages" not in annotations
         assert "pending_messages" not in annotations
-        assert "communication_log" not in annotations
+
+        # communication_log is always present regardless of channel configuration
+        # so per-agent provenance is captured for every run.
+        assert "communication_log" in annotations

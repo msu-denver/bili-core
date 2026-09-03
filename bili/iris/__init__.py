@@ -1,7 +1,26 @@
 """IRIS — Interactive Reasoning and Integration Services.
 
-Single-agent orchestration framework. Provides LLM configuration for 60+
-models across 6 providers (AWS Bedrock, Google Vertex AI, Azure OpenAI,
-OpenAI, Ollama, local), a node-based workflow pipeline, extensible tool
-system, middleware framework, and state persistence via checkpointers.
+Single-agent orchestration framework. Provides LLM configuration for 118
+model configurations across 18 provider types (11 remote API providers:
+AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenAI, Anthropic, Mistral AI,
+Cohere, Google Generative AI, DeepSeek, xAI, Groq; 3 CLI presets: Claude
+Code, Codex CLI, Gemini CLI; generic CLI subprocess; and 3 local providers:
+llama.cpp, HuggingFace, Ollama), a node-based workflow pipeline with native and
+prompted ReAct tool-calling paths, extensible tool system, middleware
+framework, and state persistence via checkpointers.
+
+Provider abstraction
+--------------------
+``bili.iris.providers`` exposes the ``LLMProvider`` abstract base class and
+``ProviderRegistry`` that unify all provider shapes behind a single
+``.invoke()`` contract.  Third-party providers can be registered at
+application startup via :func:`bili.iris.providers.register_provider`.
+
+Multimodal input
+----------------
+``bili.iris.multimodal`` builds a message carrying a non-text content part (an
+image) for any entry point that takes message content, and
+``bili.iris.providers.modality`` reads the catalog's per-model
+``input_modalities`` so an image-bearing request is refused at model selection
+rather than at the provider call.
 """

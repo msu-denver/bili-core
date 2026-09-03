@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Tears down the detached (or foreground) dev environment. Idempotent: safe to
+# run when nothing is up. Mirrors the teardown the foreground start-container
+# does on exit, so a `start-container -d` bringup ends the same way.
+
+# Change to the directory of the script
+cd "$(dirname "$0")"
+
+# Must match the CONTAINER_SUFFIX used to start the instance, so a suffixed stack
+# is torn down instead of the default one.
+CONTAINER_SUFFIX="${CONTAINER_SUFFIX:-}"
+export CONTAINER_SUFFIX
+export COMPOSE_PROJECT_NAME="bili-core${CONTAINER_SUFFIX}"
+container_name="bili-core${CONTAINER_SUFFIX}"
+
+# If the bili-core container is up, stop the Flask/Streamlit processes first so
+# their `tee` pipes flush before compose removes anything. The flask alias runs
+# `flask run`; the streamlit alias runs `streamlit run`.
+if [ "$(docker inspect -f '{{.State.Running}}' bili-core 2>&1)" = "true" ]; then
+    echo "Stopping Flask/Streamlit processes."
+    docker exec "$container_name" bash -c 'pkill -f "flask run"; pkill -f "streamlit run"' || true
+fi
+
+echo "Bringing down containers."
+docker compose down
+
+echo "Done."

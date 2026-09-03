@@ -288,7 +288,18 @@ class TestStateAdapter:
         assert messages[0].name == "test_agent"
 
     def test_pipeline_does_not_leak_inner_state(self):
-        """Pipeline output should not include inner state fields beyond messages/agent_outputs."""
+        """Pipeline output should not include inner sub-graph state fields.
+
+        The inner pipeline schema declares custom state_fields that are
+        private to the sub-graph (e.g. intermediate routing flags).  Those
+        must NOT appear in the outer node return value unless explicitly
+        propagated via ``state_fields`` propagation logic.
+
+        The outer provenance fields (``communication_log``,
+        ``channel_messages``, ``pending_messages``) ARE expected — they
+        are emitted by every agent node (plain and pipeline) so that
+        per-agent provenance is durably checkpointed in the outer MAS state.
+        """
         agent = _simple_agent(pipeline=_single_node_pipeline())
         mas = _build_sequential_mas(agent)
         compiled = GraphBuilder(mas).build()
@@ -296,8 +307,16 @@ class TestStateAdapter:
         node_fn = compiled.agent_nodes["test_agent"]
         result = node_fn({"messages": [], "agent_outputs": {}})
 
-        # Only expected keys should be in the result
-        expected_keys = {"messages", "current_agent", "agent_outputs"}
+        # Core state fields plus outer-MAS provenance channels.
+        # Inner sub-graph fields (e.g. custom state_fields) must NOT appear.
+        expected_keys = {
+            "messages",
+            "current_agent",
+            "agent_outputs",
+            "communication_log",
+            "channel_messages",
+            "pending_messages",
+        }
         assert set(result.keys()) == expected_keys
 
 

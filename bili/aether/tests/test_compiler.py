@@ -10,6 +10,7 @@ from langchain_core.messages import (  # pylint: disable=import-error
     AIMessage,
     HumanMessage,
 )
+from langgraph.errors import GraphRecursionError  # pylint: disable=import-error
 from langgraph.graph import StateGraph  # pylint: disable=import-error
 from langgraph.graph.state import CompiledStateGraph  # pylint: disable=import-error
 
@@ -25,6 +26,7 @@ from bili.aether.schema import (
     WorkflowEdge,
     WorkflowType,
 )
+from bili.iris.nodes.react_agent_node import _DEFAULT_MAX_REACT_ITERATIONS
 
 _EXAMPLES_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -812,3 +814,679 @@ class TestEnsureHumanLast:
         _ensure_human_last(messages, agent)
         assert id(messages) == original_id
         assert len(messages) == 2
+
+
+# =========================================================================
+# PROMPTED TOOL-CALLING TESTS (supports_tools=False path, #304)
+# =========================================================================
+
+# Shared mock targets for resolve_tool_strategy.
+# resolve_tool_strategy is imported lazily from llm_resolver inside
+# _generate_llm_agent_node, so we patch it at the llm_resolver source.
+_MOCK_TOOL_STRATEGY = "bili.aether.compiler.llm_resolver.resolve_tool_strategy"
+
+# Backward-compat alias: tests that still call the wrapper function patch here.
+_MOCK_SUPPORTS_TOOLS = "bili.aether.compiler.llm_resolver.resolve_supports_tools"
+
+
+class TestPromptedToolCalling:
+    """Tests for the prompted ReAct path in AETHER agent_generator.
+
+    Verifies that an AETHER agent on a non-tool-calling model uses the shared
+    prompted ReAct loop from bili.iris.nodes.react_agent_node, not
+    create_agent / bind_tools, and that the native and no-tools paths are
+    unchanged.
+    """
+
+    def _make_mock_tool(self, name: str, return_value: str) -> MagicMock:
+        """Build a minimal LangChain-style tool mock."""
+        tool = MagicMock()
+        tool.name = name
+        tool.description = f"Mock tool: {name}"
+        tool.args_schema = None
+        tool.invoke.return_value = return_value
+        return tool
+
+    # ------------------------------------------------------------------
+    # Prompted path: non-tool-calling model with tools
+    # ------------------------------------------------------------------
+
+    def test_prompted_path_does_not_call_create_agent(self):
+        """A facilitated-strategy model with tools must NOT invoke create_agent."""
+        agent = _agent("cli_agent", model_name="cli:claude", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("weather", "sunny")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
+            patch(
+                "bili.iris.nodes.react_agent_node.create_agent"
+            ) as patched_create_agent,
+        ):
+            mock_llm = MagicMock()
+            # Model returns a Final Answer on the first call
+            mock_llm.invoke.return_value = MagicMock(
+                content="Thought: done\nFinal Answer: The weather is sunny."
+            )
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            node_fn({"messages": [], "agent_outputs": {}})
+            patched_create_agent.assert_not_called()
+
+    def test_prompted_path_tool_is_invoked(self):
+        """Prompted path must invoke the resolved tool when model requests it."""
+        agent = _agent("cli_agent", model_name="cli:claude", tools=["weather"])
+        weather_tool = self._make_mock_tool("weather", "clear skies")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[weather_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
+        ):
+            mock_llm = MagicMock()
+            # First call: model requests the weather tool
+            # Second call: model produces the final answer
+            mock_llm.invoke.side_effect = [
+                MagicMock(
+                    content=(
+                        "Thought: I need the weather.\n"
+                        "Action: weather\n"
+                        'Action Input: {"location": "Denver"}'
+                    )
+                ),
+                MagicMock(
+                    content="Thought: Got it.\nFinal Answer: The weather is clear skies."
+                ),
+            ]
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            weather_tool.invoke.assert_called_once_with({"location": "Denver"})
+            assert result["current_agent"] == "cli_agent"
+            assert "clear skies" in result["messages"][0].content
+
+    def test_prompted_path_final_answer_returned(self):
+        """Prompted path returns the Final Answer content in the AETHER state update."""
+        agent = _agent("cli_agent", model_name="cli:claude", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
+        ):
+            mock_llm = MagicMock()
+            mock_llm.invoke.return_value = MagicMock(
+                content="Thought: Done.\nFinal Answer: Forty-two."
+            )
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            assert result["current_agent"] == "cli_agent"
+            assert result["messages"][0].content == "Forty-two."
+            output = result["agent_outputs"]["cli_agent"]
+            assert output["status"] == "completed"
+            assert output["message"] == "Forty-two."
+
+    def test_prompted_path_respects_max_react_iterations_from_metadata(self):
+        """max_react_iterations from agent.metadata caps the prompted loop."""
+        agent = _agent(
+            "cli_agent",
+            model_name="cli:claude",
+            tools=["mock_tool"],
+            metadata={"max_react_iterations": 2},
+        )
+        mock_tool = self._make_mock_tool("mock_tool", "result")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
+        ):
+            mock_llm = MagicMock()
+            # Always return an unparseable response — loop should cap at 2
+            mock_llm.invoke.return_value = MagicMock(content="I am confused.")
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            # With max_react_iterations=2 and _MAX_CONSECUTIVE_PARSE_FAILURES=3,
+            # the iteration cap fires first; the last model response is returned.
+            assert result["current_agent"] == "cli_agent"
+            assert mock_llm.invoke.call_count == 2
+
+    # ------------------------------------------------------------------
+    # Native path: tool-calling model with tools — unchanged
+    # ------------------------------------------------------------------
+
+    def test_native_path_still_uses_create_agent(self):
+        """A tool-capable model must use create_agent (native path unchanged)."""
+        agent = _agent("api_agent", model_name="gpt-4o", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "output")
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.return_value = {
+            "messages": [AIMessage(content="native result")]
+        }
+
+        langchain_stub = types.ModuleType("langchain")
+        agents_stub = types.ModuleType("langchain.agents")
+        mock_create_agent_fn = MagicMock(return_value=mock_react_agent)
+        agents_stub.create_agent = mock_create_agent_fn
+        langchain_stub.agents = agents_stub
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="native"),
+            patch.dict(
+                sys.modules,
+                {"langchain": langchain_stub, "langchain.agents": agents_stub},
+            ),
+        ):
+            mock_create_llm.return_value = MagicMock()
+
+            node_fn = generate_agent_node(agent)
+
+            mock_create_agent_fn.assert_called_once()
+            result = node_fn({"messages": [], "agent_outputs": {}})
+            assert result["current_agent"] == "api_agent"
+            assert result["messages"][0].content == "native result"
+
+    # ------------------------------------------------------------------
+    # No-tools path — unchanged
+    # ------------------------------------------------------------------
+
+    def test_no_tools_path_unchanged(self):
+        """Agent without tools calls LLM directly regardless of tool_strategy."""
+        agent = _agent("direct_agent", model_name="gpt-4o")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="facilitated"),
+        ):
+            mock_llm = MagicMock()
+            mock_llm.invoke.return_value = MagicMock(content="direct answer")
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            mock_llm.invoke.assert_called_once()
+            assert result["messages"][0].content == "direct answer"
+
+    # ------------------------------------------------------------------
+    # resolve_supports_tools
+    # ------------------------------------------------------------------
+
+    def test_resolve_supports_tools_returns_false_for_flagged_model(self):
+        """resolve_supports_tools returns False for a model with supports_tools=False."""
+        from bili.aether.compiler.llm_resolver import resolve_supports_tools
+
+        mock_models = {
+            "remote_aws_bedrock": {
+                "models": [
+                    {
+                        "model_name": "Amazon Titan Text G1 - Premier",
+                        "model_id": "amazon.titan-text-premier-v1:0",
+                        "supports_tools": False,
+                    },
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_supports_tools("amazon.titan-text-premier-v1:0") is False
+            assert resolve_supports_tools("Amazon Titan Text G1 - Premier") is False
+
+    def test_resolve_supports_tools_defaults_to_true(self):
+        """resolve_supports_tools returns True when flag is absent or model unknown."""
+        from bili.aether.compiler.llm_resolver import resolve_supports_tools
+
+        mock_models = {
+            "remote_openai": {
+                "models": [
+                    {"model_name": "GPT-4o", "model_id": "gpt-4o"},
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            # Entry present, no supports_tools key → default True
+            assert resolve_supports_tools("gpt-4o") is True
+            # Entry not in catalog → default True
+            assert resolve_supports_tools("unknown-model-xyz") is True
+
+    def test_resolve_supports_tools_returns_true_on_import_error(self):
+        """resolve_supports_tools returns True when bili.iris.config.llm_config is absent.
+
+        Setting sys.modules["bili.iris.config.llm_config"] = None forces Python's
+        import machinery to raise ImportError on the lazy ``from bili.iris.config...
+        import LLM_MODELS`` inside resolve_tool_strategy, exercising the real
+        except-ImportError branch.  The previous patch of the module attribute did
+        not trigger that branch (the import succeeded from cache).
+        """
+        from bili.aether.compiler.llm_resolver import resolve_supports_tools
+
+        with patch.dict(sys.modules, {"bili.iris.config.llm_config": None}):
+            # Should not raise; ImportError path defaults to True (via "native").
+            result = resolve_supports_tools("any-model")
+            assert result is True
+
+    # ------------------------------------------------------------------
+    # resolve_tool_strategy
+    # ------------------------------------------------------------------
+
+    def test_resolve_tool_strategy_returns_field_when_present(self):
+        """resolve_tool_strategy reads the tool_strategy field directly."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {
+            "remote_openai": {
+                "models": [
+                    {
+                        "model_name": "OpenAI GPT-4o Omni",
+                        "model_id": "gpt-4o",
+                        "tool_strategy": "native",
+                        "supports_tools": True,
+                    },
+                ]
+            },
+            "remote_deepseek": {
+                "models": [
+                    {
+                        "model_name": "DeepSeek Reasoner",
+                        "model_id": "deepseek-reasoner",
+                        "tool_strategy": "none",
+                        "supports_tools": False,
+                    },
+                ]
+            },
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("gpt-4o") == "native"
+            assert resolve_tool_strategy("deepseek-reasoner") == "none"
+            # Lookup by display name also works.
+            assert resolve_tool_strategy("OpenAI GPT-4o Omni") == "native"
+
+    def test_resolve_tool_strategy_infers_from_supports_tools_when_field_absent(self):
+        """resolve_tool_strategy infers from supports_tools when tool_strategy absent."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {
+            "remote_aws_bedrock": {
+                "models": [
+                    {
+                        "model_name": "Legacy True",
+                        "model_id": "legacy-true",
+                        "supports_tools": True,
+                    },
+                    {
+                        "model_name": "Legacy False",
+                        "model_id": "legacy-false",
+                        "supports_tools": False,
+                    },
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("legacy-true") == "native"
+            assert resolve_tool_strategy("legacy-false") == "facilitated"
+
+    def test_resolve_tool_strategy_defaults_to_native_for_unknown_model(self):
+        """resolve_tool_strategy defaults to 'native' when model is not in catalog."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {"remote_openai": {"models": []}}
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("unknown-model-xyz") == "native"
+
+    def test_resolve_tool_strategy_returns_native_on_import_error(self):
+        """resolve_tool_strategy defaults to 'native' when LLM_MODELS cannot be imported."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        with patch(
+            "bili.iris.config.llm_config.LLM_MODELS",
+            side_effect=ImportError("no module"),
+            create=True,
+        ):
+            result = resolve_tool_strategy("any-model")
+            assert result == "native"
+
+    def test_resolve_tool_strategy_mcp_and_none_values(self):
+        """resolve_tool_strategy returns 'mcp' and 'none' for the new strategy values."""
+        from bili.aether.compiler.llm_resolver import resolve_tool_strategy
+
+        mock_models = {
+            "cli_claude_code": {
+                "models": [
+                    {
+                        "model_name": "Claude Code CLI",
+                        "model_id": "cli:claude_code",
+                        "tool_strategy": "mcp",
+                        "supports_tools": False,
+                    },
+                ]
+            },
+            "remote_openai": {
+                "models": [
+                    {
+                        "model_name": "OpenAI o1-mini",
+                        "model_id": "o1-mini",
+                        "tool_strategy": "none",
+                        "supports_tools": False,
+                    },
+                ]
+            },
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_tool_strategy("cli:claude_code") == "mcp"
+            assert resolve_tool_strategy("o1-mini") == "none"
+
+    # ------------------------------------------------------------------
+    # resolve_prompt_length_limit
+    # ------------------------------------------------------------------
+
+    def test_resolve_prompt_length_limit_returns_declared_limit(self):
+        """resolve_prompt_length_limit reads max_input_tokens by model_id or display name."""
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        mock_models = {
+            "remote_anthropic": {
+                "models": [
+                    {
+                        "model_name": "Claude Opus 4.8",
+                        "model_id": "claude-opus-4-8",
+                        "max_input_tokens": 200000,
+                    },
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_prompt_length_limit("claude-opus-4-8") == 200000
+            assert resolve_prompt_length_limit("Claude Opus 4.8") == 200000
+
+    def test_resolve_prompt_length_limit_none_for_unknown_model(self):
+        """resolve_prompt_length_limit returns None for a model absent from the catalog.
+
+        None means "no known limit"; callers must treat this permissively,
+        never as an implicit zero-length cap.
+        """
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        mock_models = {"remote_openai": {"models": []}}
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_prompt_length_limit("unknown-model-xyz") is None
+
+    def test_resolve_prompt_length_limit_none_when_entry_declares_no_limit(self):
+        """resolve_prompt_length_limit returns None when the catalog entry has no limit.
+
+        Mirrors real CLI-subprocess and local-provider catalog entries, whose
+        actual limits depend on the underlying tool/hardware rather than
+        bili-core's catalog.
+        """
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        mock_models = {
+            "cli_claude_code": {
+                "models": [
+                    {"model_name": "Claude Code CLI", "model_id": "cli:claude_code"},
+                ]
+            }
+        }
+        with patch("bili.iris.config.llm_config.LLM_MODELS", mock_models):
+            assert resolve_prompt_length_limit("cli:claude_code") is None
+
+    def test_resolve_prompt_length_limit_none_on_import_error(self):
+        """resolve_prompt_length_limit returns None when LLM_MODELS cannot be imported."""
+        from bili.aether.compiler.llm_resolver import resolve_prompt_length_limit
+
+        with patch.dict(sys.modules, {"bili.iris.config.llm_config": None}):
+            assert resolve_prompt_length_limit("any-model") is None
+
+    # ------------------------------------------------------------------
+    # mcp and none routing in _generate_tool_agent_node
+    # ------------------------------------------------------------------
+
+    def test_mcp_strategy_with_known_cli_calls_build_mcp_node(self):
+        """An 'mcp' strategy with a known CLI -> build_mcp_node is invoked."""
+        agent = _agent("cli_agent", model_name="cli:claude_code", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        mock_node = MagicMock(
+            return_value={
+                "messages": [],
+                "agent_outputs": {},
+                "current_agent": "cli_agent",
+            }
+        )
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="mcp"),
+            patch(
+                "bili.iris.mcp.server.build_mcp_node", return_value=mock_node
+            ) as mock_build,
+            patch("bili.iris.mcp.server.resolve_mcp_injector") as mock_resolve,
+        ):
+            from bili.iris.mcp.cli_injectors import ClaudeCodeInjector
+
+            mock_llm = MagicMock()
+            mock_llm.command = ["claude", "-p"]
+            mock_create_llm.return_value = mock_llm
+            mock_resolve.return_value = ClaudeCodeInjector()
+
+            generate_agent_node(agent)
+
+            mock_build.assert_called_once()
+
+    def test_mcp_strategy_unknown_cli_falls_back_to_direct_llm(self):
+        """An 'mcp' strategy with no injector falls back to the direct-LLM node."""
+        agent = _agent("cli_agent", model_name="cli:custom", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="mcp"),
+            patch("bili.iris.mcp.server.resolve_mcp_injector", return_value=None),
+        ):
+            mock_llm = MagicMock()
+            mock_llm.command = ["unknown-cli"]
+            mock_llm.invoke.return_value = MagicMock(content="fallback answer")
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            mock_llm.invoke.assert_called_once()
+            assert result["current_agent"] == "cli_agent"
+
+    def test_none_strategy_drops_tools_and_uses_direct_llm(self):
+        """A 'none' strategy drops tools and routes to the direct-LLM node."""
+        agent = _agent("reasoner", model_name="deepseek-reasoner", tools=["mock_tool"])
+        mock_tool = self._make_mock_tool("mock_tool", "some output")
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[mock_tool]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="none"),
+        ):
+            mock_llm = MagicMock()
+            mock_llm.invoke.return_value = MagicMock(content="reasoner answer")
+            mock_create_llm.return_value = mock_llm
+
+            node_fn = generate_agent_node(agent)
+            result = node_fn({"messages": [], "agent_outputs": {}})
+
+            mock_llm.invoke.assert_called_once()
+            assert result["current_agent"] == "reasoner"
+
+
+class TestNativeReactLoopCap:
+    """The native tool-calling path bounds its inner react loop (cost-safety).
+
+    create_agent produces a compiled LangGraph whose invoke() defaults to
+    recursion_limit=5000, and the outer MAS graph's recursion_limit does not
+    bound this inner loop, so a native agent that never emits a final answer
+    would otherwise make thousands of billed model calls.  The native branch
+    now passes an explicit recursion_limit and fails clean when it is hit.
+    """
+
+    @staticmethod
+    def _build_native_node(agent, mock_react_agent):
+        """Build a native tool-agent node with create_agent stubbed to return
+        *mock_react_agent*.  Returns the node callable."""
+        langchain_stub = types.ModuleType("langchain")
+        agents_stub = types.ModuleType("langchain.agents")
+        agents_stub.create_agent = MagicMock(return_value=mock_react_agent)
+        langchain_stub.agents = agents_stub
+
+        with (
+            patch(_MOCK_CREATE) as mock_create_llm,
+            patch(_MOCK_TOOLS, return_value=[MagicMock()]),
+            patch(_MOCK_TOOL_STRATEGY, return_value="native"),
+            patch.dict(
+                sys.modules,
+                {"langchain": langchain_stub, "langchain.agents": agents_stub},
+            ),
+        ):
+            mock_create_llm.return_value = MagicMock()
+            return generate_agent_node(agent)
+
+    def test_native_invoke_passes_recursion_limit_cap(self):
+        """The native react invoke is bounded by an explicit recursion_limit.
+
+        An N-iteration budget maps to 2N+1 supersteps (N model+tools cycles
+        plus the terminal model turn).
+        """
+        agent = _agent("api_agent", model_name="gpt-4o", tools=["mock_tool"])
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.return_value = {"messages": [AIMessage(content="done")]}
+
+        node_fn = self._build_native_node(agent, mock_react_agent)
+        node_fn({"messages": [], "agent_outputs": {}})
+
+        config = mock_react_agent.invoke.call_args.kwargs["config"]
+        assert config["recursion_limit"] == 2 * _DEFAULT_MAX_REACT_ITERATIONS + 1
+
+    def test_native_cap_honors_metadata_override(self):
+        """agent.metadata['max_react_iterations'] tunes the native cap, mirroring
+        the facilitated path."""
+        agent = _agent(
+            "api_agent",
+            model_name="gpt-4o",
+            tools=["mock_tool"],
+            metadata={"max_react_iterations": 5},
+        )
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.return_value = {"messages": [AIMessage(content="done")]}
+
+        node_fn = self._build_native_node(agent, mock_react_agent)
+        node_fn({"messages": [], "agent_outputs": {}})
+
+        config = mock_react_agent.invoke.call_args.kwargs["config"]
+        assert config["recursion_limit"] == 2 * 5 + 1
+
+    def test_native_cap_hit_fails_clean_without_aborting(self):
+        """When the cap is hit, the node returns a bounded result and does not
+        propagate GraphRecursionError, so one stuck agent cannot abort the MAS."""
+        agent = _agent("api_agent", model_name="gpt-4o", tools=["mock_tool"])
+        mock_react_agent = MagicMock()
+        mock_react_agent.invoke.side_effect = GraphRecursionError(
+            "Recursion limit reached"
+        )
+
+        node_fn = self._build_native_node(agent, mock_react_agent)
+        # Must not raise.
+        result = node_fn({"messages": [], "agent_outputs": {}})
+
+        assert result["current_agent"] == "api_agent"
+        assert "tool-use limit" in result["messages"][0].content
+
+
+# =========================================================================
+# MAS-path prompt caching: the native tool-calling path applies provider
+# prompt caching, the same as the IRIS single-agent path.
+# =========================================================================
+
+
+def _capture_native_create_agent(agent, llm):
+    """Drive generate_agent_node down the native create_agent path and return
+    the create_agent call args.
+
+    Stubs ``langchain.agents.create_agent`` (it may not be importable in the
+    test env) and forces ``tool_strategy='native'`` so the branch under test is
+    taken regardless of catalog state.
+    """
+    mock_tool = MagicMock()
+    mock_react = MagicMock()
+    mock_react.invoke.return_value = {
+        "messages": [AIMessage(content="ok", name=agent.agent_id)]
+    }
+    create_agent_fn = MagicMock(return_value=mock_react)
+    langchain_stub = types.ModuleType("langchain")
+    agents_stub = types.ModuleType("langchain.agents")
+    agents_stub.create_agent = create_agent_fn
+    langchain_stub.agents = agents_stub
+
+    with (
+        patch(_MOCK_CREATE, return_value=llm),
+        patch(_MOCK_TOOLS, return_value=[mock_tool]),
+        patch(_MOCK_TOOL_STRATEGY, return_value="native"),
+        patch.dict(
+            sys.modules,
+            {"langchain": langchain_stub, "langchain.agents": agents_stub},
+        ),
+    ):
+        generate_agent_node(agent)
+
+    create_agent_fn.assert_called_once()
+    return create_agent_fn.call_args
+
+
+def test_native_mas_path_appends_anthropic_prompt_caching():
+    """The AETHER native tool-calling path applies Anthropic prompt caching.
+
+    Before this, only the IRIS single-agent path (react_agent_node) applied the
+    caching middleware; a multi-agent run re-billed its stable prefix on every
+    model call.  Now the native path routes middleware through the same
+    ``_with_prompt_caching`` helper, so an Anthropic agent gets a cache
+    breakpoint on its stable prefix.
+    """
+    from langchain_anthropic import ChatAnthropic
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    llm = ChatAnthropic(
+        model="claude-opus-5", max_tokens=1024, api_key="dummy-not-used"
+    )
+    agent = _agent("cached_agent", model_name="claude-opus-5", tools=["mock_tool"])
+
+    call = _capture_native_create_agent(agent, llm)
+    middleware = call.kwargs["middleware"]
+    assert any(
+        isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware
+    ), "native MAS path must append AnthropicPromptCachingMiddleware for an Anthropic model"
+
+
+def test_native_mas_path_no_caching_for_non_anthropic_model():
+    """A non-Anthropic, non-Bedrock model gets no caching middleware appended;
+    the middleware is unchanged (OpenAI/Gemini cache server-side)."""
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    # A plain object is neither ChatAnthropic nor ChatBedrockConverse and has no
+    # 'primary', so both caching builders return None.
+    llm = object()
+    agent = _agent("plain_agent", model_name="gpt-4o", tools=["mock_tool"])
+
+    call = _capture_native_create_agent(agent, llm)
+    middleware = call.kwargs["middleware"]
+    assert not any(isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware)
+    # No configured middleware and no caching middleware added: exactly ().
+    assert list(middleware) == []

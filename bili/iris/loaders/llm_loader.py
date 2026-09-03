@@ -3,8 +3,14 @@ Module: llm_loader
 
 This module provides functions to load and initialize various language models for LangChain.
 It supports local models (LlamaCpp, HuggingFace) and remote models
-(Google Vertex AI, AWS Bedrock, Azure OpenAI).
-The functions are conditionally cached to optimize resource usage in Streamlit applications.
+(Google Vertex AI, AWS Bedrock, Azure OpenAI, OpenAI direct).
+
+The six built-in provider types are dispatched directly by ``load_model()``.
+Additional provider types — registered at application startup via
+``bili.iris.providers.register_provider()`` — are discovered through the
+``bili.iris.providers.PROVIDER_REGISTRY`` when the built-in dispatch does not
+match.  This allows third-party provider implementations to integrate without
+modifying this module.
 
 Functions:
     - load_model(model_type, **kwargs):
@@ -54,39 +60,50 @@ Example:
         max_tokens=100,
         temperature=0.7
     )
+
+    # Load a provider registered at startup via register_provider()
+    from bili.iris.providers import register_provider
+    from mypackage import MyProvider
+    register_provider("remote_my_api", MyProvider)
+    model = load_model("remote_my_api", model_name="my-model")
 """
 
 import gc
 
-import torch
-from langchain_aws import ChatBedrockConverse
-from langchain_community.chat_models import ChatLlamaCpp
-from langchain_google_vertexai import ChatVertexAI
-from langchain_huggingface.chat_models.huggingface import (
-    ChatHuggingFace,
-    HuggingFacePipeline,
-)
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
-from transformers import AutoModelForCausalLM, pipeline
-
-from bili.iris.loaders.tokenizer_loader import load_huggingface_tokenizer
 from bili.streamlit_ui.utils.streamlit_utils import conditional_cache_resource
 from bili.utils.logging_utils import get_logger
 
 LOGGER = get_logger(__name__)
 
-# This snippet is used to detect what devices are available for inference.
-# The model itself will automatically choose the best device, but this
-# will help us know if we have a GPU available.
-if torch.backends.mps.is_available():
-    # Detect if Apple MPS is available
-    LOGGER.info("Apple MPS device found")
-elif torch.cuda.is_available():
-    # Detect if Nvidia GPU is available
-    LOGGER.info("Nvidia GPU device found")
-else:
-    # If no GPU is available, use CPU
-    LOGGER.info("No compatible GPU device found, CPU will be used for inference.")
+#: Provider types for which load_model defaults max_tokens from the catalog's
+#: max_output_tokens when the caller supplies none.  Scoped to the providers
+#: whose own default is unsuitable: Anthropic falls back to a fixed floor (a
+#: usable minimum, but below a model's real budget), and Bedrock never applies
+#: the catalog value.  Others default sensibly and are excluded to
+#: avoid capping (or context-overflowing) an otherwise-fine request.
+_CATALOG_MAX_TOKENS_PROVIDERS = ("remote_anthropic", "remote_aws_bedrock")
+
+
+def _log_available_device() -> None:
+    """Log which compute device is available (Apple MPS, CUDA GPU, or CPU).
+
+    Deferred to call-time so that importing this module does not eagerly pull
+    in ``torch``, which is only needed for the local HuggingFace/LlamaCpp
+    backends.  Cloud-only deployments (Bedrock, Vertex, OpenAI) pay no cost.
+    """
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+
+        if torch.backends.mps.is_available():
+            LOGGER.info("Apple MPS device found")
+        elif torch.cuda.is_available():
+            LOGGER.info("Nvidia GPU device found")
+        else:
+            LOGGER.info(
+                "No compatible GPU device found, CPU will be used for inference."
+            )
+    except ImportError:
+        LOGGER.debug("torch not installed; skipping device detection.")
 
 
 # This function initializes and loads the Llama model.
@@ -100,22 +117,124 @@ def load_model(
     routes to the appropriate loader function depending on whether the model type
     is local or hosted remotely on cloud services.
 
-    :param model_type: Specifies the type of the model to be loaded. The value determines
-        which loader function will be called. Supported types are "local_llamacpp",
-        "local_huggingface", "remote_google_vertex", "remote_aws_bedrock", and
-        "remote_azure_openai".
+    :param model_type: Specifies the type of the model to be loaded. Built-in
+        supported types are ``"local_llamacpp"``, ``"local_huggingface"``,
+        ``"remote_google_vertex"``, ``"remote_aws_bedrock"``,
+        ``"remote_azure_openai"``, and ``"remote_openai"``.  Additional types
+        registered via ``bili.iris.providers.register_provider()`` are also
+        supported through the provider registry.
     :type model_type: str
     :param kwargs: Additional keyword arguments specific to the loader function for
         the chosen model type. These arguments differ depending on the model type.
+        ``required_input_modalities`` (a modality string or an iterable of them,
+        e.g. ``["image"]``) is consumed here rather than forwarded; see
+        "Multimodal input" below.
     :type kwargs: dict
     :return: The loaded model object as returned by the appropriate model loader
         function. The return value may differ in format depending on the chosen
-        model type.
+        model type, but always exposes an ``.invoke(messages)`` method.
     :rtype: object
-    :raises ValueError: If the specified model_type is not one of the supported
-        values, this exception will be raised.
+    :raises ValueError: If the specified model_type is not one of the built-in
+        types and is not registered in the provider registry, or if
+        ``structured_output_schema`` is requested for a provider type without
+        decode-time schema enforcement.
+    :raises bili.iris.providers.modality.UnsupportedInputModalityError: If
+        ``required_input_modalities`` names an input kind the catalog declares
+        the chosen model does not accept.
+
+    Multimodal input
+    ----------------
+    A caller that intends to send a non-text part (an image) declares it with
+    ``required_input_modalities`` so an unsuitable model is rejected here, at
+    selection, rather than opaquely at the provider call::
+
+        llm = load_model("remote_openai", model_name="gpt-4o",
+                         required_input_modalities=["image"])
+
+    The kwarg is consumed by this function and never forwarded to the loader,
+    so omitting it leaves every existing call byte-for-byte unchanged.
     """
-    # Based on model_type, call the appropriate loader function
+    # Fail fast on an input-modality the chosen model is cataloged as unable to
+    # accept.  Same posture as the structured-output check below: refusing at
+    # selection is actionable, whereas the provider's own rejection (or, worse,
+    # a silently ignored image) surfaces at the invoke boundary.  Popped rather
+    # than passed through: it is a precondition on the selection, not a
+    # provider kwarg.
+    required_input_modalities = kwargs.pop("required_input_modalities", None)
+    if required_input_modalities:
+        from bili.iris.providers.modality import (  # pylint: disable=import-outside-toplevel
+            require_input_modalities,
+        )
+
+        require_input_modalities(
+            model_type, kwargs.get("model_name"), required_input_modalities
+        )
+
+    # Fail fast on structured-output requests the provider cannot honour.
+    # Silently returning an unconstrained model would let the caller believe
+    # generation is schema-constrained when it is not -- the exact failure
+    # the capability exists to prevent.
+    if kwargs.get("structured_output_schema") is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            require_structured_output_support,
+        )
+
+        require_structured_output_support(model_type)
+
+    # Primary temperature handling: omit `temperature` for a cataloged model
+    # whose definition declares it unsupported (current reasoning models 400 on
+    # it).  Passthrough (uncataloged) models keep their temperature and rely on
+    # the runtime retry applied below.  See temperature_resilience.
+    if kwargs.get("temperature") is not None:
+        from bili.iris.providers.temperature_resilience import (  # pylint: disable=import-outside-toplevel
+            model_supports_temperature,
+        )
+
+        if model_supports_temperature(model_type, kwargs.get("model_name")) is False:
+            LOGGER.info(
+                "Model '%s' is cataloged as not supporting temperature; omitting it.",
+                kwargs.get("model_name"),
+            )
+            kwargs.pop("temperature")
+
+    # Default max_tokens from the model's cataloged max_output_tokens when the
+    # caller supplies none, for the providers whose own default is unsuitable for
+    # authoring: langchain_anthropic falls back to 1024 (far too small to emit a
+    # multi-KB document as a required tool argument), and Bedrock never applies
+    # the catalog value.  Other providers default sensibly, and forcing
+    # max_tokens to the model max there could overflow the context window on a
+    # long input, so they are deliberately excluded.  The catalog already carries
+    # the correct per-model value; this is where it reaches those providers.
+    if kwargs.get("max_tokens") is None and model_type in _CATALOG_MAX_TOKENS_PROVIDERS:
+        from bili.iris.providers.catalog_defaults import (  # pylint: disable=import-outside-toplevel
+            model_max_output_tokens,
+        )
+
+        catalog_max_tokens = model_max_output_tokens(
+            model_type, kwargs.get("model_name")
+        )
+        if catalog_max_tokens is not None:
+            LOGGER.info(
+                "Defaulting max_tokens=%d for model '%s' from the catalog.",
+                catalog_max_tokens,
+                kwargs.get("model_name"),
+            )
+            kwargs["max_tokens"] = catalog_max_tokens
+
+    # Built-in provider dispatch — handles the six types shipped with bili-core.
+    # This if/elif block is intentionally preserved for backward compatibility;
+    # the individual loader functions are part of the public API and may be
+    # imported and called directly by consumers (e.g. sustainability-hub-engine).
+    #
+    # Follow-up (delegation refactor): each branch below duplicates logic that
+    # also lives in the corresponding LLMProvider class in bili.iris.providers.
+    # The clean fix is to delegate these branches to provider_class().load(**kwargs)
+    # so there is one implementation per backend. The blocker is the
+    # @conditional_cache_resource() decorator on each load_* function — removing
+    # it would silently change caching behavior for existing callers. Once a
+    # cache-aware delegation path exists (or caching is lifted into the caller),
+    # replace this block with: provider_class = PROVIDER_REGISTRY.get(model_type);
+    # llm_model = provider_class().load(**kwargs).
     if model_type == "local_llamacpp":
         llm_model = load_llamacpp_model(**kwargs)
     elif model_type == "local_huggingface":
@@ -129,9 +248,33 @@ def load_model(
     elif model_type == "remote_openai":
         llm_model = load_remote_openai(**kwargs)
     else:
-        raise ValueError(f"Invalid model type: {model_type}")
+        # Fall through to the provider registry for third-party / extended
+        # provider types registered at startup via register_provider().
+        # Lazy import to avoid circular dependency and module-level overhead.
+        from bili.iris.providers.registry import (  # pylint: disable=import-outside-toplevel
+            PROVIDER_REGISTRY,
+        )
 
-    return llm_model
+        provider_class = PROVIDER_REGISTRY.get(model_type)
+        if provider_class is None:
+            raise ValueError(f"Invalid model type: {model_type}")
+        LOGGER.info(
+            "Delegating model_type '%s' to registered provider: %s",
+            model_type,
+            provider_class.__name__,
+        )
+        llm_model = provider_class().load(**kwargs)
+
+    # Make the loaded model self-heal when a provider rejects ``temperature``
+    # (current reasoning models 400 on it).  Applied at this single choke point
+    # so every caller -- IRIS, AETHER, and callers that invoke the model
+    # directly -- benefits; a no-op for models that set no temperature or are
+    # not standard chat models.  See temperature_resilience for the mechanism.
+    from bili.iris.providers.temperature_resilience import (  # pylint: disable=import-outside-toplevel
+        apply_temperature_resilience,
+    )
+
+    return apply_temperature_resilience(llm_model)
 
 
 def prepare_runtime_config(
@@ -246,6 +389,24 @@ def load_huggingface_model(
     :return: An instance of `HuggingFacePipeline`, configured for generating text
              using the HuggingFace Llama model.
     """
+    # Lazy imports: torch, transformers, and langchain_huggingface are only
+    # needed for local HuggingFace inference.  Cloud-only deployments never
+    # reach this branch, so they pay no import cost.
+    import torch  # pylint: disable=import-outside-toplevel
+    from langchain_huggingface.chat_models.huggingface import (  # pylint: disable=import-outside-toplevel
+        ChatHuggingFace,
+        HuggingFacePipeline,
+    )
+    from transformers import (  # pylint: disable=import-outside-toplevel
+        AutoModelForCausalLM,
+        pipeline,
+    )
+
+    from bili.iris.loaders.tokenizer_loader import (  # pylint: disable=import-outside-toplevel
+        load_huggingface_tokenizer,
+    )
+
+    _log_available_device()
     LOGGER.info("Loading HuggingFace model from %s...", model_name)
     tokenizer = load_huggingface_tokenizer(model_name)
 
@@ -376,6 +537,13 @@ def load_llamacpp_model(
     :return: Loaded LlamaCpp model object configured with specified parameters.
     :rtype: LlamaCpp
     """
+    # Lazy import: langchain_community's ChatLlamaCpp is only needed for
+    # local LlamaCpp inference; cloud-only deployments pay no import cost.
+    from langchain_community.chat_models import (  # pylint: disable=import-outside-toplevel
+        ChatLlamaCpp,
+    )
+
+    _log_available_device()
     LOGGER.info("Loading LlamaCpp model from %s...", model_name)
 
     # Load the Llama model using the LlamaCpp library
@@ -461,6 +629,7 @@ def load_remote_gcp_vertex_model(
     seed=None,
     response_schema=None,
     response_mime_type=None,
+    structured_output_schema=None,
     additional_headers=None,
     location=None,
 ):
@@ -485,6 +654,12 @@ def load_remote_gcp_vertex_model(
     :type top_k: int, optional
     :param seed: Optional. Seed for reproducibility in model output.
     :type seed: int, optional
+    :param structured_output_schema: Optional. Cross-provider spelling of
+        ``response_schema``: a JSON schema dict (or Pydantic model class) to
+        constrain generation to. Sets ``response_schema`` and
+        ``response_mime_type="application/json"``. Mutually exclusive with
+        passing ``response_schema``/``response_mime_type`` directly.
+    :type structured_output_schema: dict or type, optional
     :param additional_headers: Optional. HTTP headers to include in API requests.
         Use for Priority PayGo: {"X-Vertex-AI-LLM-Shared-Request-Type": "priority"}
         Use for Provisioned Throughput: {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
@@ -497,6 +672,27 @@ def load_remote_gcp_vertex_model(
              specified configuration.
     :rtype: ChatVertexAI
     """
+
+    # Lazy import: langchain_google_vertexai is only needed when the Vertex AI
+    # backend is actually used; installing google-cloud-aiplatform is heavy.
+    from langchain_google_vertexai import (  # pylint: disable=import-outside-toplevel
+        ChatVertexAI,
+    )
+
+    if structured_output_schema is not None and (
+        response_schema is not None or response_mime_type is not None
+    ):
+        raise ValueError(
+            "Pass either structured_output_schema (cross-provider) or "
+            "response_schema/response_mime_type (Vertex-native), not both."
+        )
+    if structured_output_schema is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            normalize_schema,
+        )
+
+        response_schema = normalize_schema(structured_output_schema)
+        response_mime_type = "application/json"
 
     llm_config = {
         "model_name": model_name,
@@ -555,6 +751,11 @@ def load_remote_bedrock_model(
     :return: An instance of the language model configured with provided parameters.
     :rtype: ChatBedrockConverse
     """
+    # Lazy import: langchain_aws is only needed when the Bedrock backend is used.
+    from langchain_aws import (  # pylint: disable=import-outside-toplevel
+        ChatBedrockConverse,
+    )
+
     LOGGER.info("Initializing AWS Bedrock model: %s...", model_name)
 
     llm_config = {
@@ -585,6 +786,7 @@ def load_remote_azure_openai(
     top_p=None,
     top_k=None,
     seed=None,
+    structured_output_schema=None,
 ):
     """
     Loads and initializes a remote Azure OpenAI model with the specified
@@ -608,8 +810,18 @@ def load_remote_azure_openai(
     :param top_k: Optional. Top-k sampling that limits the next token
         selection to k most likely options, if specified.
     :param seed: Optional. Random seed for deterministic outputs in sampling.
+    :param structured_output_schema: Optional. JSON schema dict (or Pydantic
+        model class) to constrain generation to, bound as ``response_format``
+        with ``strict: true``. When set, the returned object is a
+        ``RunnableBinding`` (no ``bind_tools``).
     :return: An initialized Azure OpenAI language model instance.
     """
+    # Lazy import: langchain_openai is only needed when the Azure OpenAI backend
+    # is actually used.
+    from langchain_openai import (  # pylint: disable=import-outside-toplevel
+        AzureChatOpenAI,
+    )
+
     LOGGER.info(
         "Initializing Azure OpenAI model: %s, API version: %s", model_name, api_version
     )
@@ -631,6 +843,17 @@ def load_remote_azure_openai(
         azure_config["seed"] = seed
 
     llm = AzureChatOpenAI(**azure_config)
+    if structured_output_schema is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            normalize_schema,
+            openai_response_format,
+        )
+
+        llm = llm.bind(
+            response_format=openai_response_format(
+                normalize_schema(structured_output_schema)
+            )
+        )
     LOGGER.debug(llm)
     return llm
 
@@ -644,6 +867,7 @@ def load_remote_openai(
     top_k=None,
     seed=None,
     max_retries=None,
+    structured_output_schema=None,
 ):
     """
     Loads and initializes a remote OpenAI model with the specified
@@ -666,8 +890,15 @@ def load_remote_openai(
     :param top_k: Optional. Top-k sampling that limits the next token
         selection to k most likely options, if specified.
     :param seed: Optional. Random seed for deterministic outputs in sampling.
+    :param structured_output_schema: Optional. JSON schema dict (or Pydantic
+        model class) to constrain generation to, bound as ``response_format``
+        with ``strict: true`` (OpenAI structured outputs). When set, the
+        returned object is a ``RunnableBinding`` (no ``bind_tools``).
     :return: An initialized OpenAI language model instance.
     """
+    # Lazy import: langchain_openai is only needed when the OpenAI backend is used.
+    from langchain_openai import ChatOpenAI  # pylint: disable=import-outside-toplevel
+
     LOGGER.info("Initializing OpenAI model: %s", model_name)
 
     # Define OpenAI-specific parameters
@@ -688,5 +919,16 @@ def load_remote_openai(
         openai_config["max_retries"] = max_retries
 
     llm = ChatOpenAI(**openai_config)
+    if structured_output_schema is not None:
+        from bili.iris.providers.structured_output import (  # pylint: disable=import-outside-toplevel
+            normalize_schema,
+            openai_response_format,
+        )
+
+        llm = llm.bind(
+            response_format=openai_response_format(
+                normalize_schema(structured_output_schema)
+            )
+        )
     LOGGER.debug(llm)
     return llm
