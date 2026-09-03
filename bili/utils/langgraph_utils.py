@@ -45,7 +45,7 @@ cleared = clear_state(state)
 """
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from langchain_core.messages import AIMessage, RemoveMessage
 from langgraph.graph import MessagesState
@@ -134,6 +134,9 @@ class State(MessagesState):
     :type title: str
     :ivar tags: List of tags/categories associated with the conversation.
     :type tags: List[str]
+    :ivar map: Map payload describing a mappable dataset touched this turn
+        (GeoJSON plus render metadata), absent when nothing was mappable.
+    :type map: Optional[dict]
     """
 
     # If we wanted to keep any user-specific preferences or state, we could add them here
@@ -147,6 +150,7 @@ class State(MessagesState):
     title: str
     tags: List[str]
     llm_config: dict
+    map: Optional[dict]
 
 
 def clear_state(state: State) -> dict:
