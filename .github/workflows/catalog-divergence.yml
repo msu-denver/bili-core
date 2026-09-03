@@ -12,8 +12,10 @@ name: Model Catalog Divergence Check
 # When the job opens an issue, and when it does not
 # -------------------------------------------------
 # An issue is raised for the two states a maintainer can act on: an ERROR (the
-# catalog declares a capability an authoritative dataset does not list) or a
-# dataset that could not be read (the check itself is broken). Warnings and
+# catalog declares a capability an authoritative dataset does not list) or the
+# check being unable to do its job (a dataset it could not read, or coverage
+# that collapsed because an upstream moved out from under the id mapping).
+# Other warnings and
 # notes are the steady state -- a defensible under-declaration, a context
 # window the two datasets disagree about -- and raising a weekly issue for
 # those would train everyone to close it unread, after which the errors go
@@ -79,7 +81,12 @@ jobs:
                 code=${PIPESTATUS[0]}
                 set -e
                 echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
-                # 0 clean, 1 an ERROR finding, 2 a dataset could not be read.
+                # 0 clean; 1 an ERROR finding; 2 the check could not do its
+                # job (a dataset was unreadable, or its own per-family coverage
+                # fell below the recorded floors, which is how an upstream that
+                # renames a provider key shows up: valid JSON, nothing
+                # resolved, and a report that would otherwise read as "no
+                # divergence" from a check that had stopped working).
                 # Anything else is the interpreter failing before the check
                 # ran, which is a broken job and must go red rather than be
                 # reported as a result about the catalog.

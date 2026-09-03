@@ -25,30 +25,14 @@ from bili.iris.config.catalog_divergence.datasets import MODELS_DEV
 from bili.iris.config.catalog_divergence.mapping import (
     LITELLM_PROVIDERS,
     MODELS_DEV_PROVIDERS,
+    RECORDED_MATCH_FLOORS,
     UNLISTED_PROVIDER_TYPES,
 )
 
-#: Provider-scoped match counts measured against the 2026-09-03 recorded
-#: slices. The count is the floor rather than the rate, because a rate hides
-#: a family gaining entries: adding four unmatchable models to a family of
-#: four would halve the rate while breaking nothing, and dropping four
-#: matched ones would hold the rate while breaking the mapper.
-MATCH_FLOORS = {
-    "remote_anthropic": 7,
-    "remote_aws_bedrock": 48,
-    "remote_azure_openai": 11,
-    "remote_cohere": 3,
-    "remote_deepseek": 2,
-    "remote_google_genai": 7,
-    "remote_google_vertex": 5,
-    "remote_groq": 2,
-    "remote_mistral": 3,
-    "remote_openai": 9,
-    "remote_xai": 1,
-    "local_ollama": 0,
-}
-
-#: Total entries resolved to at least one authoritative record, same capture.
+#: Total entries resolved to at least one authoritative record, measured
+#: against the same capture. The per-family floors live in ``mapping.py``
+#: because the live check reads them too; this aggregate is the test's own,
+#: and it catches a regression spread too thinly to drop any single family.
 TOTAL_MATCH_FLOOR = 98
 
 
@@ -70,11 +54,11 @@ class TestMatchRateFloors:
         """Both slices must parse, or every floor below measures nothing."""
         assert recorded.any_unavailable is False
 
-    @pytest.mark.parametrize("provider_type", sorted(MATCH_FLOORS))
+    @pytest.mark.parametrize("provider_type", sorted(RECORDED_MATCH_FLOORS))
     def test_a_family_still_resolves_its_recorded_count(self, recorded, provider_type):
         """Each mapped family resolves at least what it resolved at capture."""
         match = recorded.matches[provider_type]
-        floor = MATCH_FLOORS[provider_type]
+        floor = RECORDED_MATCH_FLOORS[provider_type]
         assert match.matched_either >= floor, (
             f"{provider_type} resolved {match.matched_either} of {match.entries}, "
             f"below the recorded floor of {floor}: the id mapping regressed"
@@ -87,12 +71,12 @@ class TestMatchRateFloors:
 
     def test_every_floor_names_a_mapped_family(self):
         """A floor for an unlisted family would assert against nothing."""
-        assert not set(MATCH_FLOORS) & UNLISTED_PROVIDER_TYPES
+        assert not set(RECORDED_MATCH_FLOORS) & UNLISTED_PROVIDER_TYPES
 
     def test_every_mapped_family_has_a_floor(self, recorded):
         """A family with no floor is a family whose mapper is unguarded."""
         mapped = set(recorded.matches) - UNLISTED_PROVIDER_TYPES
-        assert mapped == set(MATCH_FLOORS)
+        assert mapped == set(RECORDED_MATCH_FLOORS)
 
     def test_a_family_with_no_upstream_listing_resolves_nothing(self, recorded):
         """The excluded families are excluded because they cannot match.

@@ -102,6 +102,34 @@ UNLISTED_PROVIDER_TYPES = frozenset(
     }
 )
 
+#: Entries per family resolved to at least one authoritative record, measured
+#: against the 2026-09-03 recorded slices.
+#:
+#: This is framework data rather than a test constant because two different
+#: readers need it. A test reads it as a regression net: a change here that
+#: stops resolving model ids drops a family below its floor. The LIVE check
+#: reads it to notice that the upstreams themselves have moved out from under
+#: the mapping -- a provider key renamed, an id scheme changed -- which parses
+#: cleanly, resolves nothing, and would otherwise report "no divergence" from a
+#: check that had silently stopped working. One table, so the two readings
+#: cannot drift.
+#:
+#: Re-measure and update these deliberately when the fixtures are re-captured.
+RECORDED_MATCH_FLOORS: Dict[str, int] = {
+    "remote_anthropic": 7,
+    "remote_aws_bedrock": 48,
+    "remote_azure_openai": 11,
+    "remote_cohere": 3,
+    "remote_deepseek": 2,
+    "remote_google_genai": 7,
+    "remote_google_vertex": 5,
+    "remote_groq": 2,
+    "remote_mistral": 3,
+    "remote_openai": 9,
+    "remote_xai": 1,
+    "local_ollama": 0,
+}
+
 _REGION_PREFIX = re.compile(r"^(?:us|eu|apac|us-gov|global)\.")
 _VERSION_SUFFIX = re.compile(r"-v\d+(?::\d+)?$")
 

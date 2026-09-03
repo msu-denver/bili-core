@@ -21,8 +21,12 @@ as a passing one:
     authoritative dataset does not list.
 
 ``2``
-    At least one dataset could not be read, and no ``ERROR`` was produced.
-    The comparison, if any, was partial.
+    The check could not do its job, and no ``ERROR`` was produced: a dataset
+    could not be read, or its own per-family coverage fell below the recorded
+    floors. The second is the quieter failure of the two -- an upstream that
+    renames a provider key still serves a well-formed document, so nothing
+    fails to parse and the lookups simply stop hitting -- so it shares this
+    code rather than passing as a clean run.
 
 Nothing here writes to the catalog.  The check is report-only by construction:
 it holds no code path that edits a source file.
@@ -115,7 +119,7 @@ def main(
     :param stdout: Stream to write the text report to; defaults to
         ``sys.stdout``.
     :returns: One of :data:`EXIT_OK`, :data:`EXIT_ERRORS`,
-        :data:`EXIT_UNAVAILABLE`.
+        :data:`EXIT_UNAVAILABLE`; see the module docstring for what each means.
     :rtype: int
     """
     args = build_parser().parse_args(argv)
@@ -138,7 +142,7 @@ def main(
 
     if report.has_errors:
         return EXIT_ERRORS
-    if report.any_unavailable:
+    if report.any_unavailable or report.coverage_regressed:
         return EXIT_UNAVAILABLE
     return EXIT_OK
 

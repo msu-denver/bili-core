@@ -91,6 +91,13 @@ def render_text(report: DivergenceReport) -> str:
         f"{report.count(INFO)} info"
     )
 
+    if report.coverage_regressed:
+        lines.append("")
+        lines.append(
+            "COVERAGE BELOW THE RECORDED FLOORS -- the check may have stopped "
+            "working; see the coverage_floor findings below."
+        )
+
     lines.append("")
     lines.append("Coverage by provider type (entries resolved to a dataset record)")
     lines.append(
@@ -137,6 +144,7 @@ def to_dict(report: DivergenceReport) -> Dict[str, Any]:
         "generated_at": report.generated_at,
         "dataset_origins": dict(sorted(report.dataset_origins.items())),
         "complete": not report.any_unavailable,
+        "coverage_regressed": report.coverage_regressed,
         "unavailable": [
             {"source": u.source, "reason": u.reason, "detail": u.detail}
             for u in report.unavailable
@@ -208,6 +216,13 @@ def render_issue_body(report: DivergenceReport, run_url: str = "") -> str:
         lines.append("")
         for entry in report.unavailable:
             lines.append(f"- `{entry.source}`: {entry.reason} -- {entry.detail}")
+        lines.append("")
+    if report.coverage_regressed:
+        lines.append(
+            "**Coverage fell below the recorded floors.** An upstream may have "
+            "moved out from under the id mapping, in which case the check is "
+            "reporting less than it thinks. See the `coverage_floor` findings."
+        )
         lines.append("")
     lines.append(
         f"- generated: `{report.generated_at}`\n"

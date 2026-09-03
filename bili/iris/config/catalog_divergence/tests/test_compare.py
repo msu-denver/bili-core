@@ -13,6 +13,7 @@ from bili.iris.config.catalog_divergence.compare import (
     ERROR,
     FIELD_CONTEXT_WINDOW,
     FIELD_COVERAGE,
+    FIELD_COVERAGE_FLOOR,
     FIELD_INPUT_MODALITIES,
     FIELD_OUTPUT_MODALITIES,
     FIELD_TEMPERATURE,
@@ -159,6 +160,25 @@ class TestModalityOverClaim:
         findings = only(report.findings, FIELD_INPUT_MODALITIES)
         assert [f.severity for f in findings] == [WARNING]
         assert "image" in findings[0].message
+
+    def test_both_directions_at_once_are_one_finding_naming_both(self):
+        """Reporting only the severe half leaves the other stated nowhere.
+
+        A catalog can simultaneously claim a kind the dataset denies and omit
+        one it lists. That is one fact about one field, so it is one finding
+        at the higher severity, and the message has to name both halves or
+        the under-claim is silently dropped.
+        """
+        report = compare_catalog(
+            models_dev(modalities={"input": ["text", "audio"]}),
+            NO_LITELLM,
+            catalog(input_modalities=["text", "image"]),
+        )
+        findings = only(report.findings, FIELD_INPUT_MODALITIES)
+        assert len(findings) == 1
+        assert findings[0].severity == ERROR
+        assert "claims ['image']" in findings[0].message
+        assert "omits ['audio']" in findings[0].message
 
 
 class TestModalityUnderClaim:
@@ -399,6 +419,55 @@ class TestCoverage:
     def test_an_empty_family_has_a_zero_match_rate(self):
         """A family with no entries divides by nothing."""
         assert ProviderMatch("remote_openai", 0, 0, 0, 0).match_rate == 0.0
+
+
+class TestCoverageFloors:
+    """The check noticing that it has stopped working."""
+
+    def test_the_shipped_catalog_against_the_recorded_slices_is_not_a_regression(
+        self, models_dev_dataset, litellm_dataset
+    ):
+        """The floors are the capture's own numbers, so the capture clears them.
+
+        Without this the floor rule could be one that always fires, which
+        would be indistinguishable from a broken upstream on every run.
+        """
+        report = compare_catalog(models_dev_dataset, litellm_dataset)
+        assert report.coverage_regressed is False
+        assert only(report.findings, FIELD_COVERAGE_FLOOR) == []
+
+    def test_datasets_that_resolve_nothing_are_a_regression(self):
+        """A parseable document under a renamed provider key resolves nothing."""
+        report = compare_catalog(
+            models_dev(provider_id="a-renamed-provider"),
+            litellm(provider_id="a-renamed-provider"),
+        )
+        assert report.coverage_regressed is True
+        findings = only(report.findings, FIELD_COVERAGE_FLOOR)
+        assert findings
+        assert all(f.severity == WARNING for f in findings)
+        assert "below the recorded floor" in findings[0].message
+
+    def test_a_caller_supplied_catalog_is_not_measured_against_the_floors(self):
+        """The floors were measured against the shipped catalog and no other.
+
+        A smaller catalog resolving fewer entries is a different question,
+        not a regression, so applying the floors to it would report a failure
+        on every synthetic comparison.
+        """
+        report = compare_catalog(
+            models_dev(), litellm(), catalog(input_modalities=["text"])
+        )
+        assert report.coverage_regressed is False
+
+    def test_a_regression_is_never_an_error(self, models_dev_dataset):
+        """It says the check is unreliable, not that the catalog is wrong.
+
+        Failing on it would assert something about the catalog that this
+        run is in no position to know.
+        """
+        report = compare_catalog(models_dev_dataset, NO_LITELLM)
+        assert report.has_errors is False
 
 
 class TestAdvisoryCap:

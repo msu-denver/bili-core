@@ -42,22 +42,50 @@ class TestParser:
 class TestExitCodes:
     """Three codes, because three things can happen."""
 
-    def test_a_clean_comparison_exits_zero(self, tmp_path):
-        """Everything read, nothing over-claimed."""
+    def test_a_clean_comparison_exits_zero(self, models_dev_path, litellm_path):
+        """Everything read, real coverage, and nothing over-claimed.
+
+        This runs against the recorded slices rather than a hand-made pair,
+        because the CLI always compares the SHIPPED catalog and a toy dataset
+        resolves almost none of it, which is now a reported failure in its own
+        right. A clean exit has to be earned against data that actually
+        covers the catalog.
+        """
+        code, text = run(
+            [
+                "--models-dev-file",
+                str(models_dev_path),
+                "--litellm-file",
+                str(litellm_path),
+            ]
+        )
+        assert code == cli.EXIT_OK
+        assert "INCOMPLETE" not in text
+        assert "BELOW THE RECORDED FLOORS" not in text
+
+    def test_datasets_that_resolve_nothing_do_not_exit_zero(self, tmp_path):
+        """A well-formed document that covers nothing is a broken check.
+
+        An upstream renaming a provider key still serves valid JSON, so
+        nothing fails to parse and every lookup simply stops hitting. Without
+        this the run would report no divergence from a check that had
+        silently stopped working, which is the same silence a failed fetch
+        would produce.
+        """
         md = tmp_path / "md.json"
         md.write_text(
-            json.dumps(
-                {"openai": {"models": {"gpt-4": {"modalities": {"input": ["text"]}}}}}
-            ),
+            json.dumps({"a-renamed-provider": {"models": {"m": {}}}}),
             encoding="utf-8",
         )
         ll = tmp_path / "ll.json"
         ll.write_text(
-            json.dumps({"gpt-4": {"litellm_provider": "openai"}}), encoding="utf-8"
+            json.dumps({"m": {"litellm_provider": "a-renamed-provider"}}),
+            encoding="utf-8",
         )
         code, text = run(["--models-dev-file", str(md), "--litellm-file", str(ll)])
-        assert code == cli.EXIT_OK
-        assert "INCOMPLETE" not in text
+        assert code == cli.EXIT_UNAVAILABLE
+        assert code != cli.EXIT_OK
+        assert "BELOW THE RECORDED FLOORS" in text
 
     def test_an_error_finding_exits_one(self, tmp_path):
         """An over-claimed capability is what non-zero is reserved for.

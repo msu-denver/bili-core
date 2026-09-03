@@ -68,6 +68,7 @@ from .mapping import (
     ADVISORY_ONLY_PROVIDER_TYPES,
     LITELLM_PROVIDERS,
     MODELS_DEV_PROVIDERS,
+    RECORDED_MATCH_FLOORS,
     UNLISTED_PROVIDER_TYPES,
     id_candidates,
 )
@@ -84,6 +85,7 @@ FIELD_OUTPUT_MODALITIES = "output_modalities"
 FIELD_TEMPERATURE = "supports_temperature"
 FIELD_CONTEXT_WINDOW = "max_input_tokens"
 FIELD_COVERAGE = "coverage"
+FIELD_COVERAGE_FLOOR = "coverage_floor"
 
 
 @dataclass(frozen=True)
@@ -193,6 +195,22 @@ class DivergenceReport:
         return self.count(ERROR) > 0
 
     @property
+    def coverage_regressed(self) -> bool:
+        """Whether any family resolved fewer entries than it did at capture.
+
+        This is the check noticing that it has stopped working. An upstream
+        that renames a provider key or changes an id scheme still serves a
+        well-formed document, so nothing fails to parse; the lookups simply
+        stop hitting, every entry reads as uncovered, and the run reports no
+        divergence. That is the same silence a failed fetch would produce and
+        it has to be as loud.
+
+        :returns: ``True`` when at least one family is below its floor.
+        :rtype: bool
+        """
+        return any(f.field_name == FIELD_COVERAGE_FLOOR for f in self.findings)
+
+    @property
     def any_unavailable(self) -> bool:
         """Whether any dataset could not be read.
 
@@ -278,48 +296,50 @@ def _modality_findings(  # pylint: disable=too-many-locals
         if dataset_set == declared_set:
             continue
 
-        verbatim = getattr(record, "input_modalities_verbatim", None)
-        shown = (
-            sorted(verbatim)
-            if (verbatim and attribute == "input_modalities")
-            else sorted(dataset_set)
-        )
+        # The untrimmed upstream set is shown so the reader sees what the
+        # dataset really said, including the kinds this vocabulary drops.
+        # Only the input axis keeps one; the output axis has nothing trimmed.
+        if attribute == "input_modalities":
+            shown = sorted(record.input_modalities_verbatim or dataset_set)
+        else:
+            shown = sorted(dataset_set)
         value = DatasetValue(record.source, record.provider_id, record.key, shown)
+
         overclaimed = declared_set - dataset_set
         underclaimed = dataset_set - declared_set
+        # An over-claim is a finding only when the dataset ENUMERATES its
+        # modalities; a dataset that merely confirms one cannot deny another.
+        denies = bool(overclaimed) and record.states_modalities_explicitly
 
-        if overclaimed and record.states_modalities_explicitly:
-            findings.append(
-                Finding(
-                    severity=_cap(ERROR, provider_type),
-                    provider_type=provider_type,
-                    model_id=entry["model_id"],
-                    model_name=entry.get("model_name", ""),
-                    field_name=field_name,
-                    catalog_value=sorted(declared_set),
-                    dataset_values=(value,),
-                    message=(
-                        f"catalog claims {sorted(overclaimed)}, which the "
-                        f"dataset does not list"
-                    ),
-                )
+        # Both directions can hold at once, and reporting only the more severe
+        # half would leave the other stated nowhere.  They are one finding
+        # rather than two, at the higher severity, because they are one fact
+        # about one field.
+        parts = []
+        if denies:
+            parts.append(
+                f"catalog claims {sorted(overclaimed)}, which the dataset "
+                f"does not list"
             )
-        elif underclaimed:
-            findings.append(
-                Finding(
-                    severity=WARNING,
-                    provider_type=provider_type,
-                    model_id=entry["model_id"],
-                    model_name=entry.get("model_name", ""),
-                    field_name=field_name,
-                    catalog_value=sorted(declared_set),
-                    dataset_values=(value,),
-                    message=(
-                        f"catalog omits {sorted(underclaimed)}, which the "
-                        f"dataset lists"
-                    ),
-                )
+        if underclaimed:
+            parts.append(
+                f"catalog omits {sorted(underclaimed)}, which the dataset lists"
             )
+        if not parts:
+            continue
+
+        findings.append(
+            Finding(
+                severity=_cap(ERROR, provider_type) if denies else WARNING,
+                provider_type=provider_type,
+                model_id=entry["model_id"],
+                model_name=entry.get("model_name", ""),
+                field_name=field_name,
+                catalog_value=sorted(declared_set),
+                dataset_values=(value,),
+                message="; ".join(parts),
+            )
+        )
     return findings
 
 
@@ -450,6 +470,41 @@ def merge_findings(findings: Sequence[Finding]) -> List[Finding]:
     return list(merged.values())
 
 
+def _coverage_floor_findings(matches: Dict[str, ProviderMatch]) -> List[Finding]:
+    """Report any family resolving fewer entries than it did at capture.
+
+    A family is skipped when the catalog no longer carries it, because a
+    provider type that was removed cannot be measured against a floor.
+
+    :param matches: The per-family coverage this run measured.
+    :returns: Zero or more findings.
+    :rtype: List[Finding]
+    """
+    findings: List[Finding] = []
+    for provider_type, floor in sorted(RECORDED_MATCH_FLOORS.items()):
+        match = matches.get(provider_type)
+        if match is None or match.matched_either >= floor:
+            continue
+        findings.append(
+            Finding(
+                severity=WARNING,
+                provider_type=provider_type,
+                model_id="",
+                model_name="",
+                field_name=FIELD_COVERAGE_FLOOR,
+                catalog_value=match.matched_either,
+                dataset_values=(),
+                message=(
+                    f"only {match.matched_either} of {match.entries} entries "
+                    f"resolved, below the recorded floor of {floor}: either an "
+                    f"upstream moved out from under the id mapping, or the "
+                    f"mapping regressed"
+                ),
+            )
+        )
+    return findings
+
+
 def compare_catalog(  # pylint: disable=too-many-locals
     models_dev: DatasetResult,
     litellm: DatasetResult,
@@ -465,10 +520,15 @@ def compare_catalog(  # pylint: disable=too-many-locals
     :param models_dev: A parsed models.dev dataset, or an ``Unavailable``.
     :param litellm: A parsed LiteLLM dataset, or an ``Unavailable``.
     :param catalog: The catalog to compare; defaults to the shipped
-        ``LLM_MODELS``.
+        ``LLM_MODELS``. The recorded coverage floors are checked only for
+        that default, because they were measured against it.
     :returns: The full report.
     :rtype: DivergenceReport
     """
+    # The recorded floors were measured against the SHIPPED catalog, so they
+    # say nothing about a caller-supplied one: a smaller catalog resolving
+    # fewer entries is not a regression, it is a different question.
+    compares_shipped_catalog = catalog is None
     catalog = LLM_MODELS if catalog is None else catalog
 
     unavailable = tuple(d for d in (models_dev, litellm) if isinstance(d, Unavailable))
@@ -545,6 +605,9 @@ def compare_catalog(  # pylint: disable=too-many-locals
             matched_litellm=ll_hits,
             matched_either=either_hits,
         )
+
+    if compares_shipped_catalog:
+        findings.extend(_coverage_floor_findings(matches))
 
     return DivergenceReport(
         findings=tuple(merge_findings(findings)),
