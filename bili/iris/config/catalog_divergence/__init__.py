@@ -49,10 +49,11 @@ from .mapping import (
     UNLISTED_PROVIDER_TYPES,
     id_candidates,
 )
-from .report import render_issue_body, render_json, render_text, to_dict
+from .report import STICKY_MARKER, render_issue_body, render_json, render_text, to_dict
 
 __all__ = [
     "ADVISORY_ONLY_PROVIDER_TYPES",
+    "STICKY_MARKER",
     "CapabilityRecord",
     "Dataset",
     "DatasetValue",

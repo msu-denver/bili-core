@@ -23,6 +23,7 @@ from bili.iris.config.catalog_divergence.datasets import (
     Unavailable,
 )
 from bili.iris.config.catalog_divergence.report import (
+    STICKY_MARKER,
     render_issue_body,
     render_json,
     render_text,
@@ -209,6 +210,15 @@ class TestRenderIssueBody:
         assert "https://ci.example/run/1" in render_issue_body(
             report([finding()]), run_url="https://ci.example/run/1"
         )
+
+    def test_it_carries_the_sticky_marker(self):
+        """The job that posts this finds its own issue by the marker.
+
+        Rendering it here rather than appending it in the job is what keeps
+        the marker the job searches for and the marker the body carries from
+        being two separate strings that can drift.
+        """
+        assert STICKY_MARKER in render_issue_body(report([finding()]))
 
     def test_no_run_url_is_rendered_when_absent(self):
         """An empty link is worse than none."""

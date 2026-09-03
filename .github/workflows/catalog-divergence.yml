@@ -1,0 +1,163 @@
+name: Model Catalog Divergence Check
+
+# Cross-checks the declared model catalog against the two community
+# capability datasets, weekly, against the LIVE upstreams.
+#
+# The in-repo tests measure this repository against RECORDED payloads, so they
+# catch a change here that stops resolving model ids. They deliberately cannot
+# catch the other half: an upstream renaming a model, changing an id scheme, or
+# correcting a capability the catalog still declares the old way. That half
+# only shows up against live data, and only a scheduled run sees it.
+#
+# When the job opens an issue, and when it does not
+# -------------------------------------------------
+# An issue is raised for the two states a maintainer can act on: an ERROR (the
+# catalog declares a capability an authoritative dataset does not list) or a
+# dataset that could not be read (the check itself is broken). Warnings and
+# notes are the steady state -- a defensible under-declaration, a context
+# window the two datasets disagree about -- and raising a weekly issue for
+# those would train everyone to close it unread, after which the errors go
+# unread too. They are written to the job summary and uploaded as an artifact
+# instead, where a maintainer doing catalog work will look for them.
+#
+# The job does not fail on a divergence. A red scheduled run on a repository's
+# default branch is a standing signal that something in the repository is
+# broken, and a community dataset disagreeing with the catalog is not that: the
+# adjudication is a human's and the catalog may well be the correct side. The
+# issue is the channel; the exit code is recorded in the summary.
+
+on:
+    schedule:
+        # Weekly, Monday 06:17 UTC. An off-minute keeps this out of the
+        # top-of-hour crush where GitHub's scheduler queues runs for minutes.
+        - cron: '17 6 * * 1'
+    workflow_dispatch:
+
+# Only what the job does: read the tree, and maintain the one sticky issue.
+permissions:
+    contents: read
+    issues: write
+
+concurrency:
+    group: catalog-divergence
+    cancel-in-progress: false
+
+jobs:
+    divergence:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+            - name: Set up Python
+              uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+              with:
+                python-version: '3.11'
+
+            # No dependency install. The check imports nothing outside the
+            # standard library and the catalog itself, which a test pins. An
+            # install step would be a second thing that can fail, and a job
+            # whose install failed reports a red run that says nothing about
+            # the catalog.
+            # No dependency install. The check imports nothing outside the
+            # standard library and the catalog itself, which a test pins. An
+            # install step would be a second thing that can fail, and a job
+            # whose install failed reports a red run that says nothing about
+            # the catalog.
+            - name: Run the divergence check against the live datasets
+              id: check
+              env:
+                RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+              run: |
+                set -o pipefail
+                set +e
+                python -m bili.iris.config.catalog_divergence.cli \
+                    --json divergence.json \
+                    --issue-body issue-body.md \
+                    --run-url "${RUN_URL}" | tee divergence.txt
+                code=${PIPESTATUS[0]}
+                set -e
+                echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+                # 0 clean, 1 an ERROR finding, 2 a dataset could not be read.
+                # Anything else is the interpreter failing before the check
+                # ran, which is a broken job and must go red rather than be
+                # reported as a result about the catalog.
+                case "${code}" in
+                    0) echo "raise_issue=false" >> "$GITHUB_OUTPUT" ;;
+                    1|2) echo "raise_issue=true" >> "$GITHUB_OUTPUT" ;;
+                    *) echo "::error::the check exited ${code}; it did not run"; exit 1 ;;
+                esac
+
+            - name: Write the report to the job summary
+              if: always() && hashFiles('divergence.txt') != ''
+              run: |
+                {
+                    echo '## Model catalog divergence'
+                    echo
+                    echo "Check exited \`${{ steps.check.outputs.exit_code }}\`."
+                    echo
+                    echo '```'
+                    cat divergence.txt
+                    echo '```'
+                } >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Upload the report
+              if: always() && hashFiles('divergence.json') != ''
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+              with:
+                name: catalog-divergence-report
+                path: |
+                    divergence.txt
+                    divergence.json
+                retention-days: 90
+
+            # One sticky issue, found by a marker the REPORT emits rather than
+            # by a label or a title match, so the job needs no label to exist,
+            # cannot adopt a human-filed issue that happens to share a title,
+            # and cannot drift from the marker it looks for.
+            - name: Open or update the tracking issue
+              if: steps.check.outputs.raise_issue == 'true'
+              env:
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                EXIT_CODE: ${{ steps.check.outputs.exit_code }}
+              run: |
+                marker=$(python -c 'from bili.iris.config.catalog_divergence import STICKY_MARKER; print(STICKY_MARKER)')
+                grep -qF "${marker}" issue-body.md
+
+                existing=$(gh issue list --state open --limit 100 \
+                    --json number,body \
+                    --jq "[.[] | select(.body | contains(\"${marker}\"))] | .[0].number // \"\"")
+
+                if [ -n "${existing}" ]; then
+                    gh issue edit "${existing}" --body-file issue-body.md
+                    gh issue comment "${existing}" \
+                        --body "Re-checked $(date -u '+%Y-%m-%d'); the body above is this run's report (check exited ${EXIT_CODE}). ${RUN_URL}"
+                    echo "updated issue #${existing}"
+                else
+                    gh issue create \
+                        --title 'Model catalog diverges from the community capability datasets' \
+                        --body-file issue-body.md
+                    echo "opened a new tracking issue"
+                fi
+
+            # A cleared condition has to clear the issue too, or the sticky
+            # issue becomes permanent furniture that says nothing about today.
+            - name: Close the tracking issue when the check comes back clean
+              if: steps.check.outputs.raise_issue == 'false'
+              env:
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+              run: |
+                marker=$(python -c 'from bili.iris.config.catalog_divergence import STICKY_MARKER; print(STICKY_MARKER)')
+                existing=$(gh issue list --state open --limit 100 \
+                    --json number,body \
+                    --jq "[.[] | select(.body | contains(\"${marker}\"))] | .[0].number // \"\"")
+                if [ -n "${existing}" ]; then
+                    gh issue close "${existing}" \
+                        --comment "The check now reads every dataset and reports no over-claimed capability. ${RUN_URL}"
+                    echo "closed issue #${existing}"
+                else
+                    echo "clean, and no tracking issue is open"
+                fi

@@ -10,6 +10,7 @@ import json
 
 from bili.iris.config.catalog_divergence import cli
 from bili.iris.config.catalog_divergence.datasets import MODELS_DEV_URL
+from bili.iris.config.catalog_divergence.report import STICKY_MARKER
 
 
 def run(argv):
@@ -147,6 +148,64 @@ class TestOutputs:
         )
         assert text == ""
         assert code == cli.EXIT_UNAVAILABLE
+
+    def test_the_issue_body_is_written_to_the_given_path(self, tmp_path):
+        """The scheduled job posts this file; it must not render it itself.
+
+        Rebuilding the report inside the job's shell would be untested code
+        in a place nothing exercises, so the rendering stays here.
+        """
+        out = tmp_path / "body.md"
+        run(
+            [
+                "--quiet",
+                "--issue-body",
+                str(out),
+                "--run-url",
+                "https://ci.example/run/1",
+                "--models-dev-file",
+                str(tmp_path / "no.json"),
+                "--litellm-file",
+                str(tmp_path / "no.json"),
+            ]
+        )
+        body = out.read_text(encoding="utf-8")
+        assert "INCOMPLETE" in body
+        assert "https://ci.example/run/1" in body
+
+    def test_the_issue_body_carries_the_sticky_marker(self, tmp_path):
+        """The job finds its own issue by this marker, so it has to be there.
+
+        Emitting it here rather than appending it in the job is what keeps
+        the marker the job looks for and the marker the body carries from
+        drifting apart.
+        """
+        out = tmp_path / "body.md"
+        run(
+            [
+                "--quiet",
+                "--issue-body",
+                str(out),
+                "--models-dev-file",
+                str(tmp_path / "no.json"),
+                "--litellm-file",
+                str(tmp_path / "no.json"),
+            ]
+        )
+        assert STICKY_MARKER in out.read_text(encoding="utf-8")
+
+    def test_no_issue_body_is_written_unless_asked(self, tmp_path):
+        """The default run writes nothing but its report."""
+        run(
+            [
+                "--quiet",
+                "--models-dev-file",
+                str(tmp_path / "no.json"),
+                "--litellm-file",
+                str(tmp_path / "no.json"),
+            ]
+        )
+        assert not list(tmp_path.glob("*.md"))
 
     def test_json_is_written_to_the_given_path(self, tmp_path):
         """The machine-readable form is what the scheduled job consumes."""

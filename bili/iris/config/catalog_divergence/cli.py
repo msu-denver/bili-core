@@ -5,6 +5,7 @@ Usage (from the project root)::
 
     python -m bili.iris.config.catalog_divergence.cli
     python -m bili.iris.config.catalog_divergence.cli --json report.json
+    python -m bili.iris.config.catalog_divergence.cli --issue-body body.md
     python -m bili.iris.config.catalog_divergence.cli \\
         --models-dev-file fixture.json --litellm-file fixture.json
 
@@ -36,7 +37,7 @@ from typing import Optional, Sequence, TextIO
 
 from .compare import compare_catalog
 from .datasets import DEFAULT_TIMEOUT_SECONDS, load_litellm, load_models_dev
-from .report import render_json, render_text
+from .report import render_issue_body, render_json, render_text
 
 EXIT_OK = 0
 EXIT_ERRORS = 1
@@ -74,6 +75,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PATH",
         help="also write the report as JSON to this path",
+    )
+    parser.add_argument(
+        "--issue-body",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "also write a Markdown tracking-issue body to this path; the "
+            "rendering lives here rather than in the job that posts it"
+        ),
+    )
+    parser.add_argument(
+        "--run-url",
+        default="",
+        help="link back to the run, included in the tracking-issue body",
     )
     parser.add_argument(
         "--quiet",
@@ -114,6 +130,11 @@ def main(
 
     if args.json is not None:
         args.json.write_text(render_json(report), encoding="utf-8")
+
+    if args.issue_body is not None:
+        args.issue_body.write_text(
+            render_issue_body(report, run_url=args.run_url), encoding="utf-8"
+        )
 
     if report.has_errors:
         return EXIT_ERRORS

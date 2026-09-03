@@ -18,6 +18,12 @@ from typing import Any, Dict, List
 
 from .compare import ERROR, INFO, SEVERITY_ORDER, WARNING, DivergenceReport, Finding
 
+#: Marker embedded in the tracking-issue body so the job that maintains that
+#: issue can find its own issue again. It is a marker in the BODY rather than a
+#: label or a title match, so the job needs no label to exist and cannot adopt
+#: a human-filed issue that happens to share a title.
+STICKY_MARKER = "<!-- catalog-divergence-sticky-issue -->"
+
 
 def _finding_sort_key(finding: Finding):
     """Order findings most severe first, then stably by provider and model.
@@ -220,4 +226,6 @@ def render_issue_body(report: DivergenceReport, run_url: str = "") -> str:
     if run_url:
         lines.append("")
         lines.append(f"Produced by {run_url}")
+    lines.append("")
+    lines.append(STICKY_MARKER)
     return "\n".join(lines) + "\n"
