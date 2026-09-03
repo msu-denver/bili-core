@@ -382,7 +382,10 @@ def _context_findings(
     :rtype: List[Finding]
     """
     declared = entry.get("max_input_tokens")
-    if not isinstance(declared, int) or declared <= 0:
+    # bool is a subclass of int, so an unguarded isinstance check reads True
+    # as the window 1.  The dataset side already rejects a boolean, and the
+    # two sides of one comparison have to mean the same thing by "a window".
+    if isinstance(declared, bool) or not isinstance(declared, int) or declared <= 0:
         return []
     findings: List[Finding] = []
     for record in records:

@@ -122,5 +122,5 @@ def main(
     return EXIT_OK
 
 
-if __name__ == "__main__":  # pragma: no cover - process entry point
+if __name__ == "__main__":
     sys.exit(main())
