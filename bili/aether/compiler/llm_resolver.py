@@ -65,13 +65,18 @@ _HEURISTIC_RULES = [
     ("ollama:", "local_ollama"),
     # Google AI Developer API sentinel.  Unlike the vendor rules below, this
     # exists to override the *catalog* lookup rather than to name a provider
-    # the heuristics could not otherwise guess: a Gemini model_id listed by
-    # both remote_google_vertex and remote_google_genai resolves to Vertex
-    # (catalog lookup runs before the heuristics, and Vertex is declared
-    # first), so a bare id gives callers no way to select the Developer API.
-    # A "genai:"-prefixed name misses the catalog, falls through to here, and
-    # routes explicitly.  GoogleGenAIProvider.load() strips the prefix before
-    # the id reaches the API, the same contract as "ollama:" above.
+    # the heuristics could not otherwise guess.  A Gemini id cataloged by BOTH
+    # remote_google_vertex and remote_google_genai now resolves to the
+    # Developer API on its own (MODEL_FAMILY_OWNERS breaks the tie in step 3),
+    # so the sentinel is no longer what reaches it for those.  It still is for
+    # a Gemini id VERTEX ALONE carries -- gemini-2.5-pro, where there is no tie
+    # to break and a preference must not name a catalog with no such entry --
+    # and for an uncataloged tag.  A "genai:"-prefixed name misses the catalog,
+    # falls through to here, and routes explicitly; the qualified form
+    # "remote_google_genai:<id>" reaches the same provider through step 1 and
+    # additionally strips the prefix from the model id.
+    # GoogleGenAIProvider.load() strips this sentinel before the id reaches the
+    # API, the same contract as "ollama:" above.
     ("genai:", "remote_google_genai"),
     ("gpt-", "remote_openai"),
     ("gpt4", "remote_openai"),
