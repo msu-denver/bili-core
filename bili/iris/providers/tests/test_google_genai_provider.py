@@ -149,17 +149,42 @@ class TestGoogleGenAICatalogRouting:
     def test_sentinel_overrides_vertex_catalog_match(self):
         """Verify the sentinel reaches the Developer API for a Vertex-listed id.
 
-        A bare 'gemini-2.5-flash' resolves to Vertex because catalog lookup
-        precedes the heuristics and Vertex is declared first.  The sentinel is
-        the seam that lets a downstream caller select the Developer API for that
-        same id without hardcoding a display name.
+        The sentinel predates the family-owner table and still works: it
+        misses the catalog, falls through to the heuristics, and routes
+        explicitly.  It is exercised here because it is a separate seam from
+        the qualified '<provider_type>:<model>' form, and both must keep
+        naming the Developer API for an id Vertex also carries.
         """
         provider, _, _ = _resolve("genai:gemini-2.5-flash")
         assert provider == "remote_google_genai"
 
-    def test_bare_catalogued_id_still_routes_to_vertex(self):
-        """Verify bare Vertex-catalogued ids are unchanged by the sentinel work."""
+    def test_a_bare_id_both_catalogs_carry_goes_to_the_developer_api(self):
+        """Verify a bare colliding Gemini id follows the family owner.
+
+        'gemini-2.5-flash' is cataloged by both Vertex and the Developer API.
+        It used to resolve to Vertex because Vertex is written first in the
+        catalog literal, which was insertion order rather than a decision, and
+        it contradicted the heuristic rule for the same family.  Vertex is
+        reached by its display name, by 'remote_google_vertex:gemini-2.5-flash',
+        or by an explicit provider_type.
+        """
         provider, _, _ = _resolve("gemini-2.5-flash")
+        assert provider == "remote_google_genai"
+
+    def test_vertex_is_still_reachable_for_that_id(self):
+        """Verify the preference reorders the candidates and removes none."""
+        provider, model_id, _ = _resolve("remote_google_vertex:gemini-2.5-flash")
+        assert provider == "remote_google_vertex"
+        assert model_id == "gemini-2.5-flash"
+
+    def test_a_vertex_only_id_still_routes_to_vertex(self):
+        """Verify a name only one catalog carries is untouched.
+
+        'gemini-2.5-pro' matches the same family rule and is cataloged by
+        Vertex alone; preferring the Developer API would name a model that
+        catalog has no entry for.
+        """
+        provider, _, _ = _resolve("gemini-2.5-pro")
         assert provider == "remote_google_vertex"
 
     def test_direct_api_display_name_still_resolves(self):

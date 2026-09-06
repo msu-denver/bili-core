@@ -142,8 +142,25 @@ model's capability flags:
    Allows full compilation and graph execution without API keys. All example YAMLs use this mode.
 
 Model resolution is handled by `llm_resolver.py`, which maps `model_name` to a
-`(provider_type, model_id)` pair by searching `bili.iris.config.llm_config.LLM_MODELS` and
-falling back to heuristic prefix-based detection. The `supports_tools` flag is also read from
+`(provider_type, model_id)` pair in four steps:
+
+1. A **qualified** name, `<provider_type>:<model>`, names its provider outright
+   (`remote_azure_openai:gpt-4o`). `AgentSpec` has no provider field, so this is how a
+   declarative run selects a provider for a name several catalogs carry.
+2. An exact match on `model_id` or display `model_name` in
+   `bili.iris.config.llm_config.LLM_MODELS`.
+3. When step 2 matches **more than one provider**, the model family's owner wins
+   (`bili.iris.config.model_families.MODEL_FAMILY_OWNERS`). A first-party API and a cloud
+   re-host list the same id, so a bare `gpt-4o` or `gemini-2.5-flash` names two entries;
+   the tie is broken by a stated preference rather than by the order the providers happen
+   to appear in the catalog literal.
+4. Heuristic prefix/substring detection, for ids the catalog does not carry.
+
+`describe_model_resolution(model_name)` returns a `ModelResolution` reporting which step
+answered, why, and every provider cataloging the name, so a caller can log where a bare name
+routed instead of finding out at the provider call. A disambiguated name is logged at INFO
+with the alternatives; a collision no rule covers keeps its catalog-order provider and is
+logged at WARNING. The `supports_tools` flag is also read from
 the `LLM_MODELS` entry to select native vs prompted path. LLMs are created via
 `bili.iris.loaders.llm_loader.load_model()`. Tools are resolved via
 `bili.iris.loaders.tools_loader.initialize_tools()`.
