@@ -399,7 +399,11 @@ def describe_model_resolution(model_name: str) -> ModelResolution:
             f"Set a recognised model_name or use bili.loaders.llm_loader directly."
         )
 
-    if resolution.source == "catalog-ambiguous":
+    if resolution.is_ambiguous:
+        # Loud, because it means a catalog edit added a collision no family
+        # rule covers, and the answer is then whatever the catalog literal
+        # happens to order first.  It cannot fire on the shipped catalog: the
+        # tests derive every collision from it and require a rule.
         LOGGER.warning(
             "Model '%s' is cataloged by %s; %s. Qualify the name as "
             "'<provider_type>:%s' to select one.",
@@ -408,17 +412,11 @@ def describe_model_resolution(model_name: str) -> ModelResolution:
             resolution.reason,
             resolution.model_id,
         )
-    elif resolution.source == "catalog-disambiguated":
-        LOGGER.info(
-            "Model '%s' is cataloged by %s; resolved to '%s' because %s. "
-            "Qualify the name as '<provider_type>:%s' to select another.",
-            model_name,
-            ", ".join(resolution.candidates),
-            resolution.provider_type,
-            resolution.reason,
-            resolution.model_id,
-        )
     else:
+        # A disambiguated name is announced by the caller that acts on it
+        # (:func:`create_llm`), not here.  ``AgentSpec`` validation resolves a
+        # name on every construction, so an INFO line at this level would
+        # repeat the same sentence several times per agent.
         LOGGER.debug(
             "Resolved '%s' via %s → provider=%s, model_id=%s",
             model_name,
@@ -428,6 +426,36 @@ def describe_model_resolution(model_name: str) -> ModelResolution:
         )
 
     return resolution
+
+
+def _resolved_catalog_entry(model_name: str) -> Optional[Dict[str, Any]]:
+    """Return the catalog entry *model_name* resolves to, or ``None``.
+
+    Every per-model field read from the catalog by name has to come from the
+    entry the model will actually be LOADED from, or a caller gets one
+    provider's model with another provider's declared limits.  That is not
+    hypothetical: the two entries for a colliding id are written independently
+    and do diverge (``gpt-4`` declares 8192 input tokens under the direct API
+    and 128000 under the re-host).  Reading the first catalog match was
+    consistent while the loader also took the first match, and stopped being
+    consistent when the loader started preferring the family owner.
+
+    ``None`` means no catalog entry backs the name: it is not in the catalog,
+    the catalog is not importable, it routed by heuristic, or it is a
+    qualified name for a model that provider does not carry.  Callers treat
+    that as "no declared value", never as a zero or a default.
+    """
+    try:
+        resolution = describe_model_resolution(model_name)
+    except ValueError:
+        return None
+    if resolution.source == "heuristic":
+        return None
+    provider_info = _llm_models().get(resolution.provider_type, {})
+    for entry in provider_info.get("models", []):
+        if entry.get("model_id") == resolution.model_id:
+            return entry
+    return None
 
 
 def _resolve_model_full(
@@ -664,12 +692,19 @@ def create_llm(agent: AgentSpec) -> Any:
     _forward_cli_subprocess_kwargs(agent, provider, kwargs)
 
     LOGGER.info(
-        "Creating LLM for agent '%s': provider=%s, model_id=%s (%s: %s)",
+        "Creating LLM for agent '%s': provider=%s, model_id=%s (%s: %s)%s",
         agent.agent_id,
         provider,
         model_id,
         resolution.source,
         resolution.reason,
+        (
+            f". Also cataloged by "
+            f"{', '.join(p for p in resolution.candidates if p != provider)}; "
+            f"qualify the name as '<provider_type>:{model_id}' to select one."
+            if resolution.source == "catalog-disambiguated"
+            else ""
+        ),
     )
 
     from bili.iris.loaders.llm_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
@@ -771,34 +806,18 @@ def resolve_tool_strategy(model_name: str) -> str:
     Returns:
         One of ``"native"``, ``"facilitated"``, ``"mcp"``, or ``"none"``.
     """
-    try:
-        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
-            LLM_MODELS,
-        )
-    except ImportError:
+    entry = _resolved_catalog_entry(model_name)
+    if entry is None:
         LOGGER.debug(
-            "bili.iris.config.llm_config not available; "
-            "assuming tool_strategy='native' for '%s'",
+            "No catalog entry backs '%s'; assuming tool_strategy='native'",
             model_name,
         )
         return "native"
 
-    for provider_info in LLM_MODELS.values():
-        for entry in provider_info.get("models", []):
-            if (
-                entry.get("model_id") == model_name
-                or entry.get("model_name") == model_name
-            ):
-                if "tool_strategy" in entry:
-                    return entry["tool_strategy"]
-                # Backward-compat: infer from legacy supports_tools flag.
-                return "native" if entry.get("supports_tools", True) else "facilitated"
-
-    LOGGER.debug(
-        "'%s' not found in LLM_MODELS; assuming tool_strategy='native'",
-        model_name,
-    )
-    return "native"
+    if "tool_strategy" in entry:
+        return entry["tool_strategy"]
+    # Backward-compat: infer from legacy supports_tools flag.
+    return "native" if entry.get("supports_tools", True) else "facilitated"
 
 
 def resolve_prompt_length_limit(model_name: str) -> Optional[int]:
@@ -828,31 +847,15 @@ def resolve_prompt_length_limit(model_name: str) -> Optional[int]:
         ``None`` means "no known limit" -- callers should treat that as
         permissive (no cap), never as zero.
     """
-    try:
-        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
-            LLM_MODELS,
-        )
-    except ImportError:
+    entry = _resolved_catalog_entry(model_name)
+    if entry is None:
         LOGGER.debug(
-            "bili.iris.config.llm_config not available; "
-            "no known prompt length limit for '%s'",
+            "No catalog entry backs '%s'; no known prompt length limit",
             model_name,
         )
         return None
 
-    for provider_info in LLM_MODELS.values():
-        for entry in provider_info.get("models", []):
-            if (
-                entry.get("model_id") == model_name
-                or entry.get("model_name") == model_name
-            ):
-                return entry.get("max_input_tokens")
-
-    LOGGER.debug(
-        "'%s' not found in LLM_MODELS; no known prompt length limit",
-        model_name,
-    )
-    return None
+    return entry.get("max_input_tokens")
 
 
 def resolve_supports_tools(model_name: str) -> bool:

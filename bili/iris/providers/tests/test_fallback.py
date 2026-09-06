@@ -46,12 +46,7 @@ from bili.iris.providers.registry import PROVIDER_REGISTRY
 
 
 def _resolution(provider_type: str, model_id: str) -> ModelResolution:
-    """Return a ModelResolution standing in for a real catalog resolution.
-
-    ``create_llm`` resolves the primary model and every fallback through
-    ``describe_model_resolution``, so a test that routes a made-up model name
-    to a test provider substitutes at that seam.
-    """
+    """Return a ModelResolution standing in for a real catalog resolution."""
     return ModelResolution(
         model_name=model_id,
         provider_type=provider_type,
@@ -59,6 +54,25 @@ def _resolution(provider_type: str, model_id: str) -> ModelResolution:
         source="catalog",
         reason="test double",
     )
+
+
+def _routing(**by_model_id):
+    """Return a describe_model_resolution stand-in keyed by model name.
+
+    ``create_llm`` resolves the primary model and every fallback through
+    ``describe_model_resolution``, so a test that routes a made-up model name
+    to a test provider substitutes at that seam.  Keyed by name rather than
+    ordered, because ``AgentSpec`` validation also resolves the model name
+    (for its prompt-length budget), so the number of calls is not the number
+    of models.
+    """
+
+    def _resolve(model_name: str) -> ModelResolution:
+        provider = by_model_id.get(model_name.replace("-", "_"))
+        assert provider is not None, f"unexpected model name {model_name!r}"
+        return _resolution(provider, model_name)
+
+    return _resolve
 
 
 def _mock_llm(response="ok", side_effect=None):
@@ -790,10 +804,10 @@ class TestCreateLLMIntegration:
             ):
                 with patch(
                     "bili.aether.compiler.llm_resolver.describe_model_resolution",
-                    side_effect=[
-                        _resolution("remote_aws_bedrock", "test-primary-id"),
-                        _resolution(type_key, "test-fallback-id"),
-                    ],
+                    side_effect=_routing(
+                        test_primary_id="remote_aws_bedrock",
+                        test_fallback_id=type_key,
+                    ),
                 ):
                     spec = self._make_spec(
                         model_name="test-primary-id",
@@ -837,10 +851,10 @@ class TestCreateLLMIntegration:
             ) as mock_load:
                 with patch(
                     "bili.aether.compiler.llm_resolver.describe_model_resolution",
-                    side_effect=[
-                        _resolution("remote_aws_bedrock", "test-primary-id"),
-                        _resolution(type_key, "test-fallback-id"),
-                    ],
+                    side_effect=_routing(
+                        test_primary_id="remote_aws_bedrock",
+                        test_fallback_id=type_key,
+                    ),
                 ):
                     spec = AgentSpec(
                         agent_id="temp-agent",
@@ -897,10 +911,10 @@ class TestCreateLLMIntegration:
             ):
                 with patch(
                     "bili.aether.compiler.llm_resolver.describe_model_resolution",
-                    side_effect=[
-                        _resolution("remote_aws_bedrock", "test-primary-id"),
-                        _resolution(type_key, "test-fallback-id"),
-                    ],
+                    side_effect=_routing(
+                        test_primary_id="remote_aws_bedrock",
+                        test_fallback_id=type_key,
+                    ),
                 ):
                     with patch.object(_fallback_mod, "DEFAULT_POLICY", policy):
                         spec = self._make_spec(

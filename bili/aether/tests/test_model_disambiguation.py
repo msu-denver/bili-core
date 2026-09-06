@@ -15,7 +15,9 @@ from bili.aether.compiler.llm_resolver import (
     ModelResolution,
     describe_model_resolution,
     resolve_model,
+    resolve_prompt_length_limit,
     resolve_provider,
+    resolve_tool_strategy,
 )
 from bili.iris.config.llm_config import LLM_MODELS
 from bili.iris.config.model_families import colliding_model_ids, disambiguate
@@ -40,6 +42,16 @@ SINGLE_PROVIDER_IDS = sorted(
         if entry.get("model_id") and entry["model_id"] not in COLLISIONS
     }
 )
+
+
+def _catalog_entry(provider_type: str, model_id: str) -> dict:
+    """Return one provider's entry for *model_id*."""
+    for entry in LLM_MODELS[provider_type].get("models", []):
+        if entry.get("model_id") == model_id:
+            return entry
+    raise AssertionError(  # pragma: no cover
+        f"{provider_type} has no entry for {model_id}"
+    )
 
 
 def _sole_provider(model_id: str) -> str:
@@ -245,22 +257,148 @@ class TestAnUncoveredCollisionIsReportedNotRaised:
 
 
 class TestTheDisambiguationIsAnnounced:
-    """A decision made for the caller is logged with its reason."""
+    """A decision made for the caller is visible, at the right granularity."""
 
-    def test_a_disambiguated_name_logs_the_candidates_and_the_reason(self, caplog):
+    def test_resolving_alone_does_not_log_at_info(self, caplog):
+        """AgentSpec validation resolves on every construction.
+
+        An INFO line inside the resolver would repeat the same sentence
+        several times per agent, so the announcement belongs to the caller
+        that acts on the resolution.
+        """
         with caplog.at_level(logging.INFO, logger="bili.aether.compiler.llm_resolver"):
             describe_model_resolution("gpt-4o")
+            describe_model_resolution("gemini-2.5-pro")
+        assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
+
+    def test_creating_the_llm_names_the_provider_and_the_alternatives(self, caplog):
+        """The one place a bare name's routing is announced."""
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            create_llm,
+        )
+        from bili.aether.schema import (  # pylint: disable=import-outside-toplevel
+            AgentSpec,
+        )
+
+        agent = AgentSpec(
+            agent_id="a", role="r", objective="resolve a model", model_name="gpt-4o"
+        )
+        with caplog.at_level(logging.INFO, logger="bili.aether.compiler.llm_resolver"):
+            with patch("bili.iris.loaders.llm_loader.load_model", MagicMock()):
+                create_llm(agent)
         messages = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
         assert messages, caplog.text
         assert any(
-            "remote_openai" in m and "remote_azure_openai" in m for m in messages
+            "remote_openai" in m
+            and "remote_azure_openai" in m
+            and "<provider_type>:gpt-4o" in m
+            for m in messages
         ), messages
 
-    def test_an_ordinary_name_does_not_log_at_info(self, caplog):
-        """A name with one candidate is not a decision worth announcing."""
+    def test_a_single_candidate_name_is_not_announced_as_a_decision(self, caplog):
+        """Nothing was decided, so nothing about alternatives is printed."""
+        from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
+            create_llm,
+        )
+        from bili.aether.schema import (  # pylint: disable=import-outside-toplevel
+            AgentSpec,
+        )
+
+        agent = AgentSpec(
+            agent_id="a",
+            role="r",
+            objective="resolve a model",
+            model_name="gemini-2.5-pro",
+        )
         with caplog.at_level(logging.INFO, logger="bili.aether.compiler.llm_resolver"):
-            describe_model_resolution("gemini-2.5-pro")
-        assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
+            with patch("bili.iris.loaders.llm_loader.load_model", MagicMock()):
+                create_llm(agent)
+        messages = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+        assert messages, caplog.text
+        assert not any("Also cataloged by" in m for m in messages), messages
+
+
+class TestEveryPerModelFieldComesFromTheEntryThatWillBeLoaded:
+    """One answer to which catalog entry a name means.
+
+    The two entries for a colliding id are written independently and do
+    diverge, so a field read by first-catalog-match while the loader prefers
+    the family owner reports one provider's model with another's declared
+    limits.
+    """
+
+    @pytest.mark.parametrize("model_id", COLLIDING_IDS)
+    def test_the_prompt_limit_is_the_resolved_providers(self, model_id: str):
+        """Derived: whatever the resolver picks, the limit comes from there."""
+        provider, _ = resolve_model(model_id)
+        declared = _catalog_entry(provider, model_id).get("max_input_tokens")
+        assert resolve_prompt_length_limit(model_id) == declared
+
+    @pytest.mark.parametrize("model_id", COLLIDING_IDS)
+    def test_the_tool_strategy_is_the_resolved_providers(self, model_id: str):
+        provider, _ = resolve_model(model_id)
+        entry = _catalog_entry(provider, model_id)
+        expected = entry.get(
+            "tool_strategy",
+            "native" if entry.get("supports_tools", True) else "facilitated",
+        )
+        assert resolve_tool_strategy(model_id) == expected
+
+    def test_the_two_entries_for_some_collision_really_do_diverge(self):
+        """The premise: without it these rows pass against identical data.
+
+        Asserted over the catalog rather than on one id, so it survives an
+        edit that happens to align the pair this test used to name.
+        """
+        diverging = [
+            model_id
+            for model_id, providers in COLLISIONS.items()
+            if len(
+                {
+                    tuple(
+                        sorted(
+                            (k, repr(v))
+                            for k, v in _catalog_entry(provider, model_id).items()
+                        )
+                    )
+                    for provider in providers
+                }
+            )
+            > 1
+        ]
+        assert diverging, (
+            "every colliding id has identical entries under both providers, so "
+            "the rows above cannot distinguish reading the resolved entry from "
+            "reading the first catalog match"
+        )
+
+    def test_a_qualified_name_reads_the_named_providers_entry(self):
+        """The override reaches the per-model fields too, not just the load."""
+        bare = resolve_prompt_length_limit("gpt-4")
+        qualified = resolve_prompt_length_limit("remote_azure_openai:gpt-4")
+        assert bare == _catalog_entry("remote_openai", "gpt-4")["max_input_tokens"]
+        assert (
+            qualified
+            == _catalog_entry("remote_azure_openai", "gpt-4")["max_input_tokens"]
+        )
+        assert bare != qualified
+
+    def test_an_unresolvable_name_degrades_rather_than_raising(self):
+        """Both readers answered 'unknown' for an unknown name before, and do now."""
+        assert resolve_prompt_length_limit("not-a-model-anyone-ships") is None
+        assert resolve_tool_strategy("not-a-model-anyone-ships") == "native"
+
+    def test_a_heuristic_routed_name_has_no_declared_limit(self):
+        """No catalog entry backs it, so there is no declared value to report."""
+        assert resolve_prompt_length_limit("claude-opus-4-1-20260805") is None
+        assert resolve_tool_strategy("claude-opus-4-1-20260805") == "native"
+
+    def test_a_display_name_still_reads_its_own_entry(self):
+        """Display names were never ambiguous and must not move."""
+        assert (
+            resolve_prompt_length_limit("Azure OpenAI GPT-4 Turbo with Vision")
+            == _catalog_entry("remote_azure_openai", "gpt-4")["max_input_tokens"]
+        )
 
 
 class TestCreateLlmUsesTheResolvedProvider:
