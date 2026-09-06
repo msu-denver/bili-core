@@ -704,14 +704,20 @@ class TestResolveProvider:
         with patch("bili.iris.config.llm_config.LLM_MODELS", {}):
             assert resolve_provider("gpt-4o") == "remote_openai"
 
-    def test_lookup_import_error_returns_none(self):
-        """_lookup_in_llm_models returns None when llm_config is unimportable."""
+    def test_lookup_import_error_reports_no_hits(self):
+        """_lookup_in_llm_models reports no hits when llm_config is unimportable.
+
+        The helper returns every matching entry, so "the catalog is not
+        installed" and "the catalog does not carry this name" are the same
+        empty list, and the resolver falls through to the heuristics either
+        way.
+        """
         from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
             _lookup_in_llm_models,
         )
 
         with patch.dict(sys.modules, {"bili.iris.config.llm_config": None}):
-            assert _lookup_in_llm_models("anything") is None
+            assert _lookup_in_llm_models("anything") == []
 
 
 class TestResolveTools:

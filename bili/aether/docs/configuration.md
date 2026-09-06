@@ -165,6 +165,31 @@ agents:
 
 Each agent can specify its own LLM via `model_name`. Different agents in the same MAS can use different models.
 
+### Naming a Model Several Providers Offer
+
+The same model id is legitimately cataloged by more than one provider: a first-party API and a
+cloud re-host list it identically. `gpt-4o` is carried by both `remote_openai` and
+`remote_azure_openai`; `gemini-2.5-flash` by both `remote_google_genai` and
+`remote_google_vertex`.
+
+A bare id resolves to the **publisher** of that model family, because a bare canonical id is
+the publisher's own spelling. To reach the other provider, qualify the name with the provider
+type:
+
+```yaml
+agents:
+  - agent_id: on_the_direct_api
+    model_name: gpt-4o                       # remote_openai
+
+  - agent_id: on_the_re_host
+    model_name: remote_azure_openai:gpt-4o   # remote_azure_openai
+```
+
+A qualified name is honoured even for an id that provider's catalog does not carry, so a
+locally pulled tag or a model newer than the catalog still routes explicitly. Selecting by
+display name works too — display names are provider-distinct (`Azure OpenAI GPT-4o Omni`) —
+and `fallback_models` entries resolve by the same rules.
+
 ### Per-Model Prompt Length Limits
 
 Every model has a different prompt/context budget, so `system_prompt` is not checked against a single hardcoded number. When `model_name` resolves to a catalog entry with a known `max_input_tokens`, the prompt is checked against an approximate character budget derived from that limit; when the model is unset, unrecognized, or has no declared limit (e.g. CLI-subprocess and local providers), the check is skipped rather than imposing an arbitrary cap.

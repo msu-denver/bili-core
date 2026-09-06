@@ -24,7 +24,14 @@ from bili.aether.validation import validate_mas
 from .agent_generator import generate_agent_node, wrap_agent_node
 from .compiled_mas import CompiledMAS
 from .graph_builder import GraphBuilder
-from .llm_resolver import create_llm, resolve_model, resolve_provider, resolve_tools
+from .llm_resolver import (
+    ModelResolution,
+    create_llm,
+    describe_model_resolution,
+    resolve_model,
+    resolve_provider,
+    resolve_tools,
+)
 from .state_generator import generate_state_schema
 
 __all__ = [
@@ -36,6 +43,8 @@ __all__ = [
     "generate_state_schema",
     "resolve_model",
     "resolve_provider",
+    "describe_model_resolution",
+    "ModelResolution",
     "resolve_tools",
     "wrap_agent_node",
 ]
