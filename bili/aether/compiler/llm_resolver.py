@@ -9,11 +9,26 @@ bili-core distinguishes between a display *model_name* (e.g.
 ``"gpt-4o"``).  This module handles that mapping so AETHER users can
 specify either form in their ``AgentSpec.model_name`` field.
 
+A name is resolved in four steps, and :func:`describe_model_resolution`
+reports which one answered and why:
+
+1. A **qualified** name, ``<provider_type>:<model>``, names its provider
+   outright.  ``AgentSpec`` has no provider field, so for a declarative run
+   this is the only way to override the preference below.
+2. An exact match on ``model_id`` or display ``model_name`` in
+   ``LLM_MODELS``.
+3. When step 2 matches **more than one provider**, the collision is broken
+   by :data:`bili.iris.config.model_families.MODEL_FAMILY_OWNERS` rather
+   than by the order the providers happen to appear in the catalog literal.
+4. The heuristic prefix/substring rules below, for ids the catalog does not
+   carry at all.
+
 All heavy imports (torch, provider SDKs) are lazy to allow the compiler
 module to load without those dependencies installed.
 """
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from bili.aether.schema import AgentSpec, OutputFormat
@@ -101,63 +116,354 @@ _HEURISTIC_RULES = [
 ]
 
 
+#: Prefixes in :data:`_HEURISTIC_RULES` that name a routing target outright
+#: rather than describing a vendor's model ids.  Derived from the table so a
+#: fourth sentinel added there is covered without a second list.
+#:
+#: These win over the ``<provider_type>:<model>`` qualified form.  ``"cli:"``
+#: is both a sentinel and a provider type, and its documented contract is
+#: that ``model_id`` keeps the prefix (the CLI provider takes its model from
+#: a separate kwarg), so reading it as a qualifier would strip a prefix the
+#: provider expects.
+_SENTINEL_PREFIXES: Tuple[str, ...] = tuple(
+    pattern for pattern, _ in _HEURISTIC_RULES if pattern.endswith(":")
+)
+
+
+@dataclass(frozen=True)
+class ModelResolution:
+    """How a model name was resolved, and why.
+
+    Returned by :func:`describe_model_resolution` so a caller can report
+    which provider a *bare* name reached instead of discovering it at the
+    provider boundary.
+
+    :ivar model_name: The name that was asked for.
+    :ivar provider_type: The ``LLM_MODELS`` key the name resolved to.
+    :ivar model_id: The id to send to that provider.
+    :ivar extra_kwargs: Provider-specific parameters from the catalog entry
+        (empty when no entry backed the resolution).
+    :ivar source: Which step answered -- one of :data:`RESOLUTION_SOURCES`.
+    :ivar reason: A sentence naming why, suitable for a log line.
+    :ivar candidates: Every provider whose catalog carries the name, in
+        catalog order.  Empty when no catalog entry matched.
+    """
+
+    model_name: str
+    provider_type: str
+    model_id: str
+    extra_kwargs: Dict[str, Any] = field(default_factory=dict)
+    source: str = "catalog"
+    reason: str = ""
+    candidates: Tuple[str, ...] = ()
+
+    @property
+    def is_ambiguous(self) -> bool:
+        """Whether several providers catalog the name and none was preferred."""
+        return self.source == "catalog-ambiguous"
+
+
+#: Every value :attr:`ModelResolution.source` can take.
+#:
+#: ``qualified``
+#:     The name carried its provider (``<provider_type>:<model>``).
+#: ``catalog``
+#:     Exactly one provider catalogs the name.
+#: ``catalog-disambiguated``
+#:     Several do, and the model family's owner was preferred.
+#: ``catalog-ambiguous``
+#:     Several do, and no rule covers the family, so the first in catalog
+#:     order was taken.  Reported rather than raised: refusing here would
+#:     break a working deployment over a catalog edit.
+#: ``heuristic``
+#:     No provider catalogs the name; a prefix/substring rule routed it.
+RESOLUTION_SOURCES: Tuple[str, ...] = (
+    "qualified",
+    "catalog",
+    "catalog-disambiguated",
+    "catalog-ambiguous",
+    "heuristic",
+)
+
+
+def _llm_models() -> Dict[str, Any]:
+    """Return ``LLM_MODELS``, or an empty mapping when iris config is absent.
+
+    The import is lazy and guarded so this compiler module keeps loading
+    without the catalog installed; the resolver then falls through to the
+    heuristic rules, which is the pre-existing degrade.
+    """
+    try:
+        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
+            LLM_MODELS,
+        )
+    except ImportError:
+        LOGGER.debug(
+            "bili.iris.config.llm_config not available; skipping LLM_MODELS lookup"
+        )
+        return {}
+    return LLM_MODELS
+
+
+def _split_qualified(model_name: str) -> Optional[Tuple[str, str]]:
+    """Split a ``<provider_type>:<model>`` name, or return ``None``.
+
+    The qualifier is the provider type itself, so there is no alias table to
+    keep in step with the catalog: the accepted prefixes are exactly the keys
+    of ``LLM_MODELS``.  A name whose prefix is not one of those keys is not a
+    qualified name and is left alone, which is what keeps an ordinary id
+    carrying a colon (a local tag such as ``"qwen3:8b"``) working.
+
+    :param model_name: The name from the caller.
+    :returns: ``(provider_type, model)`` or ``None``.
+    """
+    if model_name.lower().startswith(_SENTINEL_PREFIXES):
+        return None
+    prefix, sep, rest = model_name.partition(":")
+    if not sep or not rest:
+        return None
+    if prefix not in _llm_models():
+        return None
+    return prefix, rest
+
+
+def _resolve_qualified(model_name: str) -> Optional[ModelResolution]:
+    """Resolve a ``<provider_type>:<model>`` name, or return ``None``.
+
+    A qualified name binds its provider even when that provider's catalog
+    does not carry the model: the caller named the provider explicitly, and a
+    passthrough id is legitimate (a locally pulled tag, a new model the
+    catalog has not caught up with).  Falling through instead would leave the
+    prefix inside ``model_id`` and send the provider a name it cannot serve.
+    """
+    split = _split_qualified(model_name)
+    if split is None:
+        return None
+    provider, model = split
+
+    for hit_provider, model_id, extra_kwargs in _lookup_in_llm_models(model):
+        if hit_provider == provider:
+            return ModelResolution(
+                model_name=model_name,
+                provider_type=provider,
+                model_id=model_id,
+                extra_kwargs=extra_kwargs,
+                source="qualified",
+                reason=f"the name named provider '{provider}' outright",
+                candidates=_catalog_candidates(model),
+            )
+
+    return ModelResolution(
+        model_name=model_name,
+        provider_type=provider,
+        model_id=model,
+        source="qualified",
+        reason=(
+            f"the name named provider '{provider}' outright; that catalog has "
+            f"no entry for '{model}', which is passed through as the model id"
+        ),
+        candidates=_catalog_candidates(model),
+    )
+
+
+def _catalog_candidates(name: str) -> Tuple[str, ...]:
+    """Return each provider whose catalog carries *name*, in catalog order."""
+    seen: List[str] = []
+    for provider, _model_id, _kwargs in _lookup_in_llm_models(name):
+        if provider not in seen:
+            seen.append(provider)
+    return tuple(seen)
+
+
+def _resolve_from_catalog(model_name: str) -> Optional[ModelResolution]:
+    """Resolve *model_name* against ``LLM_MODELS``, or return ``None``.
+
+    When more than one provider catalogs the name, the tie is broken by the
+    model family's owner rather than by catalog order.  The preferred
+    provider is always one of the candidates, so a preference reorders the
+    providers that carry the model and can never introduce one that does not.
+    """
+    hits = _lookup_in_llm_models(model_name)
+    if not hits:
+        return None
+
+    by_provider: Dict[str, Tuple[str, Dict[str, Any]]] = {}
+    for provider, model_id, extra_kwargs in hits:
+        by_provider.setdefault(provider, (model_id, extra_kwargs))
+    candidates = tuple(by_provider)
+
+    first_provider = candidates[0]
+    first_model_id, first_kwargs = by_provider[first_provider]
+
+    if len(candidates) == 1:
+        return ModelResolution(
+            model_name=model_name,
+            provider_type=first_provider,
+            model_id=first_model_id,
+            extra_kwargs=first_kwargs,
+            source="catalog",
+            reason=f"'{first_provider}' is the only provider cataloging this name",
+            candidates=candidates,
+        )
+
+    preference = _prefer_owner(first_model_id, candidates)
+    if preference is not None:
+        provider, why = preference
+        model_id, extra_kwargs = by_provider[provider]
+        return ModelResolution(
+            model_name=model_name,
+            provider_type=provider,
+            model_id=model_id,
+            extra_kwargs=extra_kwargs,
+            source="catalog-disambiguated",
+            reason=why,
+            candidates=candidates,
+        )
+
+    return ModelResolution(
+        model_name=model_name,
+        provider_type=first_provider,
+        model_id=first_model_id,
+        extra_kwargs=first_kwargs,
+        source="catalog-ambiguous",
+        reason=(
+            "several providers catalog this name and no family rule covers it, "
+            "so the first in catalog order was taken"
+        ),
+        candidates=candidates,
+    )
+
+
+def _prefer_owner(
+    model_id: str, candidates: Tuple[str, ...]
+) -> Optional[Tuple[str, str]]:
+    """Return ``(provider_type, reason)`` for the family owner, or ``None``.
+
+    Guarded and lazy for the same reason as :func:`_llm_models`: without the
+    iris config package there is no table to consult and the caller keeps its
+    catalog-order answer.
+    """
+    try:
+        from bili.iris.config.model_families import (  # noqa: E402  pylint: disable=import-outside-toplevel
+            disambiguate,
+        )
+    except ImportError:  # pragma: no cover - mirrors the _llm_models degrade
+        LOGGER.debug(
+            "bili.iris.config.model_families not available; "
+            "a colliding name keeps its catalog-order provider"
+        )
+        return None
+    return disambiguate(model_id, candidates)
+
+
+def _resolve_heuristically(model_name: str) -> Optional[ModelResolution]:
+    """Route a name no provider catalogs by prefix/substring, or ``None``."""
+    lower = model_name.lower()
+    for pattern, ptype in _HEURISTIC_RULES:
+        if pattern in lower:
+            return ModelResolution(
+                model_name=model_name,
+                provider_type=ptype,
+                model_id=model_name,
+                source="heuristic",
+                reason=(
+                    f"no provider catalogs this name; the '{pattern}' rule routes "
+                    f"it to '{ptype}' and it is used as the model id"
+                ),
+            )
+    return None
+
+
+def describe_model_resolution(model_name: str) -> ModelResolution:
+    """Resolve *model_name* and report which step answered and why.
+
+    This is the resolution :func:`resolve_model`, :func:`resolve_provider`
+    and :func:`create_llm` all run; those return only part of it.  Use this
+    one to log or assert *which* provider a bare name reached, which is not
+    otherwise observable until the provider call fails.
+
+    :param model_name: A display name, a model id, or a
+        ``<provider_type>:<model>`` qualified name.
+    :returns: The :class:`ModelResolution`.
+    :raises ValueError: If the name cannot be resolved to any provider.
+    """
+    resolution = (
+        _resolve_qualified(model_name)
+        or _resolve_from_catalog(model_name)
+        or _resolve_heuristically(model_name)
+    )
+
+    if resolution is None:
+        raise ValueError(
+            f"Cannot resolve model '{model_name}' to a provider. "
+            f"Set a recognised model_name or use bili.loaders.llm_loader directly."
+        )
+
+    if resolution.source == "catalog-ambiguous":
+        LOGGER.warning(
+            "Model '%s' is cataloged by %s; %s. Qualify the name as "
+            "'<provider_type>:%s' to select one.",
+            model_name,
+            ", ".join(resolution.candidates),
+            resolution.reason,
+            resolution.model_id,
+        )
+    elif resolution.source == "catalog-disambiguated":
+        LOGGER.info(
+            "Model '%s' is cataloged by %s; resolved to '%s' because %s. "
+            "Qualify the name as '<provider_type>:%s' to select another.",
+            model_name,
+            ", ".join(resolution.candidates),
+            resolution.provider_type,
+            resolution.reason,
+            resolution.model_id,
+        )
+    else:
+        LOGGER.debug(
+            "Resolved '%s' via %s → provider=%s, model_id=%s",
+            model_name,
+            resolution.source,
+            resolution.provider_type,
+            resolution.model_id,
+        )
+
+    return resolution
+
+
 def _resolve_model_full(
     model_name: str,
 ) -> Tuple[str, str, Dict[str, Any]]:
-    """Resolve a model name to ``(provider_type, model_id, extra_kwargs)`` in one pass.
+    """Resolve a model name to ``(provider_type, model_id, extra_kwargs)``.
 
-    Search order:
-        1. Exact match on ``model_id`` in ``LLM_MODELS``
-        2. Exact match on display ``model_name`` in ``LLM_MODELS``
-        3. Heuristic fallback using prefix/substring rules
-           (``extra_kwargs`` is empty for heuristic matches)
+    Thin projection of :func:`describe_model_resolution`, kept because
+    several callers want only the triple.
 
     Raises:
         ValueError: If the model cannot be resolved to any provider.
     """
-    # --- 1 & 2: Look up in LLM_MODELS (single pass, returns extra_kwargs) ---
-    result = _lookup_in_llm_models(model_name)
-    if result is not None:
-        provider, model_id, extra_kwargs = result
-        LOGGER.debug(
-            "Resolved '%s' via LLM_MODELS → provider=%s, model_id=%s",
-            model_name,
-            provider,
-            model_id,
-        )
-        return provider, model_id, extra_kwargs
-
-    # --- 3: Heuristic fallback (model_name IS the model_id) ---
-    lower = model_name.lower()
-    for pattern, ptype in _HEURISTIC_RULES:
-        if pattern in lower:
-            LOGGER.debug(
-                "Resolved '%s' via heuristic ('%s') → %s (using as model_id)",
-                model_name,
-                pattern,
-                ptype,
-            )
-            return ptype, model_name, {}
-
-    raise ValueError(
-        f"Cannot resolve model '{model_name}' to a provider. "
-        f"Set a recognised model_name or use bili.loaders.llm_loader directly."
-    )
+    resolution = describe_model_resolution(model_name)
+    return resolution.provider_type, resolution.model_id, resolution.extra_kwargs
 
 
 def resolve_model(model_name: str) -> Tuple[str, str]:
     """Resolve a model name to a ``(provider_type, model_id)`` pair.
 
     Search order:
-        1. Exact match on ``model_id`` in ``LLM_MODELS``
-        2. Exact match on display ``model_name`` in ``LLM_MODELS``
+        1. A ``<provider_type>:<model>`` qualified name
+        2. Exact match on ``model_id`` or display ``model_name`` in
+           ``LLM_MODELS``, with a name several providers catalog broken by
+           the model family's owner
         3. Heuristic fallback using prefix/substring rules
            (assumes *model_name* is already the *model_id*)
 
+    Use :func:`describe_model_resolution` when the *reason* matters -- which
+    step answered, and which other providers catalog the same name.
+
     Args:
         model_name: The model identifier from ``AgentSpec.model_name``.
-            Can be a display name (``"GPT-4o"``) or a model ID
-            (``"gpt-4o"``).
+            Can be a display name (``"GPT-4o"``), a model ID
+            (``"gpt-4o"``), or a qualified name
+            (``"remote_azure_openai:gpt-4o"``).
 
     Returns:
         A ``(provider_type, model_id)`` tuple — e.g.
@@ -334,11 +640,13 @@ def create_llm(agent: AgentSpec) -> Any:
             f"cannot create LLM instance."
         )
 
-    provider, model_id, extra_kwargs = _resolve_model_full(agent.model_name)
+    resolution = describe_model_resolution(agent.model_name)
+    provider = resolution.provider_type
+    model_id = resolution.model_id
 
     # Build kwargs for load_model — extra_kwargs first so the resolved
     # model_id always wins if extra_kwargs ever contains a "model_name" key.
-    kwargs: Dict[str, Any] = {**extra_kwargs, "model_name": model_id}
+    kwargs: Dict[str, Any] = {**resolution.extra_kwargs, "model_name": model_id}
     if agent.temperature is not None:
         kwargs["temperature"] = agent.temperature
     if agent.max_tokens is not None:
@@ -356,10 +664,12 @@ def create_llm(agent: AgentSpec) -> Any:
     _forward_cli_subprocess_kwargs(agent, provider, kwargs)
 
     LOGGER.info(
-        "Creating LLM for agent '%s': provider=%s, model_id=%s",
+        "Creating LLM for agent '%s': provider=%s, model_id=%s (%s: %s)",
         agent.agent_id,
         provider,
         model_id,
+        resolution.source,
+        resolution.reason,
     )
 
     from bili.iris.loaders.llm_loader import (  # noqa: E402  pylint: disable=import-outside-toplevel
@@ -378,8 +688,17 @@ def create_llm(agent: AgentSpec) -> Any:
     # list.  Each model name is resolved exactly like the primary model_name.
     fallback_chain: List[Tuple[str, Dict[str, Any]]] = []
     for fb_model_name in agent.fallback_models:
-        fb_provider, fb_model_id, fb_extra = _resolve_model_full(fb_model_name)
-        fb_kwargs: Dict[str, Any] = {**fb_extra, "model_name": fb_model_id}
+        # Resolved through the same entry point as the primary, so a bare
+        # fallback name -- which is what a fallback list usually holds, since
+        # it carries no provider either -- is disambiguated and reported the
+        # same way rather than silently taking a different route.
+        fb_resolution = describe_model_resolution(fb_model_name)
+        fb_provider = fb_resolution.provider_type
+        fb_model_id = fb_resolution.model_id
+        fb_kwargs: Dict[str, Any] = {
+            **fb_resolution.extra_kwargs,
+            "model_name": fb_model_id,
+        }
         if agent.temperature is not None:
             fb_kwargs["temperature"] = agent.temperature
         if agent.max_tokens is not None:
@@ -393,10 +712,11 @@ def create_llm(agent: AgentSpec) -> Any:
             fb_kwargs["structured_output_schema"] = fb_schema
         fallback_chain.append((fb_provider, fb_kwargs))
         LOGGER.debug(
-            "Agent '%s': registered fallback provider=%s, model_id=%s",
+            "Agent '%s': registered fallback provider=%s, model_id=%s (%s)",
             agent.agent_id,
             fb_provider,
             fb_model_id,
+            fb_resolution.source,
         )
 
     from bili.iris.providers.fallback import (  # noqa: E402  pylint: disable=import-outside-toplevel
@@ -620,37 +940,30 @@ def resolve_tools(agent: AgentSpec) -> list:
 
 def _lookup_in_llm_models(
     model_name: str,
-) -> Optional[Tuple[str, str, Dict[str, Any]]]:
-    """Search ``LLM_MODELS`` for a matching model entry.
+) -> List[Tuple[str, str, Dict[str, Any]]]:
+    """Return every ``LLM_MODELS`` entry matching *model_name*, in catalog order.
 
-    Returns ``(provider_type, model_id, extra_kwargs)`` if found,
-    ``None`` otherwise.  ``extra_kwargs`` contains provider-specific
-    parameters stored in the entry's ``kwargs`` dict (e.g.
+    A match is on the entry's ``model_id`` (e.g. ``"gpt-4o"``) or its display
+    ``model_name`` (e.g. ``"OpenAI GPT-4o Omni"``).  Each hit is
+    ``(provider_type, model_id, extra_kwargs)``; ``extra_kwargs`` carries the
+    provider-specific parameters stored in the entry's ``kwargs`` dict (e.g.
     ``api_version`` for Azure OpenAI models).
-    """
-    try:
-        from bili.iris.config.llm_config import (  # noqa: E402  pylint: disable=import-outside-toplevel
-            LLM_MODELS,
-        )
-    except ImportError:
-        LOGGER.debug(
-            "bili.iris.config.llm_config not available; skipping LLM_MODELS lookup"
-        )
-        return None
 
-    for provider_type, provider_info in LLM_MODELS.items():
+    Every hit is returned rather than the first, because the same id is
+    legitimately cataloged by a first-party API and a re-host, and choosing
+    between them is :func:`_resolve_from_catalog`'s decision to make with the
+    full candidate set in hand.  An empty list means the catalog does not
+    carry the name (or is not installed).
+    """
+    hits: List[Tuple[str, str, Dict[str, Any]]] = []
+    for provider_type, provider_info in _llm_models().items():
         models: List[Dict[str, Any]] = provider_info.get("models", [])
         for entry in models:
             entry_model_id = entry.get("model_id", "")
             entry_display = entry.get("model_name", "")
-            extra_kwargs: Dict[str, Any] = entry.get("kwargs", {})
+            if model_name in (entry_model_id, entry_display):
+                extra_kwargs: Dict[str, Any] = entry.get("kwargs", {})
+                hits.append((provider_type, entry_model_id, extra_kwargs))
+                break
 
-            # Match on model_id (e.g. "gpt-4o")
-            if entry_model_id == model_name:
-                return provider_type, entry_model_id, extra_kwargs
-
-            # Match on display name (e.g. "GPT-4o")
-            if entry_display == model_name:
-                return provider_type, entry_model_id, extra_kwargs
-
-    return None
+    return hits

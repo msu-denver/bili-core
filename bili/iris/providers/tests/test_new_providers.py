@@ -234,10 +234,12 @@ class TestHeuristicResolution:
             _resolve_model_full,
         )
 
-        # Patch _lookup_in_llm_models to always return None so heuristics run.
+        # Patch _lookup_in_llm_models to report no catalog hit so the
+        # heuristics run.  The helper returns a list of every matching entry,
+        # so "no hit" is the empty list.
         with patch(
             "bili.aether.compiler.llm_resolver._lookup_in_llm_models",
-            return_value=None,
+            return_value=[],
         ):
             return _resolve_model_full(model_name)
 
@@ -848,9 +850,8 @@ class TestLoadModelNewProviders:
 
         Google GenAI entries use display names that include "(Direct API)" to
         distinguish them from the identical model_id values registered under
-        remote_google_vertex.  Users who want the Google AI Developer API
-        (GOOGLE_API_KEY, not GCP/Vertex credentials) must select a model by its
-        display name or invoke load_model() with provider_type explicitly set.
+        remote_google_vertex, so a display name selects one provider outright
+        and never needs disambiguating.
         """
         from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
             resolve_model,
@@ -862,22 +863,23 @@ class TestLoadModelNewProviders:
             f"got '{provider}'"
         )
 
-    def test_raw_gemini_model_id_resolves_to_vertex(self):
-        """Verify raw gemini-* model IDs resolve to Vertex (first catalog match).
+    def test_raw_gemini_model_id_resolves_to_the_developer_api(self):
+        """Verify a raw gemini-* id both catalogs carry follows the family owner.
 
-        Because the same gemini-2.5-flash model_id exists in both
-        remote_google_vertex (registered first in LLM_MODELS) and
-        remote_google_genai, the raw ID resolves to Vertex.  This is expected
-        and backward-compatible.  Users reach remote_google_genai via the
-        '(Direct API)' display-name catalog entries or by calling load_model()
-        with an explicit provider_type.
+        The same gemini-2.5-flash model_id is registered under
+        remote_google_vertex and remote_google_genai.  It used to resolve to
+        Vertex only because Vertex appears first in the catalog literal.  The
+        family-owner table decides it now; Vertex stays reachable through its
+        display name, a 'remote_google_vertex:'-qualified name, or an explicit
+        provider_type.
         """
         from bili.aether.compiler.llm_resolver import (  # pylint: disable=import-outside-toplevel
             resolve_model,
         )
 
         provider, model_id = resolve_model("gemini-2.5-flash")
-        assert (
-            provider == "remote_google_vertex"
-        ), "Raw 'gemini-2.5-flash' must resolve to Vertex (first catalog match)"
+        assert provider == "remote_google_genai", (
+            "Raw 'gemini-2.5-flash' must follow the family owner, "
+            "not the catalog's insertion order"
+        )
         assert model_id == "gemini-2.5-flash"
