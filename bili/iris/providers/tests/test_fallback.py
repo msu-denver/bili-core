@@ -22,7 +22,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bili.aether.compiler.llm_resolver import _load_fallback_member, create_llm
+from bili.aether.compiler.llm_resolver import (
+    ModelResolution,
+    _load_fallback_member,
+    create_llm,
+)
 from bili.aether.schema import AgentSpec
 from bili.iris.providers.base import LLMProvider
 from bili.iris.providers.fallback import (
@@ -39,6 +43,36 @@ from bili.iris.providers.registry import PROVIDER_REGISTRY
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolution(provider_type: str, model_id: str) -> ModelResolution:
+    """Return a ModelResolution standing in for a real catalog resolution."""
+    return ModelResolution(
+        model_name=model_id,
+        provider_type=provider_type,
+        model_id=model_id,
+        source="catalog",
+        reason="test double",
+    )
+
+
+def _routing(**by_model_id):
+    """Return a describe_model_resolution stand-in keyed by model name.
+
+    ``create_llm`` resolves the primary model and every fallback through
+    ``describe_model_resolution``, so a test that routes a made-up model name
+    to a test provider substitutes at that seam.  Keyed by name rather than
+    ordered, because ``AgentSpec`` validation also resolves the model name
+    (for its prompt-length budget), so the number of calls is not the number
+    of models.
+    """
+
+    def _resolve(model_name: str) -> ModelResolution:
+        provider = by_model_id.get(model_name.replace("-", "_"))
+        assert provider is not None, f"unexpected model name {model_name!r}"
+        return _resolution(provider, model_name)
+
+    return _resolve
 
 
 def _mock_llm(response="ok", side_effect=None):
@@ -752,8 +786,8 @@ class TestCreateLLMIntegration:
         """create_llm() with fallback_models returns a FallbackLLM.
 
         Registers a test provider type in the global PROVIDER_REGISTRY and
-        patches _resolve_model_full to route the fallback model name to it,
-        then cleans up the global registry on exit.
+        patches describe_model_resolution to route the fallback model name
+        to it, then cleans up the global registry on exit.
         """
         primary_llm = MagicMock(name="primary")
         fallback_llm_obj = MagicMock(name="fallback")
@@ -769,11 +803,11 @@ class TestCreateLLMIntegration:
                 "bili.iris.loaders.llm_loader.load_model", return_value=primary_llm
             ):
                 with patch(
-                    "bili.aether.compiler.llm_resolver._resolve_model_full",
-                    side_effect=[
-                        ("remote_aws_bedrock", "test-primary-id", {}),
-                        (type_key, "test-fallback-id", {}),
-                    ],
+                    "bili.aether.compiler.llm_resolver.describe_model_resolution",
+                    side_effect=_routing(
+                        test_primary_id="remote_aws_bedrock",
+                        test_fallback_id=type_key,
+                    ),
                 ):
                     spec = self._make_spec(
                         model_name="test-primary-id",
@@ -816,11 +850,11 @@ class TestCreateLLMIntegration:
                 side_effect=[primary_llm, fallback_llm_obj],
             ) as mock_load:
                 with patch(
-                    "bili.aether.compiler.llm_resolver._resolve_model_full",
-                    side_effect=[
-                        ("remote_aws_bedrock", "test-primary-id", {}),
-                        (type_key, "test-fallback-id", {}),
-                    ],
+                    "bili.aether.compiler.llm_resolver.describe_model_resolution",
+                    side_effect=_routing(
+                        test_primary_id="remote_aws_bedrock",
+                        test_fallback_id=type_key,
+                    ),
                 ):
                     spec = AgentSpec(
                         agent_id="temp-agent",
@@ -876,11 +910,11 @@ class TestCreateLLMIntegration:
                 "bili.iris.loaders.llm_loader.load_model", return_value=primary_llm
             ):
                 with patch(
-                    "bili.aether.compiler.llm_resolver._resolve_model_full",
-                    side_effect=[
-                        ("remote_aws_bedrock", "test-primary-id", {}),
-                        (type_key, "test-fallback-id", {}),
-                    ],
+                    "bili.aether.compiler.llm_resolver.describe_model_resolution",
+                    side_effect=_routing(
+                        test_primary_id="remote_aws_bedrock",
+                        test_fallback_id=type_key,
+                    ),
                 ):
                     with patch.object(_fallback_mod, "DEFAULT_POLICY", policy):
                         spec = self._make_spec(
