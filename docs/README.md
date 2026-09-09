@@ -167,6 +167,7 @@ LangGraph workflow system documentation (IRIS component).
 - Default execution pipeline and node descriptions
 - Node architecture using `functools.partial` pattern
 - Graph definition and customization
+- Extending `State` in a downstream application, and the persisted-vs-ephemeral field distinction
 - Custom node creation and registration
 - Performance monitoring and execution logging
 - Graph mutation safety (deep copy requirements)

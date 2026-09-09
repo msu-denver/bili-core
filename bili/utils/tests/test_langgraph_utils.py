@@ -1,12 +1,24 @@
 """Tests for bili.utils.langgraph_utils.
 
-Covers format_message_with_citations, clear_state, and the State
-TypedDict schema.
+Covers format_message_with_citations, clear_state, the State
+TypedDict schema, the UntrackedValue re-export, and the
+persisted-vs-ephemeral field semantics the State docstring documents.
 """
 
-from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
+from typing import Annotated, Optional
 
-from bili.utils.langgraph_utils import State, clear_state, format_message_with_citations
+import langgraph.channels
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from bili.utils import langgraph_utils
+from bili.utils.langgraph_utils import (
+    State,
+    UntrackedValue,
+    clear_state,
+    format_message_with_citations,
+)
 
 # ------------------------------------------------------------------
 # format_message_with_citations
@@ -221,3 +233,118 @@ class TestStateSchema:
     def test_has_llm_config(self):
         """State annotations include llm_config."""
         assert "llm_config" in State.__annotations__
+
+
+# ------------------------------------------------------------------
+# UntrackedValue re-export
+# ------------------------------------------------------------------
+
+
+class TestUntrackedValueReExport:
+    """Consumers declare ephemeral state fields against this module."""
+
+    def test_is_the_langgraph_channel(self):
+        """The re-export is LangGraph's channel, not a local stand-in."""
+        assert UntrackedValue is langgraph.channels.UntrackedValue
+
+    def test_listed_in_module_all(self):
+        """__all__ carries UntrackedValue.
+
+        The import is unused inside the module, so dropping it from
+        __all__ lets autoflake delete it and breaks every consumer.
+        """
+        assert "UntrackedValue" in langgraph_utils.__all__
+
+
+# ------------------------------------------------------------------
+# Persisted vs. ephemeral State fields
+# ------------------------------------------------------------------
+
+
+class _ExtendedState(State):
+    """A downstream State subclass declaring one field of each kind."""
+
+    persisted: Optional[dict]
+    ephemeral: Annotated[Optional[dict], UntrackedValue]
+
+
+def _build_two_turn_graph(saver, first_turn_writes, observations):
+    """Compile a graph that writes `first_turn_writes` on its first turn only.
+
+    The second node records whether each field reached it, which is what
+    distinguishes "crosses node boundaries" from "is checkpointed".
+    """
+    pending = [first_turn_writes]
+
+    def emit(_state):
+        """Return the queued write on the first turn, nothing after."""
+        return pending.pop(0) if pending else {}
+
+    def observe(state):
+        """Record which of the two fields is visible mid-turn."""
+        observations.append(
+            {
+                "persisted": state.get("persisted"),
+                "ephemeral": state.get("ephemeral"),
+            }
+        )
+        return {}
+
+    graph = StateGraph(_ExtendedState)
+    graph.add_node("emit", emit)
+    graph.add_node("observe", observe)
+    graph.add_edge(START, "emit")
+    graph.add_edge("emit", "observe")
+    graph.add_edge("observe", END)
+    return graph.compile(checkpointer=saver)
+
+
+class TestStateFieldPersistence:
+    """Pins the four behaviours the State docstring documents.
+
+    Documentation asserts these as facts about the pinned LangGraph, so a
+    LangGraph upgrade that changes any of them has to make the docs fail
+    rather than quietly go stale.
+    """
+
+    WRITES = {
+        "persisted": {"turn": "first"},
+        "ephemeral": {"turn": "first"},
+    }
+    CONFIG = {"configurable": {"thread_id": "state-kinds"}}
+
+    def _run_two_turns(self):
+        """Invoke the graph twice on one thread; return saver and results."""
+        saver = MemorySaver()
+        observations = []
+        agent = _build_two_turn_graph(saver, dict(self.WRITES), observations)
+        first = agent.invoke({"messages": []}, self.CONFIG)
+        second = agent.invoke({"messages": []}, self.CONFIG)
+        return saver, observations, first, second
+
+    def test_both_kinds_cross_node_boundaries_and_reach_the_result(self):
+        """Within a turn, both kinds reach later nodes and the result."""
+        _, observations, first, _ = self._run_two_turns()
+        assert observations[0]["persisted"] == {"turn": "first"}
+        assert observations[0]["ephemeral"] == {"turn": "first"}
+        assert first["persisted"] == {"turn": "first"}
+        assert first["ephemeral"] == {"turn": "first"}
+
+    def test_only_the_plain_field_is_checkpointed(self):
+        """channel_values carries the plain field and not the untracked one."""
+        saver, _, _, _ = self._run_two_turns()
+        channel_values = saver.get(self.CONFIG)["channel_values"]
+        assert channel_values["persisted"] == {"turn": "first"}
+        assert "ephemeral" not in channel_values
+
+    def test_plain_field_survives_a_turn_that_does_not_write_it(self):
+        """A persisted channel retains the prior turn's value."""
+        _, observations, _, second = self._run_two_turns()
+        assert second["persisted"] == {"turn": "first"}
+        assert observations[1]["persisted"] == {"turn": "first"}
+
+    def test_untracked_field_does_not_carry_into_the_next_turn(self):
+        """An untracked channel starts the next turn empty."""
+        _, observations, _, second = self._run_two_turns()
+        assert second.get("ephemeral") is None
+        assert observations[1]["ephemeral"] is None

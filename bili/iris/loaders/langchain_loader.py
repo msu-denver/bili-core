@@ -286,13 +286,47 @@ def build_agent_graph(
     provided or default checkpoint saver. The user can also supply custom node builders
     to extend or override the default node functionality.
 
+    Extending the state schema
+    --------------------------
+    ``state`` is the supported extension point for downstream applications.
+    bili-core's ``State`` carries only what bili-core itself needs; an
+    application that needs more fields subclasses ``State`` and passes the
+    subclass here, which keeps those fields local to that application instead
+    of adding them to every consumer of bili-core. Nodes read and write the
+    added fields exactly as they read and write bili-core's own::
+
+        from typing import Annotated, Optional
+
+        from bili.utils.langgraph_utils import State, UntrackedValue
+
+        class ApplicationState(State):
+            # Persisted: checkpointed on every checkpoint and retained across
+            # turns. Durable conversation metadata belongs here.
+            document_id: Optional[str]
+
+            # Ephemeral: reaches every node and the final invoke() result, but
+            # is never checkpointed and does not carry into the next turn.
+            # Large per-turn payloads belong here.
+            map_features: Annotated[Optional[dict], UntrackedValue]
+
+        agent = build_agent_graph(
+            checkpoint_saver=my_checkpoint_saver,
+            node_kwargs=my_node_kwargs,
+            state=ApplicationState,
+        )
+
+    ``State``'s docstring covers what persisting a field costs and when each
+    of the two kinds is the correct choice.
+
     :param checkpoint_saver: A handler to save graph state updates during execution.
     :param custom_node_registry: Optional mapping of custom node names to their
         corresponding builder callables.
     :param graph_definition: A list of node names defining the sequence and the structure
         of the graph.
     :param node_kwargs: Additional keyword arguments passed to the node builder callables.
-    :param state: Type representing the initial state of the graph to be used.
+    :param state: The state schema the graph is compiled against. Defaults to
+        bili-core's ``State``; pass a ``State`` subclass to add application-specific
+        fields, as above.
     :return: A compiled state graph ready for execution.
     :rtype: CompiledStateGraph
     """

@@ -9,6 +9,15 @@ Classes:
 --------
 - State:
     Extends MessagesState to represent user-specific state, including summary and owner fields.
+    Downstream consumers subclass it rather than adding fields to it; see the class
+    docstring and bili.iris.loaders.langchain_loader.build_agent_graph.
+
+Re-exports:
+-----------
+- UntrackedValue:
+    LangGraph channel marker that makes a state field ephemeral (never checkpointed).
+    Re-exported here so a consumer declares ephemeral fields against bili-core's
+    surface instead of reaching into the LangGraph version this package pins.
 
 Functions:
 ----------
@@ -23,6 +32,7 @@ Dependencies:
 -------------
 - langchain_core.messages: Provides message classes and utilities for chat history.
 - langgraph.graph: Provides MessagesState base class for state schema.
+- langgraph.channels: Provides the UntrackedValue channel re-exported here.
 - bili.utils.logging_utils: Logger initialization.
 
 Usage:
@@ -48,9 +58,19 @@ from datetime import datetime
 from typing import List
 
 from langchain_core.messages import AIMessage, RemoveMessage
+from langgraph.channels import UntrackedValue
 from langgraph.graph import MessagesState
 
 from bili.utils.logging_utils import get_logger
+
+# UntrackedValue is re-exported, not used inside this module: listing it in
+# __all__ is what keeps autoflake from deleting the import as unused.
+__all__ = [
+    "State",
+    "UntrackedValue",
+    "clear_state",
+    "format_message_with_citations",
+]
 
 # Initialize logger for this module
 LOGGER = get_logger(__name__)
@@ -134,6 +154,43 @@ class State(MessagesState):
     :type title: str
     :ivar tags: List of tags/categories associated with the conversation.
     :type tags: List[str]
+
+    Extending the state
+    -------------------
+    A field added to this class lands in the state schema of every downstream
+    consumer of bili-core, so application-specific fields do not belong here.
+    A consuming application subclasses ``State`` and hands the subclass to
+    ``build_agent_graph(state=...)``
+    (:func:`bili.iris.loaders.langchain_loader.build_agent_graph`), which
+    carries a worked example. That path needs no change to bili-core.
+
+    Persisted vs. ephemeral fields
+    ------------------------------
+    A field is declared one of two ways, and the default is the expensive one:
+
+    - ``field: T`` is PERSISTED. Its value is written into the checkpoint's
+      ``channel_values`` on every checkpoint, and the channel retains that
+      value across turns. If no node writes the field on a later turn, the
+      previous turn's value survives, so a caller reading
+      ``result.get("field")`` sees a value attached to an unrelated turn.
+      This is the right shape for durable conversation metadata, which is
+      what ``title`` and ``tags`` above are.
+    - ``Annotated[T, UntrackedValue]`` is EPHEMERAL. It is never written to
+      the checkpoint and does not carry into the next turn. This is the right
+      shape for large per-turn payloads and for anything a later turn must not
+      inherit. The trade-off is that the value is gone after a restart
+      mid-thread, so anything that must survive a restart has to be persisted.
+
+    Both kinds cross node boundaries within a turn and both appear in the final
+    ``invoke()`` result; they differ only in whether the value is checkpointed
+    and whether it survives into the next turn. Verified against
+    ``langgraph==1.0.2``.
+
+    Persistence is not free. A 2,000-feature GeoJSON payload measured ~911 KB
+    per checkpoint and ~9.4 MB across four turns before pruning. Pruning bounds
+    the total (``get_mongo_checkpointer`` retains the last 5 checkpoints by
+    default), but one checkpoint still has to fit the backend's document limit:
+    MongoDB and DocumentDB both reject a document larger than 16 MB.
     """
 
     # If we wanted to keep any user-specific preferences or state, we could add them here

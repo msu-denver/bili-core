@@ -42,6 +42,14 @@ Before opening a pull request:
 
 The pre-commit hooks enforce the formatters and lint automatically. The test suite is enforced in CI.
 
+### Extending the agent state
+
+An application built on bili-core that needs its own conversation-state fields subclasses `State` and passes the subclass to `build_agent_graph(state=...)`. That is the supported extension point and it requires no change to this repository.
+
+Do not add application-specific fields to `State` in `bili/utils/langgraph_utils.py`. A field added there lands in the state schema of every downstream consumer and is checkpointed for all of them. A PR that adds a field to `State` needs to justify why every consumer needs it.
+
+See [Extending State](docs/LANGGRAPH.md#extending-state) for the worked example and for the difference between a persisted field and an `UntrackedValue` one.
+
 ### Continuous integration
 
 Two required status checks gate every PR to `main` and `develop`:

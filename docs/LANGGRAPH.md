@@ -131,7 +131,7 @@ def build_agent_graph(
 - `custom_node_registry`: Additional nodes to register
 - `graph_definition`: List of Node instances defining the pipeline
 - `node_kwargs`: Arguments passed to all node builders (llm_model, tools, etc.)
-- `state`: State type definition (default: State from langgraph_utils)
+- `state`: State schema the graph is compiled against (default: `State` from `langgraph_utils`). Pass a `State` subclass to add application-specific fields; see [Extending State](#extending-state)
 
 ### Basic Usage
 
@@ -233,6 +233,78 @@ class State(MessagesState):
     llm_config: dict     # LLM configuration
     # ... additional fields
 ```
+
+### Extending State
+
+`build_agent_graph` compiles the graph against whatever state schema is passed as
+`state`, defaulting to `State`. An application that needs its own state fields
+subclasses `State` and passes the subclass. **This is the supported extension
+point, and it requires no change to BiliCore.**
+
+Adding a field to `State` in this repository instead puts that field in the state
+schema of every downstream consumer, and pays its checkpoint cost on every one of
+them. Subclass locally.
+
+```python
+from typing import Annotated, Optional
+
+from bili.iris.loaders.langchain_loader import build_agent_graph
+from bili.utils.langgraph_utils import State, UntrackedValue
+
+class ApplicationState(State):
+    # Persisted: checkpointed and retained across turns.
+    document_id: Optional[str]
+
+    # Ephemeral: never checkpointed, does not carry into the next turn.
+    map_features: Annotated[Optional[dict], UntrackedValue]
+
+agent = build_agent_graph(
+    checkpoint_saver=checkpointer,
+    node_kwargs=node_kwargs,
+    state=ApplicationState,
+)
+```
+
+Nodes read and write the added fields exactly as they read and write BiliCore's
+own, and the fields appear in the `invoke()` result the same way.
+
+#### Persisted vs. ephemeral fields
+
+There are two kinds of field declaration, and **the default is the expensive
+one**. Behaviour verified against `langgraph==1.0.2`:
+
+| Declaration | Crosses node boundaries | In `invoke()` result | Checkpointed | Retained next turn |
+|---|---|---|---|---|
+| `field: T` | yes | yes | **yes** | **yes** |
+| `Annotated[T, UntrackedValue]` | yes | yes | no | no |
+
+`UntrackedValue` is re-exported from `bili.utils.langgraph_utils`, so a consumer
+declares an ephemeral field against BiliCore's surface rather than reaching into
+the LangGraph version this package pins.
+
+**A plain annotation is persisted.** Its value is written into the checkpoint's
+`channel_values` on every checkpoint, and the channel retains that value across
+turns. If no node writes the field on a later turn, the previous turn's value
+survives, so a caller reading `result.get("field")` sees a value attached to an
+unrelated turn.
+
+**Persistence is not free.** A 2,000-feature GeoJSON payload measured ~911 KB per
+checkpoint and ~9.4 MB across four turns before pruning. Pruning bounds the total
+(`get_mongo_checkpointer` retains the last 5 checkpoints by default), but one
+checkpoint still has to fit the backend's document limit: MongoDB and DocumentDB
+both reject a document larger than 16 MB.
+
+**Choosing between them:**
+
+- Durable conversation metadata, of the shape `title` and `tags` already have,
+  belongs in an ordinary field. It has to survive into later turns, and it is
+  small.
+- Large per-turn payloads, and anything a later turn must not inherit, belong in
+  `UntrackedValue`. That keeps the payload out of every checkpoint and removes
+  the staleness case entirely.
+- The trade-off on `UntrackedValue` is that the value is gone after a restart
+  mid-thread. That is correct for per-turn data and wrong for anything that has
+  to survive one.
 
 ### Checkpointing
 
