@@ -63,8 +63,9 @@ from langgraph.graph import MessagesState
 
 from bili.utils.logging_utils import get_logger
 
-# UntrackedValue is re-exported, not used inside this module: listing it in
-# __all__ is what keeps autoflake from deleting the import as unused.
+# UntrackedValue is re-exported for consumers, not used inside this module.
+# Listing it in __all__ declares it public API; without that, pylint flags
+# the import as unused (W0611).
 __all__ = [
     "State",
     "UntrackedValue",
