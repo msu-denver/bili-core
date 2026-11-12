@@ -4,14 +4,18 @@
 # Trust rule: the actor AND the author of the thread it is working on must both
 # have write access. A trusted maintainer commenting on an outside contributor's
 # issue or PR would otherwise hand attacker-written text (the issue body, the PR
-# description, the diff) to the agent. The job's `if` is a cheap pre-filter on
-# author_association OWNER, MEMBER or COLLABORATOR, which on an organization's
-# repository also covers read-only and triage users; a step then asks the
-# collaborators API for the thread author's permission, and the action checks
-# the commenter's itself. Inside the thread, only comments by people with write
-# access reach the agent's prompt (include_comments_by_actor below). CONTRIBUTOR
-# (anyone with a merged PR) is deliberately excluded: write access is the bar,
-# not historical contribution.
+# description, the diff) to the agent. The job's `if` only matches the event
+# and the `@claude` text, so a comment without a mention never starts a runner.
+# It does not read author_association: on an organization's repository the
+# event payload reports a member whose membership is private as CONTRIBUTOR,
+# so that filter turned the bot away from the people it serves, and MEMBER or
+# COLLABORATOR also covers read-only and triage users. The gate is the
+# `trusted` step: it asks the collaborators API for the permission of the
+# thread author and of the commenter, and unless both are admin, maintain or
+# write, the job stops before the checkout and the agent. The action checks
+# the commenter's write access again itself. Inside the thread, only comments
+# by people with write access reach the agent's prompt
+# (include_comments_by_actor below).
 #
 # Pull requests from forks are skipped even when the author is trusted: the
 # action checks out the PR branch, and a fork branch is code from outside this
@@ -49,20 +53,13 @@ jobs:
   claude:
     if: |
       ((github.event_name == 'issue_comment' &&
-        contains(github.event.comment.body, '@claude') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+        contains(github.event.comment.body, '@claude')) ||
        (github.event_name == 'pull_request_review_comment' &&
-        contains(github.event.comment.body, '@claude') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+        contains(github.event.comment.body, '@claude')) ||
        (github.event_name == 'pull_request_review' &&
-        contains(github.event.review.body, '@claude') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association) &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+        contains(github.event.review.body, '@claude')) ||
        (github.event_name == 'issues' &&
-        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)))
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -100,13 +97,17 @@ jobs:
       # Write access means what the collaborators API reports for a login:
       # admin, maintain or write. author_association is not enough, because on
       # an organization's repository MEMBER and COLLABORATOR also cover
-      # read-only and triage users. Each login is asked once, and a lookup that
-      # fails counts as no access.
-      # The thread author comes first. Without write access the step sets
-      # run=false and logs why, and the agent's steps are skipped.
-      # Then the commenters: the action puts the thread's comments, reviews and
-      # review comments into the agent's prompt, and include_comments_by_actor
-      # (below) keeps out every author this step does not list.
+      # read-only and triage users, and a private member shows as CONTRIBUTOR.
+      # Each login is asked once, and a lookup that fails counts as no access.
+      # This step is the bot's only gate, since the job's `if` checks no one.
+      # The thread author comes first, then the commenter: the author of the
+      # comment or review that mentions @claude, or for an issue event the
+      # sender who opened or assigned it. When either lacks write access the
+      # step sets run=false and logs why, and the agent's steps are skipped.
+      # Then everyone else in the thread: the action puts its comments,
+      # reviews and review comments into the agent's prompt, and
+      # include_comments_by_actor (below) keeps out every author this step
+      # does not list.
       # Two bots are added by name: github-actions[bot] (the workflows' own
       # sticky comments) and claude[bot] (this bot's earlier replies). The
       # action gives a GraphQL Bot author its [bot] suffix before it matches,
@@ -138,6 +139,13 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          actor=$(jq -r '(.comment // .review).user.login // .sender.login // empty' "$GITHUB_EVENT_PATH")
+          perm=
+          if [ -z "$actor" ] || { [ "$actor" != "$author" ] && ! can_write "$actor"; }; then
+            echo "::notice::The commenter ${actor:-(none)} does not have write access (${perm:-no login}); the bot does not run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           n=$(jq -r '.issue.number // .pull_request.number' "$GITHUB_EVENT_PATH")
           people='.[] | select(.user.type != "Bot") | .user.login // empty'
           {
@@ -147,9 +155,9 @@ jobs:
               gh api "repos/$REPO/pulls/$n/comments" --paginate --jq "$people"
             fi
           } | sort -u > "$RUNNER_TEMP/commenters.txt"
-          printf '%s\n' 'github-actions[bot]' 'claude[bot]' "$author" > "$RUNNER_TEMP/trusted-authors.txt"
+          printf '%s\n' 'github-actions[bot]' 'claude[bot]' "$author" "$actor" > "$RUNNER_TEMP/trusted-authors.txt"
           while read -r login; do
-            if [ "$login" != "$author" ] && can_write "$login"; then
+            if [ "$login" != "$author" ] && [ "$login" != "$actor" ] && can_write "$login"; then
               printf '%s\n' "$login" >> "$RUNNER_TEMP/trusted-authors.txt"
             fi
           done < "$RUNNER_TEMP/commenters.txt"
