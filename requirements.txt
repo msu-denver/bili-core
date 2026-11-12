@@ -70,7 +70,7 @@ anyio==4.12.0
 
 # Google Cloud packages (from langchain-google-vertexai)
 google-api-core==2.28.1
-google-cloud-aiplatform==1.128.0
+google-cloud-aiplatform==1.161.0
 google-cloud-resource-manager==1.15.0
 google-cloud-storage==3.6.0
 google-crc32c==1.7.1
