@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+FROM nvidia/cuda:13.3.1-devel-ubuntu22.04
 
 ARG TARGETARCH
 RUN echo "Building for $TARGETARCH"
