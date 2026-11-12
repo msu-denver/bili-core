@@ -4,8 +4,8 @@
 # Trust rule: the actor AND the author of the thread it is working on must both be
 # OWNER, MEMBER or COLLABORATOR. A trusted maintainer commenting on an outside
 # contributor's issue or PR would otherwise hand attacker-written text (the issue
-# body, the PR description, the diff) to the agent. Comments from anyone else
-# inside a trusted author's thread are dropped from the agent's prompt
+# body, the PR description, the diff) to the agent. Inside the thread, only
+# comments by people with write access reach the agent's prompt
 # (include_comments_by_actor below). CONTRIBUTOR (anyone with a merged PR) is
 # deliberately excluded: write access is the bar, not historical contribution.
 #
@@ -96,8 +96,12 @@ jobs:
       # The action puts the thread's comments, reviews and review comments into
       # the agent's prompt, and the trust rule above covers only the commenter
       # and the thread author. include_comments_by_actor (below) keeps every
-      # other author out, so it needs the logins of this thread's trusted
-      # authors, judged by the same author_association rule as the gate.
+      # other author out, so it needs the logins of this thread's commenters
+      # with write access: what the collaborators API reports for the login
+      # (admin, maintain or write), asked once per commenter. author_association
+      # is not enough here, because on an organization's repository MEMBER and
+      # COLLABORATOR also cover read-only and triage users. A lookup that
+      # fails leaves that login out.
       # Two bots are added by name: github-actions[bot] (the workflows' own
       # sticky comments) and claude[bot] (this bot's earlier replies). The
       # action gives a GraphQL Bot author its [bot] suffix before it matches,
@@ -113,16 +117,25 @@ jobs:
         run: |
           set -euo pipefail
           n=$(jq -r '.issue.number // .pull_request.number' "$GITHUB_EVENT_PATH")
-          trusted='.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .user.login'
+          people='.[] | select(.user.type != "Bot") | .user.login // empty'
           {
-            gh api "repos/$REPO/issues/$n/comments" --paginate --jq "$trusted"
+            gh api "repos/$REPO/issues/$n/comments" --paginate --jq "$people"
             if jq -e '.pull_request or .issue.pull_request' "$GITHUB_EVENT_PATH" >/dev/null; then
-              gh api "repos/$REPO/pulls/$n/reviews" --paginate --jq "$trusted"
-              gh api "repos/$REPO/pulls/$n/comments" --paginate --jq "$trusted"
+              gh api "repos/$REPO/pulls/$n/reviews" --paginate --jq "$people"
+              gh api "repos/$REPO/pulls/$n/comments" --paginate --jq "$people"
             fi
-            printf '%s\n' 'github-actions[bot]' 'claude[bot]'
-          } | sort -u > "$RUNNER_TEMP/trusted-authors.txt"
-          echo "actors=$(paste -sd, "$RUNNER_TEMP/trusted-authors.txt")" >> "$GITHUB_OUTPUT"
+          } | sort -u > "$RUNNER_TEMP/commenters.txt"
+          printf '%s\n' 'github-actions[bot]' 'claude[bot]' > "$RUNNER_TEMP/trusted-authors.txt"
+          while read -r login; do
+            perm=$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission) || {
+              echo "::warning::Could not read the permission of $login; their comments are left out."
+              perm=none
+            }
+            case "$perm" in
+              admin|maintain|write) printf '%s\n' "$login" >> "$RUNNER_TEMP/trusted-authors.txt" ;;
+            esac
+          done < "$RUNNER_TEMP/commenters.txt"
+          echo "actors=$(sort -u "$RUNNER_TEMP/trusted-authors.txt" | paste -sd, -)" >> "$GITHUB_OUTPUT"
 
       - name: Check out the repository
         if: steps.guard.outputs.skip == 'false'
