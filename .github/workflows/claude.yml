@@ -1,3 +1,33 @@
+# The interactive `@claude` bot: responds to `@claude` mentions in issues, PR
+# comments, PR review comments, and PR reviews.
+#
+# Trust rule: the actor AND the author of the thread it is working on must both be
+# OWNER, MEMBER or COLLABORATOR. A trusted maintainer commenting on an outside
+# contributor's issue or PR would otherwise hand attacker-written text (the issue
+# body, the PR description, the diff) to the agent. Comments from third parties
+# inside a trusted author's thread are still context the agent reads; the tool
+# limits below bound what it can do with them. CONTRIBUTOR (anyone with a merged
+# PR) is deliberately excluded: write access is the bar, not historical
+# contribution.
+#
+# Pull requests from forks are skipped even when the author is trusted: the
+# action checks out the PR branch, and a fork branch is code from outside this
+# repository.
+#
+# Auth: CLAUDE_CODE_OAUTH_TOKEN (subscription token, no metered API key). The
+# action exchanges the job's OIDC token for a short-lived token of the Claude
+# GitHub App, so `id-token: write` is required. The workflow permissions below
+# limit only GITHUB_TOKEN; what the App token can do is set by the App
+# installation's permissions, which are the real ceiling on the agent.
+#
+# Permissions: `contents: read` because the bot does not push branches (it
+# replies with fix links a maintainer clicks), `pull-requests: write` and
+# `issues: write` to post its replies, `actions: read` to read CI results. The
+# App token is narrowed the same way through `additional_permissions` below.
+#
+# The CLAUDE_CODE_OAUTH_TOKEN repository secret must be provisioned by a
+# maintainer (see SECURITY.md).
+
 name: Claude Code
 
 on:
@@ -12,45 +42,124 @@ on:
 
 jobs:
   claude:
-    # Restrict the @claude bot to users with write access on this repository.
-    # OWNER / MEMBER / COLLABORATOR all have write; CONTRIBUTOR (anyone with a
-    # merged PR) is deliberately excluded to bound credit-burn from drive-by
-    # mentions. The outside-collaborator approval gate (Settings -> Actions)
-    # is the upstream cost-control layer; this gate is the application-level
-    # backstop.
     if: |
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR' ||
-       github.event.review.author_association == 'OWNER' ||
-       github.event.review.author_association == 'MEMBER' ||
-       github.event.review.author_association == 'COLLABORATOR' ||
-       github.event.issue.author_association == 'OWNER' ||
-       github.event.issue.author_association == 'MEMBER' ||
-       github.event.issue.author_association == 'COLLABORATOR') &&
-      ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))))
+      ((github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+       (github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+       (github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+       (github.event_name == 'issues' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)))
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
       issues: write
       id-token: write
       actions: read
     steps:
-      - name: Checkout repository
+      # The fork check reads the event payload and asks the API for PR contexts
+      # only; issues never come from a fork. Any lookup failure fails the job
+      # rather than letting the agent run on an unknown branch.
+      - name: Skip pull requests from forks
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr=$(jq -r 'if .pull_request then .pull_request.number elif .issue.pull_request then .issue.number else empty end' "$GITHUB_EVENT_PATH")
+          if [ -z "$pr" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cross=$(gh pr view "$pr" --repo "$REPO" --json isCrossRepository --jq .isCrossRepository)
+          case "$cross" in
+            false) echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            true)
+              echo "::notice::PR #$pr comes from a fork; the bot does not run on fork branches."
+              echo "skip=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::Could not tell whether PR #$pr comes from a fork (got '$cross')."
+              exit 1 ;;
+          esac
+
+      # The action puts the thread's comments, reviews and review comments into
+      # the agent's prompt, and the trust rule above covers only the commenter
+      # and the thread author. include_comments_by_actor (below) keeps every
+      # other author out, so it needs the logins of this thread's trusted
+      # authors, judged by the same author_association rule as the gate.
+      # `github-actions` (the workflows' own sticky comments) is added by
+      # name: the action filters on GraphQL logins, where bots have no [bot]
+      # suffix. The bot's own earlier replies (GraphQL login `claude`) are left
+      # out on purpose: an unrelated user account also has the login `claude`.
+      - name: List this thread's trusted authors
+        id: trusted
+        if: steps.guard.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          n=$(jq -r '.issue.number // .pull_request.number' "$GITHUB_EVENT_PATH")
+          trusted='.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .user.login'
+          {
+            gh api "repos/$REPO/issues/$n/comments" --paginate --jq "$trusted"
+            if jq -e '.pull_request or .issue.pull_request' "$GITHUB_EVENT_PATH" >/dev/null; then
+              gh api "repos/$REPO/pulls/$n/reviews" --paginate --jq "$trusted"
+              gh api "repos/$REPO/pulls/$n/comments" --paginate --jq "$trusted"
+            fi
+            echo github-actions
+          } | sort -u > "$RUNNER_TEMP/trusted-authors.txt"
+          echo "actors=$(paste -sd, "$RUNNER_TEMP/trusted-authors.txt")" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the repository
+        if: steps.guard.outputs.skip == 'false'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
+      # Tools: read and search only. The action adds its own tools to whatever
+      # --allowedTools names (git add/commit/rm and its git-push.sh wrapper, or
+      # the commit_files and delete_files MCP tools when commit signing is on,
+      # plus file edits through its acceptEdits permission mode), so the allow
+      # list alone restricts nothing. The deny list does: a deny rule beats
+      # every allow rule, and the bare `Bash` entry removes the shell, which
+      # takes the action's git and push tools with it. No git commands either,
+      # because git accepts abbreviated long options (`--outp=` for
+      # `--output=`) that no pattern list can pin.
+      #
+      # The action also allows Read on any path, so the Read denies keep the
+      # agent away from where this job's credentials sit on the runner: the
+      # process environment under /proc, and .git/config, where the action
+      # writes the App token into the remote URL. The same rules stop Grep
+      # from reading those files.
       - name: Run Claude Code
-        id: claude
+        if: steps.guard.outputs.skip == 'false'
         uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1.0.133
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           include_fix_links: true
           track_progress: true
+          include_comments_by_actor: ${{ steps.trusted.outputs.actors }}
+          # The action asks for an App token with contents, pull_requests and
+          # issues all `write` unless these lines override a key; the token's
+          # reach is the agent's real ceiling, so contents drops to read (the
+          # bot does not push). Keys use the API's spelling, `pull_requests`
+          # with an underscore: a hyphenated key is a different, unknown key
+          # and leaves the default in place.
           additional_permissions: |
             actions: read
+            contents: read
+          claude_args: >-
+            --allowedTools "Read,Grep,Glob"
+            --disallowedTools "Bash,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**)"

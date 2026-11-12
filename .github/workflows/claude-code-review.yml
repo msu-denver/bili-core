@@ -19,6 +19,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
@@ -66,7 +67,7 @@ jobs:
             } > semgrep-comment.md
           fi
           # Sticky: delete any prior Semgrep comment so the thread keeps one.
-          gh api "repos/$REPO/issues/$PR/comments" \
+          gh api "repos/$REPO/issues/$PR/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" \
           | while read -r id; do
               gh api -X DELETE "repos/$REPO/issues/comments/$id" || true
@@ -144,7 +145,7 @@ jobs:
             printf '\n_Posted before the Claude review so the test outcome is folded into the review._\n'
           } > ci-tests-comment.md
           # Sticky: replace any prior CI Tests comment so the thread keeps one.
-          gh api "repos/$REPO/issues/$PR/comments" \
+          gh api "repos/$REPO/issues/$PR/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" \
           | while read -r id; do
               gh api -X DELETE "repos/$REPO/issues/comments/$id" || true
@@ -171,18 +172,94 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
-      - name: Run Claude Code Review
+      # The code-review plugin is installed from a one-entry local marketplace
+      # that names a fixed commit of anthropics/claude-plugins-official. The
+      # upstream marketplace in anthropics/claude-code tracks that repository's
+      # `main`, so the review's prompt and its tool grants would otherwise
+      # change with no commit here. The action accepts a marketplace as a git
+      # URL ending in .git (no ref) or a local path, hence the local file. To
+      # bump: take the latest commit touching plugins/code-review,
+      #   gh api 'repos/anthropics/claude-plugins-official/commits?path=plugins/code-review&per_page=1' --jq '.[0].sha'
+      # and read the command file's allowed-tools at that commit against the
+      # deny list below.
+      - name: Pin the code-review plugin
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/pinned-plugins/.claude-plugin"
+          mkdir -p "$dir"
+          cat > "$dir/marketplace.json" <<'EOF'
+          {
+            "name": "pinned-plugins",
+            "owner": { "name": "pinned-plugins" },
+            "plugins": [
+              {
+                "name": "code-review",
+                "source": {
+                  "source": "git-subdir",
+                  "url": "https://github.com/anthropics/claude-plugins-official.git",
+                  "path": "plugins/code-review",
+                  "sha": "9780cf407f5593727b668bae95a0c4ae2e0de1ae"
+                }
+              }
+            ]
+          }
+          EOF
+
+      # SHA-pinned anthropics/claude-code-action v1.0.152. Bump by re-resolving
+      # the v1 tag's target commit:
+      #   gh api repos/anthropics/claude-code-action/git/refs/tags/v1
+      #
+      # Tools. Allow rules add up from three sources: the action's own (file
+      # reading, its comment and CI tools, git add/commit/rm, its git-push.sh
+      # wrapper), the code-review plugin's command (gh pr comment/diff/view/list,
+      # gh issue view/list and gh search, each with any arguments), and the
+      # list below. The `gh pr ... <number>` forms below are what the review
+      # needs, but with the plugin's rules in force they do not pin the PR
+      # number: the agent can still read or comment on another PR in this
+      # repository.
+      # What bounds the agent is the deny list, since a deny rule beats every
+      # allow rule:
+      #   * no file edits, web access, git writes or push wrapper;
+      #   * no gh flag that reads a local file into a comment (--body-file,
+      #     -F), names another repository (--repo, -R), or edits, deletes or
+      #     opens comments in a browser (--edit-last, --delete-last, --web).
+      #     gh rejects abbreviated long flags and takes one body source per
+      #     comment, so these patterns cover every spelling that reaches a file
+      #     or another repository;
+      #   * a gh pr command must name the PR first and not as a URL, which
+      #     closes the other route to another repository (a PR URL);
+      #   * no gh search, gh issue or gh pr list, which the plugin allows but
+      #     the review does not use;
+      #   * no Read of /proc (the process environment holds the OAuth and App
+      #     tokens) or of .git/config (the action writes the App token into the
+      #     remote URL); the same rules stop Grep.
+      # The action runs this job in acceptEdits mode, which lets shell commands
+      # such as `touch`, `cp` and `>` redirects write files with no allow rule.
+      # `--permission-mode default` below replaces it: the action keeps the
+      # last value it is given for a flag, and claude_args come after its own.
+      - name: Run Claude code review
         id: claude-review
         uses: anthropics/claude-code-action@51705da45eecce209d4700538bf8377d5b5fc695 # v1.0.152
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
+          plugin_marketplaces: ${{ runner.temp }}/pinned-plugins
+          plugins: 'code-review@pinned-plugins'
           include_fix_links: true
           track_progress: true
           allowed_bots: 'claude[bot]'
-          claude_args: '--model opus'
+          # The action asks for an App token with contents, pull_requests and
+          # issues all `write` unless a key is overridden here; the review
+          # posts comments but never pushes, so contents drops to read. Keys
+          # use the API's spelling (`pull_requests`, underscore).
+          additional_permissions: |
+            contents: read
+          claude_args: >-
+            --model opus
+            --permission-mode default
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(gh pr diff ${{ github.event.pull_request.number }}:*),Bash(gh pr view ${{ github.event.pull_request.number }}:*),Bash(gh pr comment ${{ github.event.pull_request.number }} --body:*)"
+            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(git push:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Bash(gh * --body-file*),Bash(gh * -F*),Bash(gh * --repo*),Bash(gh * -R*),Bash(gh * --edit-last*),Bash(gh * --delete-last*),Bash(gh * --web*),Bash(gh pr comment http*),Bash(gh pr view http*),Bash(gh pr diff http*),Bash(gh pr comment -*),Bash(gh pr view -*),Bash(gh pr diff -*),Bash(gh search:*),Bash(gh issue:*),Bash(gh pr list:*),Read(./.git/**),Read(//proc/**)"
           prompt: >-
             /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment
             This PR's CI has already run. A "Semgrep (OSS)" comment and a "CI Tests" comment
@@ -252,6 +329,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Fetch the review comment into ./REVIEW.md
         env:
@@ -263,8 +341,10 @@ jobs:
           # The latest comment authored by the review bot is the review. Pass it to
           # the extractor as a file (not inline in the prompt) to avoid prompt
           # injection from the review/PR text.
-          gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "map(select(.user.login==\"$REVIEW_BOT\")) | last | .body // \"\"" > REVIEW.md
+          # --slurp joins the pages first: a --jq filter runs once per page, so
+          # `last` there would emit one comment per page on a long thread.
+          gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
+            | jq -r --arg bot "$REVIEW_BOT" 'add | map(select(.user.login == $bot)) | last | .body // ""' > REVIEW.md
           if [ ! -s REVIEW.md ]; then
             echo "No review comment by $REVIEW_BOT found; extractor cannot run." >&2
             exit 1
@@ -303,9 +383,15 @@ jobs:
 
 
       # SHA-pinned anthropics/claude-code-action v1.0.152. Cheap model (Haiku) —
-      # this is a one-shot classification, not a review. The verdict comes back as
-      # schema-validated STRUCTURED OUTPUT (the `--json-schema` claude_arg), exposed
-      # as steps.extract.outputs.structured_output — no comment, no log-file parse.
+      # this is a one-shot classification, not a review. With a prompt and no
+      # track_progress the action runs in agent mode, which adds no tools of
+      # its own. Reads inside the workspace need no allow rule, so naming only
+      # ./REVIEW.md (rather than a bare `Read`, which allows any path) keeps
+      # paths outside the workspace denied; the deny keeps the agent out of
+      # .git/config, where the action writes the App token. The verdict comes
+      # back as schema-validated STRUCTURED OUTPUT (the `--json-schema`
+      # claude_arg), exposed as steps.extract.outputs.structured_output — no
+      # comment, no log-file parse.
       - name: Extract the merge verdict
         id: extract
         uses: anthropics/claude-code-action@51705da45eecce209d4700538bf8377d5b5fc695 # v1.0.152
@@ -314,8 +400,17 @@ jobs:
           # track_progress off: this is a data task, not a PR conversation; we read
           # the result from structured_output, not a comment.
           track_progress: false
+          # The extractor writes nothing to GitHub, so every key of the App
+          # token it is given drops to read (`pull_requests` with an underscore,
+          # the API's spelling; a hyphenated key would leave the write default).
+          additional_permissions: |
+            contents: read
+            pull_requests: read
+            issues: read
           claude_args: |
             --model haiku
+            --allowedTools "Read(./REVIEW.md)"
+            --disallowedTools "Read(./.git/**)"
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","BLOCK"]},"count":{"type":"integer","minimum":0}},"required":["verdict","count"],"additionalProperties":false}'
           prompt: >-
             Read the file ./REVIEW.md in the repository — it is an automated code review of this
@@ -347,6 +442,32 @@ jobs:
           echo "Parsed verdict line: ${line:-<none>}"
           echo "verdict_line=$line" >> "$GITHUB_OUTPUT"
 
+  # A push makes any earlier `review-ack` stale: it acknowledged findings on code
+  # that has since changed. Remove the label on every push so a maintainer has
+  # to acknowledge the new head. Same-repository PRs only: a fork PR's
+  # GITHUB_TOKEN is read-only, and for those the gate's own timing check (the
+  # ack must postdate this run) is what keeps an old ack from counting.
+  clear-stale-ack:
+    if: ${{ github.event.action == 'synchronize' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Remove a review-ack applied before this push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACK_LABEL: review-ack
+        run: |
+          set -euo pipefail
+          if gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name' | grep -qx "$ACK_LABEL"; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/$ACK_LABEL" >/dev/null
+            echo "Removed $ACK_LABEL: it was applied before this push."
+          else
+            echo "No $ACK_LABEL label to remove."
+          fi
+
   # ---------------------------------------------------------------------------
   # Merge gate. Reads the verdict extractor's line and FAILS this check when the
   # review reported a HIGH/CRITICAL finding, so the PR cannot merge until the
@@ -355,15 +476,21 @@ jobs:
   #   PASS          - extractor emitted VERDICT=PASS (no HIGH/CRITICAL). Check green.
   #   BLOCK         - extractor emitted VERDICT=BLOCK (>=1). Check red. Push a fix
   #                   (the review + extractor re-run on each push and can clear it),
-  #                   or a MAINTAINER applies the `review-ack` label to override.
+  #                   or a MAINTAINER applies the `review-ack` label and re-runs
+  #                   the failed jobs to override.
   #   INCONCLUSIVE  - the review or the extractor did not complete (transient API
   #                   throttle) OR no parseable verdict was found. Check red, but
   #                   distinct and re-runnable: a flaky pass must NEVER read as PASS.
   #
   # The `review-ack` override is access-controlled and scoped: it counts only when
   # the label was applied by someone with write/maintain/admin permission AND at or
-  # after the current head commit (a stale ack from a prior push cannot clear a new
-  # finding). Admin-bypass on branch protection remains the emergency break-glass.
+  # after the moment GitHub created this workflow run. The run's `created_at` is
+  # set by GitHub when the triggering event arrives and stays fixed when a job
+  # is re-run, so an ack applied after a BLOCK counts on "Re-run failed jobs",
+  # while an ack from before the latest push never does. (A commit's committer
+  # date is not used: the author sets it.) If either timestamp cannot be read,
+  # the override is refused. Admin-bypass on branch protection remains the
+  # emergency break-glass.
   #
   # ROLLOUT (per-repo): OBSERVE-ONLY until a maintainer adds the `review-gate`
   # check to the branch's required status checks. Create the label once:
@@ -380,13 +507,14 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      actions: read
     steps:
       - name: Evaluate the verdict
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           EXTRACT_RESULT: ${{ needs.verdict-extract.result }}
           VERDICT_LINE: ${{ needs.verdict-extract.outputs.verdict_line }}
@@ -395,12 +523,6 @@ jobs:
           MARKER: '### Review Gate'
         run: |
           set -euo pipefail
-          # On a manual workflow_dispatch re-run there is no pull_request context,
-          # so head.sha is empty — resolve it from the PR number (used below for
-          # review-ack head-scoping).
-          if [ -z "${SHA:-}" ]; then
-            SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || echo "")
-          fi
           verdict=""; count="0"; reason=""; gate="BLOCK"
 
           # 1) INCONCLUSIVE if the review or the extractor didn't complete.
@@ -426,20 +548,26 @@ jobs:
             fi
           fi
 
-          # 3) review-ack override: maintainer-applied AND scoped to the current head.
+          # 3) review-ack override: maintainer-applied AND applied after this run
+          #    was created (see the header for why the run, not the commit).
           override="no"; ack_actor=""
           if gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$ACK_LABEL"; then
-            ev=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
-              --jq "map(select(.event==\"labeled\" and .label.name==\"$ACK_LABEL\")) | last" 2>/dev/null || echo '{}')
-            ack_actor=$(printf '%s' "$ev" | jq -r '.actor.login // ""')
-            applied_at=$(printf '%s' "$ev" | jq -r '.created_at // ""')
-            head_at=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.committer.date // ""' 2>/dev/null || echo "")
-            perm=$(gh api "repos/$REPO/collaborators/$ack_actor/permission" --jq '.permission // "none"' 2>/dev/null || echo none)
-            # Scoped: ack must be applied at/after the head commit (ISO-8601 sorts
-            # lexically, so `sort -c` over head,applied succeeds iff applied >= head).
+            # --slurp joins the pages first (see the REVIEW.md fetch above).
+            ev=$(gh api "repos/$REPO/issues/$PR/events" --paginate --slurp 2>/dev/null \
+              | jq -c --arg l "$ACK_LABEL" 'add | map(select(.event == "labeled" and .label.name == $l)) | last // {}' 2>/dev/null || echo '{}')
+            ack_actor=$(printf '%s' "$ev" | jq -r '.actor.login // ""' 2>/dev/null || echo "")
+            applied_at=$(printf '%s' "$ev" | jq -r '.created_at // ""' 2>/dev/null || echo "")
+            run_at=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.created_at // ""' 2>/dev/null || echo "")
+            perm="none"
+            if [ -n "$ack_actor" ]; then
+              perm=$(gh api "repos/$REPO/collaborators/$ack_actor/permission" --jq '.permission // "none"' 2>/dev/null || echo none)
+            fi
+            # Both timestamps are GitHub's own UTC ISO-8601 strings, which sort
+            # lexically, so `sort -c` over run,applied succeeds iff applied >= run.
+            # An empty value on either side refuses the override.
             scoped="no"
-            if [ -n "$applied_at" ] && [ -n "$head_at" ] && \
-               printf '%s\n%s\n' "$head_at" "$applied_at" | sort -c >/dev/null 2>&1; then
+            if [ -n "$applied_at" ] && [ -n "$run_at" ] && \
+               printf '%s\n%s\n' "$run_at" "$applied_at" | sort -c >/dev/null 2>&1; then
               scoped="yes"
             fi
             case "$perm" in admin|maintain|write) maint="yes" ;; *) maint="no" ;; esac
@@ -452,7 +580,7 @@ jobs:
           if [ "$verdict" = "PASS" ]; then
             gate="PASS"; reason="Review reported no HIGH/CRITICAL findings."
           elif [ "$override" = "yes" ]; then
-            gate="PASS"; reason="Overridden via \`${ACK_LABEL}\` (applied by maintainer @${ack_actor} at/after the current head commit). Original verdict: ${verdict}${count:+, ${count} blocking}."
+            gate="PASS"; reason="Overridden via \`${ACK_LABEL}\` (applied by maintainer @${ack_actor} after GitHub created this run for the current head). Original verdict: ${verdict}${count:+, ${count} blocking}."
           fi
 
           # 5) Post a sticky gate comment.
@@ -461,8 +589,8 @@ jobs:
             case "$gate:$verdict" in
               PASS:PASS)        printf '✅ **Gate: PASS** — %s\n' "$reason" ;;
               PASS:*)           printf '✅ **Gate: PASS (override)** — %s\n' "$reason" ;;
-              BLOCK:BLOCK)      printf '🛑 **Gate: BLOCK** — the review reported %s HIGH/CRITICAL finding(s). Address them and push (the review re-runs on each push), or a maintainer can apply the `%s` label to override.\n' "$count" "$ACK_LABEL" ;;
-              *:INCONCLUSIVE)   printf '⚠️ **Gate: INCONCLUSIVE** — %s Push a new commit to re-run the checks (they re-run on every push), or a maintainer can apply the `%s` label.\n' "$reason" "$ACK_LABEL" ;;
+              BLOCK:BLOCK)      printf '🛑 **Gate: BLOCK** — the review reported %s HIGH/CRITICAL finding(s). Address them and push (the review re-runs on each push), or a maintainer can apply the `%s` label and then re-run this check (Re-run failed jobs) to override.\n' "$count" "$ACK_LABEL" ;;
+              *:INCONCLUSIVE)   printf '⚠️ **Gate: INCONCLUSIVE** — %s Push a new commit to re-run the checks (they re-run on every push), or a maintainer can apply the `%s` label and then re-run this check (Re-run failed jobs).\n' "$reason" "$ACK_LABEL" ;;
               *)                printf '🛑 **Gate: BLOCK** — %s\n' "$reason" ;;
             esac
             # NOTE: intentionally no "observe-only" footer. Whether this gate is a
@@ -472,7 +600,7 @@ jobs:
             # GitHub's checks UI already marks required checks; the verdict lines
             # above tell the reader what to do regardless of enforcement.
           } > gate-comment.md
-          gh api "repos/$REPO/issues/$PR/comments" \
+          gh api "repos/$REPO/issues/$PR/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null \
           | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null 2>&1 || true; done
           gh pr comment "$PR" --repo "$REPO" --body-file gate-comment.md || true
