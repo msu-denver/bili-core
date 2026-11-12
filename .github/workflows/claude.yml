@@ -1,13 +1,17 @@
 # The interactive `@claude` bot: responds to `@claude` mentions in issues, PR
 # comments, PR review comments, and PR reviews.
 #
-# Trust rule: the actor AND the author of the thread it is working on must both be
-# OWNER, MEMBER or COLLABORATOR. A trusted maintainer commenting on an outside
-# contributor's issue or PR would otherwise hand attacker-written text (the issue
-# body, the PR description, the diff) to the agent. Inside the thread, only
-# comments by people with write access reach the agent's prompt
-# (include_comments_by_actor below). CONTRIBUTOR (anyone with a merged PR) is
-# deliberately excluded: write access is the bar, not historical contribution.
+# Trust rule: the actor AND the author of the thread it is working on must both
+# have write access. A trusted maintainer commenting on an outside contributor's
+# issue or PR would otherwise hand attacker-written text (the issue body, the PR
+# description, the diff) to the agent. The job's `if` is a cheap pre-filter on
+# author_association OWNER, MEMBER or COLLABORATOR, which on an organization's
+# repository also covers read-only and triage users; a step then asks the
+# collaborators API for the thread author's permission, and the action checks
+# the commenter's itself. Inside the thread, only comments by people with write
+# access reach the agent's prompt (include_comments_by_actor below). CONTRIBUTOR
+# (anyone with a merged PR) is deliberately excluded: write access is the bar,
+# not historical contribution.
 #
 # Pull requests from forks are skipped even when the author is trusted: the
 # action checks out the PR branch, and a fork branch is code from outside this
@@ -93,22 +97,23 @@ jobs:
               exit 1 ;;
           esac
 
-      # The action puts the thread's comments, reviews and review comments into
-      # the agent's prompt, and the trust rule above covers only the commenter
-      # and the thread author. include_comments_by_actor (below) keeps every
-      # other author out, so it needs the logins of this thread's commenters
-      # with write access: what the collaborators API reports for the login
-      # (admin, maintain or write), asked once per commenter. author_association
-      # is not enough here, because on an organization's repository MEMBER and
-      # COLLABORATOR also cover read-only and triage users. A lookup that
-      # fails leaves that login out.
+      # Write access means what the collaborators API reports for a login:
+      # admin, maintain or write. author_association is not enough, because on
+      # an organization's repository MEMBER and COLLABORATOR also cover
+      # read-only and triage users. Each login is asked once, and a lookup that
+      # fails counts as no access.
+      # The thread author comes first. Without write access the step sets
+      # run=false and logs why, and the agent's steps are skipped.
+      # Then the commenters: the action puts the thread's comments, reviews and
+      # review comments into the agent's prompt, and include_comments_by_actor
+      # (below) keeps out every author this step does not list.
       # Two bots are added by name: github-actions[bot] (the workflows' own
       # sticky comments) and claude[bot] (this bot's earlier replies). The
       # action gives a GraphQL Bot author its [bot] suffix before it matches,
       # and no user login can contain brackets, so neither name admits a user
       # account (an unrelated user does hold the bare login `claude`). The
       # list is never empty, which matters: an empty list admits everyone.
-      - name: List this thread's trusted authors
+      - name: Check this thread's authors for write access
         id: trusted
         if: steps.guard.outputs.skip == 'false'
         env:
@@ -116,6 +121,23 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          can_write() {
+            local login=$1
+            perm=$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission) || {
+              echo "::warning::Could not read the permission of $login."
+              perm=none
+            }
+            case "$perm" in
+              admin|maintain|write) return 0 ;;
+            esac
+            return 1
+          }
+          author=$(jq -r '(.issue // .pull_request).user.login // empty' "$GITHUB_EVENT_PATH")
+          if [ -z "$author" ] || ! can_write "$author"; then
+            echo "::notice::The thread's author ${author:-(none)} does not have write access (${perm:-no login}); the bot does not run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           n=$(jq -r '.issue.number // .pull_request.number' "$GITHUB_EVENT_PATH")
           people='.[] | select(.user.type != "Bot") | .user.login // empty'
           {
@@ -125,20 +147,17 @@ jobs:
               gh api "repos/$REPO/pulls/$n/comments" --paginate --jq "$people"
             fi
           } | sort -u > "$RUNNER_TEMP/commenters.txt"
-          printf '%s\n' 'github-actions[bot]' 'claude[bot]' > "$RUNNER_TEMP/trusted-authors.txt"
+          printf '%s\n' 'github-actions[bot]' 'claude[bot]' "$author" > "$RUNNER_TEMP/trusted-authors.txt"
           while read -r login; do
-            perm=$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission) || {
-              echo "::warning::Could not read the permission of $login; their comments are left out."
-              perm=none
-            }
-            case "$perm" in
-              admin|maintain|write) printf '%s\n' "$login" >> "$RUNNER_TEMP/trusted-authors.txt" ;;
-            esac
+            if [ "$login" != "$author" ] && can_write "$login"; then
+              printf '%s\n' "$login" >> "$RUNNER_TEMP/trusted-authors.txt"
+            fi
           done < "$RUNNER_TEMP/commenters.txt"
           echo "actors=$(sort -u "$RUNNER_TEMP/trusted-authors.txt" | paste -sd, -)" >> "$GITHUB_OUTPUT"
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Check out the repository
-        if: steps.guard.outputs.skip == 'false'
+        if: steps.guard.outputs.skip == 'false' && steps.trusted.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
@@ -168,7 +187,7 @@ jobs:
       # Anthropic, cloud and Actions credentials out of any child process's
       # environment; the action turns it on only with allowed_non_write_users.
       - name: Run Claude Code
-        if: steps.guard.outputs.skip == 'false'
+        if: steps.guard.outputs.skip == 'false' && steps.trusted.outputs.run == 'true'
         uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
