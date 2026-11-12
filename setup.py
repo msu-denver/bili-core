@@ -206,8 +206,11 @@ _EXTRAS = {
     ],
     # llama.cpp local inference (bili/iris/loaders/llm_loader.py LlamaCpp path).
     # Usage: pip install bili-core[llamacpp]
+    # No prebuilt Linux wheel is published, so pip compiles this from source.
+    # Floor: 0.3.8 is the first release whose bundled llama.cpp builds with
+    # GCC 15 (0.3.7 fails in llama-mmap.h on a missing <cstdint> include).
     "llamacpp": [
-        "llama-cpp-python==0.3.7",
+        "llama-cpp-python==0.3.8",
     ],
     # Ollama local server inference (bili/iris/providers/ollama_provider.py).
     # Talks to a running Ollama daemon over HTTP; native tool calling for
