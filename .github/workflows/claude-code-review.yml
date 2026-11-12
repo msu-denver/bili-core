@@ -11,7 +11,7 @@ on:
 # One review per PR at a time. A push starts a new run and cancels the
 # older one, whose head the action would refuse anyway.
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -110,22 +110,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           MARKER: '### CI Tests'
         run: |
-          # On a manual workflow_dispatch re-run there is no pull_request context,
-          # so head.sha arrives empty — resolve it from the PR number instead.
-          if [ -z "${SHA:-}" ]; then
-            SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || echo "")
-          fi
           # Poll the CI/CD pipeline run for this head commit (~30 min ceiling),
           # then read the test-application job's conclusion by name. The build
           # and test jobs run in the same ci-cd.yml run, so the run-level
           # conclusion can be dragged down by the lint/build job; we want the
           # test job specifically.
           status="missing"; conclusion=""; runid=""
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             run=$(gh api "repos/$REPO/actions/workflows/ci-cd.yml/runs?head_sha=$SHA&event=pull_request&per_page=1" 2>/dev/null || echo '{}')
             status=$(echo "$run" | jq -r '.workflow_runs[0].status // "missing"')
             runid=$(echo "$run" | jq -r '.workflow_runs[0].id // ""')
@@ -139,6 +134,9 @@ jobs:
             conclusion=$(gh api "repos/$REPO/actions/runs/$runid/jobs" \
               --jq '.jobs[] | select(.name=="test-application") | .conclusion' 2>/dev/null || echo "")
           fi
+          # The backticks below are Markdown code spans in the comment text, not
+          # command substitution.
+          # shellcheck disable=SC2016
           {
             printf '%s\n\n' "$MARKER"
             if [ "$conclusion" = "success" ]; then
@@ -189,31 +187,43 @@ jobs:
       # steered into printing the token: gh's --jq filter can read the
       # environment, and quoting slips past any deny pattern.
       #
-      # Trusted means write access (OWNER, MEMBER, COLLABORATOR) or one of the
-      # two bots whose comments the review needs: github-actions[bot] (this
-      # workflow's sticky comments) and claude[bot] (earlier reviews). The
-      # REST API gives a bot its [bot] suffix and no user login can contain
-      # brackets, so those two names cannot be borrowed. The same list feeds
-      # include_comments_by_actor below, because tag mode also puts the PR's
-      # comments into the prompt. It always holds the two bots, which
-      # matters: an empty include list lets every comment through.
+      # Trusted means write access or one of the two bots whose comments the
+      # review needs. Write access is what the collaborators API reports for
+      # the login (admin, maintain or write), asked once per commenter.
+      # author_association is not enough: on an organization's repository,
+      # MEMBER and COLLABORATOR also cover read-only and triage users. A
+      # lookup that fails leaves that login's comments out. The two bots are
+      # github-actions[bot] (this workflow's sticky comments) and claude[bot]
+      # (earlier reviews); the REST API gives a bot its [bot] suffix and no
+      # user login can contain brackets, so those two names cannot be
+      # borrowed. The same list feeds include_comments_by_actor below,
+      # because tag mode also puts the PR's comments into the prompt. It
+      # always holds the two bots, which matters: an empty include list lets
+      # every comment through.
       #
       # A PR from a fork stops here. Its pull_request run has no secrets, but
       # on any other trigger the action does not restore .claude/ and
       # .mcp.json from the base branch, so the fork's hooks and MCP servers
       # would start beside the App token. Only an explicit false passes.
       #
-      # On a pull_request run the head must still be the commit this run was
-      # started for; the action refuses a moved head too, and the newer run
-      # reviews it. The files live beside the checkout, not under the runner
-      # temp folder, which the agent may not read. Any failure fails the
-      # step, and the review does not run.
+      # So does a PR whose author lacks write access, by the same lookup. An
+      # organization member with read or triage access can open a PR from a
+      # branch a writer pushed; the writer's next push starts this run, and
+      # the PR's title and body would reach the agent through pr.json. The
+      # review then fails, and where a gate follows it reads INCONCLUSIVE,
+      # which a maintainer can ack.
+      #
+      # The head must still be the commit this run was started for; the
+      # action refuses a moved head too, and the newer run reviews it. The
+      # files live beside the checkout, not under the runner temp folder,
+      # which the agent may not read. Any other failure fails the step, and
+      # the review does not run.
       - name: Collect the PR context for the review
         id: context
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
@@ -226,18 +236,48 @@ jobs:
             echo "::error::PR #$PR comes from a fork; the review does not run on fork code."
             exit 1
           fi
+          author=$(jq -r '.author.login // empty' "$dir/pr.json")
+          perm=none
+          if [ -n "$author" ]; then
+            perm=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .permission) || perm=none
+          fi
+          case "$perm" in
+            admin|maintain|write) ;;
+            *)
+              echo "::error::PR #$PR's author ${author:-(none)} does not have write access ($perm); the review does not read their title and body."
+              exit 1 ;;
+          esac
           head=$(jq -r .headRefOid "$dir/pr.json")
-          if [ -n "${HEAD_SHA:-}" ] && [ "$head" != "$HEAD_SHA" ]; then
+          if [ "$head" != "$HEAD_SHA" ]; then
             echo "::error::PR #$PR moved from $HEAD_SHA to $head after this run started; the newer run reviews it."
             exit 1
           fi
           gh pr diff "$PR" --repo "$REPO" > "$dir/diff.patch"
           gh pr diff "$PR" --repo "$REPO" --name-only > "$dir/changed-files.txt"
-          trusted='(.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))
-            or (.user.type == "Bot" and (.user.login | IN("github-actions[bot]", "claude[bot]")))'
           for kind in "issues/$PR/comments" "pulls/$PR/reviews" "pulls/$PR/comments"; do
             gh api --paginate "repos/$REPO/$kind" | jq -s --arg kind "$kind" 'add // [] | map(. + {kind: $kind})'
-          done | jq -s "add | map(select($trusted))" > "$RUNNER_TEMP/trusted-comments.json"
+          done | jq -s 'add' > "$RUNNER_TEMP/all-comments.json"
+          jq -r '[.[] | select(.user.type != "Bot") | .user.login // empty] | unique[]' \
+            "$RUNNER_TEMP/all-comments.json" > "$RUNNER_TEMP/commenters.txt"
+          printf '%s\n' "$author" > "$RUNNER_TEMP/writers.txt"
+          while read -r login; do
+            if [ "$login" = "$author" ]; then
+              continue
+            fi
+            perm=$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission) || {
+              echo "::warning::Could not read the permission of $login; their comments are left out."
+              perm=none
+            }
+            case "$perm" in
+              admin|maintain|write) printf '%s\n' "$login" >> "$RUNNER_TEMP/writers.txt" ;;
+            esac
+          done < "$RUNNER_TEMP/commenters.txt"
+          jq --rawfile writers "$RUNNER_TEMP/writers.txt" '
+            ($writers | split("\n") | map(select(. != ""))) as $w
+            | map(select(if .user.type == "Bot"
+                         then .user.login | IN("github-actions[bot]", "claude[bot]")
+                         else .user.login | IN($w[]) end))' \
+            "$RUNNER_TEMP/all-comments.json" > "$RUNNER_TEMP/trusted-comments.json"
           jq -r '
             sort_by(.created_at // .submitted_at)[]
             | select((.body // "") != "")
@@ -291,10 +331,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           include_fix_links: true
-          # track_progress puts a pull_request run in tag mode (a tracking
-          # comment, and the PR's comments copied into the prompt). A
-          # workflow_dispatch run has no tracking comment to update.
-          track_progress: ${{ github.event_name != 'workflow_dispatch' }}
+          # track_progress puts the run in tag mode: a tracking comment, and
+          # the PR's comments copied into the prompt.
+          track_progress: true
           allowed_bots: 'claude[bot]'
           # Keeps only the trusted authors the context step found in the
           # comments, reviews and review comments tag mode copies.
@@ -312,7 +351,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob"
             --disallowedTools "Bash,Monitor,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**)"
           prompt: >-
-            Review pull request ${{ github.repository }}#${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+            Review pull request ${{ github.repository }}#${{ github.event.pull_request.number }}
             for correctness bugs, security problems and clear CLAUDE.md violations in the changed
             code. There is no shell in this job, so gh and git cannot run. Everything you need from
             GitHub is already in files in ${{ steps.context.outputs.dir }}: pr.json (number, title,
@@ -399,7 +438,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          PR: ${{ github.event.pull_request.number }}
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -594,7 +633,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          PR: ${{ github.event.pull_request.number }}
           RUN_ID: ${{ github.run_id }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
@@ -674,6 +713,9 @@ jobs:
           fi
 
           # 5) Post a sticky gate comment.
+          # The backticks below are Markdown code spans in the comment text, not
+          # command substitution.
+          # shellcheck disable=SC2016
           {
             printf '%s\n\n' "$MARKER"
             case "$gate:$verdict" in
