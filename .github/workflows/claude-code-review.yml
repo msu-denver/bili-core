@@ -206,6 +206,13 @@ jobs:
       # .mcp.json from the base branch, so the fork's hooks and MCP servers
       # would start beside the App token. Only an explicit false passes.
       #
+      # So does a PR whose author lacks write access, by the same lookup. An
+      # organization member with read or triage access can open a PR from a
+      # branch a writer pushed; the writer's next push starts this run, and
+      # the PR's title and body would reach the agent through pr.json. The
+      # review then fails, and where a gate follows it reads INCONCLUSIVE,
+      # which a maintainer can ack.
+      #
       # The head must still be the commit this run was started for; the
       # action refuses a moved head too, and the newer run reviews it. The
       # files live beside the checkout, not under the runner temp folder,
@@ -229,6 +236,17 @@ jobs:
             echo "::error::PR #$PR comes from a fork; the review does not run on fork code."
             exit 1
           fi
+          author=$(jq -r '.author.login // empty' "$dir/pr.json")
+          perm=none
+          if [ -n "$author" ]; then
+            perm=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .permission) || perm=none
+          fi
+          case "$perm" in
+            admin|maintain|write) ;;
+            *)
+              echo "::error::PR #$PR's author ${author:-(none)} does not have write access ($perm); the review does not read their title and body."
+              exit 1 ;;
+          esac
           head=$(jq -r .headRefOid "$dir/pr.json")
           if [ "$head" != "$HEAD_SHA" ]; then
             echo "::error::PR #$PR moved from $HEAD_SHA to $head after this run started; the newer run reviews it."
@@ -241,8 +259,11 @@ jobs:
           done | jq -s 'add' > "$RUNNER_TEMP/all-comments.json"
           jq -r '[.[] | select(.user.type != "Bot") | .user.login // empty] | unique[]' \
             "$RUNNER_TEMP/all-comments.json" > "$RUNNER_TEMP/commenters.txt"
-          : > "$RUNNER_TEMP/writers.txt"
+          printf '%s\n' "$author" > "$RUNNER_TEMP/writers.txt"
           while read -r login; do
+            if [ "$login" = "$author" ]; then
+              continue
+            fi
             perm=$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission) || {
               echo "::warning::Could not read the permission of $login; their comments are left out."
               perm=none
