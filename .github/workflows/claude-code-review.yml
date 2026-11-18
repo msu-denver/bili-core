@@ -100,7 +100,7 @@ jobs:
     # mandatory before merge. Keying on the actor flipped these jobs from skipped
     # to running against a PR the review never comments on, so verdict-extract
     # found nothing and a required check failed, leaving dependabot PRs unmergeable.
-    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -163,7 +163,7 @@ jobs:
           gh pr comment "$PR" --repo "$REPO" --body-file ci-tests-comment.md
 
   claude-review:
-    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' }}
     # Both gates post their sticky comments before the review runs:
     #   semgrep -> "Semgrep (OSS)"; await-tests -> "CI Tests".
     needs: [semgrep, await-tests]
@@ -620,7 +620,7 @@ jobs:
     # !cancelled(): the gate must still run (and report INCONCLUSIVE) when the
     # review or extractor errored, because `needs` would otherwise SKIP it and
     # a skipped required check could be misread as non-blocking. A run that a
-    # newer push cancelled posts no gate comment; the newer run gates. Skip
+    # newer push canceled posts no gate comment; the newer run gates. Skip
     # only for dependabot.
     if: ${{ !cancelled() && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
@@ -629,6 +629,17 @@ jobs:
       pull-requests: write
       actions: read
     steps:
+      # A draft gets no Claude review, so its gate has no verdict to read. Fail
+      # rather than skip: a skipped required check counts as passing, and after
+      # "Ready for review" this draft run's result would stand until the new
+      # run's gate reports. A draft cannot merge, so the red check blocks nothing.
+      - name: Fail while the PR is a draft
+        if: ${{ github.event.pull_request.draft }}
+        run: |
+          msg="This PR is a draft, so the Claude review has not run, and a red review-gate on a draft is expected. Mark the PR ready for review to start the review; this gate then runs again on the review's verdict."
+          echo "::error title=Draft PR::$msg"
+          printf '%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
       - name: Evaluate the verdict
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
