@@ -10,9 +10,14 @@
 # schedule via the "Dependabot security updates" repo setting.
 
 version: 2
+# Every ecosystem waits 7 days after a release before Dependabot proposes it
+# (cooldown): a compromised or mistaken release is usually caught within days.
+# Security updates are not delayed.
 updates:
   # Python dependencies
   - package-ecosystem: "pip"
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "weekly"
@@ -58,6 +63,8 @@ updates:
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "weekly"
@@ -78,6 +85,8 @@ updates:
 
   # Docker base image (Dockerfile)
   - package-ecosystem: "docker"
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "weekly"

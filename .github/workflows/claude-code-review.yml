@@ -65,14 +65,18 @@ jobs:
           if [ "$COUNT" -eq 0 ]; then
             printf '%s: no findings\n\n_Clean scan. Posted before the Claude review._\n' "$MARKER" > semgrep-comment.md
           else
-            HIGH=$(jq '[.results[]|select(.extra.severity=="ERROR")]|length' semgrep.json)
-            MED=$(jq '[.results[]|select(.extra.severity=="WARNING")]|length' semgrep.json)
-            LOW=$(jq '[.results[]|select(.extra.severity=="INFO")]|length' semgrep.json)
+            # Semgrep rules report either the older names (ERROR, WARNING, INFO)
+            # or the newer ones (CRITICAL, HIGH, MEDIUM, LOW). Both the summary
+            # counts and the table use this one mapping, so they cannot disagree.
+            SEV='def sev: if .=="ERROR" or .=="CRITICAL" or .=="HIGH" then "HIGH" elif .=="WARNING" or .=="MEDIUM" then "MEDIUM" else "LOW" end;'
+            HIGH=$(jq "$SEV"'[.results[]|select((.extra.severity|sev)=="HIGH")]|length' semgrep.json)
+            MED=$(jq "$SEV"'[.results[]|select((.extra.severity|sev)=="MEDIUM")]|length' semgrep.json)
+            LOW=$(jq "$SEV"'[.results[]|select((.extra.severity|sev)=="LOW")]|length' semgrep.json)
             {
               printf '%s: %s findings\n\n' "$MARKER" "$COUNT"
               printf '<details><summary>HIGH (%s) · MEDIUM (%s) · LOW (%s)</summary>\n\n' "$HIGH" "$MED" "$LOW"
               printf '| Sev | Rule | Location | Message |\n|---|---|---|---|\n'
-              jq -r '.results[] | "| \(.extra.severity|if .=="ERROR" then "HIGH" elif .=="WARNING" then "MEDIUM" else "LOW" end) | \(.check_id|split(".")|last) | \(.path):\(.start.line) | \(.extra.message|gsub("[\n|]";" ")|.[0:120]) |"' semgrep.json
+              jq -r "$SEV"'.results[] | "| \(.extra.severity|sev) | \(.check_id|split(".")|last) | \(.path):\(.start.line) | \(.extra.message|gsub("[\n|]";" ")|.[0:120]) |"' semgrep.json
               printf '\n</details>\n\n_Posted before the Claude review so findings are folded into the review._\n'
             } > semgrep-comment.md
           fi
@@ -291,9 +295,9 @@ jobs:
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "actors=$actors" >> "$GITHUB_OUTPUT"
 
-      # SHA-pinned anthropics/claude-code-action v1.0.271. Bump by re-resolving
+      # SHA-pinned anthropics/claude-code-action v1.0.280 Bump by re-resolving
       # the tag's commit (the tag is annotated, so peel it):
-      #   gh api repos/anthropics/claude-code-action/git/refs/tags/v1.0.271
+      #   gh api repos/anthropics/claude-code-action/git/refs/tags/v1.0.280
       #
       # Tools. --tools names every built-in tool the agent has; any other,
       # including ones a later CLI adds, does not exist in the session or its
@@ -316,16 +320,17 @@ jobs:
       #     credentials writes them there); the same rules stop Grep.
       # The review posts through the action's tracking comment and the
       # inline-comment tool only.
-      # Tag mode starts the agent in acceptEdits mode; `--permission-mode
-      # default` below replaces it (the action keeps the last value it is
-      # given for a flag, and claude_args come after its own), so no tool is
-      # allowed by the mode alone.
+      # With allowed_bots set, as here, the action starts tag mode in acceptEdits
+      # mode, and without it in auto mode, where a safety review can approve a
+      # tool no allow rule covers; `--permission-mode default` below replaces
+      # either (the action keeps the last value it is given for a flag, and
+      # claude_args come after its own), so no tool is allowed by the mode alone.
       # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB keeps the Anthropic, cloud and
       # Actions credentials out of the environment of any process the agent
       # starts. The action turns it on only with allowed_non_write_users.
       - name: Run Claude code review
         id: claude-review
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@469588f42e6b1e94cd14ad09dccfeaec772ce0fd # v1.0.280
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         with:
@@ -492,7 +497,7 @@ jobs:
           fi
 
 
-      # SHA-pinned anthropics/claude-code-action v1.0.271 Cheap model (Haiku) —
+      # SHA-pinned anthropics/claude-code-action v1.0.280 Cheap model (Haiku) —
       # this is a one-shot classification, not a review. With a prompt and no
       # track_progress the action runs in agent mode, which adds no tools of
       # its own. Reads inside the workspace need no allow rule, so naming only
@@ -502,9 +507,12 @@ jobs:
       # back as schema-validated STRUCTURED OUTPUT (the `--json-schema`
       # claude_arg), exposed as steps.extract.outputs.structured_output — no
       # comment, no log-file parse.
+      # --permission-mode default keeps the allow list strict: from
+      # claude-code-action v1.0.273 a session without a mode starts in auto
+      # mode, where a safety review can approve a tool no allow rule covers.
       - name: Extract the merge verdict
         id: extract
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@469588f42e6b1e94cd14ad09dccfeaec772ce0fd # v1.0.280
         env:
           # Strips Anthropic, cloud and Actions credentials (the OAuth token,
           # the OIDC request token) from the environment of the processes the
@@ -525,6 +533,7 @@ jobs:
             issues: read
           claude_args: |
             --model haiku
+            --permission-mode default
             --tools "Read"
             --allowedTools "Read(./REVIEW.md)"
             --disallowedTools "Bash,Monitor,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**)"
@@ -533,7 +542,10 @@ jobs:
             Read the file ./REVIEW.md in the repository — it is an automated code review of this
             pull request. Your ONLY task is to report its merge verdict. Count the findings the
             review itself rates HIGH or CRITICAL severity (a "CI Tests" FAILURE called out in the
-            review also counts). Do NOT re-judge the diff, do NOT add findings of your own, and do
+            review also counts). The review also restates the Semgrep scan's and the CI's own
+            results, for example "Semgrep reported 11 findings (5 HIGH, 6 MEDIUM)"; those are
+            scanner counts over the whole repository, not findings of the review, so never count
+            them. When the review says it has no findings, return PASS with count=0. Do NOT re-judge the diff, do NOT add findings of your own, and do
             NOT count MEDIUM/LOW findings, missing-test notes, or anything the review did not label
             HIGH/CRITICAL. Return verdict="PASS" with count=0 when the review has zero HIGH/CRITICAL
             findings; otherwise verdict="BLOCK" with count set to the number of HIGH/CRITICAL findings.
