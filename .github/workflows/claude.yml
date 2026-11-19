@@ -174,7 +174,7 @@ jobs:
       # Tools: read and search only. The action adds its own tools to whatever
       # --allowedTools names (git add/commit/rm and its git-push.sh wrapper, or
       # the commit_files and delete_files MCP tools when commit signing is on,
-      # plus file edits through its acceptEdits permission mode), so the allow
+      # plus file edits when its permission mode allows them), so the allow
       # list alone restricts nothing. --tools does: it names every built-in
       # tool the agent has, so any other, including ones a later CLI adds,
       # does not exist in the session. Bash is not the only tool that runs
@@ -194,9 +194,13 @@ jobs:
       # Grep from reading those files. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB keeps the
       # Anthropic, cloud and Actions credentials out of any child process's
       # environment; the action turns it on only with allowed_non_write_users.
+      #
+      # --permission-mode default makes a call no allow rule covers a denial.
+      # Without a mode, claude-code-action from v1.0.273 starts the session in
+      # auto mode, where a safety review can approve such a call.
       - name: Run Claude Code
         if: steps.guard.outputs.skip == 'false' && steps.trusted.outputs.run == 'true'
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@469588f42e6b1e94cd14ad09dccfeaec772ce0fd # v1.0.280
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         with:
@@ -214,6 +218,7 @@ jobs:
             actions: read
             contents: read
           claude_args: >-
+            --permission-mode default
             --tools "Read,Grep,Glob,ToolSearch"
             --allowedTools "Read,Grep,Glob"
             --disallowedTools "Bash,Monitor,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**)"
