@@ -50,15 +50,9 @@ jobs:
             --config p/ci \
             --config p/dockerfile || true
 
-      - name: Post Semgrep findings as a sticky PR comment
-        # Dependabot PRs run with a read-only token, so the comment post fails
-        # there. continue-on-error keeps the job (and the run) green, so the
-        # review workflow does not surface as a failed/skipped run on dependabot.
+      - name: Render scan findings for the job summary
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
           MARKER: '### Semgrep (OSS)'
         run: |
           COUNT=$(jq '.results | length' semgrep.json)
@@ -80,13 +74,22 @@ jobs:
               printf '\n</details>\n\n_Posted before the Claude review so findings are folded into the review._\n'
             } > semgrep-comment.md
           fi
-          # Sticky: delete any prior Semgrep comment so the thread keeps one.
+          cat semgrep-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+        # Dependabot has no write token here; the summary still reports findings.
+      - name: Post scan findings as a sticky PR comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          MARKER: '### Semgrep (OSS)'
+        run: |
           gh api --paginate "repos/$REPO/issues/$PR/comments" \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARKER\"))) | .id" \
-          | while read -r id; do
-              gh api -X DELETE "repos/$REPO/issues/comments/$id" || true
-            done
-          gh pr comment "$PR" --body-file semgrep-comment.md
+          | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" || true; done
+          gh pr comment "$PR" --repo "$REPO" --body-file semgrep-comment.md
 
   # Wait for the CI/CD pipeline's test-application job (in ci-cd.yml) to finish
   # on this PR's head commit, then post its result as a sticky comment. The
@@ -104,7 +107,7 @@ jobs:
     # mandatory before merge. Keying on the actor flipped these jobs from skipped
     # to running against a PR the review never comments on, so verdict-extract
     # found nothing and a required check failed, leaving dependabot PRs unmergeable.
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -147,7 +150,9 @@ jobs:
               printf '✅ **Tests passed**: the pytest suite and the per-file coverage gate (>= 90%%) are green on `%s`.\n' "${SHA:0:9}"
             elif [ "$conclusion" = "failure" ]; then
               printf '❌ **Tests failed** on `%s`. Failing output (truncated):\n\n```\n' "${SHA:0:9}"
-              gh run view "$runid" --repo "$REPO" --log-failed 2>/dev/null \
+              gh api "repos/$REPO/actions/runs/$runid/jobs?per_page=100" --paginate --slurp 2>/dev/null \
+                | jq -r '.[]?.jobs[]? | select(.conclusion == "failure") | .id' \
+                | while read -r JOB_ID; do curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "${GITHUB_API_URL:-https://api.github.com}/repos/$REPO/actions/jobs/$JOB_ID/logs" 2>/dev/null | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' || true; done \
                 | grep -iE 'FAILED |ERROR |AssertionError|assert |Error:|Exception|E   |short test summary|coverage|below threshold|did not pass' \
                 | head -40 || true
               printf '```\n'
@@ -167,7 +172,7 @@ jobs:
           gh pr comment "$PR" --repo "$REPO" --body-file ci-tests-comment.md
 
   claude-review:
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
     # Both gates post their sticky comments before the review runs:
     #   semgrep -> "Semgrep (OSS)"; await-tests -> "CI Tests".
     needs: [semgrep, await-tests]
@@ -179,11 +184,16 @@ jobs:
       id-token: write
       actions: read
 
+    outputs:
+      review_attempt: ${{ steps.attempt.outputs.value }}
     steps:
+      - name: Record this review attempt
+        id: attempt
+        run: printf 'value=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       # Everything the review reads from GitHub is fetched here, by fixed
@@ -229,6 +239,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           dir="$(dirname "$GITHUB_WORKSPACE")/pr-context"
@@ -236,10 +247,6 @@ jobs:
           mkdir -p "$dir"
           gh pr view "$PR" --repo "$REPO" \
             --json number,title,body,state,isDraft,author,baseRefName,headRefName,headRefOid,url,isCrossRepository > "$dir/pr.json"
-          if [ "$(jq -r .isCrossRepository "$dir/pr.json")" != "false" ]; then
-            echo "::error::PR #$PR comes from a fork; the review does not run on fork code."
-            exit 1
-          fi
           author=$(jq -r '.author.login // empty' "$dir/pr.json")
           perm=none
           if [ -n "$author" ]; then
@@ -256,8 +263,81 @@ jobs:
             echo "::error::PR #$PR moved from $HEAD_SHA to $head after this run started; the newer run reviews it."
             exit 1
           fi
-          gh pr diff "$PR" --repo "$REPO" > "$dir/diff.patch"
-          gh pr diff "$PR" --repo "$REPO" --name-only > "$dir/changed-files.txt"
+          if [ "$(jq -r .isCrossRepository "$dir/pr.json")" != "false" ]; then
+            echo "::error::PR #$PR comes from a fork; the review does not run on fork code."
+            exit 1
+          fi
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "::error::Base commit $BASE_SHA is missing; cannot collect the PR diff."
+            exit 1
+          fi
+          if ! git merge-base "$BASE_SHA" "$HEAD_SHA" >/dev/null; then
+            echo "::error::No merge base exists for $BASE_SHA and $HEAD_SHA; cannot collect the PR diff."
+            exit 1
+          fi
+          git -c core.quotePath=false --literal-pathspecs --attr-source="$BASE_SHA" diff \
+            --no-color --no-textconv --no-ext-diff --no-renames "$BASE_SHA...$HEAD_SHA" > "$dir/diff.patch"
+          git -c core.quotePath=false --literal-pathspecs --attr-source="$BASE_SHA" diff \
+            --no-textconv --no-ext-diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$dir/changed-files.z"
+          changed_files=()
+          while IFS= read -r -d '' file; do changed_files+=("$file"); done < "$dir/changed-files.z"
+          printf '%s\n' "${changed_files[@]}" > "$dir/changed-files.txt"
+          bytes=$(wc -c < "$dir/diff.patch")
+          lines=$(wc -l < "$dir/diff.patch")
+          if [ "$bytes" -gt 200000 ] || [ "$lines" -gt 6000 ]; then
+            mkdir -p "$dir/diff-parts"
+            printf '| Part | Files | Bytes |\n|---|---:|---:|\n' > "$dir/diff-parts/INDEX.md"
+            parts=()
+            for file in "${changed_files[@]}"; do
+              part="${file%%/*}"
+              found=no
+              for existing in "${parts[@]-}"; do
+                [ "$existing" != "$part" ] || found=yes
+              done
+              if [ "$found" = no ]; then
+                parts+=("$part")
+              fi
+            done
+            indexed_files=()
+            index=0
+            for part in "${parts[@]}"; do
+              index=$((index + 1))
+              safe=$(printf '%s' "$part" | tr -c 'A-Za-z0-9._-' '_')
+              printf -v part_name '%03d-%s.patch' "$index" "$safe"
+              git -c core.quotePath=false --literal-pathspecs --attr-source="$BASE_SHA" diff \
+                --no-color --no-textconv --no-ext-diff --no-renames "$BASE_SHA...$HEAD_SHA" -- "$part" > "$dir/diff-parts/$part_name"
+              part_files=()
+              for file in "${changed_files[@]}"; do
+                if [ "$file" = "$part" ] || [[ "$file" == "$part/"* ]]; then
+                  part_files+=("$file")
+                  indexed_files+=("$file")
+                fi
+              done
+              git -c core.quotePath=false --literal-pathspecs --attr-source="$BASE_SHA" diff \
+                --no-textconv --no-ext-diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" -- "$part" > "$dir/actual-part-files.z"
+              printf '%s\0' "${part_files[@]}" | sort -z > "$dir/expected-part-files.z"
+              sort -z "$dir/actual-part-files.z" > "$dir/sorted-part-files.z"
+              if ! cmp -s "$dir/expected-part-files.z" "$dir/sorted-part-files.z"; then
+                echo "::error::Split diff part $part_name omits a changed file."
+                exit 1
+              fi
+              rm "$dir/actual-part-files.z" "$dir/expected-part-files.z" "$dir/sorted-part-files.z"
+              size=$(wc -c < "$dir/diff-parts/$part_name" | tr -d ' ')
+              {
+                printf '| %s | %s | %s |\n' "$part_name" "${#part_files[@]}" "$size"
+                printf '\n### %s\n' "$part_name"
+                # shellcheck disable=SC2016
+                printf -- '- `%s`\n' "${part_files[@]}"
+              } >> "$dir/diff-parts/INDEX.md"
+            done
+            printf '%s\0' "${indexed_files[@]}" | sort -z > "$dir/indexed-files.z"
+            sort -z "$dir/changed-files.z" > "$dir/expected-files.z"
+            if ! cmp -s "$dir/indexed-files.z" "$dir/expected-files.z"; then
+              echo "::error::The split diff index does not list every changed file exactly once."
+              exit 1
+            fi
+            rm "$dir/indexed-files.z" "$dir/expected-files.z"
+          fi
           for kind in "issues/$PR/comments" "pulls/$PR/reviews" "pulls/$PR/comments"; do
             gh api --paginate "repos/$REPO/$kind" | jq -s --arg kind "$kind" 'add // [] | map(. + {kind: $kind})'
           done | jq -s 'add' > "$RUNNER_TEMP/all-comments.json"
@@ -295,7 +375,7 @@ jobs:
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "actors=$actors" >> "$GITHUB_OUTPUT"
 
-      # SHA-pinned anthropics/claude-code-action v1.0.280 Bump by re-resolving
+      # SHA-pinned anthropics/claude-code-action v1.0.280. Bump by re-resolving
       # the tag's commit (the tag is annotated, so peel it):
       #   gh api repos/anthropics/claude-code-action/git/refs/tags/v1.0.280
       #
@@ -354,7 +434,7 @@ jobs:
             --permission-mode default
             --tools "Read,Grep,Glob,Task,ToolSearch"
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob"
-            --disallowedTools "Bash,Monitor,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**)"
+            --disallowedTools "Bash,Monitor,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**),Read(//home/runner/actions-runner/**),Read(//home/runner/.docker/**),Read(//home/runner/.config/**),Grep(//home/runner/actions-runner/**),Grep(//home/runner/.docker/**),Grep(//home/runner/.config/**),Glob(//home/runner/actions-runner/**),Glob(//home/runner/.docker/**),Glob(//home/runner/.config/**)"
           prompt: >-
             Review pull request ${{ github.repository }}#${{ github.event.pull_request.number }}
             for correctness bugs, security problems and clear CLAUDE.md violations in the changed
@@ -365,6 +445,8 @@ jobs:
             and comments.md (the PR's comments, reviews and review comments, from maintainers and
             this repository's bots only). Read them with the Read tool, and tell every subagent you
             launch to do the same. The checkout is the PR's head, so read any file for context.
+            When ${{ steps.context.outputs.dir }}/diff-parts/INDEX.md exists, read it and every listed part. State in your summary
+            that you reviewed a split diff and give the number of parts.
             Post each finding as an inline comment with the inline-comment tool, and put the whole
             review (a summary, every finding with its severity, and the sections asked for below)
             in your tracking comment. Only github-actions[bot]'s comments under the "Semgrep (OSS)"
@@ -413,7 +495,7 @@ jobs:
   verdict-extract:
     needs: [claude-review]
     # Only run when the review actually produced something to extract from.
-    if: ${{ needs.claude-review.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: ${{ needs.claude-review.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     # The verdict travels to the gate as a JOB OUTPUT built from the action's
     # STRUCTURED OUTPUT (claude-code-action's `--json-schema` feature, v1.0.152+):
@@ -423,11 +505,13 @@ jobs:
     # file (its path is coupled to the action version and broke on a bump).
     outputs:
       verdict_line: ${{ steps.parse.outputs.verdict_line }}
+      review_id: ${{ steps.fetch.outputs.review_id }}
     permissions:
       contents: read
       pull-requests: write
       issues: read
       id-token: write
+      actions: read
     env:
       REVIEW_BOT: 'claude[bot]'
     steps:
@@ -440,6 +524,7 @@ jobs:
           persist-credentials: false
 
       - name: Fetch the review comment into ./REVIEW.md
+        id: fetch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -447,19 +532,38 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          # The review is the review bot's comment that links this run: the
-          # action's tracking comment carries a job link ending in
-          # /actions/runs/<run id>). An @claude reply posted while the review
-          # ran, or an earlier run's review, links another run, so neither can
-          # become the verdict input; a re-run keeps the run id. When no comment
-          # links this run the step fails and the gate reads INCONCLUSIVE.
+          # The tracking comment is the earliest review-bot comment linking
+          # this run after the review job started. A later @claude reply can
+          # repeat the same link, so it cannot decide the verdict. A comment
+          # edited more than two minutes after the job completed is refused.
           # Pass it to the extractor as a file (not inline in the prompt) to
           # avoid prompt injection from the review/PR text.
-          # --slurp joins the pages first: a --jq filter runs once per page, so
-          # `last` there would emit one comment per page on a long thread.
-          gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
-            | jq -r --arg bot "$REVIEW_BOT" --arg run "$RUN_ID" \
-                'add | map(select(.user.login == $bot and (.body | contains("/actions/runs/" + $run + ")")))) | last | .body // empty' > REVIEW.md
+          # --slurp joins all comment and job pages before selecting one object.
+          jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --paginate --slurp)
+          timing=$(printf '%s' "$jobs" | jq -c '[.[] | .jobs[]? | select(.name == "claude-review" and .started_at != null and .completed_at != null)] | sort_by(.started_at, .id) | last // {}')
+          started=$(printf '%s' "$timing" | jq -r '.started_at // empty')
+          completed=$(printf '%s' "$timing" | jq -r '.completed_at // empty')
+          if [ -z "$started" ] || [ -z "$completed" ]; then
+            echo "The claude-review job timing is unavailable for run $RUN_ID; verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          review=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
+            | jq -c --arg bot "$REVIEW_BOT" --arg run "$RUN_ID" --arg started "$started" \
+                '[.[][] | select(.user.login == $bot and .user.type == "Bot" and .created_at >= $started and ((.body // "") | contains("/actions/runs/" + $run + ")")))] | sort_by(.created_at, .id) | first // {}')
+          review_id=$(printf '%s' "$review" | jq -r '.id // empty')
+          if ! [[ "$review_id" =~ ^[0-9]+$ ]]; then
+            echo "No tracking comment by $REVIEW_BOT links this run ($RUN_ID) after the review job started; verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          updated=$(printf '%s' "$review" | jq -r '.updated_at // empty')
+          completed_epoch=$(date -u -d "$completed" +%s 2>/dev/null) || completed_epoch=''
+          updated_epoch=$(date -u -d "$updated" +%s 2>/dev/null) || updated_epoch=''
+          if [ -z "$completed_epoch" ] || [ -z "$updated_epoch" ] || [ "$updated_epoch" -gt "$((completed_epoch + 120))" ]; then
+            echo "Tracking comment $review_id was updated more than 120 seconds after claude-review completed, or its timing is unreadable; verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          printf '%s' "$review" | jq -r '.body // empty' > REVIEW.md
+          printf 'review_id=%s\n' "$review_id" >> "$GITHUB_OUTPUT"
           if [ ! -s REVIEW.md ]; then
             echo "No comment by $REVIEW_BOT links this run ($RUN_ID); extractor cannot run." >&2
             exit 1
@@ -536,7 +640,7 @@ jobs:
             --permission-mode default
             --tools "Read"
             --allowedTools "Read(./REVIEW.md)"
-            --disallowedTools "Bash,Monitor,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**)"
+            --disallowedTools "Bash,Monitor,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**),Read(//home/runner/actions-runner/**),Read(//home/runner/.docker/**),Read(//home/runner/.config/**)"
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","BLOCK"]},"count":{"type":"integer","minimum":0}},"required":["verdict","count"],"additionalProperties":false}'
           prompt: >-
             Read the file ./REVIEW.md in the repository — it is an automated code review of this
@@ -583,6 +687,8 @@ jobs:
       pull-requests: write
     steps:
       - name: Remove a review-ack applied before this push
+        if: ${{ github.run_attempt == 1 }}
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -597,176 +703,220 @@ jobs:
             echo "No $ACK_LABEL label to remove."
           fi
 
-  # ---------------------------------------------------------------------------
-  # Merge gate. Reads the verdict extractor's line and FAILS this check when the
-  # review reported a HIGH/CRITICAL finding, so the PR cannot merge until the
-  # latest review is clean. Three outcomes:
-  #
-  #   PASS          - extractor emitted VERDICT=PASS (no HIGH/CRITICAL). Check green.
-  #   BLOCK         - extractor emitted VERDICT=BLOCK (>=1). Check red. Push a fix
-  #                   (the review + extractor re-run on each push and can clear it),
-  #                   or a MAINTAINER applies the `review-ack` label and re-runs
-  #                   the failed jobs to override.
-  #   INCONCLUSIVE  - the review or the extractor did not complete (transient API
-  #                   throttle) OR no parseable verdict was found. Check red, but
-  #                   distinct and re-runnable: a flaky pass must NEVER read as PASS.
-  #
-  # The `review-ack` override is access-controlled and scoped: it counts only when
-  # the label was applied by someone with write/maintain/admin permission AND at or
-  # after the moment GitHub created this workflow run. The run's `created_at` is
-  # set by GitHub when the triggering event arrives and stays fixed when a job
-  # is re-run, so an ack applied after a BLOCK counts on "Re-run failed jobs",
-  # while an ack from before the latest push never does. (A commit's committer
-  # date is not used: the author sets it.) If either timestamp cannot be read,
-  # the override is refused. The PR's author cannot apply it to their own PR:
-  # the ack must come from another maintainer. Admin-bypass on branch
-  # protection remains the emergency break-glass.
-  #
-  # ROLLOUT (per-repo): OBSERVE-ONLY until a maintainer adds the `review-gate`
-  # check to the branch's required status checks. Create the label once:
-  #   gh label create review-ack -c '0E8A16' \
-  #     -d 'Maintainer override: merge despite a blocking Claude review finding'
-  # ---------------------------------------------------------------------------
+  # The required gate always evaluates a ready PR, including failed review jobs.
+  # The newest workflow run on a SHA decides the required check; a rerun of an older run does not replace it.
+  # State is not read again immediately before an override; a change after the final read is an accepted race.
+  # Collaborator permission is evaluated now, since the label event does not record historical permission.
   review-gate:
-    needs: [claude-review, verdict-extract]
-    # !cancelled(): the gate must still run (and report INCONCLUSIVE) when the
-    # review or extractor errored, because `needs` would otherwise SKIP it and
-    # a skipped required check could be misread as non-blocking. A run that a
-    # newer push canceled posts no gate comment; the newer run gates. Skip
-    # only for dependabot.
+    needs: [claude-review, verdict-extract, clear-stale-ack]
     if: ${{ !cancelled() && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
       actions: read
+      issues: read
+      pull-requests: write
     steps:
-      # A draft gets no Claude review, so its gate has no verdict to read. Fail
-      # rather than skip: a skipped required check counts as passing, and after
-      # "Ready for review" this draft run's result would stand until the new
-      # run's gate reports. A draft cannot merge, so the red check blocks nothing.
       - name: Fail while the PR is a draft
         if: ${{ github.event.pull_request.draft }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          msg="This PR is a draft, so the Claude review has not run, and a red review-gate on a draft is expected. Mark the PR ready for review to start the review; this gate then runs again on the review's verdict."
+          # shellcheck disable=SC2016
+          msg="This PR is a draft, so the Claude review has not run. Mark the PR ready for review to start the review."
           echo "::error title=Draft PR::$msg"
           printf '%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+          live=$(gh api "repos/$REPO/pulls/$PR" 2>/dev/null) || live=''
+          live_head=$(printf '%s' "$live" | jq -r '.head.sha // empty' 2>/dev/null || true)
+          live_draft=$(printf '%s' "$live" | jq -r '.draft | if . == true then "true" elif . == false then "false" else empty end' 2>/dev/null || true)
+          if [ "$SAME_REPO" = "true" ] && [ "$live_head" = "$HEAD_SHA" ] && [ "$live_draft" = true ]; then
+            marker='### Review Gate'
+            comments=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate --slurp 2>/dev/null) || comments=''
+            if [ -n "$comments" ]; then
+              old=$(printf '%s' "$comments" | jq -r --arg marker "$marker" '[.[][] | select(.user.login == "github-actions[bot]" and .user.type == "Bot" and ((.body // "") | startswith($marker)))] | max_by(.created_at, .id) | .id // empty' 2>/dev/null) || old=''
+              if [ -n "$old" ]; then
+                printf -v draft_body '%s\n\n%s' "$marker" 'Gate: BLOCK. The review waits for this PR to be marked ready.'
+                body=$(jq -n --arg body "$draft_body" '{body:$body}')
+                printf '%s' "$body" | gh api -X PATCH "repos/$REPO/issues/comments/$old" --input - >/dev/null 2>&1 || true
+              fi
+            fi
+          fi
           exit 1
       - name: Evaluate the verdict
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           EXTRACT_RESULT: ${{ needs.verdict-extract.result }}
           VERDICT_LINE: ${{ needs.verdict-extract.outputs.verdict_line }}
-          REVIEW_BOT: 'claude[bot]'
+          REVIEW_COMMENT_ID: ${{ needs.verdict-extract.outputs.review_id }}
+          REVIEW_ATTEMPT: ${{ needs.claude-review.outputs.review_attempt }}
           ACK_LABEL: review-ack
           MARKER: '### Review Gate'
         run: |
+          # shellcheck disable=SC2016
           set -euo pipefail
-          verdict=""; count="0"; reason=""; gate="BLOCK"
+          export LC_ALL=C
+          verdict=BLOCK; gate=BLOCK; reason=''; count=0; ack_note=''; override=no
+          tag="<!-- review-gate sha=$HEAD_SHA review=${REVIEW_COMMENT_ID:-none}.${REVIEW_ATTEMPT:-1} -->"
 
-          # 1) INCONCLUSIVE if the review or the extractor didn't complete.
-          if [ "$REVIEW_RESULT" != "success" ]; then
-            verdict="INCONCLUSIVE"
-            reason="The Claude review did not complete (job result: \`${REVIEW_RESULT}\`). Usually a transient API throttle, not a code finding."
-          elif [ "$EXTRACT_RESULT" != "success" ]; then
-            verdict="INCONCLUSIVE"
-            reason="The verdict extractor did not complete (job result: \`${EXTRACT_RESULT}\`)."
+          # A deleted head repository takes the fork path.
+          if [ "$SAME_REPO" != true ]; then
+            verdict=FORK
+            reason="This PR comes from a fork. A maintainer must review it locally and apply \`review-ack\` after this run starts."
+          elif [ "$REVIEW_RESULT" != success ]; then
+            verdict=INCONCLUSIVE
+            reason="The Claude review did not complete (job result: \`$REVIEW_RESULT\`), so **this diff was not reviewed**. Read the \`claude-review\` job log before merging: a transient throttle and a rejected request (expired credential or exhausted quota) look identical from here, and a rejected request stays broken until someone rotates the credential."
+          elif [ "$EXTRACT_RESULT" != success ]; then
+            verdict=INCONCLUSIVE
+            reason="The verdict extractor did not complete (job result: \`$EXTRACT_RESULT\`)."
           else
-            # 2) Read the verdict from the extractor's JOB OUTPUT (parsed from the
-            # agent's execution log, not a PR comment — the comment channel is
-            # unreliable for a one-shot). The extractor job succeeded (checked
-            # above); an empty/garbled line here means the agent emitted nothing
-            # parseable, which is INCONCLUSIVE (never a silent PASS).
             line=$(printf '%s' "$VERDICT_LINE" | grep -oE 'MERGE-VERDICT-GATE VERDICT=(PASS|BLOCK) COUNT=[0-9]+' | tail -1 || true)
             if [ -z "$line" ]; then
-              verdict="INCONCLUSIVE"
+              verdict=INCONCLUSIVE
               reason="The verdict extractor produced no parseable \`MERGE-VERDICT-GATE VERDICT=...\` line."
             else
               verdict=$(printf '%s' "$line" | sed -E 's/.*VERDICT=([A-Z]+).*/\1/')
               count=$(printf '%s' "$line" | sed -E 's/.*COUNT=([0-9]+).*/\1/')
-              # The pair must agree: PASS with findings, or BLOCK with none,
-              # means the extractor misread the review.
-              if { [ "$verdict" = "PASS" ] && [ "$count" -ne 0 ]; } || \
-                 { [ "$verdict" = "BLOCK" ] && [ "$count" -eq 0 ]; }; then
-                reason="The verdict extractor returned VERDICT=${verdict} with COUNT=${count}, which contradict each other."
-                verdict="INCONCLUSIVE"
+              if { [ "$verdict" = PASS ] && [ "$count" -ne 0 ]; } || \
+                 { [ "$verdict" = BLOCK ] && [ "$count" -eq 0 ]; }; then
+                reason="The verdict extractor returned VERDICT=$verdict with COUNT=$count, which contradict each other."
+                verdict=INCONCLUSIVE
               fi
             fi
           fi
 
-          # 3) review-ack override: maintainer-applied AND applied after this run
-          #    was created (see the header for why the run, not the commit).
-          override="no"; ack_actor=""
-          if gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$ACK_LABEL"; then
-            # --slurp joins the pages first (see the REVIEW.md fetch above).
-            ev=$(gh api "repos/$REPO/issues/$PR/events" --paginate --slurp 2>/dev/null \
-              | jq -c --arg l "$ACK_LABEL" 'add | map(select(.event == "labeled" and .label.name == $l)) | last // {}' 2>/dev/null || echo '{}')
-            ack_actor=$(printf '%s' "$ev" | jq -r '.actor.login // ""' 2>/dev/null || echo "")
-            applied_at=$(printf '%s' "$ev" | jq -r '.created_at // ""' 2>/dev/null || echo "")
-            run_at=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.created_at // ""' 2>/dev/null || echo "")
-            perm="none"
-            if [ -n "$ack_actor" ]; then
-              perm=$(gh api "repos/$REPO/collaborators/$ack_actor/permission" --jq '.permission // "none"' 2>/dev/null || echo none)
+          live=$(gh api "repos/$REPO/pulls/$PR" 2>/dev/null) || live=''
+          live_head=$(printf '%s' "$live" | jq -r '.head.sha // empty' 2>/dev/null || true)
+          label=$(printf '%s' "$live" | jq -r --arg l "$ACK_LABEL" '[.labels[]?.name | select(. == $l)] | first // empty' 2>/dev/null || true)
+          if [ "$live_head" != "$HEAD_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            verdict=INCONCLUSIVE
+            reason='The live PR head differs from this run, or could not be read. Run the check on the current head.'
+          fi
+
+          comments=''; comments_ok=no
+          if [ "$SAME_REPO" = true ]; then
+            if comments=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate --slurp 2>/dev/null) && \
+               printf '%s' "$comments" | jq -e 'all(.[]; type == "array")' >/dev/null 2>&1; then
+              comments_ok=yes
             fi
-            # Both timestamps are GitHub's own UTC ISO-8601 strings, which sort
-            # lexically, so `sort -c` over run,applied succeeds iff applied >= run.
-            # An empty value on either side refuses the override.
-            scoped="no"
-            if [ -n "$applied_at" ] && [ -n "$run_at" ] && \
-               printf '%s\n%s\n' "$run_at" "$applied_at" | sort -c >/dev/null 2>&1; then
-              scoped="yes"
+          fi
+          anchor_at=''
+          if [ -n "$label" ]; then
+            if [ "$live_head" != "$HEAD_SHA" ] || [ -z "$HEAD_SHA" ]; then
+              ack_note='The live PR head has moved or is unreadable.'
+            elif [ "$SAME_REPO" = true ]; then
+              if [ "$comments_ok" != yes ]; then
+                ack_note='The gate comments could not be read.'
+              else
+                anchor_at=$(printf '%s' "$comments" | jq -r --arg marker "$MARKER" --arg tag "$tag" '[.[][] | select(.user.login == "github-actions[bot]" and .user.type == "Bot" and ((.body // "") | split("\n") | first) == $marker) | select(((.body // "") | split("\n") | map(select(. != "")) | last) == $tag)] | max_by(.created_at, .id) | .created_at // empty' 2>/dev/null || true)
+                [ -n "$anchor_at" ] || ack_note='No published gate comment matches this review.'
+              fi
+            else
+              runs=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&event=pull_request&per_page=100" --paginate --slurp 2>/dev/null) || runs=''
+              anchor_at=$(printf '%s' "$runs" | jq -r '[.[]?.workflow_runs[]?.created_at] | max // empty' 2>/dev/null || true)
+              [ -n "$anchor_at" ] || ack_note='The workflow run anchor could not be read.'
             fi
-            case "$perm" in admin|maintain|write) maint="yes" ;; *) maint="no" ;; esac
-            if [ "$scoped" = "yes" ] && [ "$maint" = "yes" ] && \
-               [ -n "$PR_AUTHOR" ] && [ "$ack_actor" != "$PR_AUTHOR" ]; then
-              override="yes"
+            if [ -z "$ack_note" ]; then
+              events=$(gh api "repos/$REPO/issues/$PR/events?per_page=100" --paginate --slurp 2>/dev/null) || events=''
+              ev=$(printf '%s' "$events" | jq -c --arg l "$ACK_LABEL" '[.[][] | select((.event == "labeled" or .event == "unlabeled") and .label.name == $l)] | max_by(.created_at, .id) // {}' 2>/dev/null) || ev=''
+              actor=$(printf '%s' "$ev" | jq -r '.actor.login // empty' 2>/dev/null || true)
+              actor_id=$(printf '%s' "$ev" | jq -r '.actor.id // empty' 2>/dev/null || true)
+              actor_type=$(printf '%s' "$ev" | jq -r '.actor.type // empty' 2>/dev/null || true)
+              applied_at=$(printf '%s' "$ev" | jq -r '.created_at // empty' 2>/dev/null || true)
+              event_type=$(printf '%s' "$ev" | jq -r '.event // empty' 2>/dev/null || true)
+              actor_lower=$(printf '%s' "$actor" | tr '[:upper:]' '[:lower:]')
+              author_lower=$(printf '%s' "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
+              if [ "$event_type" != labeled ] || [ "$actor_type" != User ] || \
+                 ! [[ "$actor_id" =~ ^[0-9]+$ ]] || ! [[ "$PR_AUTHOR_ID" =~ ^[0-9]+$ ]] || \
+                 [ -z "$actor" ] || [ -z "$PR_AUTHOR" ]; then
+                ack_note='The latest label event or its user identity is unreadable.'
+              elif [ "$actor_id" = "$PR_AUTHOR_ID" ] || [ "$actor_lower" = "$author_lower" ]; then
+                ack_note='The PR author cannot acknowledge their own review.'
+              elif ! [[ "$anchor_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || \
+                   ! [[ "$applied_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || \
+                   ! [[ "$applied_at" > "$anchor_at" ]]; then
+                ack_note='The label must be applied strictly after this review result was published.'
+              else
+                permission=$(gh api "repos/$REPO/collaborators/$actor/permission" 2>/dev/null) || permission=''
+                perm=$(printf '%s' "$permission" | jq -r '.permission // empty' 2>/dev/null || true)
+                perm_id=$(printf '%s' "$permission" | jq -r '.user.id // empty' 2>/dev/null || true)
+                if [ "$perm_id" != "$actor_id" ]; then
+                  ack_note='The label actor permission could not be verified.'
+                else
+                  case "$perm" in
+                    admin|maintain|write) override=yes ;;
+                    *) ack_note='The label actor does not have write permission.' ;;
+                  esac
+                fi
+              fi
             fi
           fi
 
-          # 4) Decide.
-          if [ "$verdict" = "PASS" ]; then
-            gate="PASS"; reason="Review reported no HIGH/CRITICAL findings."
-          elif [ "$override" = "yes" ]; then
-            gate="PASS"; reason="Overridden via \`${ACK_LABEL}\` (applied by maintainer @${ack_actor} after GitHub created this run for the current head). Original verdict: ${verdict}${count:+, ${count} blocking}."
+          if [ "$verdict" = PASS ]; then
+            gate=PASS
+            reason='Review reported no HIGH/CRITICAL findings.'
+          elif [ "$override" = yes ] && [ "$live_head" = "$HEAD_SHA" ]; then
+            gate=PASS
+            reason="A maintainer applied \`$ACK_LABEL\` after this result. Original verdict: $verdict."
+          fi
+          if [ "$verdict" = BLOCK ] && [ -z "$reason" ]; then
+            reason="Review reported $count HIGH/CRITICAL finding(s)."
           fi
 
-          # 5) Post a sticky gate comment.
+          # The summary remains available when comments cannot be read or written.
           # The backticks below are Markdown code spans in the comment text, not
           # command substitution.
           # shellcheck disable=SC2016
           {
             printf '%s\n\n' "$MARKER"
             case "$gate:$verdict" in
-              PASS:PASS)        printf '✅ **Gate: PASS** — %s\n' "$reason" ;;
-              PASS:*)           printf '✅ **Gate: PASS (override)** — %s\n' "$reason" ;;
-              BLOCK:BLOCK)      printf '🛑 **Gate: BLOCK** — the review reported %s HIGH/CRITICAL finding(s). Address them and push (the review re-runs on each push), or a maintainer can apply the `%s` label and then re-run this check (Re-run failed jobs) to override.\n' "$count" "$ACK_LABEL" ;;
-              *:INCONCLUSIVE)   printf '⚠️ **Gate: INCONCLUSIVE** — %s Push a new commit to re-run the checks (they re-run on every push), or a maintainer can apply the `%s` label and then re-run this check (Re-run failed jobs).\n' "$reason" "$ACK_LABEL" ;;
-              *)                printf '🛑 **Gate: BLOCK** — %s\n' "$reason" ;;
+              PASS:PASS) printf '✅ **Gate: PASS.** %s\n' "$reason" ;;
+              PASS:*) printf '✅ **Gate: PASS (override).** %s\n' "$reason" ;;
+              BLOCK:BLOCK) printf '🛑 **Gate: BLOCK.** The review reported %s HIGH/CRITICAL finding(s). Address them and push, or have a maintainer apply `%s` and rerun this gate.\n' "$count" "$ACK_LABEL" ;;
+              *:FORK) printf '🛑 **Gate: FORK.** %s\n' "$reason" ;;
+              *:INCONCLUSIVE) printf '⚠️ **Gate: INCONCLUSIVE.** %s Push a new commit or have a maintainer apply `%s` and rerun this gate.\n' "$reason" "$ACK_LABEL" ;;
             esac
-            # NOTE: intentionally no "observe-only" footer. Whether this gate is a
-            # required (merge-blocking) check varies per repo/branch and changes
-            # over time; a hard-coded claim goes stale (it falsely read
-            # "observe-only" after the gate was made required across the lab).
-            # GitHub's checks UI already marks required checks; the verdict lines
-            # above tell the reader what to do regardless of enforcement.
+            printf '\nHead commit: `%s`\n' "$HEAD_SHA"
+            [ -z "$ack_note" ] || printf '\nAcknowledgment: %s\n' "$ack_note"
+            printf '\n%s\n' "$tag"
           } > gate-comment.md
-          gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARKER\"))) | .id" 2>/dev/null \
-          | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null 2>&1 || true; done
-          gh pr comment "$PR" --repo "$REPO" --body-file gate-comment.md || true
-          # (No raw extractor comment to tidy: the verdict now travels as a job
-          # output, so the extractor posts nothing to the thread. The visible
-          # comments are the review, semgrep, CI, and this gate verdict.)
+          cat gate-comment.md >> "$GITHUB_STEP_SUMMARY"
 
-          # 6) Set the check result.
-          if [ "$gate" = "PASS" ]; then
-            echo "review-gate: PASS — $reason"
+          write_live=$(gh api "repos/$REPO/pulls/$PR" 2>/dev/null) || write_live=''
+          write_head=$(printf '%s' "$write_live" | jq -r '.head.sha // empty' 2>/dev/null || true)
+          write_draft=$(printf '%s' "$write_live" | jq -r '.draft | if . == true then "true" elif . == false then "false" else empty end' 2>/dev/null || true)
+          if [ "$SAME_REPO" = true ] && [ "$comments_ok" = yes ] &&
+             [ "$write_head" = "$HEAD_SHA" ] && [ "$write_draft" = false ]; then
+            newest=$(printf '%s' "$comments" | jq -c --arg marker "$MARKER" '[.[][] | select(.user.login == "github-actions[bot]" and .user.type == "Bot" and ((.body // "") | split("\n") | first) == $marker)] | max_by(.created_at, .id) // {}' 2>/dev/null || true)
+            newest_id=$(printf '%s' "$newest" | jq -r '.id // empty' 2>/dev/null || true)
+            newest_tag=$(printf '%s' "$newest" | jq -r '(.body // "") | split("\n") | map(select(. != "")) | last // empty' 2>/dev/null || true)
+            payload=$(jq -Rs '{body:.}' gate-comment.md)
+            if [ -n "$newest_id" ] && [ "$newest_tag" = "$tag" ]; then
+              printf '%s' "$payload" | gh api -X PATCH "repos/$REPO/issues/comments/$newest_id" --input - >/dev/null 2>&1 || true
+            elif printf '%s' "$payload" | gh api -X POST "repos/$REPO/issues/$PR/comments" --input - >/dev/null 2>&1; then
+              printf '%s' "$comments" | jq -r --arg marker "$MARKER" '.[][] | select(.user.login == "github-actions[bot]" and .user.type == "Bot" and ((.body // "") | split("\n") | first) == $marker) | .id' 2>/dev/null |
+                while read -r id; do
+                  delete_live=$(gh api "repos/$REPO/pulls/$PR" 2>/dev/null) || delete_live=''
+                  delete_head=$(printf '%s' "$delete_live" | jq -r '.head.sha // empty' 2>/dev/null || true)
+                  delete_draft=$(printf '%s' "$delete_live" | jq -r '.draft | if . == true then "true" elif . == false then "false" else empty end' 2>/dev/null || true)
+                  if [ "$delete_head" != "$HEAD_SHA" ] || [ "$delete_draft" != false ]; then break; fi
+                  gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null 2>&1 || true
+                done
+            fi
+          fi
+          if [ "$gate" = PASS ]; then
+            echo "review-gate: PASS: $reason"
           else
-            echo "review-gate: ${verdict} — $reason"
+            echo "review-gate: $verdict: $reason"
             exit 1
           fi
