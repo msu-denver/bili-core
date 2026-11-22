@@ -221,4 +221,4 @@ jobs:
             --permission-mode default
             --tools "Read,Grep,Glob,ToolSearch"
             --allowedTools "Read,Grep,Glob"
-            --disallowedTools "Bash,Monitor,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**)"
+            --disallowedTools "Bash,Monitor,Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Read(./.git/**),Read(//proc/**),Read(//home/runner/work/_temp/**),Read(//home/runner/actions-runner/**),Read(//home/runner/.docker/**),Read(//home/runner/.config/**),Grep(//home/runner/actions-runner/**),Grep(//home/runner/.docker/**),Grep(//home/runner/.config/**),Glob(//home/runner/actions-runner/**),Glob(//home/runner/.docker/**),Glob(//home/runner/.config/**)"
