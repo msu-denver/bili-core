@@ -186,6 +186,7 @@ jobs:
 
     outputs:
       review_attempt: ${{ steps.attempt.outputs.value }}
+      split_parts: ${{ steps.context.outputs.split_parts }}
     steps:
       - name: Record this review attempt
         id: attempt
@@ -284,6 +285,7 @@ jobs:
           printf '%s\n' "${changed_files[@]}" > "$dir/changed-files.txt"
           bytes=$(wc -c < "$dir/diff.patch")
           lines=$(wc -l < "$dir/diff.patch")
+          index=0
           if [ "$bytes" -gt 200000 ] || [ "$lines" -gt 6000 ]; then
             mkdir -p "$dir/diff-parts"
             printf '| Part | Files | Bytes |\n|---|---:|---:|\n' > "$dir/diff-parts/INDEX.md"
@@ -299,7 +301,6 @@ jobs:
               fi
             done
             indexed_files=()
-            index=0
             for part in "${parts[@]}"; do
               index=$((index + 1))
               safe=$(printf '%s' "$part" | tr -c 'A-Za-z0-9._-' '_')
@@ -372,8 +373,7 @@ jobs:
               + "\n\n\(.body)\n"' "$RUNNER_TEMP/trusted-comments.json" > "$dir/comments.md"
           actors=$(jq -r '[.[].user.login] + ["github-actions[bot]", "claude[bot]"] | unique | join(",")' \
             "$RUNNER_TEMP/trusted-comments.json")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-          echo "actors=$actors" >> "$GITHUB_OUTPUT"
+          printf 'dir=%s\nactors=%s\nsplit_parts=%s\n' "$dir" "$actors" "$index" >> "$GITHUB_OUTPUT"
 
       # SHA-pinned anthropics/claude-code-action v1.0.280. Bump by re-resolving
       # the tag's commit (the tag is annotated, so peel it):
@@ -530,6 +530,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           RUN_ID: ${{ github.run_id }}
+          SPLIT_PARTS: ${{ needs.claude-review.outputs.split_parts }}
         run: |
           set -euo pipefail
           # The tracking comment is the earliest review-bot comment linking
@@ -562,7 +563,24 @@ jobs:
             echo "Tracking comment $review_id was updated more than 120 seconds after claude-review completed, or its timing is unreadable; verdict is INCONCLUSIVE." >&2
             exit 1
           fi
-          printf '%s' "$review" | jq -r '.body // empty' > REVIEW.md
+          body=$(printf '%s' "$review" | jq -r '.body // empty')
+          if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*- \[ \] '; then
+            echo "::error::Tracking comment $review_id has an unchecked checklist item; the review is unfinished and the verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*(#{1,6}[[:space:]]+|\*\*).*test coverage'; then
+            echo "::error::Tracking comment $review_id has no Test coverage section; the review is unfinished and the verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          if ! [[ "$SPLIT_PARTS" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::The review's split-diff part count is unavailable; the verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          if [ "$SPLIT_PARTS" -gt 0 ] && ! printf '%s\n' "$body" | grep -Eiq "(^|[^[:alnum:]])${SPLIT_PARTS}[[:space:]]+parts?([^[:alnum:]]|$)"; then
+            echo "::error::Tracking comment $review_id does not state the split diff's $SPLIT_PARTS parts; the review is unfinished and the verdict is INCONCLUSIVE." >&2
+            exit 1
+          fi
+          printf '%s\n' "$body" > REVIEW.md
           printf 'review_id=%s\n' "$review_id" >> "$GITHUB_OUTPUT"
           if [ ! -s REVIEW.md ]; then
             echo "No comment by $REVIEW_BOT links this run ($RUN_ID); extractor cannot run." >&2
