@@ -6,7 +6,7 @@ Covers:
 - State adapter carries custom fields in and out of sub-graphs
 - Custom fields promoted to outer MAS state
 - Conditional edges can reference custom state fields
-- Single-agent MAS with custom state (Katie pattern)
+- Single-agent MAS with custom state
 - YAML round-trip with state_fields
 """
 
@@ -451,7 +451,7 @@ class TestStateAdapterCustomFields:
 
 
 # =========================================================================
-# TEST: Single-agent MAS pattern (Katie pattern)
+# TEST: Single-agent MAS pattern
 # =========================================================================
 
 
