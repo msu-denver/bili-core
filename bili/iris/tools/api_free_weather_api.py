@@ -40,7 +40,9 @@ Example:
 --------
 To fetch weather data for a city:
 ```python
-from katie.tools.weather import fetch_weather
+import asyncio
+
+from bili.iris.tools.api_free_weather_api import fetch_weather
 
 weather_data = asyncio.run(fetch_weather("New York"))
 print(weather_data)
