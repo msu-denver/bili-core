@@ -408,11 +408,15 @@ jobs:
       # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB keeps the Anthropic, cloud and
       # Actions credentials out of the environment of any process the agent
       # starts. The action turns it on only with allowed_non_write_users.
+      # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS keeps every subagent in the foreground: the
+      # job ends when the agent's turn ends, so a lane started in the background never
+      # reports, and the review would post its checklist with no findings.
       - name: Run Claude code review
         id: claude-review
         uses: anthropics/claude-code-action@469588f42e6b1e94cd14ad09dccfeaec772ce0fd # v1.0.280
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           include_fix_links: true
@@ -447,6 +451,8 @@ jobs:
             launch to do the same. The checkout is the PR's head, so read any file for context.
             When ${{ steps.context.outputs.dir }}/diff-parts/INDEX.md exists, read it and every listed part. State in your summary
             that you reviewed a split diff and give the number of parts.
+            You may hand parts to subagents, but wait for every subagent's result and post the
+            complete review before you finish; never end your turn while a lane is still running.
             Post each finding as an inline comment with the inline-comment tool, and put the whole
             review (a summary, every finding with its severity, and the sections asked for below)
             in your tracking comment. Only github-actions[bot]'s comments under the "Semgrep (OSS)"

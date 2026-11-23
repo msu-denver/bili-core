@@ -198,11 +198,15 @@ jobs:
       # --permission-mode default makes a call no allow rule covers a denial.
       # Without a mode, claude-code-action from v1.0.273 starts the session in
       # auto mode, where a safety review can approve such a call.
+      # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS keeps every subagent in the foreground: the
+      # job ends when the agent's turn ends, so a lane started in the background never
+      # reports, and the review would post its checklist with no findings.
       - name: Run Claude Code
         if: steps.guard.outputs.skip == 'false' && steps.trusted.outputs.run == 'true'
         uses: anthropics/claude-code-action@469588f42e6b1e94cd14ad09dccfeaec772ce0fd # v1.0.280
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           include_fix_links: true
