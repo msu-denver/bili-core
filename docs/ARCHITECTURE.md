@@ -164,39 +164,7 @@ checkpointer = AsyncPostgresSaver.from_conn_string(
 
 Records a migration could not convert are kept in a separate archive (`checkpoints_archive` in PostgreSQL and MongoDB, a `.archive` sidecar file for JSONL) for manual review; `delete_thread` does not touch the archive.
 
-**Orphaned PostgreSQL blobs.** Through release 5.11.0, `delete_thread` on PostgreSQL deleted a thread's `checkpoints` and `checkpoint_writes` rows but left its `checkpoint_blobs` rows, so a deleted conversation's messages stayed in the database. They stay even after the thread id is used again, which is the usual case for a stable per-user thread id: the new conversation's rows sit beside the old one's. Keep-last-N pruning leaves rows of the same kind, because it deletes old checkpoints but not the blob versions only they referenced.
-
-`delete_orphaned_blobs()` removes them. A blob row is an orphan when no row in `checkpoints` with the same `thread_id` and `checkpoint_ns` maps the row's `channel` to the row's `version` in its `channel_versions`. Every read joins blobs on exactly that key, so no read can return an orphan and deleting one cannot change what any conversation loads.
-
-```python
-from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
-
-saver = get_pg_checkpointer()
-print(saver.delete_orphaned_blobs(dry_run=True))       # rows that would be deleted
-print(saver.delete_orphaned_blobs(batch_size=5000))    # rows deleted
-```
-
-- **Operator tool.** It is database-wide and ignores the saver's `user_id`. Nothing in this library runs it; whether and when to delete rows in a deployed database is its owner's decision.
-- **Dry run.** `dry_run=True` counts the rows in a read-only transaction and changes nothing.
-- **Batching.** With `batch_size`, each batch of at most that many rows is its own transaction, repeated until a batch comes back short, so no single transaction runs long on a large table. Each batch evaluates the predicate again; without `batch_size`, one statement deletes everything in one transaction.
-- **Safe while the application runs.** The cleanup uses its own pooled connection, so it never joins a write in progress on the same saver. A put that has not committed is invisible to it, and every write path in this library commits a checkpoint's blobs and its checkpoint row in one transaction. Threads with a checkpoint newer than `min_idle_seconds` (default one hour) are skipped entirely: pruning can delete a thread's older checkpoints just before a run commits a checkpoint that reuses their unchanged blob versions, and until that commit those blobs look unreferenced. A later run cleans the skipped threads. Set `min_idle_seconds=0` only when nothing writes to the database.
-- **Idempotent.** A second run deletes nothing, once every thread is past the idle window.
-- **Archive.** A blob version referenced only by a row moved to `checkpoints_archive` counts as an orphan. No PostgreSQL migration is registered today, so that table is empty.
-
-The async saver offers the same operation as `adelete_orphaned_blobs()`. The equivalent SQL, for running by hand while nothing writes (without the idle window):
-
-```sql
-DELETE FROM checkpoint_blobs b
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM checkpoints c
-    CROSS JOIN LATERAL jsonb_each_text(c.checkpoint -> 'channel_versions') v
-    WHERE c.thread_id = b.thread_id
-        AND c.checkpoint_ns = b.checkpoint_ns
-        AND v.key = b.channel
-        AND v.value = b.version
-);
-```
+**Rows left by earlier releases.** Through release 5.11.0, `delete_thread` on PostgreSQL left a deleted conversation's rows in `checkpoint_blobs`, including its messages. This release deletes those rows for every new delete but does not remove rows that earlier deletes already left behind.
 
 #### Multi-Conversation Support
 

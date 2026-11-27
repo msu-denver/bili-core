@@ -1,4 +1,4 @@
-"""Real-PostgreSQL tests for thread deletion and orphaned blob cleanup.
+"""Real-PostgreSQL tests for thread deletion.
 
 These run graphs through PruningPostgresSaver against a live database and
 read the tables back with SQL, so they catch rows the mocked tests cannot
@@ -11,15 +11,13 @@ for example::
         pytest bili/iris/checkpointers/tests/test_pg_checkpointer_real_db.py
 
 Every test runs in a temporary schema it creates and drops, reached through
-``search_path``, so the migrations, the ALTER TABLE and the database-wide
-cleanup touch nothing outside it. The tests also refuse a DSN whose host is
-not local (localhost, 127.0.0.1, ::1 or a unix socket) unless
+``search_path``, so the migrations, the ALTER TABLE and the deletes touch
+nothing outside it. The tests also refuse a target that is not local
+(localhost, 127.0.0.1, ::1 or a unix socket) unless
 ``PG_INTEGRATION_TEST_ALLOW_REMOTE=1`` is set.
 """
 
 import os
-import threading
-import time
 import uuid
 from typing import Annotated, TypedDict
 
@@ -30,8 +28,6 @@ ALLOW_REMOTE = os.environ.get("PG_INTEGRATION_TEST_ALLOW_REMOTE") == "1"
 
 TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
-# Advisory lock key the hold-open trigger waits on.
-_HOLD_KEY = 3570357
 
 
 def _refusal(dsn, allow_remote):
@@ -45,16 +41,33 @@ def _refusal(dsn, allow_remote):
     if allow_remote:
         return None
     params = conninfo_to_dict(dsn)
-    hosts = params.get("host") or params.get("hostaddr") or os.environ.get("PGHOST")
-    # No host means libpq's default unix socket.
-    for host in (hosts or "").split(","):
-        host = host.strip()
-        if host and host not in _LOCAL_HOSTS and not host.startswith("/"):
-            return (
-                f"Refusing non-local PostgreSQL host {host!r}; set "
-                "PG_INTEGRATION_TEST_ALLOW_REMOTE=1 to allow it"
-            )
+    # libpq connects to hostaddr when it is set, uses host for the name, and
+    # fills either one from PGHOST or PGHOSTADDR when the DSN omits it. Every
+    # value present must be local, so no combination can reach a remote
+    # server. No value at all means libpq's default unix socket.
+    values = (
+        params.get("host"),
+        params.get("hostaddr"),
+        os.environ.get("PGHOST"),
+        os.environ.get("PGHOSTADDR"),
+    )
+    for value in values:
+        for host in (value or "").split(","):
+            host = host.strip()
+            if host and host not in _LOCAL_HOSTS and not host.startswith("/"):
+                return (
+                    f"Refusing non-local PostgreSQL host {host!r}; set "
+                    "PG_INTEGRATION_TEST_ALLOW_REMOTE=1 to allow it"
+                )
     return None
+
+
+@pytest.fixture(name="no_pg_host_env")
+def _no_pg_host_env(monkeypatch):
+    """Clear the libpq host variables so each guard case sets its own."""
+    monkeypatch.delenv("PGHOST", raising=False)
+    monkeypatch.delenv("PGHOSTADDR", raising=False)
+    return monkeypatch
 
 
 @pytest.mark.parametrize(
@@ -66,11 +79,13 @@ def _refusal(dsn, allow_remote):
         "host=/var/run/postgresql dbname=db",
         "dbname=db",
         "host=localhost,127.0.0.1 dbname=db",
+        "host=localhost hostaddr=127.0.0.1 dbname=db",
+        "postgresql://u:p@localhost/db?hostaddr=::1",
     ],
 )
-def test_local_dsns_are_accepted(dsn, monkeypatch):
+@pytest.mark.usefixtures("no_pg_host_env")
+def test_local_dsns_are_accepted(dsn):
     """Loopback hosts and unix sockets may run the tests."""
-    monkeypatch.delenv("PGHOST", raising=False)
     assert _refusal(dsn, allow_remote=False) is None
 
 
@@ -80,19 +95,49 @@ def test_local_dsns_are_accepted(dsn, monkeypatch):
         "postgresql://u:p@db.example.com:5432/db",
         "postgresql://u:p@10.0.0.5/db",
         "host=localhost,db.example.com dbname=db",
+        "host=localhost hostaddr=10.0.0.5 dbname=db",
+        "postgresql://u:p@localhost/db?hostaddr=10.0.0.5",
+        "hostaddr=10.0.0.5 dbname=db",
     ],
 )
-def test_remote_dsns_are_refused_unless_allowed(dsn, monkeypatch):
+@pytest.mark.usefixtures("no_pg_host_env")
+def test_remote_dsns_are_refused_unless_allowed(dsn):
     """A remote host is refused, and allowed only by the explicit variable."""
-    monkeypatch.delenv("PGHOST", raising=False)
     assert "Refusing non-local" in _refusal(dsn, allow_remote=False)
     assert _refusal(dsn, allow_remote=True) is None
 
 
-def test_remote_pghost_is_refused(monkeypatch):
-    """A DSN without a host falls back to PGHOST, which is checked too."""
-    monkeypatch.setenv("PGHOST", "db.example.com")
-    assert "Refusing non-local" in _refusal("dbname=db", allow_remote=False)
+@pytest.mark.parametrize(
+    "dsn, env",
+    [
+        ("dbname=db", {"PGHOST": "db.example.com"}),
+        ("dbname=db", {"PGHOSTADDR": "10.0.0.5"}),
+        ("dbname=db", {"PGHOST": "localhost", "PGHOSTADDR": "10.0.0.5"}),
+        ("host=localhost dbname=db", {"PGHOSTADDR": "10.0.0.5"}),
+        ("host=/var/run/postgresql dbname=db", {"PGHOST": "db.example.com"}),
+    ],
+)
+def test_a_remote_value_in_the_environment_is_refused(dsn, env, no_pg_host_env):
+    """PGHOST and PGHOSTADDR are checked whether or not the DSN names a host."""
+    for name, value in env.items():
+        no_pg_host_env.setenv(name, value)
+    assert "Refusing non-local" in _refusal(dsn, allow_remote=False)
+    assert _refusal(dsn, allow_remote=True) is None
+
+
+@pytest.mark.parametrize(
+    "dsn, env",
+    [
+        ("dbname=db", {"PGHOST": "/tmp", "PGHOSTADDR": "127.0.0.1"}),
+        ("host=localhost dbname=db", {"PGHOSTADDR": "::1"}),
+        ("hostaddr=127.0.0.1 dbname=db", {"PGHOST": "localhost"}),
+    ],
+)
+def test_local_values_in_the_environment_are_accepted(dsn, env, no_pg_host_env):
+    """Local PGHOST and PGHOSTADDR values beside a local DSN are allowed."""
+    for name, value in env.items():
+        no_pg_host_env.setenv(name, value)
+    assert _refusal(dsn, allow_remote=False) is None
 
 
 def test_missing_dsn_is_refused():
@@ -195,84 +240,11 @@ def _counts(pool, thread_id):
         }
 
 
-def _blob_keys(pool, thread_id):
-    """Return every (namespace, channel, version) blob key of a thread."""
-    with pool.connection() as conn:
-        return set(
-            conn.execute(
-                "SELECT checkpoint_ns, channel, version FROM checkpoint_blobs "
-                "WHERE thread_id = %s",
-                (thread_id,),
-            ).fetchall()
-        )
-
-
-def _unreferenced(pool):
-    """Count blob rows no checkpoint references, computed with ->> lookups.
-
-    Written independently of the library's predicate, so the cleanup's
-    count is checked against a second formulation.
-    """
-    with pool.connection() as conn:
-        return conn.execute(
-            """
-            SELECT count(*) FROM checkpoint_blobs b WHERE NOT EXISTS (
-                SELECT 1 FROM checkpoints c
-                WHERE c.thread_id = b.thread_id
-                AND c.checkpoint_ns = b.checkpoint_ns
-                AND c.checkpoint -> 'channel_versions' ->> b.channel = b.version
-            )
-            """
-        ).fetchone()[0]
-
-
-def _contains(pool, thread_id, text):
-    """Count a thread's blob rows whose serialized bytes contain ``text``."""
-    with pool.connection() as conn:
-        rows = conn.execute(
-            "SELECT blob FROM checkpoint_blobs WHERE thread_id = %s",
-            (thread_id,),
-        ).fetchall()
-    return sum(1 for (blob,) in rows if blob and text.encode() in bytes(blob))
-
-
 def _old_style_delete(pool, thread_id):
     """Delete a thread the way earlier releases did: blobs were left behind."""
     with pool.connection() as conn:
         conn.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
         conn.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
-
-
-def _snapshot(saver, thread_id, checkpoint_ns=""):
-    """Every checkpoint tuple of a thread and namespace, plus its messages."""
-    with saver.conn.connection() as conn:
-        ids = [
-            row[0]
-            for row in conn.execute(
-                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s "
-                "AND checkpoint_ns = %s ORDER BY checkpoint_id",
-                (thread_id, checkpoint_ns),
-            ).fetchall()
-        ]
-    tuples = [
-        saver.get_tuple(
-            {
-                "configurable": {
-                    "thread_id": thread_id,
-                    "checkpoint_ns": checkpoint_ns,
-                    "checkpoint_id": checkpoint_id,
-                }
-            }
-        )
-        for checkpoint_id in ids
-    ]
-    messages = saver.get_thread_messages(thread_id) if checkpoint_ns == "" else None
-    return ids, tuples, messages
-
-
-def _report(label, **counts):
-    """Print row counts so a run with -s records them."""
-    print(f"ROWCOUNTS {label}: {counts}")
 
 
 def test_saver_tables_and_migrations_live_in_the_test_schema(pool, schema):
@@ -380,281 +352,3 @@ def test_scoped_saver_deletes_its_own_thread(pool):
 
     assert saver.delete_thread("alice_conv") is True
     assert _counts(pool, "alice_conv") == {table: 0 for table in TABLES}
-
-
-def test_a_reused_thread_loses_the_old_conversation_and_keeps_the_new(pool):
-    """(a) Old blobs on a reused thread id go; the new conversation is unchanged."""
-    saver = _saver(pool)
-    graph = _graph(saver)
-    thread_id = "alice@example.com"
-    _chat(graph, thread_id, "OLD secret one", "OLD secret two")
-    _old_style_delete(pool, thread_id)
-    old_keys = _blob_keys(pool, thread_id)
-    _chat(graph, thread_id, "new one", "new two")
-    before = _snapshot(saver, thread_id)
-    old_rows = len(old_keys)
-    # Every old blob is unreferenced; keep-last-N pruning of the new
-    # conversation can add leftovers of its own.
-    orphans = _unreferenced(pool)
-    assert orphans >= old_rows > 0
-    assert _contains(pool, thread_id, "OLD secret") > 0
-
-    # The thread was just written, so the default idle window skips it.
-    assert saver.delete_orphaned_blobs(dry_run=True) == 0
-    assert saver.delete_orphaned_blobs() == 0
-    assert _blob_keys(pool, thread_id) >= old_keys
-
-    assert saver.delete_orphaned_blobs(dry_run=True, min_idle_seconds=0) == orphans
-    assert _blob_keys(pool, thread_id) >= old_keys
-    deleted = saver.delete_orphaned_blobs(min_idle_seconds=0)
-
-    assert deleted == orphans
-    assert _unreferenced(pool) == 0
-    assert not _blob_keys(pool, thread_id) & old_keys
-    assert _contains(pool, thread_id, "OLD secret") == 0
-    after = _snapshot(saver, thread_id)
-    assert after == before
-    assert [m["content"] for m in after[2]] == [
-        "new one",
-        "echo: new one",
-        "new two",
-        "echo: new two",
-    ]
-    assert saver.delete_orphaned_blobs(min_idle_seconds=0) == 0
-    _report(
-        "a",
-        old_conversation_blob_rows=old_rows,
-        pruning_leftovers=orphans - old_rows,
-        deleted=deleted,
-        second_run=0,
-    )
-
-
-def test_the_idle_window_admits_a_thread_once_it_is_old_enough(pool):
-    """A thread whose newest checkpoint is older than the window is cleaned."""
-    saver = _saver(pool)
-    thread_id = "alice@example.com"
-    graph = _graph(saver)
-    _chat(graph, thread_id, "OLD secret")
-    _old_style_delete(pool, thread_id)
-    _chat(graph, thread_id, "new")
-    orphans = _unreferenced(pool)
-    with pool.connection() as conn:
-        conn.execute(
-            "UPDATE checkpoints SET checkpoint = jsonb_set(checkpoint, '{ts}', "
-            "to_jsonb((now() - interval '2 hours')::text)) WHERE thread_id = %s",
-            (thread_id,),
-        )
-
-    assert saver.delete_orphaned_blobs(min_idle_seconds=7200 + 60) == 0
-    assert saver.delete_orphaned_blobs() == orphans
-    assert _contains(pool, thread_id, "OLD secret") == 0
-
-
-def test_a_pruned_thread_loads_identically_after_the_cleanup(pool):
-    """(b) Pruning leftovers go; every remaining checkpoint loads as before."""
-    saver = _saver(pool, keep_last_n=2)
-    _chat(_graph(saver), "alice_conv-1", "one", "two", "three", "four", "five")
-    before = _snapshot(saver, "alice_conv-1")
-    leftovers = _unreferenced(pool)
-    assert len(before[0]) == 2
-    assert leftovers > 0
-
-    deleted = saver.delete_orphaned_blobs(min_idle_seconds=0)
-
-    assert deleted == leftovers
-    assert _snapshot(saver, "alice_conv-1") == before
-    assert len(before[2]) == 10
-    assert _unreferenced(pool) == 0
-    assert saver.delete_orphaned_blobs(min_idle_seconds=0) == 0
-    _report(
-        "b",
-        remaining_checkpoints=len(before[0]),
-        blob_rows_after=_counts(pool, "alice_conv-1")["checkpoint_blobs"],
-        pruning_leftovers_deleted=deleted,
-    )
-
-
-def test_a_subgraph_namespace_on_a_live_thread_is_intact(pool):
-    """(c) Blobs of a child namespace survive while another thread's go."""
-    saver = _saver(pool, keep_last_n=-1)
-    graph = _graph(saver, subgraph=True)
-    _chat(graph, "alice_conv-1", "one", "two")
-    _chat(graph, "bob_conv-1", "gone")
-    _old_style_delete(pool, "bob_conv-1")
-    with pool.connection() as conn:
-        child_namespaces = [
-            ns
-            for (ns,) in conn.execute(
-                "SELECT DISTINCT checkpoint_ns FROM checkpoint_blobs "
-                "WHERE thread_id = 'alice_conv-1' AND checkpoint_ns <> ''"
-            ).fetchall()
-        ]
-    assert child_namespaces
-    snapshots = {ns: _snapshot(saver, "alice_conv-1", ns) for ns in child_namespaces}
-    root = _snapshot(saver, "alice_conv-1")
-    live_keys = _blob_keys(pool, "alice_conv-1")
-    bob_rows = _counts(pool, "bob_conv-1")["checkpoint_blobs"]
-
-    deleted = saver.delete_orphaned_blobs(min_idle_seconds=0)
-
-    assert deleted == bob_rows
-    assert _blob_keys(pool, "alice_conv-1") == live_keys
-    assert {ns: _snapshot(saver, "alice_conv-1", ns) for ns in child_namespaces} == (
-        snapshots
-    )
-    assert _snapshot(saver, "alice_conv-1") == root
-    assert saver.delete_orphaned_blobs(min_idle_seconds=0) == 0
-    child_rows = sum(1 for key in live_keys if key[0] != "")
-    _report(
-        "c",
-        child_namespaces=len(child_namespaces),
-        child_blob_rows_kept=child_rows,
-        deleted_other_thread=deleted,
-    )
-
-
-def test_batched_cleanup_deletes_the_same_rows_in_bounded_chunks(pool):
-    """(d) Batches of 3 delete every orphan; a rerun deletes 0."""
-    saver = _saver(pool)
-    graph = _graph(saver)
-    for thread_id in ("a_1", "a_2", "a_3"):
-        _chat(graph, thread_id, "x", "y")
-        _old_style_delete(pool, thread_id)
-    orphans = _unreferenced(pool)
-    assert orphans > 3
-
-    assert saver.delete_orphaned_blobs(dry_run=True, min_idle_seconds=0) == orphans
-    assert saver.delete_orphaned_blobs(batch_size=3, min_idle_seconds=0) == orphans
-    assert _unreferenced(pool) == 0
-    assert saver.delete_orphaned_blobs(batch_size=3, min_idle_seconds=0) == 0
-    _report("d", orphans=orphans, second_run=0)
-
-
-@pytest.fixture(name="held_insert")
-def _held_insert(pool):
-    """Make every checkpoint INSERT wait on an advisory lock this test holds.
-
-    The trigger fires after the put's blob rows are written in the same
-    transaction, so the write stays open, uncommitted, until release().
-    """
-    # pylint: disable=no-member
-    import psycopg  # pylint: disable=import-outside-toplevel
-
-    _saver(pool)
-    with pool.connection() as conn:
-        conn.execute(
-            f"""
-            CREATE FUNCTION hold_checkpoint_insert() RETURNS trigger AS $$
-            BEGIN
-                PERFORM pg_advisory_lock_shared({_HOLD_KEY});
-                PERFORM pg_advisory_unlock_shared({_HOLD_KEY});
-                RETURN NEW;
-            END $$ LANGUAGE plpgsql
-            """
-        )
-        conn.execute(
-            "CREATE TRIGGER hold_checkpoint_insert BEFORE INSERT ON checkpoints "
-            "FOR EACH ROW EXECUTE FUNCTION hold_checkpoint_insert()"
-        )
-    holder = psycopg.connect(DSN, autocommit=True)
-    holder.execute("SELECT pg_advisory_lock(%s)", (_HOLD_KEY,))
-    released = []
-
-    def release():
-        if not released:
-            holder.execute("SELECT pg_advisory_unlock(%s)", (_HOLD_KEY,))
-            released.append(True)
-
-    def waiting_writer_pid(timeout=15.0):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            row = holder.execute(
-                "SELECT pid FROM pg_locks WHERE locktype = 'advisory' "
-                "AND objid = %s AND NOT granted",
-                (_HOLD_KEY,),
-            ).fetchone()
-            if row:
-                return row[0]
-            time.sleep(0.05)
-        raise AssertionError("the writer never reached the held checkpoint insert")
-
-    def holds_blob_insert(pid):
-        return (
-            holder.execute(
-                "SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation "
-                "WHERE l.pid = %s AND c.relname = 'checkpoint_blobs' "
-                "AND l.mode = 'RowExclusiveLock'",
-                (pid,),
-            ).fetchone()[0]
-            > 0
-        )
-
-    yield release, waiting_writer_pid, holds_blob_insert
-    release()
-    holder.close()
-
-
-@pytest.mark.parametrize("user_id", [None, "alice"], ids=["default", "user_scoped"])
-def test_a_write_in_progress_keeps_its_blobs(pool, held_insert, user_id):
-    """(e) Blobs of a put held open before its checkpoint row survive the cleanup.
-
-    The put runs through bili's real write path (the upstream pipeline on
-    the default path, _put_with_user_id when scoped) on the same saver the
-    cleanup is called on.
-    """
-    release, waiting_writer_pid, holds_blob_insert = held_insert
-    saver = _saver(pool, user_id=user_id)
-    graph = _graph(saver)
-    thread_id = "alice_conv-1"
-    _old_style_delete(pool, thread_id)
-    visible_before = _blob_keys(pool, thread_id)
-    errors = []
-
-    def write():
-        try:
-            _chat(graph, thread_id, "private in flight")
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            errors.append(exc)
-
-    writer = threading.Thread(target=write, daemon=True)
-    writer.start()
-    try:
-        pid = waiting_writer_pid()
-        # The blob insert ran in the writer's still-open transaction...
-        assert holds_blob_insert(pid)
-        # ...and none of its rows are visible outside it.
-        assert _blob_keys(pool, thread_id) == visible_before
-
-        results = []
-        cleanup = threading.Thread(
-            target=lambda: results.extend(
-                [
-                    saver.delete_orphaned_blobs(dry_run=True, min_idle_seconds=0),
-                    saver.delete_orphaned_blobs(min_idle_seconds=0),
-                    saver.delete_orphaned_blobs(batch_size=1, min_idle_seconds=0),
-                ]
-            ),
-            daemon=True,
-        )
-        cleanup.start()
-        cleanup.join(timeout=15)
-        assert not cleanup.is_alive(), "the cleanup blocked on the open write"
-    finally:
-        release()
-        writer.join(timeout=30)
-
-    assert not writer.is_alive()
-    assert not errors, errors
-    assert results == [0, 0, 0]
-    state = graph.get_state({"configurable": {"thread_id": thread_id}})
-    assert [m.content for m in state.values["messages"]] == [
-        "private in flight",
-        "echo: private in flight",
-    ]
-    assert _unreferenced(pool) == 0
-    _report(
-        f"e[{user_id or 'default'}]",
-        cleanup_results=results,
-        blob_rows_after_commit=_counts(pool, thread_id)["checkpoint_blobs"],
-    )

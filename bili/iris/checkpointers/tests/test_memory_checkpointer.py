@@ -941,3 +941,89 @@ class TestListingUnderConcurrency:
 
         assert not worker.is_alive()
         assert not errors, errors
+
+
+class TestDeleteUnderConcurrency:
+    """delete_thread tolerates puts and pending writes on other Python threads."""
+
+    @pytest.mark.parametrize("store", ["writes", "blobs"])
+    def test_existence_scan_survives_a_resize_mid_scan(self, store):
+        """A key added while the store is scanned does not break the delete."""
+        saver = QueryableMemorySaver()
+        table = getattr(saver, store)
+        late_key = ("u_other", "", "late", "1")
+        resized = []
+
+        class ResizingKey(tuple):
+            """A key whose lookup adds an entry, as a concurrent put would."""
+
+            def __getitem__(self, index):
+                if not resized:
+                    resized.append(True)
+                    table[late_key] = {}
+                return tuple.__getitem__(self, index)
+
+        table[("u_other", "", "first", "1")] = {}
+        table[ResizingKey(("u_other", "", "second", "1"))] = {}
+
+        assert saver.delete_thread("u_gone") is False
+        assert resized
+        assert late_key in table
+        assert len(table) == 3
+
+    def test_delete_survives_concurrent_puts_and_writes_on_another_thread(self):
+        """Puts and put_writes that grow the stores never break a delete."""
+        # pylint: disable=import-outside-toplevel
+        import sys
+        import threading
+
+        saver = QueryableMemorySaver()
+        thread_id = "u_busy"
+
+        def write(i):
+            checkpoint_id = f"cp-{i:06d}"
+            saver.put_writes(
+                _config(thread_id, checkpoint_id), [("messages", i)], task_id="t"
+            )
+            saver.put(
+                _config(thread_id),
+                {
+                    **_make_checkpoint([i], checkpoint_id=checkpoint_id),
+                    "channel_versions": {"messages": f"{i:06d}"},
+                    "ts": "t",
+                },
+                {},
+                {"messages": f"{i:06d}"},
+            )
+
+        for i in range(500):
+            write(i)
+        _chat(saver, "u_gone", "bye")
+        stop = threading.Event()
+
+        def writer():
+            i = 500
+            while not stop.is_set():
+                write(i)
+                i += 1
+
+        errors = []
+        previous_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        worker = threading.Thread(target=writer, daemon=True)
+        worker.start()
+        try:
+            for attempt in range(200):
+                try:
+                    assert saver.delete_thread("u_gone") is (attempt == 0)
+                except RuntimeError as exc:
+                    errors.append(exc)
+                    break
+        finally:
+            stop.set()
+            worker.join(timeout=10)
+            sys.setswitchinterval(previous_interval)
+
+        assert not worker.is_alive()
+        assert not errors, errors
+        assert saver.thread_exists(thread_id)

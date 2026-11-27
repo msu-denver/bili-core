@@ -932,34 +932,3 @@ class TestAsyncPgThreadOwnership:
             second = saver._get_query_delegate()
         assert first is second
         mock_cls.assert_called_once()
-
-    def test_orphaned_blob_cleanup_delegates_to_sync_saver(self):
-        """The sync and async cleanup entry points reach the delegate."""
-        saver = _make_async_saver(user_id="owner@example.com")
-        delegate = MagicMock()
-        delegate.delete_orphaned_blobs.return_value = 4
-        saver._query_delegate = delegate
-
-        assert saver.delete_orphaned_blobs() == 4
-        delegate.delete_orphaned_blobs.assert_called_once_with(
-            dry_run=False, batch_size=None, min_idle_seconds=3600
-        )
-        assert (
-            saver.delete_orphaned_blobs(dry_run=True, batch_size=10, min_idle_seconds=0)
-            == 4
-        )
-        delegate.delete_orphaned_blobs.assert_called_with(
-            dry_run=True, batch_size=10, min_idle_seconds=0
-        )
-
-    async def test_async_orphaned_blob_cleanup_runs_off_thread(self):
-        """adelete_orphaned_blobs forwards dry_run to the sync delegate."""
-        saver = _make_async_saver(user_id="owner@example.com")
-        delegate = MagicMock()
-        delegate.delete_orphaned_blobs.return_value = 0
-        saver._query_delegate = delegate
-
-        assert await saver.adelete_orphaned_blobs(dry_run=True, batch_size=50) == 0
-        delegate.delete_orphaned_blobs.assert_called_once_with(
-            dry_run=True, batch_size=50, min_idle_seconds=3600
-        )

@@ -284,10 +284,12 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
+        # list() copies the keys in one step, so a concurrent put() or
+        # put_writes() cannot resize the dict while it is iterated.
         existed = (
             self._has_checkpoint(thread_id)
-            or any(key[0] == thread_id for key in self.writes)
-            or any(key[0] == thread_id for key in self.blobs)
+            or any(key[0] == thread_id for key in list(self.writes))
+            or any(key[0] == thread_id for key in list(self.blobs))
         )
         # Call MemorySaver.delete_thread directly because
         # QueryableCheckpointerMixin precedes MemorySaver in the MRO and

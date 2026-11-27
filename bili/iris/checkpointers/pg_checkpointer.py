@@ -106,65 +106,6 @@ _SQL_DELETE_THREAD = (
     "DELETE FROM checkpoint_writes WHERE thread_id = %s",
 )
 
-# A blob row is referenced when a checkpoint row of the same thread and
-# namespace maps the blob's channel to the blob's version in its
-# channel_versions. The join is the one upstream's SELECT_SQL uses to load
-# channel values (jsonb_each_text key and value against channel and version),
-# so a row this predicate calls unreferenced is never returned by any read.
-_SQL_BLOB_UNREFERENCED = """
-    NOT EXISTS (
-        SELECT 1
-        FROM checkpoints c
-        CROSS JOIN LATERAL jsonb_each_text(c.checkpoint -> 'channel_versions') v
-        WHERE c.thread_id = b.thread_id
-            AND c.checkpoint_ns = b.checkpoint_ns
-            AND v.key = b.channel
-            AND v.value = b.version
-    )
-"""
-# Skips every blob of a thread that has a checkpoint newer than the idle
-# window. Pruning deletes a thread's older checkpoints while a run may still
-# be about to commit a checkpoint that reuses their unchanged blob versions;
-# those blobs look unreferenced until that commit. A checkpoint without a
-# parsable ts counts as recent, so its thread is never cleaned by accident.
-_SQL_THREAD_IDLE = """
-    AND NOT EXISTS (
-        SELECT 1
-        FROM checkpoints r
-        WHERE r.thread_id = b.thread_id
-            AND COALESCE((r.checkpoint ->> 'ts')::timestamptz, 'infinity')
-                > now() - make_interval(secs => %(min_idle_seconds)s)
-    )
-"""
-
-
-def _orphaned_blobs_where(min_idle_seconds: float) -> str:
-    """Return the WHERE predicate on ``checkpoint_blobs b`` for orphans."""
-    if min_idle_seconds > 0:
-        return _SQL_BLOB_UNREFERENCED + _SQL_THREAD_IDLE
-    return _SQL_BLOB_UNREFERENCED
-
-
-def _sql_count_orphaned_blobs(min_idle_seconds: float) -> str:
-    """Count the orphaned blob rows."""
-    return (
-        "SELECT count(*) AS orphaned FROM checkpoint_blobs b WHERE "
-        + _orphaned_blobs_where(min_idle_seconds)
-    )
-
-
-def _sql_delete_orphaned_blobs(min_idle_seconds: float, batched: bool) -> str:
-    """Delete the orphaned blob rows, at most %(batch_size)s when batched."""
-    where = _orphaned_blobs_where(min_idle_seconds)
-    if not batched:
-        return "DELETE FROM checkpoint_blobs b WHERE " + where
-    return (
-        "DELETE FROM checkpoint_blobs"
-        " WHERE (thread_id, checkpoint_ns, channel, version) IN ("
-        " SELECT b.thread_id, b.checkpoint_ns, b.channel, b.version"
-        " FROM checkpoint_blobs b WHERE " + where + " LIMIT %(batch_size)s)"
-    )
-
 
 @conditional_cache_resource()
 def get_pg_connection_pool():
@@ -980,95 +921,6 @@ class PruningPostgresSaver(
 
         return deleted_count > 0
 
-    def delete_orphaned_blobs(
-        self,
-        dry_run: bool = False,
-        batch_size: int | None = None,
-        min_idle_seconds: float = 3600,
-    ) -> int:
-        """Delete ``checkpoint_blobs`` rows that no checkpoint references.
-
-        A blob row is an orphan when no row in ``checkpoints`` with the same
-        thread_id and checkpoint_ns maps the row's channel to the row's
-        version in its ``channel_versions``. Every read joins blobs on that
-        key, so no read can return an orphan, yet it still holds a channel
-        value such as a message list. Orphans come from a delete that left
-        blobs behind (a conversation deleted that way stays stored even after
-        its thread_id is used again), from keep-last-N pruning, which deletes
-        checkpoints but not the blob versions only they referenced, and from
-        a migration that archives a checkpoint out of ``checkpoints``.
-
-        This is an operator tool. It is database-wide and ignores the saver's
-        ``user_id``, and nothing in this library runs it automatically: the
-        database's owner decides whether and when to delete rows (see
-        "Deleting Conversations" in docs/ARCHITECTURE.md). It runs on its own
-        pooled connection, never inside a write in progress on this saver.
-        It is idempotent once the idle window has passed for every thread.
-
-        Safe while the application runs. A blob row written by a put that has
-        not committed is invisible to the statement, and every write path in
-        this library commits a checkpoint's blobs and its checkpoint row in
-        one transaction. What it cannot see is a run about to commit a
-        checkpoint that reuses blob versions whose older checkpoints pruning
-        just deleted, so threads with a checkpoint newer than
-        ``min_idle_seconds`` are skipped entirely; a later run cleans them.
-
-        :param dry_run: When True, count the orphaned rows in a read-only
-            transaction and delete nothing.
-        :param batch_size: When set, delete at most this many rows per
-            transaction, repeating until a batch comes back short, so no
-            single transaction runs long on a large table. When None, one
-            statement deletes every orphan in one transaction.
-        :param min_idle_seconds: Skip threads written to within this many
-            seconds. 0 disables the guard; use it only while nothing writes.
-        :return: The number of rows deleted, or that would be deleted.
-        :raises ValueError: If batch_size is not positive or
-            min_idle_seconds is negative.
-        """
-        if batch_size is not None and batch_size <= 0:
-            raise ValueError("batch_size must be a positive integer or None")
-        if min_idle_seconds < 0:
-            raise ValueError("min_idle_seconds must not be negative")
-        params = {"min_idle_seconds": min_idle_seconds, "batch_size": batch_size}
-
-        with self._maintenance_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                if dry_run:
-                    with conn.transaction():
-                        cur.execute("SET TRANSACTION READ ONLY")
-                        cur.execute(_sql_count_orphaned_blobs(min_idle_seconds), params)
-                        return cur.fetchone()["orphaned"]
-
-                statement = _sql_delete_orphaned_blobs(
-                    min_idle_seconds, batched=batch_size is not None
-                )
-                deleted = 0
-                while True:
-                    with conn.transaction():
-                        cur.execute(statement, params)
-                        batch_deleted = cur.rowcount
-                    deleted += batch_deleted
-                    if batch_size is None or batch_deleted < batch_size:
-                        break
-        LOGGER.info("Deleted %d orphaned checkpoint_blobs rows", deleted)
-        return deleted
-
-    @contextmanager
-    def _maintenance_connection(self):
-        """Yield a connection for operator statements.
-
-        A pool hands out a connection of its own, so the statement neither
-        joins a ``_put_with_user_id`` transaction through ``_txn_conn`` nor
-        holds ``self.lock`` and stalls this saver's checkpoint I/O. A single
-        shared connection is used under the lock, as upstream does.
-        """
-        if isinstance(self.conn, ConnectionPool):
-            with self.conn.connection() as conn:
-                yield conn
-        else:
-            with self.lock:
-                yield self.conn
-
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user."""
         threads = self.get_user_threads(user_identifier)
@@ -1372,17 +1224,6 @@ class AsyncPruningPostgresSaver(
         """Delete all checkpoints for a thread (delegates to the sync saver)."""
         return self._get_query_delegate().delete_thread(thread_id)
 
-    def delete_orphaned_blobs(
-        self,
-        dry_run: bool = False,
-        batch_size: int | None = None,
-        min_idle_seconds: float = 3600,
-    ) -> int:
-        """Delete orphaned checkpoint_blobs rows (delegates to the sync saver)."""
-        return self._get_query_delegate().delete_orphaned_blobs(
-            dry_run=dry_run, batch_size=batch_size, min_idle_seconds=min_idle_seconds
-        )
-
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user (delegates to the sync saver)."""
         return self._get_query_delegate().get_user_stats(user_identifier)
@@ -1418,20 +1259,6 @@ class AsyncPruningPostgresSaver(
     async def adelete_thread(self, thread_id: str) -> bool:
         """Async variant of delete_thread (runs off the event loop)."""
         return await asyncio.to_thread(self.delete_thread, thread_id)
-
-    async def adelete_orphaned_blobs(
-        self,
-        dry_run: bool = False,
-        batch_size: int | None = None,
-        min_idle_seconds: float = 3600,
-    ) -> int:
-        """Async variant of delete_orphaned_blobs (runs off the event loop)."""
-        return await asyncio.to_thread(
-            self.delete_orphaned_blobs,
-            dry_run=dry_run,
-            batch_size=batch_size,
-            min_idle_seconds=min_idle_seconds,
-        )
 
     async def aget_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Async variant of get_user_stats (runs off the event loop)."""
