@@ -5,6 +5,7 @@ provider types, and individual loader functions with mocked
 external dependencies.
 """
 
+import importlib.util
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -377,6 +378,12 @@ class TestDeviceDetection:
 # ---------------------------------------------------------------------------
 
 
+# These tests patch names inside langchain_huggingface, so they need the
+# optional [huggingface] extra, which does not install on every supported Python.
+@pytest.mark.skipif(
+    importlib.util.find_spec("langchain_huggingface") is None,
+    reason="requires the [huggingface] extra (langchain-huggingface)",
+)
 class TestLoadHuggingFaceModel:
     """Verify the local HuggingFace pipeline construction."""
 

@@ -100,26 +100,24 @@ _EXTRAS = {
     # Provider extras — install the optional SDK for each new provider.  #
     # Usage: pip install bili-core[anthropic,mistral]                     #
     # ------------------------------------------------------------------ #
-    "anthropic": ["langchain-anthropic~=1.0.0"],
+    "anthropic": ["langchain-anthropic~=1.7.13"],
     "mistral": ["langchain-mistralai>=0.2.0"],
     "cohere": ["langchain-cohere>=0.3.0"],
-    # Capped to the langchain-core-1.0 line: unbounded >=2.0.0 resolves to the
-    # 4.x line, which requires langchain-core>=1.1.2 (violating the ~=1.0.3 pin)
-    # and switches to google-genai>=1.53 (violating google-cloud-aiplatform's
-    # google-genai<2.0.0). 3.0.x keeps langchain-core<2 and the
-    # google-ai-generativelanguage transitive; 3.2.0 is the first to require
-    # langchain-core 1.1, so the ceiling stays below it.
-    "google-genai": ["langchain-google-genai>=3.0,<3.1"],
+    # Capped below 4.5: 4.5.0 and later require google-genai>=3.2, while the
+    # lean core's google-cloud-aiplatform requires google-genai<3, so an
+    # uncapped pin makes this extra (and [all]) unresolvable. 4.4.x accepts the
+    # google-genai 2.x line the lean core pins and the langchain-core 1.8 line.
+    "google-genai": ["langchain-google-genai>=4.4,<4.5"],
     "deepseek": ["langchain-deepseek>=0.1.0"],
     "xai": ["langchain-xai>=0.2.0"],
     "groq": ["langchain-groq>=0.2.0"],
     # Convenience bundle for all API providers
     "all-providers": [
-        "langchain-anthropic~=1.0.0",
+        "langchain-anthropic~=1.7.13",
         "langchain-mistralai>=0.2.0",
         "langchain-cohere>=0.3.0",
-        # See the google-genai extra above for why this is capped to <3.1.
-        "langchain-google-genai>=3.0,<3.1",
+        # See the google-genai extra above for why this is capped to <4.5.
+        "langchain-google-genai>=4.4,<4.5",
         "langchain-deepseek>=0.1.0",
         "langchain-xai>=0.2.0",
         "langchain-groq>=0.2.0",
@@ -129,11 +127,21 @@ _EXTRAS = {
     # ------------------------------------------------------------------ #
     # Streamlit web UI (bili/streamlit_app.py + bili/streamlit_ui/).
     # Usage: pip install bili-core[streamlit]
+    # streamlit must admit pyarrow>=22: 22.0.0 is the first pyarrow with
+    # CPython 3.14 wheels, and an older pyarrow makes tensorflow 2.20+ abort at
+    # import on macOS when [ml] shares the environment. streamlit 1.51 and
+    # earlier cap pyarrow below 22. The explicit pyarrow floor makes an
+    # in-place upgrade replace an installed pyarrow 21 instead of keeping it.
+    # The <26 ceiling: pyarrow 26 refuses to import with NumPy 1.x without
+    # declaring it in its metadata, and [ml] pins numpy 1.26.4.
+    # pillow 11.3.0 and pandas 2.3.3 are the first releases of their lines with
+    # CPython 3.14 wheels.
     "streamlit": [
-        "streamlit~=1.51.0",
+        "streamlit~=1.67.0",
         "streamlit-flow-component>=1.3.0",
-        "pillow~=10.4.0",
-        "pandas==2.2.3",
+        "pyarrow>=22,<26",
+        "pillow~=11.3.0",
+        "pandas==2.3.3",
     ],
     # Flask REST API (bili/flask_app.py + bili/flask_api/).
     # Usage: pip install bili-core[flask]
@@ -148,7 +156,7 @@ _EXTRAS = {
     # cross-model Anthropic support used in some attack strategies.       #
     # ------------------------------------------------------------------ #
     "aegis": [
-        "langchain-anthropic~=1.0.0",
+        "langchain-anthropic~=1.7.13",
     ],
     # ------------------------------------------------------------------ #
     # Tool-backend extras — heavy retrieval / search SDKs.               #
@@ -161,11 +169,14 @@ _EXTRAS = {
     ],
     # Amazon OpenSearch vector search.
     # Usage: pip install bili-core[opensearch]
+    # boto3/botocore floor: the lean core's langchain-aws requires
+    # boto3>=1.43.64, so a lower pin here makes [opensearch] and [all]
+    # unresolvable.
     "opensearch": [
         "opensearch-py~=3.0.0",
         "requests-aws4auth==1.3.1",
-        "boto3~=1.40.19",
-        "botocore~=1.40.19",
+        "boto3~=1.44.0",
+        "botocore~=1.44.0",
     ],
     # ------------------------------------------------------------------ #
     # Checkpointer-backend extras — database state persistence.          #
@@ -221,10 +232,16 @@ _EXTRAS = {
     # Full ML stack: Keras, TensorFlow, scikit-learn (AEGIS attack strategies,
     # baseline runners, and advanced embedding backends).
     # Usage: pip install bili-core[ml]
+    # tensorflow floor: 2.19 and earlier require protobuf<6, and the lean
+    # core's Google packages require protobuf>=6.33.5, so an older tensorflow
+    # makes [ml] and [all] unresolvable. tf-keras must match tensorflow's minor.
+    # On macOS, tensorflow 2.20+ aborts at import when pyarrow is older than 22
+    # ("mutex.cc ... Lock blocking"); [streamlit] must keep admitting
+    # pyarrow>=22 for [all] to import tensorflow there.
     "ml": [
         "keras~=3.12.0",
-        "tensorflow~=2.18.0",
-        "tf-keras~=2.18.0",
+        "tensorflow~=2.21.0",
+        "tf-keras~=2.21.0",
         "scikit-learn~=1.7.2",
         "ml-dtypes~=0.5.1",
         "numpy==1.26.4",
