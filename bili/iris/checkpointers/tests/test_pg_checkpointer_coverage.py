@@ -917,6 +917,7 @@ class TestAsyncPgThreadOwnership:
         ]
         assert await saver.aget_thread_messages("t1") == [{"role": "user"}]
         assert await saver.adelete_thread("t1") is False
+        delegate.delete_thread.assert_called_once_with("t1")
         assert await saver.aget_user_stats("owner@example.com") == {"total_threads": 1}
         assert await saver.athread_exists("t1") is True
         delegate.get_user_threads.assert_called_once_with("owner@example.com", None, 0)
@@ -931,3 +932,25 @@ class TestAsyncPgThreadOwnership:
             second = saver._get_query_delegate()
         assert first is second
         mock_cls.assert_called_once()
+
+    def test_orphaned_blob_cleanup_delegates_to_sync_saver(self):
+        """The sync and async cleanup entry points reach the delegate."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        delegate = MagicMock()
+        delegate.delete_orphaned_blobs.return_value = 4
+        saver._query_delegate = delegate
+
+        assert saver.delete_orphaned_blobs() == 4
+        delegate.delete_orphaned_blobs.assert_called_once_with(False)
+        assert saver.delete_orphaned_blobs(dry_run=True) == 4
+        delegate.delete_orphaned_blobs.assert_called_with(True)
+
+    async def test_async_orphaned_blob_cleanup_runs_off_thread(self):
+        """adelete_orphaned_blobs forwards dry_run to the sync delegate."""
+        saver = _make_async_saver(user_id="owner@example.com")
+        delegate = MagicMock()
+        delegate.delete_orphaned_blobs.return_value = 0
+        saver._query_delegate = delegate
+
+        assert await saver.adelete_orphaned_blobs(dry_run=True) == 0
+        delegate.delete_orphaned_blobs.assert_called_once_with(True)

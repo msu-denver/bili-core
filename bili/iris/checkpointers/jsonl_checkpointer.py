@@ -817,13 +817,15 @@ class JSONLCheckpointSaver(
 
         with self._lock:
             keys_to_delete = [k for k in self._checkpoints if k[0] == thread_id]
-            if not keys_to_delete:
+            # Writes are collected independently of checkpoints: a write
+            # record's value is conversation content too, and put_writes()
+            # stores it whether or not a checkpoint record exists.
+            write_keys = [k for k in self._writes if k[0] == thread_id]
+            if not keys_to_delete and not write_keys:
                 return False
 
             for k in keys_to_delete:
                 del self._checkpoints[k]
-
-            write_keys = [k for k in self._writes if k[0] == thread_id]
             for k in write_keys:
                 del self._writes[k]
 

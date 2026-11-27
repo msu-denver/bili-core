@@ -91,6 +91,27 @@ _SQL_CREATE_USER_ID_INDEX = """
     ON checkpoints(user_id, thread_id)
 """
 
+# Every table langgraph-checkpoint-postgres keys by thread_id, in the order
+# its own PostgresSaver.delete_thread deletes them. checkpoint_blobs holds the
+# serialized channel values, including the messages channel, so a delete that
+# skips it keeps the conversation's content.
+_SQL_DELETE_THREAD = (
+    "DELETE FROM checkpoints WHERE thread_id = %s",
+    "DELETE FROM checkpoint_blobs WHERE thread_id = %s",
+    "DELETE FROM checkpoint_writes WHERE thread_id = %s",
+)
+
+# Blob rows whose thread has no checkpoint row left. Scoped by thread_id only,
+# so blobs of a live thread are never touched, whatever their namespace.
+_SQL_ORPHANED_BLOBS_FILTER = """
+    FROM checkpoint_blobs b
+    WHERE NOT EXISTS (
+        SELECT 1 FROM checkpoints c WHERE c.thread_id = b.thread_id
+    )
+"""
+_SQL_COUNT_ORPHANED_BLOBS = "SELECT count(*) AS orphaned" + _SQL_ORPHANED_BLOBS_FILTER
+_SQL_DELETE_ORPHANED_BLOBS = "DELETE" + _SQL_ORPHANED_BLOBS_FILTER
+
 
 @conditional_cache_resource()
 def get_pg_connection_pool():
@@ -970,21 +991,62 @@ class PruningPostgresSaver(
         return messages
 
     def delete_thread(self, thread_id: str) -> bool:
-        """Delete all checkpoints for a conversation thread."""
+        """Delete every stored row of a conversation thread.
+
+        Removes the thread from ``checkpoints``, ``checkpoint_blobs`` (the
+        channel values, including the messages) and ``checkpoint_writes``, in
+        every namespace, in one transaction. Ownership is validated before
+        anything is deleted.
+
+        :param thread_id: Thread to delete.
+        :return: True if the thread had at least one checkpoint.
+        :raises PermissionError: If the thread belongs to another user.
+        """
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
         with self._cursor() as cur:
-            # Delete checkpoints
-            cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
-            deleted_count = cur.rowcount
+            # One transaction, so a failure part way cannot leave the
+            # checkpoints gone while the message blobs are still stored.
+            with cur.connection.transaction():
+                cur.execute(_SQL_DELETE_THREAD[0], (thread_id,))
+                deleted_count = cur.rowcount
+                for statement in _SQL_DELETE_THREAD[1:]:
+                    cur.execute(statement, (thread_id,))
 
-            # Also delete writes for this thread
-            cur.execute(
-                "DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,)
-            )
+        return deleted_count > 0
 
-            return deleted_count > 0
+    def delete_orphaned_blobs(self, dry_run: bool = False) -> int:
+        """Delete ``checkpoint_blobs`` rows whose thread has no checkpoint left.
+
+        Such rows hold channel values, including messages, of threads whose
+        checkpoints are gone; no read method can reach them, but they still
+        hold conversation content. Nothing calls this automatically: deleting
+        rows is a decision for the database's owner, who runs it on purpose
+        (see "Deleting Conversations" in docs/ARCHITECTURE.md). It is
+        idempotent; a second run deletes nothing.
+
+        Live threads are safe while the application runs. A row is deleted
+        only when no ``checkpoints`` row for its thread_id is visible to the
+        statement. Every writer in this library, and the upstream
+        ``PostgresSaver.put``, commits a checkpoint's blobs and its checkpoint
+        row in one transaction, so a thread that is mid-write has neither
+        visible yet and its uncommitted blob rows are not seen. A writer that
+        commits blob rows separately from its checkpoint row would not be
+        covered; with such a writer, run this in a quiet window.
+
+        :param dry_run: When True, count the orphaned rows and delete nothing.
+        :return: The number of rows deleted, or that would be deleted.
+        """
+        with self._cursor() as cur:
+            if dry_run:
+                cur.execute(_SQL_COUNT_ORPHANED_BLOBS)
+                return cur.fetchone()["orphaned"]
+            with cur.connection.transaction():
+                cur.execute(_SQL_DELETE_ORPHANED_BLOBS)
+                deleted = cur.rowcount
+        LOGGER.info("Deleted %d orphaned checkpoint_blobs rows", deleted)
+        return deleted
 
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user."""
@@ -1289,6 +1351,10 @@ class AsyncPruningPostgresSaver(
         """Delete all checkpoints for a thread (delegates to the sync saver)."""
         return self._get_query_delegate().delete_thread(thread_id)
 
+    def delete_orphaned_blobs(self, dry_run: bool = False) -> int:
+        """Delete orphaned checkpoint_blobs rows (delegates to the sync saver)."""
+        return self._get_query_delegate().delete_orphaned_blobs(dry_run)
+
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user (delegates to the sync saver)."""
         return self._get_query_delegate().get_user_stats(user_identifier)
@@ -1324,6 +1390,10 @@ class AsyncPruningPostgresSaver(
     async def adelete_thread(self, thread_id: str) -> bool:
         """Async variant of delete_thread (runs off the event loop)."""
         return await asyncio.to_thread(self.delete_thread, thread_id)
+
+    async def adelete_orphaned_blobs(self, dry_run: bool = False) -> int:
+        """Async variant of delete_orphaned_blobs (runs off the event loop)."""
+        return await asyncio.to_thread(self.delete_orphaned_blobs, dry_run)
 
     async def aget_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Async variant of get_user_stats (runs off the event loop)."""

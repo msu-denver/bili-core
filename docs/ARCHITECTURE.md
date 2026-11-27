@@ -151,6 +151,40 @@ checkpointer = AsyncPostgresSaver.from_conn_string(
 - MongoDB: Adds `user_id` field to documents on first use
 - Zero downtime - migrations run automatically during checkpointer initialization
 
+#### Deleting Conversations
+
+`delete_thread(thread_id)` removes every stored row of a conversation after validating ownership, and returns `True` when the thread had checkpoints. Each backend removes all of its per-thread stores:
+
+| Backend | Stores removed |
+|---|---|
+| PostgreSQL | `checkpoints`, `checkpoint_blobs` (channel values, including messages), `checkpoint_writes`, in one transaction |
+| MongoDB | the checkpoint and writes collections (channel values live inside the checkpoint documents) |
+| JSONL | checkpoint and write records; the file is rewritten without them |
+| In-memory | checkpoints, pending writes, and channel blobs |
+
+Records a migration could not convert are kept in a separate archive (`checkpoints_archive` in PostgreSQL and MongoDB, a `.archive` sidecar file for JSONL) for manual review; `delete_thread` does not touch the archive.
+
+**Orphaned PostgreSQL blobs.** Through release 5.11.0, `delete_thread` on PostgreSQL deleted a thread's `checkpoints` and `checkpoint_writes` rows but left its `checkpoint_blobs` rows, so a deleted conversation's messages stayed in the database. Remove those rows with the cleanup method, which deletes `checkpoint_blobs` rows whose `thread_id` has no row left in `checkpoints`:
+
+```python
+from bili.iris.checkpointers.pg_checkpointer import get_pg_checkpointer
+
+saver = get_pg_checkpointer()
+print(saver.delete_orphaned_blobs(dry_run=True))  # rows that would be deleted
+print(saver.delete_orphaned_blobs())              # rows deleted
+```
+
+The equivalent SQL, for running by hand:
+
+```sql
+DELETE FROM checkpoint_blobs b
+WHERE NOT EXISTS (
+    SELECT 1 FROM checkpoints c WHERE c.thread_id = b.thread_id
+);
+```
+
+Nothing runs this automatically; whether and when to delete rows in a deployed database is its owner's decision. It is idempotent, and safe while the application runs: every writer in this library commits a checkpoint's blobs and its checkpoint row in one transaction, so the blob rows of a thread that is mid-write are not visible to the statement. The async saver offers the same operation as `adelete_orphaned_blobs()`.
+
 #### Multi-Conversation Support
 
 Users can maintain multiple isolated conversation threads via `conversation_id`:

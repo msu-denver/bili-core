@@ -5,6 +5,7 @@ Covers get_user_threads, get_thread_messages, delete_thread,
 get_user_stats, thread_exists, pruning, and thread ownership.
 """
 
+import re
 import threading
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -51,7 +52,7 @@ def _attach_fake_cursor(saver, mock_cur):
     """
 
     @contextmanager
-    def fake_cursor(_pipeline=False):
+    def fake_cursor(*_args, **_kwargs):
         yield mock_cur
 
     # Use object.__setattr__ to bypass pylint protected-access on the
@@ -80,27 +81,189 @@ class TestThreadExists:
         assert saver.thread_exists("thread_missing") is False
 
 
+_PER_THREAD_TABLES = {"checkpoints", "checkpoint_blobs", "checkpoint_writes"}
+
+
+def _recording_cursor(rowcounts=None, fail_on=None):
+    """Build a mock cursor that logs statements and transaction boundaries.
+
+    ``rowcounts`` maps a table name to the rowcount its DELETE reports;
+    ``fail_on`` names a table whose DELETE raises. The returned event list
+    holds "BEGIN", each executed statement, and "COMMIT" or "ROLLBACK".
+    """
+    events = []
+    rowcounts = rowcounts or {}
+    mock_cur = MagicMock()
+
+    @contextmanager
+    def transaction():
+        events.append("BEGIN")
+        try:
+            yield
+        except Exception:
+            events.append("ROLLBACK")
+            raise
+        events.append("COMMIT")
+
+    def execute(statement, params=None):
+        events.append((" ".join(statement.split()), params))
+        table = _deleted_table(statement)
+        if table is not None and table == fail_on:
+            raise RuntimeError(f"delete from {table} failed")
+        mock_cur.rowcount = rowcounts.get(table, 0)
+
+    mock_cur.connection.transaction.side_effect = transaction
+    mock_cur.execute.side_effect = execute
+    return mock_cur, events
+
+
+def _deleted_table(statement):
+    """Return the table a plain ``DELETE FROM <table>`` statement targets."""
+    match = re.match(r"\s*DELETE\s+FROM\s+(\w+)", statement)
+    return match.group(1) if match else None
+
+
 class TestDeleteThread:
     """Tests for delete_thread method."""
 
-    def test_deletes_checkpoints_and_writes(self):
-        """Deletes from both checkpoints and checkpoint_writes."""
+    def test_deletes_every_per_thread_table_in_one_transaction(self):
+        """Checkpoints, blobs and writes are deleted inside one transaction."""
         saver = _make_saver()
-        mock_cur = MagicMock()
-        mock_cur.rowcount = 2
+        mock_cur, events = _recording_cursor({"checkpoints": 5})
         _attach_fake_cursor(saver, mock_cur)
-        result = saver.delete_thread("thread_x")
-        assert result is True
-        assert mock_cur.execute.call_count == 2
+
+        assert saver.delete_thread("thread_x") is True
+        assert events == [
+            "BEGIN",
+            ("DELETE FROM checkpoints WHERE thread_id = %s", ("thread_x",)),
+            ("DELETE FROM checkpoint_blobs WHERE thread_id = %s", ("thread_x",)),
+            ("DELETE FROM checkpoint_writes WHERE thread_id = %s", ("thread_x",)),
+            "COMMIT",
+        ]
 
     def test_returns_false_when_nothing_deleted(self):
         """Returns False when no checkpoints existed."""
         saver = _make_saver()
-        mock_cur = MagicMock()
-        mock_cur.rowcount = 0
+        mock_cur, events = _recording_cursor()
         _attach_fake_cursor(saver, mock_cur)
-        result = saver.delete_thread("thread_none")
-        assert result is False
+        assert saver.delete_thread("thread_none") is False
+        # The blob and write deletes still run: rows left without a
+        # checkpoint are removed too.
+        assert len(events) == 5
+
+    def test_blobs_alone_do_not_count_as_a_thread(self):
+        """True means the thread had checkpoints, not merely leftover blobs."""
+        saver = _make_saver()
+        mock_cur, _ = _recording_cursor(
+            {"checkpoints": 0, "checkpoint_blobs": 9, "checkpoint_writes": 2}
+        )
+        _attach_fake_cursor(saver, mock_cur)
+        assert saver.delete_thread("thread_leftover") is False
+
+    def test_return_value_comes_from_checkpoints_rowcount(self):
+        """A later statement's rowcount does not overwrite the result."""
+        saver = _make_saver()
+        mock_cur, _ = _recording_cursor(
+            {"checkpoints": 3, "checkpoint_blobs": 0, "checkpoint_writes": 0}
+        )
+        _attach_fake_cursor(saver, mock_cur)
+        assert saver.delete_thread("thread_x") is True
+
+    def test_failed_blob_delete_rolls_back_the_transaction(self):
+        """A failure part way rolls back instead of committing a partial delete."""
+        saver = _make_saver()
+        mock_cur, events = _recording_cursor(
+            {"checkpoints": 2}, fail_on="checkpoint_blobs"
+        )
+        _attach_fake_cursor(saver, mock_cur)
+        with pytest.raises(RuntimeError, match="checkpoint_blobs"):
+            saver.delete_thread("thread_x")
+        assert events[0] == "BEGIN"
+        assert events[-1] == "ROLLBACK"
+        assert "COMMIT" not in events
+
+    def test_covers_every_table_upstream_delete_covers(self):
+        """bili deletes from the same tables as the pinned upstream delete."""
+        from langgraph.checkpoint.postgres import (  # pylint: disable=import-outside-toplevel
+            PostgresSaver,
+        )
+
+        saver = _make_saver()
+        upstream_cur, upstream_events = _recording_cursor()
+        _attach_fake_cursor(saver, upstream_cur)
+        PostgresSaver.delete_thread(saver, "thread_x")
+        upstream_tables = {
+            _deleted_table(e[0]) for e in upstream_events if isinstance(e, tuple)
+        }
+
+        bili_cur, bili_events = _recording_cursor()
+        _attach_fake_cursor(saver, bili_cur)
+        saver.delete_thread("thread_x")
+        bili_tables = {
+            _deleted_table(e[0]) for e in bili_events if isinstance(e, tuple)
+        }
+
+        assert upstream_tables == _PER_THREAD_TABLES
+        assert bili_tables == upstream_tables
+
+
+class TestDeleteOrphanedBlobs:
+    """Tests for the operator-run orphaned blob cleanup."""
+
+    def test_deletes_blobs_without_a_checkpoint_in_one_transaction(self):
+        """The cleanup is one NOT EXISTS delete keyed on thread_id."""
+        saver = _make_saver()
+        mock_cur, events = _recording_cursor({"checkpoint_blobs": 15})
+        _attach_fake_cursor(saver, mock_cur)
+
+        assert saver.delete_orphaned_blobs() == 15
+        assert events[0] == "BEGIN"
+        assert events[-1] == "COMMIT"
+        ((statement, params),) = [e for e in events if isinstance(e, tuple)]
+        assert params is None
+        assert statement == (
+            "DELETE FROM checkpoint_blobs b WHERE NOT EXISTS ( SELECT 1 FROM "
+            "checkpoints c WHERE c.thread_id = b.thread_id )"
+        )
+
+    def test_dry_run_counts_and_deletes_nothing(self):
+        """dry_run reports the count without issuing a DELETE."""
+        saver = _make_saver()
+        mock_cur, events = _recording_cursor()
+        mock_cur.fetchone.return_value = {"orphaned": 7}
+        _attach_fake_cursor(saver, mock_cur)
+
+        assert saver.delete_orphaned_blobs(dry_run=True) == 7
+        statements = [e[0] for e in events if isinstance(e, tuple)]
+        assert len(statements) == 1
+        assert statements[0].startswith("SELECT count(*) AS orphaned FROM")
+        assert not any("DELETE" in stmt for stmt in statements)
+        assert "BEGIN" not in events
+
+    def test_second_run_reports_zero(self):
+        """An idempotent rerun reports the database's zero rowcount."""
+        saver = _make_saver()
+        mock_cur, _ = _recording_cursor({"checkpoint_blobs": 0})
+        _attach_fake_cursor(saver, mock_cur)
+        assert saver.delete_orphaned_blobs() == 0
+
+    def test_factory_never_runs_the_cleanup(self):
+        """Creating a checkpointer does not delete orphaned rows on its own."""
+        with patch(
+            "bili.iris.checkpointers.pg_checkpointer.get_pg_connection_pool",
+            return_value=MagicMock(),
+        ), patch(
+            "bili.iris.checkpointers.pg_checkpointer.PruningPostgresSaver"
+        ) as mock_cls:
+            from bili.iris.checkpointers.pg_checkpointer import (  # pylint: disable=import-outside-toplevel
+                get_pg_checkpointer,
+            )
+
+            get_pg_checkpointer(user_id="alice")
+        instance = mock_cls.return_value
+        instance.setup.assert_called_once_with()
+        instance.ensure_indexes.assert_called_once_with()
+        instance.delete_orphaned_blobs.assert_not_called()
 
 
 class TestThreadOwnership:
@@ -119,6 +282,8 @@ class TestThreadOwnership:
         _attach_fake_cursor(saver, mock_cur)
         with pytest.raises(PermissionError, match="Access denied"):
             saver.delete_thread("bob@example.com")
+        mock_cur.execute.assert_not_called()
+        mock_cur.connection.transaction.assert_not_called()
 
     def test_delete_allows_exact_match(self):
         """No error for exact user_id match on delete."""

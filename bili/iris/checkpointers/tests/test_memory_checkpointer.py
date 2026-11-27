@@ -470,6 +470,25 @@ class TestDeleteThread:
         assert not any(key[0] == "user1_conv-1" for key in saver.writes)
         assert not any(key[0] == "user1_conv-1" for key in saver.blobs)
 
+    def test_delete_after_graph_run_empties_every_store(self):
+        """A real conversation leaves no checkpoint, write or blob behind."""
+        saver = QueryableMemorySaver()
+        _chat(saver, "alice_conv-1", "private one", "private two")
+        _chat(saver, "bob_conv-1", "keep me")
+        assert any(key[0] == "alice_conv-1" for key in saver.blobs)
+        assert any(key[0] == "alice_conv-1" for key in saver.writes)
+
+        assert saver.delete_thread("alice_conv-1") is True
+
+        assert "alice_conv-1" not in saver.storage
+        assert not any(key[0] == "alice_conv-1" for key in saver.writes)
+        assert not any(key[0] == "alice_conv-1" for key in saver.blobs)
+        assert saver.get_thread_messages("alice_conv-1") == []
+        assert [m["content"] for m in saver.get_thread_messages("bob_conv-1")] == [
+            "keep me",
+            "echo: keep me",
+        ]
+
     def test_never_saved_thread_returns_false_for_exists_and_delete(self):
         """Verify thread_exists and delete_thread return False when unsaved."""
         saver = QueryableMemorySaver()
