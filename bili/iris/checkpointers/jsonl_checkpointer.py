@@ -271,18 +271,29 @@ class JSONLCheckpointSaver(
         # Rewrite the file from the in-memory index (compact)
         self._rewrite_file()
 
-    def _rewrite_file(self) -> None:
-        """Rewrite the entire JSONL file from the in-memory index (caller holds lock)."""
+    def _rewrite_file(
+        self,
+        checkpoints: Optional[Dict[Any, Any]] = None,
+        writes: Optional[Dict[Any, Any]] = None,
+    ) -> None:
+        """Rewrite the entire JSONL file (caller holds lock).
+
+        Writes the given checkpoint and write indexes, or the in-memory
+        index when they are omitted. Either the file is replaced whole or it
+        is left as it was and the error propagates.
+        """
+        checkpoints = self._checkpoints if checkpoints is None else checkpoints
+        writes = self._writes if writes is None else writes
         dir_path = os.path.dirname(self._path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
         tmp_path = self._path + ".tmp"
         try:
             with open(tmp_path, "w", encoding="utf-8") as fh:
-                for records in self._checkpoints.values():
+                for records in checkpoints.values():
                     for rec in records:
                         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                for write_list in self._writes.values():
+                for write_list in writes.values():
                     for rec in write_list:
                         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             os.replace(tmp_path, self._path)
@@ -811,25 +822,34 @@ class JSONLCheckpointSaver(
 
         Returns:
             ``True`` if any records were removed.
+
+        Raises:
+            OSError: If the file cannot be rewritten. The file and the index
+                are then both unchanged, so a retry deletes the thread.
         """
         self._validate_thread_ownership(thread_id)
         self._ensure_loaded()
 
         with self._lock:
-            keys_to_delete = [k for k in self._checkpoints if k[0] == thread_id]
-            # Writes are collected independently of checkpoints: a write
+            # Writes are filtered independently of checkpoints: a write
             # record's value is conversation content too, and put_writes()
             # stores it whether or not a checkpoint record exists.
-            write_keys = [k for k in self._writes if k[0] == thread_id]
-            if not keys_to_delete and not write_keys:
+            checkpoints = defaultdict(
+                list, {k: v for k, v in self._checkpoints.items() if k[0] != thread_id}
+            )
+            writes = defaultdict(
+                list, {k: v for k, v in self._writes.items() if k[0] != thread_id}
+            )
+            if len(checkpoints) == len(self._checkpoints) and len(writes) == len(
+                self._writes
+            ):
                 return False
 
-            for k in keys_to_delete:
-                del self._checkpoints[k]
-            for k in write_keys:
-                del self._writes[k]
-
-            self._rewrite_file()
+            # The file is rewritten from the filtered copies first; the index
+            # changes only once the file no longer holds the thread.
+            self._rewrite_file(checkpoints, writes)
+            self._checkpoints = checkpoints
+            self._writes = writes
         return True
 
     def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:

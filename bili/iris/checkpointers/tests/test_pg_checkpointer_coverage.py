@@ -941,9 +941,16 @@ class TestAsyncPgThreadOwnership:
         saver._query_delegate = delegate
 
         assert saver.delete_orphaned_blobs() == 4
-        delegate.delete_orphaned_blobs.assert_called_once_with(False)
-        assert saver.delete_orphaned_blobs(dry_run=True) == 4
-        delegate.delete_orphaned_blobs.assert_called_with(True)
+        delegate.delete_orphaned_blobs.assert_called_once_with(
+            dry_run=False, batch_size=None, min_idle_seconds=3600
+        )
+        assert (
+            saver.delete_orphaned_blobs(dry_run=True, batch_size=10, min_idle_seconds=0)
+            == 4
+        )
+        delegate.delete_orphaned_blobs.assert_called_with(
+            dry_run=True, batch_size=10, min_idle_seconds=0
+        )
 
     async def test_async_orphaned_blob_cleanup_runs_off_thread(self):
         """adelete_orphaned_blobs forwards dry_run to the sync delegate."""
@@ -952,5 +959,7 @@ class TestAsyncPgThreadOwnership:
         delegate.delete_orphaned_blobs.return_value = 0
         saver._query_delegate = delegate
 
-        assert await saver.adelete_orphaned_blobs(dry_run=True) == 0
-        delegate.delete_orphaned_blobs.assert_called_once_with(True)
+        assert await saver.adelete_orphaned_blobs(dry_run=True, batch_size=50) == 0
+        delegate.delete_orphaned_blobs.assert_called_once_with(
+            dry_run=True, batch_size=50, min_idle_seconds=3600
+        )

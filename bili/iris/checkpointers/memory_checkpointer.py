@@ -102,19 +102,25 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         ordered newest checkpoint first. Entries that hold no checkpoint (the
         placeholders a read of a never-saved thread leaves in the upstream
         storage) are not threads and are skipped.
+
+        When the saver has a ``user_id``, a thread that user does not own is
+        listed with its structure only (ids, checkpoint count, timestamp) and
+        no content: no messages, message count, title or tags. The
+        PostgreSQL backend likewise returns no messages for such a thread,
+        because its content read refuses it.
         """
         summaries = []
-        # Snapshot the keys so a concurrent put() on another thread cannot
-        # resize the dict while it is being iterated.
+        # list() copies the keys in one step, so a concurrent put() or
+        # delete_thread() cannot resize the dict while it is iterated.
         for thread_id in list(self.storage.keys()):
             if not (
                 thread_id == user_identifier
                 or thread_id.startswith(f"{user_identifier}_")
             ):
                 continue
-            if not self._has_checkpoint(thread_id):
-                continue
-            summaries.append(self._summarize_thread(thread_id))
+            summary = self._summarize_thread(thread_id)
+            if summary is not None:
+                summaries.append(summary)
 
         summaries.sort(key=lambda item: item[0], reverse=True)
         threads = [thread for _, thread in summaries]
@@ -127,37 +133,61 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
         return threads
 
-    def _summarize_thread(self, thread_id: str) -> Tuple[str, Dict[str, Any]]:
+    def _owns_thread(self, thread_id: str) -> bool:
+        """Return True when no user_id is set or the user owns the thread."""
+        return self.user_id is None or self.verify_thread_ownership(
+            thread_id, self.user_id
+        )
+
+    def _summarize_thread(self, thread_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         """Build one get_user_threads entry and its newest checkpoint id.
 
         Storage maps thread_id -> checkpoint_ns -> checkpoint_id -> a tuple of
         serialized (checkpoint, metadata, parent_checkpoint_id); the checkpoint
-        part omits channel_values, which live in self.blobs. Like the
-        PostgreSQL backend, the count and the timestamp cover every namespace,
-        and the messages, title and tags come from the root namespace.
+        part omits channel_values, which live in self.blobs. The count and
+        the timestamp cover every namespace. The messages, title and tags are
+        the root namespace's state, read through get_tuple; the PostgreSQL
+        backend differs here, reading title and tags from the newest
+        checkpoint of any namespace.
+
+        Returns None for a thread with no checkpoint, including one deleted
+        by another Python thread while the listing runs. The lookup uses
+        get(), because indexing the upstream defaultdict would re-create the
+        deleted entry, and each namespace is copied with dict() before it is
+        read, so a concurrent put() into it cannot resize it mid-iteration.
         """
-        namespaces = self.storage[thread_id]
-        checkpoint_count = sum(len(cps) for cps in namespaces.values())
-        newest_id, newest_ns = max(
-            (checkpoint_id, ns)
-            for ns, cps in namespaces.items()
-            for checkpoint_id in cps
+        namespaces = self.storage.get(thread_id)
+        if namespaces is None:
+            return None
+        snapshot = {ns: dict(cps) for ns, cps in list(namespaces.items())}
+        newest = max(
+            (
+                (checkpoint_id, ns)
+                for ns, cps in snapshot.items()
+                for checkpoint_id in cps
+            ),
+            default=None,
         )
-        newest = self.serde.loads_typed(namespaces[newest_ns][newest_id][0])
+        if newest is None:
+            return None
+        newest_id, newest_ns = newest
+        newest_checkpoint = self.serde.loads_typed(snapshot[newest_ns][newest_id][0])
 
         thread = {
             "thread_id": thread_id,
             "conversation_id": (
                 thread_id.split("_", 1)[1] if "_" in thread_id else "default"
             ),
-            "last_updated": newest.get("ts"),
-            "checkpoint_count": checkpoint_count,
+            "last_updated": newest_checkpoint.get("ts"),
+            "checkpoint_count": sum(len(cps) for cps in snapshot.values()),
             "message_count": 0,
             "first_message": None,
             "last_message": None,
             "title": None,
             "tags": [],
         }
+        if not self._owns_thread(thread_id):
+            return newest_id, thread
 
         checkpoint_tuple = self._latest_root_tuple(thread_id)
         if checkpoint_tuple is not None:
@@ -204,7 +234,10 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         from self.blobs and deserialized with self.serde. The upstream read
         indexes the nested defaultdict, so it is called only when the root
         namespace already holds a checkpoint; otherwise it would leave an
-        empty placeholder behind. Ownership is the caller's responsibility.
+        empty placeholder behind. A delete on another Python thread between
+        the check and the read still can, and the read then returns None;
+        _has_checkpoint does not count such a placeholder as a thread.
+        Ownership is the caller's responsibility.
         """
         namespaces = self.storage.get(thread_id)
         if not namespaces or not namespaces.get(""):
@@ -228,39 +261,10 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         if checkpoint_tuple is None:
             return []
 
-        # Extract messages from checkpoint
         channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
-        raw_messages = channel_values.get("messages", [])
-
-        messages = []
-        for msg in raw_messages:
-            msg_type = msg.__class__.__name__
-
-            # Apply message type filter if specified
-            if message_types is not None and msg_type not in message_types:
-                continue
-
-            # Extract content (handle multimodal)
-            content = msg.content if hasattr(msg, "content") else str(msg)
-            if isinstance(content, list):
-                text_parts = [
-                    p.get("text", "")
-                    for p in content
-                    if isinstance(p, dict) and p.get("type") == "text"
-                ]
-                content = " ".join(text_parts)
-
-            # Strip thinking blocks from AI messages
-            if msg_type == "AIMessage":
-                content = self._strip_thinking_blocks(content)
-
-            messages.append(
-                {
-                    "role": "user" if msg_type == "HumanMessage" else "assistant",
-                    "content": content,
-                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-                }
-            )
+        messages = self._format_thread_messages(
+            channel_values.get("messages", []), message_types
+        )
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -270,7 +274,13 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         return messages
 
     def delete_thread(self, thread_id: str) -> bool:
-        """Delete all checkpoints for a conversation thread."""
+        """Delete a thread's checkpoints, pending writes and channel blobs.
+
+        :return: True if anything of the thread was removed. An empty
+            placeholder left by a read of a never-saved thread holds nothing
+            and does not count.
+        :raises PermissionError: If the thread belongs to another user.
+        """
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 

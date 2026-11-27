@@ -30,6 +30,63 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
+# Lower-case serialized message types mapped to message class names.
+_MESSAGE_CLASS_BY_TYPE = {
+    "human": "HumanMessage",
+    "ai": "AIMessage",
+    "system": "SystemMessage",
+    "tool": "ToolMessage",
+    "function": "FunctionMessage",
+}
+
+_ROLE_BY_MESSAGE_CLASS = {
+    "HumanMessage": "user",
+    "AIMessage": "assistant",
+    "SystemMessage": "system",
+    "ToolMessage": "tool",
+    "FunctionMessage": "function",
+}
+
+
+def _message_class_name(msg: Any) -> Any:
+    """Return the normalized class name of a message object or dictionary."""
+    # Check dict first: every Python object (including dict) has __class__,
+    # so a leading hasattr(msg, "__class__") guard would always win and the
+    # dict-specific type extraction would be dead code.
+    if isinstance(msg, dict):
+        msg_class = msg.get("type", msg.get("__class__", "unknown"))
+        # Serialized format where the type is the last element of the id.
+        if msg_class == "unknown" and "kwargs" in msg:
+            raw_id = msg.get("id")
+            # Guard against an empty id list: [][-1] would raise.
+            msg_class = raw_id[-1] if isinstance(raw_id, list) and raw_id else "unknown"
+    else:
+        msg_class = msg.__class__.__name__
+    if isinstance(msg_class, str):
+        return _MESSAGE_CLASS_BY_TYPE.get(msg_class.lower(), msg_class)
+    return msg_class
+
+
+def _message_text(msg: Any) -> Any:
+    """Return a message's content, with multimodal parts reduced to text."""
+    if hasattr(msg, "content"):
+        content = msg.content
+    elif isinstance(msg, dict):
+        content = msg.get("content", msg.get("kwargs", {}).get("content", str(msg)))
+    else:
+        content = str(msg)
+
+    # Multimodal content is a list of {type, text} parts and plain strings.
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                text_parts.append(item["text"])
+            elif isinstance(item, str):
+                text_parts.append(item)
+        content = " ".join(text_parts)
+    return content
+
 
 class QueryableCheckpointerMixin(ABC):
     """
@@ -193,6 +250,53 @@ class QueryableCheckpointerMixin(ABC):
                 f"Access denied: thread_id '{thread_id}' does not belong to "
                 f"user '{self.user_id}'"
             )
+
+    def _format_thread_messages(
+        self, raw_messages: List[Any], message_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Map stored messages to get_thread_messages dictionaries.
+
+        Shared by the backends whose get_thread_messages output must agree:
+        the message type is normalized to a class name, filtered by
+        ``message_types``, and mapped to a role (``user``, ``assistant``,
+        ``system``, ``tool``, ``function``, else ``unknown``). Multimodal
+        content is reduced to its text, thinking blocks are stripped from AI
+        messages, and an AI message left empty by that is dropped.
+
+        Args:
+            raw_messages: Messages from the checkpoint's messages channel,
+                as message objects or serialized dictionaries.
+            message_types: Optional message class names to keep.
+
+        Returns:
+            List of ``{role, content, timestamp}`` dictionaries, unpaginated.
+        """
+        messages = []
+        for msg in raw_messages:
+            msg_class = _message_class_name(msg)
+
+            if message_types is not None and msg_class not in message_types:
+                continue
+
+            role = _ROLE_BY_MESSAGE_CLASS.get(msg_class, "unknown")
+            content = _message_text(msg)
+
+            if msg_class == "AIMessage":
+                content = self._strip_thinking_blocks(content)
+                # An AI message holding only a thinking block has nothing to
+                # show once it is stripped.
+                if not content:
+                    continue
+
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    # Messages carry no individual timestamps in LangGraph.
+                    "timestamp": None,
+                }
+            )
+        return messages
 
     def _strip_thinking_blocks(self, content: str) -> str:
         """

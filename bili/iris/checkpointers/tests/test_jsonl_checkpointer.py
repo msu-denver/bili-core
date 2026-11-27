@@ -828,6 +828,61 @@ class TestQueryableMixin:
             assert not [line for line in fh if line.strip()]
         assert saver.delete_thread("writes-only") is False
 
+    def test_failed_rewrite_raises_and_a_retry_deletes(self, tmp_path, monkeypatch):
+        """A delete whose rewrite fails changes nothing, so a retry completes it."""
+        path = str(tmp_path / "ck.jsonl")
+        saver = JSONLCheckpointSaver(path=path)
+        for thread_id in ("alice_conv-1", "bob_conv-1"):
+            saver.put(
+                _minimal_config(thread_id),
+                _minimal_checkpoint("cp-1"),
+                _minimal_metadata(),
+                {},
+            )
+            saver.put_writes(
+                _minimal_config(thread_id, checkpoint_id="cp-1"),
+                [("messages", [_human_message(f"{thread_id} private")])],
+                task_id="task-1",
+            )
+        with open(path, "r", encoding="utf-8") as fh:
+            before = fh.read()
+
+        real_replace = os.replace
+        calls = []
+
+        def replace_fails_once(src, dst):
+            calls.append(src)
+            if len(calls) == 1:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(
+            "bili.iris.checkpointers.jsonl_checkpointer.os.replace",
+            replace_fails_once,
+        )
+
+        with pytest.raises(OSError, match="disk full"):
+            saver.delete_thread("alice_conv-1")
+        with open(path, "r", encoding="utf-8") as fh:
+            assert fh.read() == before
+        assert saver.thread_exists("alice_conv-1") is True
+        assert not os.path.exists(path + ".tmp")
+
+        assert saver.delete_thread("alice_conv-1") is True
+        with open(path, "r", encoding="utf-8") as fh:
+            remaining = {json.loads(line)["thread_id"] for line in fh if line.strip()}
+        assert remaining == {"bob_conv-1"}
+        assert saver.thread_exists("alice_conv-1") is False
+        assert saver.delete_thread("alice_conv-1") is False
+        # The rebuilt index still accepts records for a brand-new key.
+        saver.put(
+            _minimal_config("carol_conv-1"),
+            _minimal_checkpoint("cp-1"),
+            _minimal_metadata(),
+            {},
+        )
+        assert JSONLCheckpointSaver(path=path).thread_exists("carol_conv-1") is True
+
     def test_get_user_stats(self, tmp_path):
         """get_user_stats aggregates across threads."""
         saver = JSONLCheckpointSaver(path=str(tmp_path / "ck.jsonl"))

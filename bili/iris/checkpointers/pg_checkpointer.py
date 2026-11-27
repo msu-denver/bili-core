@@ -72,19 +72,24 @@ from bili.utils.logging_utils import get_logger
 # Initialize logger for this module
 LOGGER = get_logger(__name__)
 
-# SQL constants shared by sync and async user_id schema migration methods
+# SQL constants shared by sync and async user_id schema migration methods.
+# The checks resolve 'checkpoints' through to_regclass, the same search_path
+# lookup the unqualified ALTER TABLE and every query use, so a checkpoints
+# table in another schema of the same database cannot answer for this one.
 _SQL_CHECK_USER_ID_COLUMN = """
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_name = 'checkpoints'
-    AND column_name = 'user_id'
+    SELECT attname AS column_name
+    FROM pg_attribute
+    WHERE attrelid = to_regclass('checkpoints')
+    AND attname = 'user_id'
+    AND NOT attisdropped
 """
 _SQL_ADD_USER_ID_COLUMN = "ALTER TABLE checkpoints ADD COLUMN user_id TEXT"
 _SQL_CHECK_USER_ID_INDEX = """
-    SELECT indexname
-    FROM pg_indexes
-    WHERE tablename = 'checkpoints'
-    AND indexname = 'idx_checkpoints_user_thread'
+    SELECT c.relname AS indexname
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    WHERE i.indrelid = to_regclass('checkpoints')
+    AND c.relname = 'idx_checkpoints_user_thread'
 """
 _SQL_CREATE_USER_ID_INDEX = """
     CREATE INDEX idx_checkpoints_user_thread
@@ -101,16 +106,64 @@ _SQL_DELETE_THREAD = (
     "DELETE FROM checkpoint_writes WHERE thread_id = %s",
 )
 
-# Blob rows whose thread has no checkpoint row left. Scoped by thread_id only,
-# so blobs of a live thread are never touched, whatever their namespace.
-_SQL_ORPHANED_BLOBS_FILTER = """
-    FROM checkpoint_blobs b
-    WHERE NOT EXISTS (
-        SELECT 1 FROM checkpoints c WHERE c.thread_id = b.thread_id
+# A blob row is referenced when a checkpoint row of the same thread and
+# namespace maps the blob's channel to the blob's version in its
+# channel_versions. The join is the one upstream's SELECT_SQL uses to load
+# channel values (jsonb_each_text key and value against channel and version),
+# so a row this predicate calls unreferenced is never returned by any read.
+_SQL_BLOB_UNREFERENCED = """
+    NOT EXISTS (
+        SELECT 1
+        FROM checkpoints c
+        CROSS JOIN LATERAL jsonb_each_text(c.checkpoint -> 'channel_versions') v
+        WHERE c.thread_id = b.thread_id
+            AND c.checkpoint_ns = b.checkpoint_ns
+            AND v.key = b.channel
+            AND v.value = b.version
     )
 """
-_SQL_COUNT_ORPHANED_BLOBS = "SELECT count(*) AS orphaned" + _SQL_ORPHANED_BLOBS_FILTER
-_SQL_DELETE_ORPHANED_BLOBS = "DELETE" + _SQL_ORPHANED_BLOBS_FILTER
+# Skips every blob of a thread that has a checkpoint newer than the idle
+# window. Pruning deletes a thread's older checkpoints while a run may still
+# be about to commit a checkpoint that reuses their unchanged blob versions;
+# those blobs look unreferenced until that commit. A checkpoint without a
+# parsable ts counts as recent, so its thread is never cleaned by accident.
+_SQL_THREAD_IDLE = """
+    AND NOT EXISTS (
+        SELECT 1
+        FROM checkpoints r
+        WHERE r.thread_id = b.thread_id
+            AND COALESCE((r.checkpoint ->> 'ts')::timestamptz, 'infinity')
+                > now() - make_interval(secs => %(min_idle_seconds)s)
+    )
+"""
+
+
+def _orphaned_blobs_where(min_idle_seconds: float) -> str:
+    """Return the WHERE predicate on ``checkpoint_blobs b`` for orphans."""
+    if min_idle_seconds > 0:
+        return _SQL_BLOB_UNREFERENCED + _SQL_THREAD_IDLE
+    return _SQL_BLOB_UNREFERENCED
+
+
+def _sql_count_orphaned_blobs(min_idle_seconds: float) -> str:
+    """Count the orphaned blob rows."""
+    return (
+        "SELECT count(*) AS orphaned FROM checkpoint_blobs b WHERE "
+        + _orphaned_blobs_where(min_idle_seconds)
+    )
+
+
+def _sql_delete_orphaned_blobs(min_idle_seconds: float, batched: bool) -> str:
+    """Delete the orphaned blob rows, at most %(batch_size)s when batched."""
+    where = _orphaned_blobs_where(min_idle_seconds)
+    if not batched:
+        return "DELETE FROM checkpoint_blobs b WHERE " + where
+    return (
+        "DELETE FROM checkpoint_blobs"
+        " WHERE (thread_id, checkpoint_ns, channel, version) IN ("
+        " SELECT b.thread_id, b.checkpoint_ns, b.channel, b.version"
+        " FROM checkpoint_blobs b WHERE " + where + " LIMIT %(batch_size)s)"
+    )
 
 
 @conditional_cache_resource()
@@ -885,96 +938,7 @@ class PruningPostgresSaver(
             msg_types = [type(msg).__name__ for msg in raw_messages]
             LOGGER.info("get_thread_messages: Message types: %s", msg_types)
 
-        messages = []
-        for msg in raw_messages:
-            # Get message type - handle both objects and dicts. Check dict
-            # first: every Python object (including dict) has __class__, so a
-            # leading hasattr(msg, "__class__") guard would always win and the
-            # dict-specific type extraction below would be dead code.
-            if isinstance(msg, dict):
-                # For dict-like messages, try to determine type from 'type' field
-                msg_class = msg.get("type", msg.get("__class__", "unknown"))
-                # Handle serialized format where type might be in different places
-                if msg_class == "unknown" and "kwargs" in msg:
-                    raw_id = msg.get("id")
-                    # Guard against an empty id list: [][-1] would raise.
-                    msg_class = (
-                        raw_id[-1] if isinstance(raw_id, list) and raw_id else "unknown"
-                    )
-            elif hasattr(msg, "__class__"):
-                msg_class = msg.__class__.__name__
-            else:
-                msg_class = "unknown"
-
-            # Map various type representations to standard names
-            type_normalization = {
-                "human": "HumanMessage",
-                "ai": "AIMessage",
-                "system": "SystemMessage",
-                "tool": "ToolMessage",
-                "function": "FunctionMessage",
-            }
-            msg_class = (
-                type_normalization.get(msg_class.lower(), msg_class)
-                if isinstance(msg_class, str)
-                else msg_class
-            )
-
-            # Apply message type filter if specified
-            if message_types is not None and msg_class not in message_types:
-                LOGGER.debug(
-                    "get_thread_messages: Filtering out message of type %s", msg_class
-                )
-                continue
-
-            # Map message types to roles
-            role_mapping = {
-                "HumanMessage": "user",
-                "AIMessage": "assistant",
-                "SystemMessage": "system",
-                "ToolMessage": "tool",
-                "FunctionMessage": "function",
-            }
-            role = role_mapping.get(msg_class, "unknown")
-
-            # Get content, handling both objects, dicts, and multimodal formats
-            if hasattr(msg, "content"):
-                content = msg.content
-            elif isinstance(msg, dict):
-                # Try different possible content locations in dict
-                content = msg.get(
-                    "content", msg.get("kwargs", {}).get("content", str(msg))
-                )
-            else:
-                content = str(msg)
-
-            # Handle multimodal content (list of {text, type} objects)
-            if isinstance(content, list):
-                # Extract text from multimodal format
-                text_parts = []
-                for item in content:
-                    if isinstance(item, dict) and "text" in item:
-                        text_parts.append(item["text"])
-                    elif isinstance(item, str):
-                        text_parts.append(item)
-                content = " ".join(text_parts)
-
-            # Strip thinking tags from AI messages using shared helper
-            if msg_class == "AIMessage":
-                content = self._strip_thinking_blocks(content)
-
-                # Skip empty AI messages (they should have been removed by normalize_state)
-                if not content:
-                    LOGGER.debug("get_thread_messages: Skipping empty AI message")
-                    continue
-
-            messages.append(
-                {
-                    "role": role,
-                    "content": content,
-                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-                }
-            )
+        messages = self._format_thread_messages(raw_messages, message_types)
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -999,54 +963,111 @@ class PruningPostgresSaver(
         anything is deleted.
 
         :param thread_id: Thread to delete.
-        :return: True if the thread had at least one checkpoint.
+        :return: True if any row of the thread was removed, from any table.
         :raises PermissionError: If the thread belongs to another user.
         """
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
+        deleted_count = 0
         with self._cursor() as cur:
             # One transaction, so a failure part way cannot leave the
             # checkpoints gone while the message blobs are still stored.
             with cur.connection.transaction():
-                cur.execute(_SQL_DELETE_THREAD[0], (thread_id,))
-                deleted_count = cur.rowcount
-                for statement in _SQL_DELETE_THREAD[1:]:
+                for statement in _SQL_DELETE_THREAD:
                     cur.execute(statement, (thread_id,))
+                    deleted_count += cur.rowcount
 
         return deleted_count > 0
 
-    def delete_orphaned_blobs(self, dry_run: bool = False) -> int:
-        """Delete ``checkpoint_blobs`` rows whose thread has no checkpoint left.
+    def delete_orphaned_blobs(
+        self,
+        dry_run: bool = False,
+        batch_size: int | None = None,
+        min_idle_seconds: float = 3600,
+    ) -> int:
+        """Delete ``checkpoint_blobs`` rows that no checkpoint references.
 
-        Such rows hold channel values, including messages, of threads whose
-        checkpoints are gone; no read method can reach them, but they still
-        hold conversation content. Nothing calls this automatically: deleting
-        rows is a decision for the database's owner, who runs it on purpose
-        (see "Deleting Conversations" in docs/ARCHITECTURE.md). It is
-        idempotent; a second run deletes nothing.
+        A blob row is an orphan when no row in ``checkpoints`` with the same
+        thread_id and checkpoint_ns maps the row's channel to the row's
+        version in its ``channel_versions``. Every read joins blobs on that
+        key, so no read can return an orphan, yet it still holds a channel
+        value such as a message list. Orphans come from a delete that left
+        blobs behind (a conversation deleted that way stays stored even after
+        its thread_id is used again), from keep-last-N pruning, which deletes
+        checkpoints but not the blob versions only they referenced, and from
+        a migration that archives a checkpoint out of ``checkpoints``.
 
-        Live threads are safe while the application runs. A row is deleted
-        only when no ``checkpoints`` row for its thread_id is visible to the
-        statement. Every writer in this library, and the upstream
-        ``PostgresSaver.put``, commits a checkpoint's blobs and its checkpoint
-        row in one transaction, so a thread that is mid-write has neither
-        visible yet and its uncommitted blob rows are not seen. A writer that
-        commits blob rows separately from its checkpoint row would not be
-        covered; with such a writer, run this in a quiet window.
+        This is an operator tool. It is database-wide and ignores the saver's
+        ``user_id``, and nothing in this library runs it automatically: the
+        database's owner decides whether and when to delete rows (see
+        "Deleting Conversations" in docs/ARCHITECTURE.md). It runs on its own
+        pooled connection, never inside a write in progress on this saver.
+        It is idempotent once the idle window has passed for every thread.
 
-        :param dry_run: When True, count the orphaned rows and delete nothing.
+        Safe while the application runs. A blob row written by a put that has
+        not committed is invisible to the statement, and every write path in
+        this library commits a checkpoint's blobs and its checkpoint row in
+        one transaction. What it cannot see is a run about to commit a
+        checkpoint that reuses blob versions whose older checkpoints pruning
+        just deleted, so threads with a checkpoint newer than
+        ``min_idle_seconds`` are skipped entirely; a later run cleans them.
+
+        :param dry_run: When True, count the orphaned rows in a read-only
+            transaction and delete nothing.
+        :param batch_size: When set, delete at most this many rows per
+            transaction, repeating until a batch comes back short, so no
+            single transaction runs long on a large table. When None, one
+            statement deletes every orphan in one transaction.
+        :param min_idle_seconds: Skip threads written to within this many
+            seconds. 0 disables the guard; use it only while nothing writes.
         :return: The number of rows deleted, or that would be deleted.
+        :raises ValueError: If batch_size is not positive or
+            min_idle_seconds is negative.
         """
-        with self._cursor() as cur:
-            if dry_run:
-                cur.execute(_SQL_COUNT_ORPHANED_BLOBS)
-                return cur.fetchone()["orphaned"]
-            with cur.connection.transaction():
-                cur.execute(_SQL_DELETE_ORPHANED_BLOBS)
-                deleted = cur.rowcount
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer or None")
+        if min_idle_seconds < 0:
+            raise ValueError("min_idle_seconds must not be negative")
+        params = {"min_idle_seconds": min_idle_seconds, "batch_size": batch_size}
+
+        with self._maintenance_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                if dry_run:
+                    with conn.transaction():
+                        cur.execute("SET TRANSACTION READ ONLY")
+                        cur.execute(_sql_count_orphaned_blobs(min_idle_seconds), params)
+                        return cur.fetchone()["orphaned"]
+
+                statement = _sql_delete_orphaned_blobs(
+                    min_idle_seconds, batched=batch_size is not None
+                )
+                deleted = 0
+                while True:
+                    with conn.transaction():
+                        cur.execute(statement, params)
+                        batch_deleted = cur.rowcount
+                    deleted += batch_deleted
+                    if batch_size is None or batch_deleted < batch_size:
+                        break
         LOGGER.info("Deleted %d orphaned checkpoint_blobs rows", deleted)
         return deleted
+
+    @contextmanager
+    def _maintenance_connection(self):
+        """Yield a connection for operator statements.
+
+        A pool hands out a connection of its own, so the statement neither
+        joins a ``_put_with_user_id`` transaction through ``_txn_conn`` nor
+        holds ``self.lock`` and stalls this saver's checkpoint I/O. A single
+        shared connection is used under the lock, as upstream does.
+        """
+        if isinstance(self.conn, ConnectionPool):
+            with self.conn.connection() as conn:
+                yield conn
+        else:
+            with self.lock:
+                yield self.conn
 
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user."""
@@ -1351,9 +1372,16 @@ class AsyncPruningPostgresSaver(
         """Delete all checkpoints for a thread (delegates to the sync saver)."""
         return self._get_query_delegate().delete_thread(thread_id)
 
-    def delete_orphaned_blobs(self, dry_run: bool = False) -> int:
+    def delete_orphaned_blobs(
+        self,
+        dry_run: bool = False,
+        batch_size: int | None = None,
+        min_idle_seconds: float = 3600,
+    ) -> int:
         """Delete orphaned checkpoint_blobs rows (delegates to the sync saver)."""
-        return self._get_query_delegate().delete_orphaned_blobs(dry_run)
+        return self._get_query_delegate().delete_orphaned_blobs(
+            dry_run=dry_run, batch_size=batch_size, min_idle_seconds=min_idle_seconds
+        )
 
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user (delegates to the sync saver)."""
@@ -1391,9 +1419,19 @@ class AsyncPruningPostgresSaver(
         """Async variant of delete_thread (runs off the event loop)."""
         return await asyncio.to_thread(self.delete_thread, thread_id)
 
-    async def adelete_orphaned_blobs(self, dry_run: bool = False) -> int:
+    async def adelete_orphaned_blobs(
+        self,
+        dry_run: bool = False,
+        batch_size: int | None = None,
+        min_idle_seconds: float = 3600,
+    ) -> int:
         """Async variant of delete_orphaned_blobs (runs off the event loop)."""
-        return await asyncio.to_thread(self.delete_orphaned_blobs, dry_run)
+        return await asyncio.to_thread(
+            self.delete_orphaned_blobs,
+            dry_run=dry_run,
+            batch_size=batch_size,
+            min_idle_seconds=min_idle_seconds,
+        )
 
     async def aget_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Async variant of get_user_stats (runs off the event loop)."""

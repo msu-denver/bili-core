@@ -151,23 +151,20 @@ class TestDeleteThread:
         # checkpoint are removed too.
         assert len(events) == 5
 
-    def test_blobs_alone_do_not_count_as_a_thread(self):
-        """True means the thread had checkpoints, not merely leftover blobs."""
+    @pytest.mark.parametrize(
+        "rowcounts",
+        [
+            {"checkpoints": 0, "checkpoint_blobs": 9, "checkpoint_writes": 0},
+            {"checkpoints": 0, "checkpoint_blobs": 0, "checkpoint_writes": 2},
+            {"checkpoints": 3, "checkpoint_blobs": 0, "checkpoint_writes": 0},
+        ],
+    )
+    def test_true_when_any_table_had_rows(self, rowcounts):
+        """True means something was removed, from whichever table held it."""
         saver = _make_saver()
-        mock_cur, _ = _recording_cursor(
-            {"checkpoints": 0, "checkpoint_blobs": 9, "checkpoint_writes": 2}
-        )
+        mock_cur, _ = _recording_cursor(rowcounts)
         _attach_fake_cursor(saver, mock_cur)
-        assert saver.delete_thread("thread_leftover") is False
-
-    def test_return_value_comes_from_checkpoints_rowcount(self):
-        """A later statement's rowcount does not overwrite the result."""
-        saver = _make_saver()
-        mock_cur, _ = _recording_cursor(
-            {"checkpoints": 3, "checkpoint_blobs": 0, "checkpoint_writes": 0}
-        )
-        _attach_fake_cursor(saver, mock_cur)
-        assert saver.delete_thread("thread_x") is True
+        assert saver.delete_thread("thread_leftover") is True
 
     def test_failed_blob_delete_rolls_back_the_transaction(self):
         """A failure part way rolls back instead of committing a partial delete."""
@@ -207,45 +204,198 @@ class TestDeleteThread:
         assert bili_tables == upstream_tables
 
 
+def _recording_connection(rowcounts=(), count=0):
+    """Build a mock connection that logs statements and transactions.
+
+    Each executed statement takes the next value of ``rowcounts`` as its
+    rowcount; ``fetchone`` answers a count query with ``count``.
+    """
+    events = []
+    remaining = list(rowcounts)
+    conn = MagicMock()
+    cur = MagicMock()
+
+    @contextmanager
+    def transaction():
+        events.append("BEGIN")
+        yield
+        events.append("COMMIT")
+
+    @contextmanager
+    def cursor(**_kwargs):
+        yield cur
+
+    def execute(statement, params=None):
+        events.append((" ".join(statement.split()), params))
+        cur.rowcount = remaining.pop(0) if remaining else 0
+
+    conn.transaction.side_effect = transaction
+    conn.cursor.side_effect = cursor
+    cur.execute.side_effect = execute
+    cur.fetchone.return_value = {"orphaned": count}
+    return conn, events
+
+
+def _attach_maintenance_connection(saver, conn):
+    """Make the saver's cleanup statements run on the given connection."""
+
+    @contextmanager
+    def maintenance_connection():
+        yield conn
+
+    object.__setattr__(saver, "_maintenance_connection", maintenance_connection)
+
+
+def _statements(events):
+    """Return the SQL text of every executed statement, in order."""
+    return [event[0] for event in events if isinstance(event, tuple)]
+
+
+# The orphan predicate must use the key upstream's read joins blobs on.
+_REFERENCE_JOIN = (
+    "CROSS JOIN LATERAL jsonb_each_text(c.checkpoint -> 'channel_versions') v",
+    "c.thread_id = b.thread_id",
+    "c.checkpoint_ns = b.checkpoint_ns",
+    "v.key = b.channel",
+    "v.value = b.version",
+)
+_IDLE_GUARD = "make_interval(secs => %(min_idle_seconds)s)"
+
+
 class TestDeleteOrphanedBlobs:
     """Tests for the operator-run orphaned blob cleanup."""
 
-    def test_deletes_blobs_without_a_checkpoint_in_one_transaction(self):
-        """The cleanup is one NOT EXISTS delete keyed on thread_id."""
+    def test_unbatched_delete_is_one_statement_in_one_transaction(self):
+        """By default one DELETE, guarded by the idle window, runs and commits."""
         saver = _make_saver()
-        mock_cur, events = _recording_cursor({"checkpoint_blobs": 15})
-        _attach_fake_cursor(saver, mock_cur)
+        conn, events = _recording_connection(rowcounts=[15])
+        _attach_maintenance_connection(saver, conn)
 
         assert saver.delete_orphaned_blobs() == 15
-        assert events[0] == "BEGIN"
-        assert events[-1] == "COMMIT"
+        assert events[0] == "BEGIN" and events[-1] == "COMMIT"
         ((statement, params),) = [e for e in events if isinstance(e, tuple)]
-        assert params is None
-        assert statement == (
-            "DELETE FROM checkpoint_blobs b WHERE NOT EXISTS ( SELECT 1 FROM "
-            "checkpoints c WHERE c.thread_id = b.thread_id )"
-        )
+        assert statement.startswith("DELETE FROM checkpoint_blobs b WHERE NOT EXISTS")
+        for fragment in _REFERENCE_JOIN + (_IDLE_GUARD,):
+            assert fragment in statement
+        assert "LIMIT" not in statement
+        assert params == {"min_idle_seconds": 3600, "batch_size": None}
 
-    def test_dry_run_counts_and_deletes_nothing(self):
-        """dry_run reports the count without issuing a DELETE."""
+    def test_zero_idle_window_drops_the_guard(self):
+        """min_idle_seconds=0 deletes by the reference test alone."""
         saver = _make_saver()
-        mock_cur, events = _recording_cursor()
-        mock_cur.fetchone.return_value = {"orphaned": 7}
-        _attach_fake_cursor(saver, mock_cur)
+        conn, events = _recording_connection(rowcounts=[2])
+        _attach_maintenance_connection(saver, conn)
 
-        assert saver.delete_orphaned_blobs(dry_run=True) == 7
-        statements = [e[0] for e in events if isinstance(e, tuple)]
-        assert len(statements) == 1
-        assert statements[0].startswith("SELECT count(*) AS orphaned FROM")
-        assert not any("DELETE" in stmt for stmt in statements)
-        assert "BEGIN" not in events
+        assert saver.delete_orphaned_blobs(min_idle_seconds=0) == 2
+        (statement,) = _statements(events)
+        assert _IDLE_GUARD not in statement
+        assert all(fragment in statement for fragment in _REFERENCE_JOIN)
+
+    def test_batches_repeat_until_one_comes_back_short(self):
+        """Each batch is its own transaction; a short batch ends the loop."""
+        saver = _make_saver()
+        conn, events = _recording_connection(rowcounts=[3, 3, 1])
+        _attach_maintenance_connection(saver, conn)
+
+        assert saver.delete_orphaned_blobs(batch_size=3) == 7
+        assert events.count("BEGIN") == events.count("COMMIT") == 3
+        statements = _statements(events)
+        assert len(set(statements)) == 1
+        assert statements[0].startswith(
+            "DELETE FROM checkpoint_blobs WHERE (thread_id, checkpoint_ns, channel,"
+            " version) IN ( SELECT"
+        )
+        assert statements[0].endswith("LIMIT %(batch_size)s)")
+        assert all(fragment in statements[0] for fragment in _REFERENCE_JOIN)
+        assert {e[1]["batch_size"] for e in events if isinstance(e, tuple)} == {3}
+
+    def test_exact_multiple_of_batch_size_ends_on_an_empty_batch(self):
+        """When the orphans fill whole batches, one more batch confirms none left."""
+        saver = _make_saver()
+        conn, events = _recording_connection(rowcounts=[2, 2, 0])
+        _attach_maintenance_connection(saver, conn)
+
+        assert saver.delete_orphaned_blobs(batch_size=2) == 4
+        assert len(_statements(events)) == 3
+
+    def test_dry_run_counts_in_a_read_only_transaction(self):
+        """dry_run reports the count and issues no DELETE."""
+        saver = _make_saver()
+        conn, events = _recording_connection(count=7)
+        _attach_maintenance_connection(saver, conn)
+
+        assert saver.delete_orphaned_blobs(dry_run=True, batch_size=5) == 7
+        statements = _statements(events)
+        assert events[0] == "BEGIN" and events[-1] == "COMMIT"
+        assert statements[0] == "SET TRANSACTION READ ONLY"
+        assert statements[1].startswith(
+            "SELECT count(*) AS orphaned FROM checkpoint_blobs b WHERE NOT EXISTS"
+        )
+        assert all(fragment in statements[1] for fragment in _REFERENCE_JOIN)
+        assert _IDLE_GUARD in statements[1]
+        assert len(statements) == 2
+        assert not any("DELETE" in statement for statement in statements)
 
     def test_second_run_reports_zero(self):
         """An idempotent rerun reports the database's zero rowcount."""
         saver = _make_saver()
-        mock_cur, _ = _recording_cursor({"checkpoint_blobs": 0})
-        _attach_fake_cursor(saver, mock_cur)
+        conn, _ = _recording_connection(rowcounts=[0])
+        _attach_maintenance_connection(saver, conn)
         assert saver.delete_orphaned_blobs() == 0
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"batch_size": 0}, {"batch_size": -1}, {"min_idle_seconds": -1}]
+    )
+    def test_rejects_invalid_arguments_before_connecting(self, kwargs):
+        """A non-positive batch or a negative idle window raises ValueError."""
+        saver = _make_saver()
+        conn, events = _recording_connection()
+        _attach_maintenance_connection(saver, conn)
+        with pytest.raises(ValueError):
+            saver.delete_orphaned_blobs(**kwargs)
+        assert not events
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"batch_size": 1}, {"batch_size": None}, {"min_idle_seconds": 0}],
+    )
+    def test_accepts_boundary_arguments(self, kwargs):
+        """The smallest batch, no batching and a zero idle window are valid."""
+        saver = _make_saver()
+        conn, _ = _recording_connection(rowcounts=[0])
+        _attach_maintenance_connection(saver, conn)
+        assert saver.delete_orphaned_blobs(**kwargs) == 0
+
+    def test_uses_its_own_pool_connection_not_a_write_in_progress(self):
+        """A pool connection is checked out; _txn_conn and the lock go unused."""
+        from psycopg_pool import (  # pylint: disable=import-outside-toplevel
+            ConnectionPool,
+        )
+
+        saver = _make_saver()
+        pool = MagicMock(spec=ConnectionPool)
+        own = MagicMock(name="own")
+        pool.connection.return_value.__enter__.return_value = own
+        saver.conn = pool
+        saver._txn_conn = MagicMock(name="in-progress write")
+        saver.lock = MagicMock()
+
+        with saver._maintenance_connection() as conn:
+            assert conn is own
+        pool.connection.assert_called_once_with()
+        saver._txn_conn.cursor.assert_not_called()
+        saver.lock.__enter__.assert_not_called()
+
+    def test_single_connection_is_used_under_the_lock(self):
+        """Without a pool the shared connection is serialized by the lock."""
+        saver = _make_saver()
+        shared = MagicMock(name="shared")
+        saver.conn = shared
+        saver.lock = MagicMock()
+
+        with saver._maintenance_connection() as conn:
+            assert conn is shared
+            saver.lock.__enter__.assert_called_once()
 
     def test_factory_never_runs_the_cleanup(self):
         """Creating a checkpointer does not delete orphaned rows on its own."""

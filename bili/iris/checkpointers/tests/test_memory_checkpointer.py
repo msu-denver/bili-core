@@ -9,6 +9,7 @@ from typing import Annotated, TypedDict
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -710,3 +711,233 @@ class TestThreadExists:
         saver = QueryableMemorySaver()
         assert saver.thread_exists("ghost") is False
         assert "ghost" not in saver.storage
+
+
+# ---------------------------------------------------------------------------
+# Listing another user's threads on a scoped saver
+# ---------------------------------------------------------------------------
+
+
+class TestCrossUserListing:
+    """A scoped saver never returns content of threads its user does not own."""
+
+    @staticmethod
+    def _shared_saver():
+        """Write two users' threads, then scope the saver to alice."""
+        saver = QueryableMemorySaver()
+        _chat(saver, "alice@test.com_conv-1", "alice private")
+        _chat(saver, "bob@test.com_conv-1", "bob private", "bob again")
+        saver.user_id = "alice@test.com"
+        return saver
+
+    def test_other_users_threads_are_listed_without_content(self):
+        """Structure is listed; messages, title and tags are withheld."""
+        saver = self._shared_saver()
+
+        (thread,) = saver.get_user_threads("bob@test.com")
+
+        assert thread["thread_id"] == "bob@test.com_conv-1"
+        assert thread["checkpoint_count"] == 6
+        assert thread["last_updated"] is not None
+        assert thread["message_count"] == 0
+        assert thread["first_message"] is None
+        assert thread["last_message"] is None
+        assert thread["title"] is None
+        assert thread["tags"] == []
+
+    def test_own_threads_keep_their_content(self):
+        """The configured user's own listing is unchanged by the scoping."""
+        saver = self._shared_saver()
+
+        (thread,) = saver.get_user_threads("alice@test.com")
+
+        assert thread["first_message"] == "alice private"
+        assert thread["message_count"] == 2
+        assert thread["title"] == "About alice private"
+        assert thread["tags"] == ["memory", "test"]
+
+    def test_unscoped_saver_lists_content_for_any_user(self):
+        """Without a user_id there is no owner to protect, as before."""
+        saver = self._shared_saver()
+        saver.user_id = None
+
+        (thread,) = saver.get_user_threads("bob@test.com")
+
+        assert thread["first_message"] == "bob private"
+        assert thread["last_message"] == "bob again"
+
+
+# ---------------------------------------------------------------------------
+# get_thread_messages parity with the PostgreSQL backend
+# ---------------------------------------------------------------------------
+
+
+def _every_message_kind():
+    """Messages of every type the role mapping distinguishes."""
+    # pylint: disable=import-outside-toplevel
+    from langchain_core.messages import (
+        ChatMessage,
+        FunctionMessage,
+        SystemMessage,
+        ToolMessage,
+    )
+
+    return [
+        SystemMessage("be brief"),
+        HumanMessage([{"type": "text", "text": "look"}, "here"]),
+        AIMessage("<think>only reasoning</think>"),
+        AIMessage("<thinking>why</thinking>Answer"),
+        ToolMessage("42", tool_call_id="call-1"),
+        FunctionMessage("result", name="fn"),
+        ChatMessage("custom", role="critic"),
+    ]
+
+
+class TestGetThreadMessagesParity:
+    """The in-memory and PostgreSQL mappings produce the same output."""
+
+    _EXPECTED = [
+        {"role": "system", "content": "be brief", "timestamp": None},
+        {"role": "user", "content": "look here", "timestamp": None},
+        {"role": "assistant", "content": "Answer", "timestamp": None},
+        {"role": "tool", "content": "42", "timestamp": None},
+        {"role": "function", "content": "result", "timestamp": None},
+        {"role": "unknown", "content": "custom", "timestamp": None},
+    ]
+
+    @staticmethod
+    def _memory_messages(**kwargs):
+        """Store every message kind through a graph run and read it back."""
+        saver = QueryableMemorySaver()
+
+        def emit(_state):
+            return {"messages": _every_message_kind()}
+
+        builder = StateGraph(_ChatState)
+        builder.add_node("emit", emit)
+        builder.add_edge(START, "emit")
+        builder.add_edge("emit", END)
+        graph = builder.compile(checkpointer=saver)
+        graph.invoke({"messages": []}, {"configurable": {"thread_id": "u_c"}})
+        stored = saver.get_tuple(_config("u_c")).checkpoint["channel_values"]
+        return saver.get_thread_messages("u_c", **kwargs), stored["messages"]
+
+    @staticmethod
+    def _postgres_messages(raw_messages, **kwargs):
+        """Feed the same stored messages through the PostgreSQL reader."""
+        # pylint: disable=import-outside-toplevel
+        from unittest.mock import MagicMock, patch
+
+        with patch(
+            "bili.iris.checkpointers.pg_checkpointer"
+            ".PruningPostgresSaver._ensure_user_id_schema"
+        ), patch(
+            "langgraph.checkpoint.postgres.PostgresSaver.__init__", return_value=None
+        ):
+            from bili.iris.checkpointers.pg_checkpointer import PruningPostgresSaver
+
+            saver = PruningPostgresSaver(MagicMock())
+        saver.get_tuple = MagicMock(
+            return_value=MagicMock(
+                checkpoint={"channel_values": {"messages": raw_messages}}
+            )
+        )
+        return saver.get_thread_messages("u_c", **kwargs)
+
+    def test_roles_and_empty_ai_messages_match_postgres(self):
+        """System, tool, function, unknown and stripped-empty AI messages."""
+        memory, raw = self._memory_messages()
+
+        assert memory == self._EXPECTED
+        assert self._postgres_messages(raw) == memory
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"message_types": ["ToolMessage", "ChatMessage"]},
+            {"message_types": ["AIMessage"]},
+            {"limit": 2, "offset": 1},
+        ],
+    )
+    def test_filters_and_pagination_match_postgres(self, kwargs):
+        """Type filters and pagination agree on the same stored messages."""
+        memory, raw = self._memory_messages(**kwargs)
+
+        assert self._postgres_messages(raw, **kwargs) == memory
+
+
+# ---------------------------------------------------------------------------
+# Listing while other threads write and delete
+# ---------------------------------------------------------------------------
+
+
+class TestListingUnderConcurrency:
+    """get_user_threads tolerates puts and deletes on other Python threads."""
+
+    def test_thread_deleted_mid_listing_is_skipped_without_placeholder(self):
+        """A delete after the key snapshot and before the summary is tolerated."""
+        # pylint: disable=protected-access
+        saver = QueryableMemorySaver()
+        _chat(saver, "u_doomed", "bye")
+        _chat(saver, "u_kept", "stay")
+        summarize = saver._summarize_thread
+
+        def delete_then_summarize(thread_id):
+            if thread_id == "u_doomed":
+                MemorySaver.delete_thread(saver, thread_id)
+            return summarize(thread_id)
+
+        saver._summarize_thread = delete_then_summarize
+
+        threads = saver.get_user_threads("u")
+
+        assert [t["thread_id"] for t in threads] == ["u_kept"]
+        assert "u_doomed" not in saver.storage
+
+    def test_listing_survives_concurrent_puts_into_the_listed_thread(self):
+        """Puts that resize the namespace being summarized never break a listing."""
+        # pylint: disable=import-outside-toplevel
+        import sys
+        import threading
+
+        saver = QueryableMemorySaver()
+        thread_id = "u_busy"
+        for i in range(500):
+            saver.put(
+                _config(thread_id),
+                {**_make_checkpoint(checkpoint_id=f"cp-{i:06d}"), "ts": "t"},
+                {},
+                {},
+            )
+        stop = threading.Event()
+
+        def writer():
+            i = 500
+            while not stop.is_set():
+                saver.put(
+                    _config(thread_id),
+                    {**_make_checkpoint(checkpoint_id=f"cp-{i:06d}"), "ts": "t"},
+                    {},
+                    {},
+                )
+                i += 1
+
+        errors = []
+        previous_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        worker = threading.Thread(target=writer, daemon=True)
+        worker.start()
+        try:
+            for _ in range(200):
+                try:
+                    saver.get_user_threads("u")
+                except (RuntimeError, ValueError) as exc:
+                    errors.append(exc)
+                    break
+        finally:
+            stop.set()
+            worker.join(timeout=10)
+            sys.setswitchinterval(previous_interval)
+
+        assert not worker.is_alive()
+        assert not errors, errors
