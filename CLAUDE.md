@@ -169,7 +169,7 @@ Security evaluation framework for testing LLM robustness:
 
 ### Dependencies and Configuration
 
-- **Python 3.11+** required
+- Supports **Python 3.11 through 3.14**
 - **LangChain/LangGraph** for LLM orchestration
 - **Environment Variables**: `.env` file in project root (Docker Compose reads via `env_file: .env`). Copy `.env.example` to `.env` and fill in API keys. Shared variables are compatible with sustainability-hub-engine's `.env`.
   - AWS credentials in `env/bili_root/.aws/`

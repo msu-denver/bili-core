@@ -43,6 +43,12 @@ updates:
           - "langchain-openai"
           - "langchain-google-vertexai"
           - "langchain-huggingface"
+      google-cloud:
+        patterns:
+          - "google-*"
+          - "googleapis-common-protos"
+          - "proto-plus"
+          - "grpc-google-iam-v1"
       ml-frameworks:
         patterns:
           - "torch*"
