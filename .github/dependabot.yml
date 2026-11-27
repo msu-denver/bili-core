@@ -31,6 +31,18 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    # Major versions the google-cloud group would otherwise propose, held back
+    # by constraints documented in requirements.txt:
+    # - google-genai 3.x cannot resolve while google-cloud-aiplatform, 1.x and
+    #   2.x alike, requires google-genai<3. Remove when aiplatform admits 3.x.
+    # - google-cloud-aiplatform 2.10 allows protobuf<8, which moves the lean
+    #   core and [all] from protobuf 6.x to 7.x. Remove once the suite passes
+    #   on protobuf 7.
+    ignore:
+      - dependency-name: "google-genai"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "google-cloud-aiplatform"
+        update-types: ["version-update:semver-major"]
     groups:
       langchain-ecosystem:
         patterns:
@@ -43,6 +55,12 @@ updates:
           - "langchain-openai"
           - "langchain-google-vertexai"
           - "langchain-huggingface"
+      google-cloud:
+        patterns:
+          - "google-*"
+          - "googleapis-common-protos"
+          - "proto-plus"
+          - "grpc-google-iam-v1"
       ml-frameworks:
         patterns:
           - "torch*"

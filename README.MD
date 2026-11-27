@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/msu-denver/bili-core/actions/workflows/ci-cd.yml"><img src="https://github.com/msu-denver/bili-core/actions/workflows/ci-cd.yml/badge.svg?branch=develop" alt="CI/CD"></a>
   <a href="https://github.com/msu-denver/bili-core/releases/latest"><img src="https://img.shields.io/github/v/release/msu-denver/bili-core" alt="Latest Release"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%20through%203.14-blue.svg" alt="Python 3.11 through 3.14"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
@@ -122,6 +122,18 @@ newer**; on older git the script warns and only the worktree feature degrades.
 
 - **Docker**: [Get Docker](https://docs.docker.com/get-docker/) — all services run in containers
 - **Git**: To clone the repository
+
+### Python versions and optional extras
+
+The core library installs on Python 3.11 through 3.14. Some optional extras do not install on the newer versions:
+
+| Python | Extras that install |
+|--------|---------------------|
+| 3.11, 3.12 | Every extra, including `[all]` |
+| 3.13 | Every extra except `[ml]`, `[docs]` and `[all]` |
+| 3.14 | Every extra except `[huggingface]`, `[ml]`, `[docs]` and `[all]` |
+
+On 3.13 and later, langchain-community requires numpy 2.1 or newer, while `[ml]` pins numpy 1.26 and `[docs]` needs rapidocr, which requires numpy below 2. On 3.14, the torch 2.6 pinned by `[huggingface]` has no wheels. `[llamacpp]` always compiles from source. On Linux, `[ml]` needs glibc 2.27 or newer.
 
 ### 1. Clone and configure
 
