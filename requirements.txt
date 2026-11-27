@@ -53,7 +53,7 @@ langchain-openai~=1.8.5
 # bili.iris.providers.structured_output.parse_structured_content.
 jsonschema~=4.21
 pyyaml~=6.0
-# Floor set by google-api-core (2.35 and later require requests>=2.33). A
+# Floor set by google-api-core (2.31.0 and later require requests>=2.33). A
 # patch-level ~=2.32.x pin here makes every newer google-api-core unresolvable.
 requests~=2.33
 
@@ -81,10 +81,12 @@ anyio==4.16.0
 # - protobuf is left unpinned. google-api-core, googleapis-common-protos,
 #   proto-plus, grpc-google-iam-v1 and google-cloud-resource-manager in this set
 #   require protobuf>=6.33.5, and google-cloud-aiplatform 1.x caps it below 7,
-#   so it resolves to the 6.x line, which the [streamlit] extra also requires.
-# - google-cloud-aiplatform stays on 1.x: langchain-google-vertexai needs only
-#   >=1.97, and 2.x would admit protobuf 7 in the lean core while [all] stays
-#   on 6.
+#   so it resolves to the 6.x line. streamlit 1.67 ([streamlit]) and
+#   tensorflow 2.21 ([ml]) both accept protobuf<8.
+# - google-cloud-aiplatform stays on 1.x to hold protobuf on 6.x:
+#   langchain-google-vertexai needs only >=1.97, and aiplatform 2.10.0 allows
+#   protobuf<8, so moving to it puts the lean core and [all] on protobuf 7.
+#   Move it only together with a full test run on protobuf 7.
 # - google-genai stays below 3 because google-cloud-aiplatform requires
 #   google-genai<3. The [google-genai] extra in setup.py is capped to match.
 # - google-crc32c 1.8.0 is the first release with CPython 3.14 wheels.

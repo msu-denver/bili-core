@@ -235,6 +235,8 @@ _EXTRAS = {
     # tensorflow floor: 2.19 and earlier require protobuf<6, and the lean
     # core's Google packages require protobuf>=6.33.5, so an older tensorflow
     # makes [ml] and [all] unresolvable. tf-keras must match tensorflow's minor.
+    # tensorflow 2.21 publishes no sdist and its Linux wheels are tagged
+    # manylinux_2_27, so [ml] needs glibc 2.27 or newer on Linux.
     # On macOS, tensorflow 2.20+ aborts at import when pyarrow is older than 22
     # ("mutex.cc ... Lock blocking"); [streamlit] must keep admitting
     # pyarrow>=22 for [all] to import tensorflow there.
@@ -310,7 +312,11 @@ _EXTRAS = {
         "pympler==1.1",
         "pytest~=8.0.0",
         "pytest-cov~=7.0.0",
-        "setuptools~=65.5.0",
+        # 66.1 is the first release that runs on Python 3.12 (earlier ones
+        # call pkgutil.ImpImporter, which 3.12 removed), and 69.0 fixes a
+        # Python 3.13 incompatibility. The cap is the newest major verified
+        # to build this package.
+        "setuptools>=69.0,<85",
         "watchdog==5.0.3",
     ],
 }
