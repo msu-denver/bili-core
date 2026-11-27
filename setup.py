@@ -127,11 +127,21 @@ _EXTRAS = {
     # ------------------------------------------------------------------ #
     # Streamlit web UI (bili/streamlit_app.py + bili/streamlit_ui/).
     # Usage: pip install bili-core[streamlit]
+    # streamlit must admit pyarrow>=22: 22.0.0 is the first pyarrow with
+    # CPython 3.14 wheels, and an older pyarrow makes tensorflow 2.20+ abort at
+    # import on macOS when [ml] shares the environment. streamlit 1.51 and
+    # earlier cap pyarrow below 22. The explicit pyarrow floor makes an
+    # in-place upgrade replace an installed pyarrow 21 instead of keeping it.
+    # The <26 ceiling: pyarrow 26 refuses to import with NumPy 1.x without
+    # declaring it in its metadata, and [ml] pins numpy 1.26.4.
+    # pillow 11.3.0 and pandas 2.3.3 are the first releases of their lines with
+    # CPython 3.14 wheels.
     "streamlit": [
-        "streamlit~=1.51.0",
+        "streamlit~=1.67.0",
         "streamlit-flow-component>=1.3.0",
-        "pillow~=10.4.0",
-        "pandas==2.2.3",
+        "pyarrow>=22,<26",
+        "pillow~=11.3.0",
+        "pandas==2.3.3",
     ],
     # Flask REST API (bili/flask_app.py + bili/flask_api/).
     # Usage: pip install bili-core[flask]
@@ -226,8 +236,8 @@ _EXTRAS = {
     # core's Google packages require protobuf>=6.33.5, so an older tensorflow
     # makes [ml] and [all] unresolvable. tf-keras must match tensorflow's minor.
     # On macOS, tensorflow 2.20+ aborts at import when pyarrow is older than 22
-    # ("mutex.cc ... Lock blocking"), and the streamlit pin in [streamlit]
-    # caps pyarrow below 22, so [all] on macOS cannot import tensorflow.
+    # ("mutex.cc ... Lock blocking"); [streamlit] must keep admitting
+    # pyarrow>=22 for [all] to import tensorflow there.
     "ml": [
         "keras~=3.12.0",
         "tensorflow~=2.21.0",
