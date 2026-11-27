@@ -5,13 +5,6 @@ into streamlit-flow nodes and edges. All streamlit-flow types
 are imported from the real library.
 """
 
-import pytest
-
-# streamlit-flow ships in the optional [streamlit] extra, which does not
-# install on every supported Python; skip instead of erroring at collection.
-pytest.importorskip("streamlit_flow", reason="requires the [streamlit] extra")
-
-# pylint: disable=wrong-import-position
 from streamlit_flow.elements import StreamlitFlowEdge, StreamlitFlowNode
 
 from bili.aether.schema import AgentSpec
