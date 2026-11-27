@@ -274,7 +274,11 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
-        existed = thread_id in self.storage
+        existed = (
+            self._has_checkpoint(thread_id)
+            or any(key[0] == thread_id for key in self.writes)
+            or any(key[0] == thread_id for key in self.blobs)
+        )
         # Call MemorySaver.delete_thread directly because
         # QueryableCheckpointerMixin precedes MemorySaver in the MRO and
         # defines an abstract delete_thread method.
@@ -312,5 +316,19 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         }
 
     def thread_exists(self, thread_id: str) -> bool:
-        """Check if a thread exists in memory storage."""
-        return thread_id in self.storage
+        """Check if a thread has at least one stored checkpoint."""
+        return self._has_checkpoint(thread_id)
+
+    def _has_checkpoint(self, thread_id: str) -> bool:
+        """Return True when any namespace of the thread holds a checkpoint.
+
+        InMemorySaver.storage is a nested defaultdict that get_tuple() and
+        list() index directly, so reading a thread that was never saved leaves
+        an empty entry behind. Key membership therefore does not mean a
+        checkpoint exists, and indexing here would itself create an entry, so
+        the lookup uses get() and checks for a non-empty namespace.
+        """
+        namespaces = self.storage.get(thread_id)
+        if not namespaces:
+            return False
+        return any(namespaces.values())
