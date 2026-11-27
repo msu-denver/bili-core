@@ -274,14 +274,12 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
-        # MemorySaver already has delete_thread, but we need to return bool
-        # Find all keys for this thread and delete them
-        keys_to_delete = [key for key in self.storage.keys() if key[0] == thread_id]
-
-        for key in keys_to_delete:
-            del self.storage[key]
-
-        return len(keys_to_delete) > 0
+        existed = thread_id in self.storage
+        # Call MemorySaver.delete_thread directly because
+        # QueryableCheckpointerMixin precedes MemorySaver in the MRO and
+        # defines an abstract delete_thread method.
+        MemorySaver.delete_thread(self, thread_id)
+        return existed
 
     def get_user_stats(self, user_identifier: str) -> Dict[str, Any]:
         """Get usage statistics for a user."""
@@ -315,4 +313,4 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
 
     def thread_exists(self, thread_id: str) -> bool:
         """Check if a thread exists in memory storage."""
-        return any(key[0] == thread_id for key in self.storage.keys())
+        return thread_id in self.storage
