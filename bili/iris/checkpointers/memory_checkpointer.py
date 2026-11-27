@@ -20,7 +20,7 @@ Usage:
     threads = checkpointer.get_user_threads("user@example.com")
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -95,105 +95,29 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
     def get_user_threads(
         self, user_identifier: str, limit: Optional[int] = None, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get all conversation threads for a user from memory storage."""
-        # MemorySaver stores data in self.storage dict with thread_id as string key
-        # We need to filter by thread_id that matches user_identifier pattern
+        """Get all conversation threads for a user from memory storage.
 
-        threads_data = {}
-
-        # Iterate through storage to find matching threads
-        for thread_id, checkpoint_queue in self.storage.items():
-            # Check if thread belongs to user
-            if thread_id == user_identifier or thread_id.startswith(
-                f"{user_identifier}_"
+        Returns the same keys as the PostgreSQL backend: ``last_updated`` is
+        the ISO-8601 ``ts`` of the thread's newest checkpoint, and threads are
+        ordered newest checkpoint first. Entries that hold no checkpoint (the
+        placeholders a read of a never-saved thread leaves in the upstream
+        storage) are not threads and are skipped.
+        """
+        summaries = []
+        # Snapshot the keys so a concurrent put() on another thread cannot
+        # resize the dict while it is being iterated.
+        for thread_id in list(self.storage.keys()):
+            if not (
+                thread_id == user_identifier
+                or thread_id.startswith(f"{user_identifier}_")
             ):
-                if thread_id not in threads_data:
-                    threads_data[thread_id] = {
-                        "checkpoints": [],
-                        "last_checkpoint": None,
-                    }
+                continue
+            if not self._has_checkpoint(thread_id):
+                continue
+            summaries.append(self._summarize_thread(thread_id))
 
-                # checkpoint_queue is a deque of (checkpoint, metadata) tuples
-                threads_data[thread_id]["checkpoints"] = list(checkpoint_queue)
-
-                # Track the latest checkpoint (last in queue)
-                if checkpoint_queue and len(checkpoint_queue) > 0:
-                    last_item = checkpoint_queue[-1]
-                    # Handle both tuple (checkpoint, metadata) and single checkpoint
-                    if isinstance(last_item, tuple) and len(last_item) == 2:
-                        checkpoint, metadata = last_item
-                    else:
-                        checkpoint = last_item
-                    if checkpoint:
-                        threads_data[thread_id]["last_checkpoint"] = checkpoint
-
-        # Build thread list
-        threads = []
-        for thread_id, data in sorted(
-            threads_data.items(),
-            key=lambda x: (
-                x[1]["last_checkpoint"]["id"] if x[1]["last_checkpoint"] else ""
-            ),
-            reverse=True,
-        ):
-            # Extract conversation_id from thread_id
-            if "_" in thread_id:
-                conversation_id = thread_id.split("_", 1)[1]
-            else:
-                conversation_id = "default"
-
-            # Extract first/last message and message count from latest checkpoint
-            first_message = None
-            last_message = None
-            message_count = 0
-            title = None
-            tags = []
-            last_checkpoint = data["last_checkpoint"]
-
-            if last_checkpoint:
-                channel_values = last_checkpoint.get("channel_values", {})
-                messages = channel_values.get("messages", [])
-
-                # Extract title and tags from state
-                title = channel_values.get("title")
-                tags = channel_values.get("tags", [])
-
-                if messages:
-                    message_count = len(messages)
-                    # Get the first and last user messages
-                    for msg in messages:
-                        if (
-                            hasattr(msg, "content")
-                            and msg.content
-                            and msg.__class__.__name__ == "HumanMessage"
-                        ):
-                            # Extract text content (handle multimodal)
-                            content = msg.content
-                            if isinstance(content, list):
-                                text_parts = [
-                                    p.get("text", "")
-                                    for p in content
-                                    if isinstance(p, dict) and p.get("type") == "text"
-                                ]
-                                content = " ".join(text_parts)
-
-                            if first_message is None:
-                                first_message = content
-                            last_message = content
-
-            threads.append(
-                {
-                    "thread_id": thread_id,
-                    "conversation_id": conversation_id,
-                    "last_updated": last_checkpoint["id"] if last_checkpoint else None,
-                    "checkpoint_count": len(data["checkpoints"]),
-                    "message_count": message_count,
-                    "first_message": first_message,
-                    "last_message": last_message,
-                    "title": title,
-                    "tags": tags,
-                }
-            )
+        summaries.sort(key=lambda item: item[0], reverse=True)
+        threads = [thread for _, thread in summaries]
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -202,6 +126,92 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
             threads = threads[start:end]
 
         return threads
+
+    def _summarize_thread(self, thread_id: str) -> Tuple[str, Dict[str, Any]]:
+        """Build one get_user_threads entry and its newest checkpoint id.
+
+        Storage maps thread_id -> checkpoint_ns -> checkpoint_id -> a tuple of
+        serialized (checkpoint, metadata, parent_checkpoint_id); the checkpoint
+        part omits channel_values, which live in self.blobs. Like the
+        PostgreSQL backend, the count and the timestamp cover every namespace,
+        and the messages, title and tags come from the root namespace.
+        """
+        namespaces = self.storage[thread_id]
+        checkpoint_count = sum(len(cps) for cps in namespaces.values())
+        newest_id, newest_ns = max(
+            (checkpoint_id, ns)
+            for ns, cps in namespaces.items()
+            for checkpoint_id in cps
+        )
+        newest = self.serde.loads_typed(namespaces[newest_ns][newest_id][0])
+
+        thread = {
+            "thread_id": thread_id,
+            "conversation_id": (
+                thread_id.split("_", 1)[1] if "_" in thread_id else "default"
+            ),
+            "last_updated": newest.get("ts"),
+            "checkpoint_count": checkpoint_count,
+            "message_count": 0,
+            "first_message": None,
+            "last_message": None,
+            "title": None,
+            "tags": [],
+        }
+
+        checkpoint_tuple = self._latest_root_tuple(thread_id)
+        if checkpoint_tuple is not None:
+            channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
+            messages = channel_values.get("messages", [])
+            thread["title"] = channel_values.get("title")
+            thread["tags"] = channel_values.get("tags", [])
+            thread["message_count"] = len(messages)
+            thread["first_message"], thread["last_message"] = (
+                self._first_and_last_human_text(messages)
+            )
+        return newest_id, thread
+
+    @staticmethod
+    def _first_and_last_human_text(messages: List[Any]) -> Tuple[Any, Any]:
+        """Return the text of the first and last non-empty human messages."""
+        first_message = None
+        last_message = None
+        for msg in messages:
+            if (
+                hasattr(msg, "content")
+                and msg.content
+                and msg.__class__.__name__ == "HumanMessage"
+            ):
+                # Extract text content (handle multimodal)
+                content = msg.content
+                if isinstance(content, list):
+                    text_parts = [
+                        p.get("text", "")
+                        for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    ]
+                    content = " ".join(text_parts)
+
+                if first_message is None:
+                    first_message = content
+                last_message = content
+        return first_message, last_message
+
+    def _latest_root_tuple(self, thread_id: str):
+        """Return the newest root-namespace CheckpointTuple, or None.
+
+        Reads through the upstream get_tuple so channel_values are rebuilt
+        from self.blobs and deserialized with self.serde. The upstream read
+        indexes the nested defaultdict, so it is called only when the root
+        namespace already holds a checkpoint; otherwise it would leave an
+        empty placeholder behind. Ownership is the caller's responsibility.
+        """
+        namespaces = self.storage.get(thread_id)
+        if not namespaces or not namespaces.get(""):
+            return None
+        return MemorySaver.get_tuple(
+            self, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        )
 
     def get_thread_messages(
         self,
@@ -214,22 +224,12 @@ class QueryableMemorySaver(QueryableCheckpointerMixin, MemorySaver):
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
-        # Get the checkpoint queue for this thread
-        checkpoint_queue = self.storage.get(thread_id)
-
-        if not checkpoint_queue:
+        checkpoint_tuple = self._latest_root_tuple(thread_id)
+        if checkpoint_tuple is None:
             return []
-
-        # Get the latest checkpoint (last in queue)
-        checkpoint, metadata = checkpoint_queue[-1]
-
-        if not checkpoint:
-            return []
-
-        latest_checkpoint = checkpoint
 
         # Extract messages from checkpoint
-        channel_values = latest_checkpoint.get("channel_values", {})
+        channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
         raw_messages = channel_values.get("messages", [])
 
         messages = []
