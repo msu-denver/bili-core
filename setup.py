@@ -319,6 +319,17 @@ _EXTRAS["all"] = sorted(
 setup(
     name="bili-core",
     version="5.11.0",
+    python_requires=">=3.11",
+    license="MIT",
+    classifiers=[
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Operating System :: OS Independent",
+    ],
     # Detect runtime packages while excluding every test subpackage. Without
     # the exclude, find_packages() bundles 200+ .py test modules (under
     # bili/<component>/tests/ and bili/<component>/<subcomponent>/tests/)
