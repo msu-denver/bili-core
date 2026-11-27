@@ -2,6 +2,12 @@
 
 import pytest
 
+# The AETHER UI is the optional [streamlit] extra, which does not install on
+# every supported Python. Without it every module here fails at import, so
+# skip the directory instead of erroring at collection.
+pytest.importorskip("streamlit", reason="requires the [streamlit] extra")
+
+# pylint: disable=wrong-import-position
 from bili.aether.schema.agent_spec import AgentSpec
 from bili.aether.schema.enums import WorkflowType
 from bili.aether.schema.mas_config import Channel, MASConfig
