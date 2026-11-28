@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from langchain.agents.middleware.types import ModelRequest
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -113,29 +114,24 @@ class TestBuildPromptCachingMiddleware:
 # ---------------------------------------------------------------------------
 
 
-class _RequestStub:  # pylint: disable=too-few-public-methods
-    """Minimal stand-in for langchain's ModelRequest.
-
-    Only the four attributes the caching middleware reads/writes are needed:
-    ``model``, ``messages``, ``system_prompt``, and ``model_settings``.  Using a
-    stub keeps the test independent of the full ModelRequest schema.
-    """
-
-    def __init__(self, model, messages, system_prompt=None):
-        self.model = model
-        self.messages = messages
-        self.system_prompt = system_prompt
-        self.model_settings: dict = {}
-
-
-def _run_middleware(mw, model, messages, system_prompt="STABLE SYSTEM PREFIX"):
+def _run_middleware(
+    mw, model, messages, system_prompt="STABLE SYSTEM PREFIX", seen=None
+):
     """Drive the middleware's ``wrap_model_call`` and return the model_settings
-    the model call would receive (what the langchain factory binds)."""
-    request = _RequestStub(model, messages, system_prompt=system_prompt)
+    the model call would receive (what the langchain factory binds).
+
+    The request is langchain's real ``ModelRequest``, not a stand-in: the
+    middleware reads fields of it (``system_message`` among them) that a
+    hand-written stub silently lacks when the upstream schema grows. When
+    *seen* is a list, the request the handler received is appended to it.
+    """
+    request = ModelRequest(model=model, messages=messages, system_prompt=system_prompt)
     captured: dict = {}
 
     def handler(req):
         captured.update(req.model_settings)
+        if seen is not None:
+            seen.append(req)
         return "response"
 
     mw.wrap_model_call(request, handler)
@@ -146,8 +142,16 @@ def test_middleware_sets_ephemeral_cache_control():
     """The middleware records an ephemeral cache_control setting for Anthropic."""
     chat = _chat()
     mw = build_prompt_caching_middleware(chat)
-    settings = _run_middleware(mw, chat, [HumanMessage("hello")])
+    seen = []
+    settings = _run_middleware(mw, chat, [HumanMessage("hello")], seen=seen)
     assert settings.get("cache_control", {}).get("type") == "ephemeral"
+    # The stable system prefix itself carries the breakpoint, and the user
+    # turn is passed through unchanged.
+    (forwarded,) = seen
+    system_blocks = forwarded.system_message.content
+    assert system_blocks[-1]["text"] == "STABLE SYSTEM PREFIX"
+    assert system_blocks[-1]["cache_control"]["type"] == "ephemeral"
+    assert [m.content for m in forwarded.messages] == ["hello"]
 
 
 # ---------------------------------------------------------------------------
@@ -167,11 +171,21 @@ class _FakeUsage:  # pylint: disable=too-few-public-methods
         self.cache_creation = None
 
 
-class _FakeRawMessage:  # pylint: disable=too-few-public-methods
-    """Stand-in for the raw Anthropic Message returned by the client."""
+class _FakeRawMessage:
+    """Stand-in for what ``ChatAnthropic._create`` returns.
+
+    ``_create`` calls the client's ``with_raw_response`` API, so the chat model
+    calls ``parse()`` on the result to get the Message. One object plays both
+    roles here: ``parse()`` returns itself, and ``model_dump()`` and ``usage``
+    are the Message fields ``_format_output`` reads.
+    """
 
     def __init__(self, usage):
         self.usage = usage
+
+    def parse(self):
+        """Return the parsed Message (this object)."""
+        return self
 
     def model_dump(self):
         """Return a minimal Anthropic Message dict for ``_format_output``."""
@@ -185,14 +199,6 @@ class _FakeRawMessage:  # pylint: disable=too-few-public-methods
             "content": [{"type": "text", "text": "ok"}],
             "usage": {},
         }
-
-
-def _last_message_cache_control(payload):
-    """Return the cache_control dict on the payload's last message block, if any."""
-    content = payload["messages"][-1]["content"]
-    if isinstance(content, list) and content:
-        return content[-1].get("cache_control")
-    return None
 
 
 def test_cache_control_marks_prefix_and_reuse_reads_cache():
@@ -238,15 +244,16 @@ def test_cache_control_marks_prefix_and_reuse_reads_cache():
         ]
     )
 
-    # The stable prefix carries a cache breakpoint on both calls.
-    assert _last_message_cache_control(payloads[0]) == {
-        "type": "ephemeral",
-        "ttl": "5m",
-    }
-    assert _last_message_cache_control(payloads[1]) == {
-        "type": "ephemeral",
-        "ttl": "5m",
-    }
+    # Both calls carry the cache breakpoint. On the direct Anthropic API the
+    # chat model sends it as the top-level ``cache_control`` request field and
+    # the API places the breakpoint on the prefix; it is not copied onto a
+    # message block as well.
+    for payload in payloads:
+        assert payload["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
+        for message in payload["messages"]:
+            content = message["content"]
+            blocks = content if isinstance(content, list) else []
+            assert not any("cache_control" in block for block in blocks)
     # The system prefix is present ahead of the breakpoint (it is cached).
     assert payloads[0]["system"]
 

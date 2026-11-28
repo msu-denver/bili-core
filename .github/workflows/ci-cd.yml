@@ -36,11 +36,11 @@ jobs:
         steps:
             # Checkout code
             - name: Checkout code
-              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
             # Set up Python
             - name: Set up Python
-              uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+              uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
               with:
                 python-version: '3.11'
 
@@ -81,10 +81,10 @@ jobs:
         timeout-minutes: 30
         steps:
             - name: Checkout code
-              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
             - name: Set up Python
-              uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+              uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
               with:
                 python-version: '3.11'
                 # Cache the pip download/build artifacts keyed on both
@@ -122,4 +122,54 @@ jobs:
             - name: Enforce per-file coverage gate (>= 90%)
               run: |
                 python scripts/check_coverage.py
+              shell: bash
+
+    # Run the suite on the newest supported Python. test-application above
+    # covers the floor of the supported range with every extra; this job
+    # covers the ceiling with every extra that ships wheels for it. The
+    # huggingface, llamacpp, ml and docs extras are left out because their
+    # pinned native dependencies have no wheels for this Python; the tests
+    # that need them skip. The per-file coverage gate stays on
+    # test-application only, since those skipped tests are what cover the
+    # files behind the missing extras.
+    test-python-latest:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+            - name: Set up Python
+              uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+              with:
+                python-version: '3.14'
+                cache: 'pip'
+                cache-dependency-path: |
+                  requirements.txt
+                  setup.py
+
+            # psycopg2 in the postgres extra builds from source on Linux and
+            # needs the PostgreSQL client headers.
+            - name: Install system build dependencies
+              run: |
+                sudo apt-get update && sudo apt-get install -y libpq-dev
+              shell: bash
+
+            - name: Install dependencies
+              run: |
+                python -m pip install --upgrade pip
+                pip install -e ".[mcp,dev,all-providers,flask,aegis,faiss,opensearch,mongo,ollama,firebase,postgres,streamlit]"
+                pip check
+              shell: bash
+
+            # The lean-core packages must import on this Python, including the
+            # provider whose transitive pins decide whether it installs at all.
+            - name: Import smoke test
+              run: |
+                python -c "import bili.iris, bili.aether, langchain_google_vertexai"
+              shell: bash
+
+            - name: Run pytest
+              run: |
+                pytest bili/ -q --tb=short
               shell: bash

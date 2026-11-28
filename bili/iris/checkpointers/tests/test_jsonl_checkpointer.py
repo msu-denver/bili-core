@@ -25,6 +25,7 @@ from typing import Any, Dict
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
 
 from bili.iris.checkpointers.jsonl_checkpointer import (
     JSONLCheckpointSaver,
@@ -775,6 +776,112 @@ class TestQueryableMixin:
         tids = {r["thread_id"] for r in records}
         assert "thread-1" not in tids
         assert "thread-2" in tids
+
+    def test_delete_thread_after_graph_run_leaves_no_record_on_disk(self, tmp_path):
+        """A real conversation's checkpoint and write records all leave the file."""
+        path = str(tmp_path / "ck.jsonl")
+        saver = JSONLCheckpointSaver(path=path)
+
+        def reply(state):
+            return {"messages": [_ai_message(f"echo {state['messages'][-1].content}")]}
+
+        builder = StateGraph(MessagesState)
+        builder.add_node("reply", reply)
+        builder.add_edge(START, "reply")
+        builder.add_edge("reply", END)
+        graph = builder.compile(checkpointer=saver)
+        for thread_id in ("alice_conv-1", "bob_conv-1"):
+            for turn in ("one", "two"):
+                graph.invoke(
+                    {"messages": [_human_message(f"{thread_id} {turn}")]},
+                    {"configurable": {"thread_id": thread_id}},
+                )
+
+        def record_types(thread_id):
+            with open(path, "r", encoding="utf-8") as fh:
+                rows = [json.loads(line) for line in fh if line.strip()]
+            return {r["record_type"] for r in rows if r["thread_id"] == thread_id}
+
+        assert record_types("alice_conv-1") == {"checkpoint", "write"}
+        assert saver.delete_thread("alice_conv-1") is True
+
+        assert record_types("alice_conv-1") == set()
+        assert record_types("bob_conv-1") == {"checkpoint", "write"}
+        reloaded = JSONLCheckpointSaver(path=path)
+        assert reloaded.get_thread_messages("alice_conv-1") == []
+        assert len(reloaded.get_thread_messages("bob_conv-1")) == 4
+
+    def test_delete_thread_removes_writes_without_a_checkpoint(self, tmp_path):
+        """Write records go even when the thread has no checkpoint record."""
+        path = str(tmp_path / "ck.jsonl")
+        saver = JSONLCheckpointSaver(path=path)
+        saver.put_writes(
+            _minimal_config("writes-only", checkpoint_id="cp-1"),
+            [("messages", [_human_message("private")])],
+            task_id="task-1",
+        )
+        assert saver.thread_exists("writes-only") is False
+
+        assert saver.delete_thread("writes-only") is True
+
+        with open(path, "r", encoding="utf-8") as fh:
+            assert not [line for line in fh if line.strip()]
+        assert saver.delete_thread("writes-only") is False
+
+    def test_failed_rewrite_raises_and_a_retry_deletes(self, tmp_path, monkeypatch):
+        """A delete whose rewrite fails changes nothing, so a retry completes it."""
+        path = str(tmp_path / "ck.jsonl")
+        saver = JSONLCheckpointSaver(path=path)
+        for thread_id in ("alice_conv-1", "bob_conv-1"):
+            saver.put(
+                _minimal_config(thread_id),
+                _minimal_checkpoint("cp-1"),
+                _minimal_metadata(),
+                {},
+            )
+            saver.put_writes(
+                _minimal_config(thread_id, checkpoint_id="cp-1"),
+                [("messages", [_human_message(f"{thread_id} private")])],
+                task_id="task-1",
+            )
+        with open(path, "r", encoding="utf-8") as fh:
+            before = fh.read()
+
+        real_replace = os.replace
+        calls = []
+
+        def replace_fails_once(src, dst):
+            calls.append(src)
+            if len(calls) == 1:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(
+            "bili.iris.checkpointers.jsonl_checkpointer.os.replace",
+            replace_fails_once,
+        )
+
+        with pytest.raises(OSError, match="disk full"):
+            saver.delete_thread("alice_conv-1")
+        with open(path, "r", encoding="utf-8") as fh:
+            assert fh.read() == before
+        assert saver.thread_exists("alice_conv-1") is True
+        assert not os.path.exists(path + ".tmp")
+
+        assert saver.delete_thread("alice_conv-1") is True
+        with open(path, "r", encoding="utf-8") as fh:
+            remaining = {json.loads(line)["thread_id"] for line in fh if line.strip()}
+        assert remaining == {"bob_conv-1"}
+        assert saver.thread_exists("alice_conv-1") is False
+        assert saver.delete_thread("alice_conv-1") is False
+        # The rebuilt index still accepts records for a brand-new key.
+        saver.put(
+            _minimal_config("carol_conv-1"),
+            _minimal_checkpoint("cp-1"),
+            _minimal_metadata(),
+            {},
+        )
+        assert JSONLCheckpointSaver(path=path).thread_exists("carol_conv-1") is True
 
     def test_get_user_stats(self, tmp_path):
         """get_user_stats aggregates across threads."""

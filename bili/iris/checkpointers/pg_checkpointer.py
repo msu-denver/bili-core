@@ -72,24 +72,39 @@ from bili.utils.logging_utils import get_logger
 # Initialize logger for this module
 LOGGER = get_logger(__name__)
 
-# SQL constants shared by sync and async user_id schema migration methods
+# SQL constants shared by sync and async user_id schema migration methods.
+# The checks resolve 'checkpoints' through to_regclass, the same search_path
+# lookup the unqualified ALTER TABLE and every query use, so a checkpoints
+# table in another schema of the same database cannot answer for this one.
 _SQL_CHECK_USER_ID_COLUMN = """
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_name = 'checkpoints'
-    AND column_name = 'user_id'
+    SELECT attname AS column_name
+    FROM pg_attribute
+    WHERE attrelid = to_regclass('checkpoints')
+    AND attname = 'user_id'
+    AND NOT attisdropped
 """
 _SQL_ADD_USER_ID_COLUMN = "ALTER TABLE checkpoints ADD COLUMN user_id TEXT"
 _SQL_CHECK_USER_ID_INDEX = """
-    SELECT indexname
-    FROM pg_indexes
-    WHERE tablename = 'checkpoints'
-    AND indexname = 'idx_checkpoints_user_thread'
+    SELECT c.relname AS indexname
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    WHERE i.indrelid = to_regclass('checkpoints')
+    AND c.relname = 'idx_checkpoints_user_thread'
 """
 _SQL_CREATE_USER_ID_INDEX = """
     CREATE INDEX idx_checkpoints_user_thread
     ON checkpoints(user_id, thread_id)
 """
+
+# Every table langgraph-checkpoint-postgres keys by thread_id, in the order
+# its own PostgresSaver.delete_thread deletes them. checkpoint_blobs holds the
+# serialized channel values, including the messages channel, so a delete that
+# skips it keeps the conversation's content.
+_SQL_DELETE_THREAD = (
+    "DELETE FROM checkpoints WHERE thread_id = %s",
+    "DELETE FROM checkpoint_blobs WHERE thread_id = %s",
+    "DELETE FROM checkpoint_writes WHERE thread_id = %s",
+)
 
 
 @conditional_cache_resource()
@@ -864,96 +879,7 @@ class PruningPostgresSaver(
             msg_types = [type(msg).__name__ for msg in raw_messages]
             LOGGER.info("get_thread_messages: Message types: %s", msg_types)
 
-        messages = []
-        for msg in raw_messages:
-            # Get message type - handle both objects and dicts. Check dict
-            # first: every Python object (including dict) has __class__, so a
-            # leading hasattr(msg, "__class__") guard would always win and the
-            # dict-specific type extraction below would be dead code.
-            if isinstance(msg, dict):
-                # For dict-like messages, try to determine type from 'type' field
-                msg_class = msg.get("type", msg.get("__class__", "unknown"))
-                # Handle serialized format where type might be in different places
-                if msg_class == "unknown" and "kwargs" in msg:
-                    raw_id = msg.get("id")
-                    # Guard against an empty id list: [][-1] would raise.
-                    msg_class = (
-                        raw_id[-1] if isinstance(raw_id, list) and raw_id else "unknown"
-                    )
-            elif hasattr(msg, "__class__"):
-                msg_class = msg.__class__.__name__
-            else:
-                msg_class = "unknown"
-
-            # Map various type representations to standard names
-            type_normalization = {
-                "human": "HumanMessage",
-                "ai": "AIMessage",
-                "system": "SystemMessage",
-                "tool": "ToolMessage",
-                "function": "FunctionMessage",
-            }
-            msg_class = (
-                type_normalization.get(msg_class.lower(), msg_class)
-                if isinstance(msg_class, str)
-                else msg_class
-            )
-
-            # Apply message type filter if specified
-            if message_types is not None and msg_class not in message_types:
-                LOGGER.debug(
-                    "get_thread_messages: Filtering out message of type %s", msg_class
-                )
-                continue
-
-            # Map message types to roles
-            role_mapping = {
-                "HumanMessage": "user",
-                "AIMessage": "assistant",
-                "SystemMessage": "system",
-                "ToolMessage": "tool",
-                "FunctionMessage": "function",
-            }
-            role = role_mapping.get(msg_class, "unknown")
-
-            # Get content, handling both objects, dicts, and multimodal formats
-            if hasattr(msg, "content"):
-                content = msg.content
-            elif isinstance(msg, dict):
-                # Try different possible content locations in dict
-                content = msg.get(
-                    "content", msg.get("kwargs", {}).get("content", str(msg))
-                )
-            else:
-                content = str(msg)
-
-            # Handle multimodal content (list of {text, type} objects)
-            if isinstance(content, list):
-                # Extract text from multimodal format
-                text_parts = []
-                for item in content:
-                    if isinstance(item, dict) and "text" in item:
-                        text_parts.append(item["text"])
-                    elif isinstance(item, str):
-                        text_parts.append(item)
-                content = " ".join(text_parts)
-
-            # Strip thinking tags from AI messages using shared helper
-            if msg_class == "AIMessage":
-                content = self._strip_thinking_blocks(content)
-
-                # Skip empty AI messages (they should have been removed by normalize_state)
-                if not content:
-                    LOGGER.debug("get_thread_messages: Skipping empty AI message")
-                    continue
-
-            messages.append(
-                {
-                    "role": role,
-                    "content": content,
-                    "timestamp": None,  # Messages don't have individual timestamps in LangGraph
-                }
-            )
+        messages = self._format_thread_messages(raw_messages, message_types)
 
         # Apply pagination
         if offset > 0 or limit is not None:
@@ -970,21 +896,30 @@ class PruningPostgresSaver(
         return messages
 
     def delete_thread(self, thread_id: str) -> bool:
-        """Delete all checkpoints for a conversation thread."""
+        """Delete every stored row of a conversation thread.
+
+        Removes the thread from ``checkpoints``, ``checkpoint_blobs`` (the
+        channel values, including the messages) and ``checkpoint_writes``, in
+        every namespace, in one transaction. Ownership is validated before
+        anything is deleted.
+
+        :param thread_id: Thread to delete.
+        :return: True if any row of the thread was removed, from any table.
+        :raises PermissionError: If the thread belongs to another user.
+        """
         # Validate thread ownership if user_id is set
         self._validate_thread_ownership(thread_id)
 
+        deleted_count = 0
         with self._cursor() as cur:
-            # Delete checkpoints
-            cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
-            deleted_count = cur.rowcount
+            # One transaction, so a failure part way cannot leave the
+            # checkpoints gone while the message blobs are still stored.
+            with cur.connection.transaction():
+                for statement in _SQL_DELETE_THREAD:
+                    cur.execute(statement, (thread_id,))
+                    deleted_count += cur.rowcount
 
-            # Also delete writes for this thread
-            cur.execute(
-                "DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,)
-            )
-
-            return deleted_count > 0
+        return deleted_count > 0
 
     def get_user_stats(self, user_identifier: str) -> dict[str, Any]:
         """Get usage statistics for a user."""

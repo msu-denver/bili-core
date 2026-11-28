@@ -830,11 +830,17 @@ class TestExecutorHelpers:
             ),
             user_id="u@example.com",
         )
+        from langgraph.checkpoint.memory import MemorySaver
+
+        # langgraph rejects anything that is not a BaseCheckpointSaver at
+        # compile time, so the tenant saver must be a real one.
+        tenant_saver = MemorySaver()
         with patch.object(
-            executor, "_create_checkpointer_with_user_id", return_value=Mock()
+            executor, "_create_checkpointer_with_user_id", return_value=tenant_saver
         ) as mock_create:
             executor.initialize()
         mock_create.assert_called_once()
+        assert executor._compiled_graph.checkpointer is tenant_saver
 
 
 # =========================================================================

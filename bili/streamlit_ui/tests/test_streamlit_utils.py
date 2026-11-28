@@ -1,6 +1,9 @@
 """Tests for streamlit_ui.utils.streamlit_utils conditional cache decorators."""
 
+import importlib.util
 from unittest.mock import patch
+
+import pytest
 
 from bili.streamlit_ui.utils.streamlit_utils import (
     conditional_cache_data,
@@ -12,9 +15,19 @@ def _sample():
     return "value"
 
 
+# The in-Streamlit cases patch attributes of the real streamlit module, so they
+# need the optional [streamlit] extra. The outside-Streamlit cases check the
+# behavior without it and always run.
+needs_streamlit = pytest.mark.skipif(
+    importlib.util.find_spec("streamlit") is None,
+    reason="requires the [streamlit] extra (streamlit is not installed)",
+)
+
+
 class TestConditionalCacheResource:
     """conditional_cache_resource wraps with st.cache_resource only in Streamlit."""
 
+    @needs_streamlit
     def test_wraps_with_cache_resource_in_streamlit_env(self):
         """In a Streamlit environment the function is cache_resource wrapped."""
         sentinel = object()
@@ -35,6 +48,7 @@ class TestConditionalCacheResource:
 class TestConditionalCacheData:
     """conditional_cache_data wraps with st.cache_data only in Streamlit."""
 
+    @needs_streamlit
     def test_wraps_with_cache_data_in_streamlit_env(self):
         """In a Streamlit environment the function is cache_data wrapped."""
         sentinel = object()
