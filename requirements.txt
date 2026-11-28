@@ -51,7 +51,7 @@ langchain-openai~=1.8.5
 # -----------------------------------------------------------------------------
 # jsonschema powers post-hoc validation in
 # bili.iris.providers.structured_output.parse_structured_content.
-jsonschema~=4.21
+jsonschema~=4.26
 pyyaml~=6.0
 # Floor set by google-api-core (2.31.0 and later require requests>=2.33). A
 # patch-level ~=2.32.x pin here makes every newer google-api-core unresolvable.
