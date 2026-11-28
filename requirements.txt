@@ -55,7 +55,7 @@ jsonschema~=4.21
 pyyaml~=6.0
 # Floor set by google-api-core (2.31.0 and later require requests>=2.33). A
 # patch-level ~=2.32.x pin here makes every newer google-api-core unresolvable.
-requests~=2.33
+requests~=2.34
 
 # =============================================================================
 # Pinned Transitive Dependencies
