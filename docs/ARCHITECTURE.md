@@ -164,7 +164,7 @@ checkpointer = AsyncPostgresSaver.from_conn_string(
 
 Records a migration could not convert are kept in a separate archive (`checkpoints_archive` in PostgreSQL and MongoDB, a `.archive` sidecar file for JSONL) for manual review; `delete_thread` does not touch the archive.
 
-**Rows left by earlier releases.** Through release 5.11.0, `delete_thread` on PostgreSQL left a deleted conversation's rows in `checkpoint_blobs`, including its messages. This release deletes those rows for every new delete but does not remove rows that earlier deletes already left behind.
+**Rows left by earlier releases.** Through release 5.11.0, `delete_thread` on PostgreSQL left a deleted conversation's rows in `checkpoint_blobs`, including its messages. Release 5.12.0 deletes those rows for every new delete but does not remove rows that earlier deletes already left behind. The 5.12.0 release notes give two SQL statements a deployment owner can run to remove them.
 
 #### Multi-Conversation Support
 
