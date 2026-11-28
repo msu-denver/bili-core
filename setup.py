@@ -341,7 +341,7 @@ _EXTRAS["all"] = sorted(
 
 setup(
     name="bili-core",
-    version="5.11.0",
+    version="5.12.0",
     python_requires=">=3.11",
     license="MIT",
     classifiers=[
