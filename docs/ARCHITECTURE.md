@@ -151,6 +151,21 @@ checkpointer = AsyncPostgresSaver.from_conn_string(
 - MongoDB: Adds `user_id` field to documents on first use
 - Zero downtime - migrations run automatically during checkpointer initialization
 
+#### Deleting Conversations
+
+`delete_thread(thread_id)` removes every stored row of a conversation after validating ownership. On PostgreSQL, JSONL and in-memory it returns `True` when anything of the thread was removed (checkpoints, writes or blobs) and `False` when nothing was stored, so a caller can map it to found and not found. MongoDB returns `True` only when checkpoint documents were removed; a thread holding only write documents reports `False` although those documents are deleted. Each backend removes all of its per-thread stores:
+
+| Backend | Stores removed |
+|---|---|
+| PostgreSQL | `checkpoints`, `checkpoint_blobs` (channel values, including messages), `checkpoint_writes`, in one transaction |
+| MongoDB | the checkpoint and writes collections (channel values live inside the checkpoint documents) |
+| JSONL | checkpoint and write records; the file is rewritten without them before the index changes, so a failed rewrite raises and leaves both as they were |
+| In-memory | checkpoints, pending writes, and channel blobs |
+
+Records a migration could not convert are kept in a separate archive (`checkpoints_archive` in PostgreSQL and MongoDB, a `.archive` sidecar file for JSONL) for manual review; `delete_thread` does not touch the archive.
+
+**Rows left by earlier releases.** Through release 5.11.0, `delete_thread` on PostgreSQL left a deleted conversation's rows in `checkpoint_blobs`, including its messages. This release deletes those rows for every new delete but does not remove rows that earlier deletes already left behind.
+
 #### Multi-Conversation Support
 
 Users can maintain multiple isolated conversation threads via `conversation_id`:

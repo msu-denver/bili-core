@@ -917,6 +917,7 @@ class TestAsyncPgThreadOwnership:
         ]
         assert await saver.aget_thread_messages("t1") == [{"role": "user"}]
         assert await saver.adelete_thread("t1") is False
+        delegate.delete_thread.assert_called_once_with("t1")
         assert await saver.aget_user_stats("owner@example.com") == {"total_threads": 1}
         assert await saver.athread_exists("t1") is True
         delegate.get_user_threads.assert_called_once_with("owner@example.com", None, 0)
